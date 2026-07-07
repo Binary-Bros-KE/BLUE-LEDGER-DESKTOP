@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Variable.ttf") format("truetype-variations");
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@theme {
+  --font-sans: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --color-primary: var(--brand-primary);
+  --color-accent: var(--brand-accent);
+  --color-success: var(--brand-success);
+  --color-warning: var(--brand-warning);
+  --color-danger: var(--brand-danger);
+  --color-danger-soft: #f3ded8;
+  --color-teal: #0e7a5a;
+  --color-app: #eae5d8;
+  --color-sidebar: #0c1a3f;
+  --color-soft: #f1ede1;
+  --color-line: #ddd5c2;
+  --color-muted: #83795f;
+  --color-ink: var(--brand-ink);
+  --shadow-soft: 0 18px 40px rgba(28, 22, 8, 0.1);
+  --shadow-stamp: 0 2px 0 rgba(28, 22, 8, 0.06);
+}
+
+:root {
+  --brand-primary: #061e64;
+  --brand-accent: #2b5fd9;
+  --brand-success: #15915f;
+  --brand-warning: #c1791f;
+  --brand-danger: #ad3a29;
+  --brand-surface: #fffdf7;
+  --brand-ink: #1c1710;
+  font-family: var(--font-sans);
+  color: var(--brand-ink);
+  background: #eae5d8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+  min-width: 1180px;
+  font-family: var(--font-sans);
+  font-feature-settings: "tnum" 1, "case" 1;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  height: 100%;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}

@@ -1,0 +1,12 @@
+node_modules
+out
+out-tsc
+release
+dist
+*.log
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+blue-ledger*.db
+*.sqlite
