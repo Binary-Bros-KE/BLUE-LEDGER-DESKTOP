@@ -5,7 +5,7 @@ import { Field } from "@renderer/shared/components/form-fields";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { useAuthStore } from "@renderer/shared/stores/auth-store";
 
-const PUNCH_COUNT = 6;
+const PUNCH_COUNT = 3;
 
 export function LoginRoute(): React.JSX.Element {
   const context = useAppStore((state) => state.context);
@@ -81,7 +81,7 @@ export function LoginRoute(): React.JSX.Element {
               <span
                 key={`punch-l-${i}`}
                 className="pointer-events-none absolute -left-2.5 size-5 rounded-full bg-sidebar"
-                style={{ top: `${i * 56 + 24}px` }}
+                style={{ top: `${i * 150 + 30}px` }}
                 aria-hidden="true"
               />
             ))}
@@ -89,7 +89,7 @@ export function LoginRoute(): React.JSX.Element {
               <span
                 key={`punch-r-${i}`}
                 className="pointer-events-none absolute -right-2.5 size-5 rounded-full bg-sidebar"
-                style={{ top: `${i * 56 + 24}px` }}
+                style={{ top: `${i * 150 + 30}px` }}
                 aria-hidden="true"
               />
             ))}

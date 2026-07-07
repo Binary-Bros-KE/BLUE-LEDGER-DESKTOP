@@ -49,7 +49,8 @@ const employeeBaseFields = {
   hireDate: optionalText(20),
   roleId: nullableId,
   username: optionalText(50),
-  status: z.enum(employeeStatusValues)
+  status: z.enum(employeeStatusValues),
+  photoPath: optionalText(500)
 };
 
 export const employeeCreateSchema = z

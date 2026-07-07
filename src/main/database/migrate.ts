@@ -425,6 +425,131 @@ const migrations = [
       ALTER TABLE roles ADD COLUMN created_by TEXT;
       ALTER TABLE roles ADD COLUMN updated_by TEXT;
     `
+  },
+  {
+    version: 10,
+    name: "employee_photo",
+    sql: `
+      ALTER TABLE employees ADD COLUMN photo_path TEXT;
+    `
+  },
+  {
+    version: 11,
+    name: "payment_methods",
+    sql: `
+      CREATE TABLE IF NOT EXISTS payment_methods (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        code TEXT NOT NULL,
+        description TEXT,
+        is_system_method INTEGER NOT NULL DEFAULT 0,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        requires_reference INTEGER NOT NULL DEFAULT 0,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        UNIQUE (tenant_id, code),
+        UNIQUE (tenant_id, name),
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_payment_methods_tenant_active ON payment_methods(tenant_id, is_active);
+    `
+  },
+  {
+    version: 12,
+    name: "customers",
+    sql: `
+      DROP TABLE IF EXISTS customers;
+
+      CREATE TABLE customers (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        customer_code TEXT NOT NULL,
+        customer_type TEXT NOT NULL DEFAULT 'retail',
+        name TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        email TEXT,
+        physical_address TEXT,
+        credit_limit_cents INTEGER,
+        current_balance_cents INTEGER NOT NULL DEFAULT 0,
+        notes TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        UNIQUE (tenant_id, customer_code),
+        UNIQUE (tenant_id, phone),
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id)
+      );
+
+      CREATE INDEX idx_customers_tenant_status ON customers(tenant_id, status);
+      CREATE INDEX idx_customers_tenant_phone ON customers(tenant_id, phone);
+    `
+  },
+  {
+    version: 13,
+    name: "pos_sales",
+    sql: `
+      DROP TABLE IF EXISTS sale_items;
+      DROP TABLE IF EXISTS sales;
+
+      CREATE TABLE sales (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        receipt_number TEXT,
+        location_id TEXT NOT NULL,
+        employee_id TEXT NOT NULL,
+        customer_id TEXT,
+        sale_status TEXT NOT NULL DEFAULT 'pending' CHECK (sale_status IN ('pending', 'completed', 'cancelled')),
+        subtotal_cents INTEGER NOT NULL DEFAULT 0,
+        discount_amount_cents INTEGER NOT NULL DEFAULT 0,
+        tax_amount_cents INTEGER NOT NULL DEFAULT 0,
+        grand_total_cents INTEGER NOT NULL DEFAULT 0,
+        payment_method_id TEXT,
+        payment_reference TEXT,
+        amount_received_cents INTEGER,
+        change_given_cents INTEGER,
+        notes TEXT,
+        completed_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        UNIQUE (tenant_id, receipt_number),
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (location_id) REFERENCES locations(id),
+        FOREIGN KEY (employee_id) REFERENCES employees(id),
+        FOREIGN KEY (customer_id) REFERENCES customers(id),
+        FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id)
+      );
+
+      CREATE INDEX idx_sales_tenant_status ON sales(tenant_id, sale_status);
+      CREATE INDEX idx_sales_tenant_created ON sales(tenant_id, created_at);
+      CREATE INDEX idx_sales_location ON sales(location_id);
+      CREATE INDEX idx_sales_customer ON sales(customer_id);
+
+      CREATE TABLE sale_items (
+        id TEXT PRIMARY KEY,
+        sale_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        quantity INTEGER NOT NULL,
+        unit_price_cents INTEGER NOT NULL,
+        discount_amount_cents INTEGER NOT NULL DEFAULT 0,
+        tax_amount_cents INTEGER NOT NULL DEFAULT 0,
+        line_total_cents INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (sale_id) REFERENCES sales(id),
+        FOREIGN KEY (product_id) REFERENCES products(id)
+      );
+
+      CREATE INDEX idx_sale_items_sale ON sale_items(sale_id);
+      CREATE INDEX idx_sale_items_product ON sale_items(product_id);
+    `
   }
 ] as const;
 

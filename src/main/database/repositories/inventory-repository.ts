@@ -34,6 +34,13 @@ export function findInventoryRow(productId: string, locationId: string): Invento
     .get(productId, locationId) as InventoryRow | undefined;
 }
 
+/** Every stocked product's balance at a single location — the POS screen's "available stock" source. */
+export function findInventoryRowsForLocation(locationId: string): InventoryRow[] {
+  return getDatabase()
+    .prepare("SELECT * FROM inventory WHERE location_id = ?")
+    .all(locationId) as InventoryRow[];
+}
+
 /** All tenant locations left-joined with this product's inventory rows — missing rows read as zero stock. */
 export function findInventoryOverviewForProduct(
   tenantId: string,

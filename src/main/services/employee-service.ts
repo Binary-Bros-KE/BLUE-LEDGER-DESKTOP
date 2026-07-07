@@ -4,6 +4,7 @@ import * as locationRepository from "@main/database/repositories/location-reposi
 import * as roleRepository from "@main/database/repositories/role-repository";
 import { hashSecret } from "@main/lib/password-hash";
 import { getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
+import { deleteManagedEmployeePhoto } from "@main/services/image-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { employeeCreateSchema, employeeUpdateSchema, type EmployeeCreateInput } from "@shared/schemas/employee";
 import type { Employee, EmployeeListItem, EmployeeStatus } from "@shared/types/employee";
@@ -154,6 +155,11 @@ export function updateEmployee(id: string, input: unknown): Employee {
     pinHash,
     passwordHash
   });
+
+  if (existing.photo_path && existing.photo_path !== parsed.photoPath) {
+    deleteManagedEmployeePhoto(existing.photo_path);
+  }
+
   return employeeRepository.mapEmployeeRow(row);
 }
 
@@ -170,5 +176,6 @@ export function deleteEmployee(id: string): { id: string } {
     throw new Error("Employee not found");
   }
   employeeRepository.deleteEmployeeRow(id);
+  deleteManagedEmployeePhoto(existing.photo_path);
   return { id };
 }

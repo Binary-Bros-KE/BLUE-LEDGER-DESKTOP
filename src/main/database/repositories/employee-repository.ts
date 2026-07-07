@@ -31,6 +31,7 @@ export type EmployeeRow = {
   created_by: string | null;
   sync_status: string;
   last_synced_at: string | null;
+  photo_path: string | null;
 };
 
 export type EmployeeListRow = EmployeeRow & {
@@ -109,9 +110,9 @@ export function insertEmployeeRow(
       INSERT INTO employees (
         id, tenant_id, employee_code, first_name, middle_name, last_name, gender, date_of_birth,
         phone, alternative_phone, email, branch_id, department, job_title, hire_date, role_id,
-        pin_hash, username, password_hash, status, created_at, updated_at, created_by, sync_status
+        pin_hash, username, password_hash, status, photo_path, created_at, updated_at, created_by, sync_status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
     `
     )
     .run(
@@ -135,6 +136,7 @@ export function insertEmployeeRow(
       input.username,
       input.passwordHash,
       input.status,
+      input.photoPath,
       now,
       now,
       input.createdBy
@@ -175,6 +177,7 @@ export function updateEmployeeRow(
         username = ?,
         password_hash = ?,
         status = ?,
+        photo_path = ?,
         sync_status = 'pending',
         updated_at = ?
       WHERE id = ?
@@ -199,6 +202,7 @@ export function updateEmployeeRow(
       input.username,
       input.passwordHash,
       input.status,
+      input.photoPath,
       now,
       id
     );
@@ -277,7 +281,8 @@ export function mapEmployeeRow(row: EmployeeRow): Employee {
     updatedAt: row.updated_at,
     createdBy: row.created_by,
     syncStatus: row.sync_status as EmployeeSyncStatus,
-    lastSyncedAt: row.last_synced_at
+    lastSyncedAt: row.last_synced_at,
+    photoPath: row.photo_path
   };
 }
 

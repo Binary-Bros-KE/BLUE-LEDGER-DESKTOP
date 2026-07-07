@@ -26,7 +26,8 @@ function buildSession(row: EmployeeRow, tenantId: string): AuthSession {
       employeeCode: row.employee_code,
       firstName: row.first_name,
       lastName: row.last_name,
-      jobTitle: row.job_title
+      jobTitle: row.job_title,
+      photoPath: row.photo_path
     },
     role: role ? { id: role.id, roleName: role.roleName } : null,
     branch: branchRow ? { id: branchRow.id, locationName: branchRow.location_name } : null,

@@ -1,0 +1,304 @@
+import { getDatabase } from "@main/database/connection";
+import type { PendingSaleListItem, Sale, SaleItem, SaleStatus, SaleSyncStatus } from "@shared/types/sale";
+
+export type SaleRow = {
+  id: string;
+  tenant_id: string;
+  receipt_number: string | null;
+  location_id: string;
+  employee_id: string;
+  customer_id: string | null;
+  sale_status: string;
+  subtotal_cents: number;
+  discount_amount_cents: number;
+  tax_amount_cents: number;
+  grand_total_cents: number;
+  payment_method_id: string | null;
+  payment_reference: string | null;
+  amount_received_cents: number | null;
+  change_given_cents: number | null;
+  notes: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  sync_status: string;
+  last_synced_at: string | null;
+};
+
+export type SaleDetailRow = SaleRow & {
+  location_name: string;
+  employee_name: string;
+  customer_name: string | null;
+  payment_method_name: string | null;
+};
+
+export type SaleItemRow = {
+  id: string;
+  sale_id: string;
+  product_id: string;
+  quantity: number;
+  unit_price_cents: number;
+  discount_amount_cents: number;
+  tax_amount_cents: number;
+  line_total_cents: number;
+  created_at: string;
+};
+
+export type SaleItemDetailRow = SaleItemRow & {
+  product_name: string;
+  sku: string;
+};
+
+export type PendingSaleListRow = {
+  id: string;
+  customer_id: string | null;
+  customer_name: string | null;
+  item_count: number;
+  grand_total_cents: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export function findMaxReceiptNumberRow(tenantId: string): string | null {
+  const row = getDatabase()
+    .prepare(
+      "SELECT MAX(receipt_number) as maxReceipt FROM sales WHERE tenant_id = ? AND receipt_number LIKE 'BL-%'"
+    )
+    .get(tenantId) as { maxReceipt: string | null };
+  return row.maxReceipt;
+}
+
+export function findSaleRowById(id: string): SaleRow | undefined {
+  return getDatabase().prepare("SELECT * FROM sales WHERE id = ?").get(id) as SaleRow | undefined;
+}
+
+export function findSaleDetailRowById(id: string): SaleDetailRow | undefined {
+  return getDatabase()
+    .prepare(
+      `
+      SELECT
+        s.*,
+        l.location_name AS location_name,
+        (e.first_name || ' ' || e.last_name) AS employee_name,
+        c.name AS customer_name,
+        pm.name AS payment_method_name
+      FROM sales s
+      LEFT JOIN locations l ON l.id = s.location_id
+      LEFT JOIN employees e ON e.id = s.employee_id
+      LEFT JOIN customers c ON c.id = s.customer_id
+      LEFT JOIN payment_methods pm ON pm.id = s.payment_method_id
+      WHERE s.id = ?
+    `
+    )
+    .get(id) as SaleDetailRow | undefined;
+}
+
+export function findSaleItemDetailRows(saleId: string): SaleItemDetailRow[] {
+  return getDatabase()
+    .prepare(
+      `
+      SELECT si.*, p.name AS product_name, p.sku AS sku
+      FROM sale_items si
+      JOIN products p ON p.id = si.product_id
+      WHERE si.sale_id = ?
+      ORDER BY si.created_at ASC
+    `
+    )
+    .all(saleId) as SaleItemDetailRow[];
+}
+
+export function findPendingSaleListRows(tenantId: string, locationId: string): PendingSaleListRow[] {
+  return getDatabase()
+    .prepare(
+      `
+      SELECT
+        s.id,
+        s.customer_id,
+        c.name AS customer_name,
+        s.notes,
+        s.grand_total_cents,
+        s.created_at,
+        s.updated_at,
+        (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.id) AS item_count
+      FROM sales s
+      LEFT JOIN customers c ON c.id = s.customer_id
+      WHERE s.tenant_id = ? AND s.location_id = ? AND s.sale_status = 'pending'
+      ORDER BY s.created_at DESC
+    `
+    )
+    .all(tenantId, locationId) as PendingSaleListRow[];
+}
+
+export function insertSaleRow(input: {
+  id: string;
+  tenantId: string;
+  receiptNumber: string | null;
+  locationId: string;
+  employeeId: string;
+  customerId: string | null;
+  saleStatus: SaleStatus;
+  subtotalCents: number;
+  discountAmountCents: number;
+  taxAmountCents: number;
+  grandTotalCents: number;
+  paymentMethodId: string | null;
+  paymentReference: string | null;
+  amountReceivedCents: number | null;
+  changeGivenCents: number | null;
+  notes: string | null;
+  completedAt: string | null;
+}): SaleRow {
+  const now = new Date().toISOString();
+
+  getDatabase()
+    .prepare(
+      `
+      INSERT INTO sales (
+        id, tenant_id, receipt_number, location_id, employee_id, customer_id, sale_status,
+        subtotal_cents, discount_amount_cents, tax_amount_cents, grand_total_cents,
+        payment_method_id, payment_reference, amount_received_cents, change_given_cents,
+        notes, completed_at, created_at, updated_at, sync_status
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+    `
+    )
+    .run(
+      input.id,
+      input.tenantId,
+      input.receiptNumber,
+      input.locationId,
+      input.employeeId,
+      input.customerId,
+      input.saleStatus,
+      input.subtotalCents,
+      input.discountAmountCents,
+      input.taxAmountCents,
+      input.grandTotalCents,
+      input.paymentMethodId,
+      input.paymentReference,
+      input.amountReceivedCents,
+      input.changeGivenCents,
+      input.notes,
+      input.completedAt,
+      now,
+      now
+    );
+
+  const row = findSaleRowById(input.id);
+  if (!row) {
+    throw new Error("Failed to create sale record");
+  }
+  return row;
+}
+
+export function insertSaleItemRow(input: {
+  id: string;
+  saleId: string;
+  productId: string;
+  quantity: number;
+  unitPriceCents: number;
+  discountAmountCents: number;
+  taxAmountCents: number;
+  lineTotalCents: number;
+}): SaleItemRow {
+  const now = new Date().toISOString();
+
+  getDatabase()
+    .prepare(
+      `
+      INSERT INTO sale_items (
+        id, sale_id, product_id, quantity, unit_price_cents,
+        discount_amount_cents, tax_amount_cents, line_total_cents, created_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `
+    )
+    .run(
+      input.id,
+      input.saleId,
+      input.productId,
+      input.quantity,
+      input.unitPriceCents,
+      input.discountAmountCents,
+      input.taxAmountCents,
+      input.lineTotalCents,
+      now
+    );
+
+  const row = getDatabase().prepare("SELECT * FROM sale_items WHERE id = ?").get(input.id) as
+    | SaleItemRow
+    | undefined;
+  if (!row) {
+    throw new Error("Failed to create sale item record");
+  }
+  return row;
+}
+
+export function deleteSaleItemsForSaleRow(saleId: string): void {
+  getDatabase().prepare("DELETE FROM sale_items WHERE sale_id = ?").run(saleId);
+}
+
+export function deleteSaleRow(id: string): void {
+  getDatabase().prepare("DELETE FROM sales WHERE id = ?").run(id);
+}
+
+export function mapSaleItemDetailRow(row: SaleItemDetailRow): SaleItem {
+  return {
+    id: row.id,
+    saleId: row.sale_id,
+    productId: row.product_id,
+    productName: row.product_name,
+    sku: row.sku,
+    quantity: row.quantity,
+    unitPriceCents: row.unit_price_cents,
+    discountAmountCents: row.discount_amount_cents,
+    taxAmountCents: row.tax_amount_cents,
+    lineTotalCents: row.line_total_cents,
+    createdAt: row.created_at
+  };
+}
+
+export function mapSaleDetailRow(row: SaleDetailRow, items: SaleItem[]): Sale {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    receiptNumber: row.receipt_number,
+    locationId: row.location_id,
+    locationName: row.location_name,
+    employeeId: row.employee_id,
+    employeeName: row.employee_name,
+    customerId: row.customer_id,
+    customerName: row.customer_name,
+    saleStatus: row.sale_status as Sale["saleStatus"],
+    subtotalCents: row.subtotal_cents,
+    discountAmountCents: row.discount_amount_cents,
+    taxAmountCents: row.tax_amount_cents,
+    grandTotalCents: row.grand_total_cents,
+    paymentMethodId: row.payment_method_id,
+    paymentMethodName: row.payment_method_name,
+    paymentReference: row.payment_reference,
+    amountReceivedCents: row.amount_received_cents,
+    changeGivenCents: row.change_given_cents,
+    notes: row.notes,
+    completedAt: row.completed_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    syncStatus: row.sync_status as SaleSyncStatus,
+    lastSyncedAt: row.last_synced_at,
+    items
+  };
+}
+
+export function mapPendingSaleListRow(row: PendingSaleListRow): PendingSaleListItem {
+  return {
+    id: row.id,
+    customerId: row.customer_id,
+    customerName: row.customer_name,
+    itemCount: row.item_count,
+    grandTotalCents: row.grand_total_cents,
+    notes: row.notes,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}

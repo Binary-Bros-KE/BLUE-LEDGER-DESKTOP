@@ -51,7 +51,8 @@ const api: BlueLedgerApi = {
     readImagePreview: (relativePath) => invoke("product:read-image-preview", relativePath)
   },
   inventory: {
-    overview: (productId) => invoke("inventory:overview", productId)
+    overview: (productId) => invoke("inventory:overview", productId),
+    listForLocation: (locationId) => invoke("inventory:list-for-location", locationId)
   },
   stockMovement: {
     list: (productId, input) => invoke("stock-movement:list", productId, input ?? {}),
@@ -71,7 +72,31 @@ const api: BlueLedgerApi = {
     create: (input) => invoke("employee:create", input),
     update: (id, input) => invoke("employee:update", id, input),
     setStatus: (id, status) => invoke("employee:set-status", id, status),
-    delete: (id) => invoke("employee:delete", id)
+    delete: (id) => invoke("employee:delete", id),
+    pickPhoto: () => invoke("employee:pick-photo"),
+    readPhotoPreview: (relativePath) => invoke("employee:read-photo-preview", relativePath)
+  },
+  paymentMethod: {
+    list: () => invoke("payment-method:list"),
+    get: (id) => invoke("payment-method:get", id),
+    create: (input) => invoke("payment-method:create", input),
+    update: (id, input) => invoke("payment-method:update", id, input),
+    setActive: (id, isActive) => invoke("payment-method:set-active", id, isActive),
+    delete: (id) => invoke("payment-method:delete", id)
+  },
+  customer: {
+    list: () => invoke("customer:list"),
+    get: (id) => invoke("customer:get", id),
+    create: (input) => invoke("customer:create", input),
+    update: (id, input) => invoke("customer:update", id, input),
+    setStatus: (id, status) => invoke("customer:set-status", id, status)
+  },
+  sale: {
+    listPending: () => invoke("sale:list-pending"),
+    get: (id) => invoke("sale:get", id),
+    suspend: (input) => invoke("sale:suspend", input),
+    deletePending: (id) => invoke("sale:delete-pending", id),
+    complete: (input) => invoke("sale:complete", input)
   },
   sync: {
     getSnapshot: () => invoke("sync:get-snapshot"),

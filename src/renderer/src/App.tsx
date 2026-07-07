@@ -5,9 +5,12 @@ import { navItemsByKey } from "@renderer/app/layouts/navigation";
 import { AccessDeniedRoute } from "@renderer/app/routes/AccessDeniedRoute";
 import { BusinessProfileRoute } from "@renderer/app/routes/BusinessProfileRoute";
 import { CategoriesRoute } from "@renderer/app/routes/CategoriesRoute";
+import { CheckoutRoute } from "@renderer/app/routes/CheckoutRoute";
+import { CustomersRoute } from "@renderer/app/routes/CustomersRoute";
 import { DashboardRoute } from "@renderer/app/routes/DashboardRoute";
 import { EmployeesRoute } from "@renderer/app/routes/EmployeesRoute";
 import { LoginRoute } from "@renderer/app/routes/LoginRoute";
+import { PaymentMethodsRoute } from "@renderer/app/routes/PaymentMethodsRoute";
 import { PlaceholderRoute } from "@renderer/app/routes/PlaceholderRoute";
 import { ProductsRoute } from "@renderer/app/routes/ProductsRoute";
 import { RolesRoute } from "@renderer/app/routes/RolesRoute";
@@ -63,6 +66,12 @@ export function App(): React.JSX.Element {
         <EmployeesRoute />
       ) : activeNavKey === "roles" ? (
         <RolesRoute />
+      ) : activeNavKey === "payment-methods" ? (
+        <PaymentMethodsRoute />
+      ) : activeNavKey === "customers" ? (
+        <CustomersRoute />
+      ) : activeNavKey === "checkout" ? (
+        <CheckoutRoute />
       ) : (
         <PlaceholderRoute
           icon={activeItem.icon}

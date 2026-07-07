@@ -83,8 +83,9 @@ const DEFAULT_SYSTEM_ROLES: Array<{
       dashboard: ["view"],
       products: ["view"],
       inventory: ["view"],
-      sales: ["view", "create"],
-      customers: ["view", "create"]
+      sales: ["view", "create", "delete"],
+      customers: ["view", "create"],
+      payment_methods: ["view"]
     }
   },
   {
@@ -109,7 +110,8 @@ const DEFAULT_SYSTEM_ROLES: Array<{
       reports: ["view", "export"],
       customers: ["view"],
       suppliers: ["view"],
-      business_profile: ["view"]
+      business_profile: ["view"],
+      payment_methods: ["view"]
     }
   }
 ];

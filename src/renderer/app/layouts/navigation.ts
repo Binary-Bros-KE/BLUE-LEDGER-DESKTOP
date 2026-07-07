@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   BarChart3,
   Building2,
+  CreditCard,
   FolderTree,
   LayoutDashboard,
   Package,
@@ -69,6 +70,13 @@ export const navGroups: NavGroup[] = [
         description: "Customer directory",
         icon: Users,
         permissionModule: "customers"
+      },
+            {
+        key: "payment-methods",
+        label: "Payment Methods",
+        description: "How customers can pay",
+        icon: CreditCard,
+        permissionModule: "payment_methods"
       }
     ]
   },

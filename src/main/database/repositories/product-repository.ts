@@ -33,6 +33,7 @@ export type ProductRow = {
 
 export type ProductListRow = ProductRow & {
   category_name: string | null;
+  category_color: string | null;
   total_stock: number;
 };
 
@@ -40,7 +41,7 @@ export function findAllProductRows(tenantId: string): ProductListRow[] {
   return getDatabase()
     .prepare(
       `
-      SELECT p.*, c.name AS category_name, COALESCE(SUM(i.quantity), 0) AS total_stock
+      SELECT p.*, c.name AS category_name, c.color AS category_color, COALESCE(SUM(i.quantity), 0) AS total_stock
       FROM products p
       LEFT JOIN categories c ON c.id = p.category_id
       LEFT JOIN inventory i ON i.product_id = p.id
@@ -255,6 +256,7 @@ export function mapProductListRow(row: ProductListRow): ProductListItem {
   return {
     ...mapProductRow(row),
     categoryName: row.category_name,
+    categoryColor: row.category_color,
     totalStock: row.total_stock
   };
 }

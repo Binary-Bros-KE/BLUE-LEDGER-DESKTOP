@@ -36,6 +36,7 @@ export type EmployeeInputFields = {
   roleId: string | null;
   username: string | null;
   status: EmployeeStatus;
+  photoPath: string | null;
 };
 
 /**

@@ -9,6 +9,13 @@ import {
   updateCategory
 } from "@main/services/category-service";
 import {
+  createCustomer,
+  getCustomer,
+  listCustomers,
+  setCustomerStatus,
+  updateCustomer
+} from "@main/services/customer-service";
+import {
   createEmployee,
   deleteEmployee,
   getEmployee,
@@ -17,12 +24,15 @@ import {
   updateEmployee
 } from "@main/services/employee-service";
 import {
+  pickAndStoreEmployeePhoto,
   pickAndStoreProductImage,
   readLocalImagePreview,
+  readManagedEmployeePhotoPreview,
   readManagedProductImagePreview
 } from "@main/services/image-service";
 import {
   getInventoryOverview,
+  listInventoryForLocation,
   listStockMovements,
   recordStockMovement,
   recordStockTransfer
@@ -35,6 +45,14 @@ import {
   updateLocation
 } from "@main/services/location-service";
 import {
+  createPaymentMethod,
+  deletePaymentMethod,
+  getPaymentMethod,
+  listPaymentMethods,
+  setPaymentMethodActive,
+  updatePaymentMethod
+} from "@main/services/payment-method-service";
+import {
   createProduct,
   getProduct,
   listProducts,
@@ -42,6 +60,13 @@ import {
   updateProduct
 } from "@main/services/product-service";
 import { createRole, deleteRole, getRole, listRoles, updateRole } from "@main/services/role-service";
+import {
+  completeSale,
+  deletePendingSale,
+  getSale,
+  listPendingSales,
+  suspendSale
+} from "@main/services/sale-service";
 import {
   getAppContext,
   getCurrentTenant,
@@ -53,6 +78,7 @@ import { getSyncSnapshot, listSyncQueue } from "@main/services/sync-service";
 import { saveTheme } from "@main/services/theme-service";
 import { brandThemeSchema } from "@shared/schemas/theme";
 import type { CategoryStatus } from "@shared/types/category";
+import type { CustomerStatus } from "@shared/types/customer";
 import type { EmployeeStatus } from "@shared/types/employee";
 import type { LocationStatus } from "@shared/types/location";
 import type { ProductStatus } from "@shared/types/product";
@@ -112,6 +138,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.inventoryOverview, (_event, productId: string) =>
     getInventoryOverview(productId)
   );
+  ipcMain.handle(ipcChannels.inventoryListForLocation, (_event, locationId: string) =>
+    listInventoryForLocation(locationId)
+  );
   ipcMain.handle(ipcChannels.stockMovementList, (_event, productId: string, input?: { limit?: number }) =>
     listStockMovements(productId, input?.limit)
   );
@@ -132,6 +161,36 @@ export function registerIpcHandlers(): void {
     setEmployeeStatus(id, status)
   );
   ipcMain.handle(ipcChannels.employeeDelete, (_event, id: string) => deleteEmployee(id));
+  ipcMain.handle(ipcChannels.employeePickPhoto, () => pickAndStoreEmployeePhoto());
+  ipcMain.handle(ipcChannels.employeeReadPhotoPreview, (_event, relativePath: string) =>
+    readManagedEmployeePhotoPreview(relativePath)
+  );
+  ipcMain.handle(ipcChannels.paymentMethodList, () => listPaymentMethods());
+  ipcMain.handle(ipcChannels.paymentMethodGet, (_event, id: string) => getPaymentMethod(id));
+  ipcMain.handle(ipcChannels.paymentMethodCreate, (_event, input: unknown) =>
+    createPaymentMethod(input)
+  );
+  ipcMain.handle(ipcChannels.paymentMethodUpdate, (_event, id: string, input: unknown) =>
+    updatePaymentMethod(id, input)
+  );
+  ipcMain.handle(ipcChannels.paymentMethodSetActive, (_event, id: string, isActive: boolean) =>
+    setPaymentMethodActive(id, isActive)
+  );
+  ipcMain.handle(ipcChannels.paymentMethodDelete, (_event, id: string) => deletePaymentMethod(id));
+  ipcMain.handle(ipcChannels.customerList, () => listCustomers());
+  ipcMain.handle(ipcChannels.customerGet, (_event, id: string) => getCustomer(id));
+  ipcMain.handle(ipcChannels.customerCreate, (_event, input: unknown) => createCustomer(input));
+  ipcMain.handle(ipcChannels.customerUpdate, (_event, id: string, input: unknown) =>
+    updateCustomer(id, input)
+  );
+  ipcMain.handle(ipcChannels.customerSetStatus, (_event, id: string, status: CustomerStatus) =>
+    setCustomerStatus(id, status)
+  );
+  ipcMain.handle(ipcChannels.saleListPending, () => listPendingSales());
+  ipcMain.handle(ipcChannels.saleGet, (_event, id: string) => getSale(id));
+  ipcMain.handle(ipcChannels.saleSuspend, (_event, input: unknown) => suspendSale(input));
+  ipcMain.handle(ipcChannels.saleDeletePending, (_event, id: string) => deletePendingSale(id));
+  ipcMain.handle(ipcChannels.saleComplete, (_event, input: unknown) => completeSale(input));
   ipcMain.handle(ipcChannels.syncGetSnapshot, () => getSyncSnapshot());
   ipcMain.handle(ipcChannels.syncListQueue, (_event, input?: { limit?: number }) =>
     listSyncQueue(input?.limit)

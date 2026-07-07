@@ -11,7 +11,7 @@ import {
   stockTransferInputSchema,
   type StockMovementInput
 } from "@shared/schemas/stock-movement";
-import type { InventoryBalance } from "@shared/types/inventory";
+import type { InventoryBalance, LocationStockLevel } from "@shared/types/inventory";
 import type { StockMovement, StockMovementType, StockTransferResult } from "@shared/types/stock-movement";
 
 const INCREASING_MOVEMENT_TYPES = new Set(["purchase", "transfer_in", "return", "opening_stock"]);
@@ -144,4 +144,13 @@ export function listStockMovements(productId: string, limit?: number): StockMove
   return stockMovementRepository
     .findStockMovementRowsForProduct(productId, limit)
     .map(stockMovementRepository.mapStockMovementRow);
+}
+
+/** Every stocked product's balance at one location — feeds the POS screen's available-stock display. */
+export function listInventoryForLocation(locationId: string): LocationStockLevel[] {
+  requirePermission("inventory", "view");
+  return inventoryRepository.findInventoryRowsForLocation(locationId).map((row) => ({
+    productId: row.product_id,
+    quantity: row.quantity
+  }));
 }

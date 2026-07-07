@@ -6,6 +6,7 @@ export type AuthEmployeeSummary = {
   firstName: string;
   lastName: string;
   jobTitle: string | null;
+  photoPath: string | null;
 };
 
 export type AuthRoleSummary = {

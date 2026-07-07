@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { motion } from "framer-motion";
-import { Eye, KeyRound, Loader2, Pencil, Plus, Search, Trash2, UserCog } from "lucide-react";
+import { Eye, ImagePlus, KeyRound, Loader2, Pencil, Plus, Search, Trash2, UserCog, X } from "lucide-react";
 import { EmployeeDetailModal } from "@renderer/app/routes/employees/EmployeeDetailModal";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
@@ -38,6 +38,7 @@ type FormState = {
   pin: string;
   confirmPin: string;
   password: string;
+  photoPath: string | null;
 };
 
 const emptyForm: FormState = {
@@ -59,7 +60,8 @@ const emptyForm: FormState = {
   status: "active",
   pin: "",
   confirmPin: "",
-  password: ""
+  password: "",
+  photoPath: null
 };
 
 function toFormState(employee: EmployeeListItem): FormState {
@@ -82,7 +84,8 @@ function toFormState(employee: EmployeeListItem): FormState {
     status: employee.status,
     pin: "",
     confirmPin: "",
-    password: ""
+    password: "",
+    photoPath: employee.photoPath
   };
 }
 
@@ -107,6 +110,8 @@ export function EmployeesRoute(): React.JSX.Element {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detailEmployee, setDetailEmployee] = useState<EmployeeListItem | null>(null);
@@ -135,6 +140,20 @@ export function EmployeesRoute(): React.JSX.Element {
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  useEffect(() => {
+    if (!form.photoPath) {
+      setPhotoPreviewUrl(null);
+      return;
+    }
+    let cancelled = false;
+    void window.blueLedger.employee.readPhotoPreview(form.photoPath).then((url) => {
+      if (!cancelled) setPhotoPreviewUrl(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.photoPath]);
 
   const roleOptions = useMemo(
     () => roles.map((role) => ({ value: role.id, label: role.roleName })),
@@ -172,6 +191,20 @@ export function EmployeesRoute(): React.JSX.Element {
 
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]): void {
     setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function handlePickPhoto(): Promise<void> {
+    setPhotoBusy(true);
+    try {
+      const relativePath = await window.blueLedger.employee.pickPhoto();
+      if (relativePath) {
+        updateField("photoPath", relativePath);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to attach photo");
+    } finally {
+      setPhotoBusy(false);
+    }
   }
 
   function openCreateModal(): void {
@@ -218,7 +251,8 @@ export function EmployeesRoute(): React.JSX.Element {
       status: form.status,
       pin: form.pin,
       confirmPin: form.confirmPin,
-      password: form.password
+      password: form.password,
+      photoPath: form.photoPath
     };
 
     try {
@@ -431,10 +465,13 @@ export function EmployeesRoute(): React.JSX.Element {
                         <button
                           type="button"
                           onClick={() => setDetailEmployee(employee)}
-                          className="truncate font-extrabold hover:text-accent hover:underline"
+                          className="flex min-w-0 items-center gap-2.5 font-extrabold hover:text-accent hover:underline"
                           title={`${employee.firstName} ${employee.lastName}`}
                         >
-                          {employee.firstName} {employee.lastName}
+                          <EmployeeAvatar photoPath={employee.photoPath} />
+                          <span className="truncate">
+                            {employee.firstName} {employee.lastName}
+                          </span>
                         </button>
                       </td>
                       <td className="truncate px-4 py-3 text-sm font-semibold text-muted">
@@ -526,7 +563,41 @@ export function EmployeesRoute(): React.JSX.Element {
             </div>
           )}
 
-          <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
+          <div className="flex items-center gap-4">
+            <div className="grid size-16 flex-none place-items-center overflow-hidden rounded-full border border-line bg-soft">
+              {photoPreviewUrl ? (
+                <img src={photoPreviewUrl} alt="" className="size-full object-cover" />
+              ) : (
+                <UserCog className="size-6 text-muted" aria-hidden="true" />
+              )}
+            </div>
+            <div>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  onClick={() => void handlePickPhoto()}
+                  disabled={photoBusy}
+                  className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <ImagePlus className="mr-1.5 size-4" aria-hidden="true" />
+                  {form.photoPath ? "Replace Photo" : "Upload Photo"}
+                </Button>
+                {form.photoPath && (
+                  <Button
+                    type="button"
+                    onClick={() => updateField("photoPath", null)}
+                    className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+                  >
+                    <X className="mr-1 size-3.5" aria-hidden="true" />
+                    Remove
+                  </Button>
+                )}
+              </div>
+              <p className="mt-1.5 text-[11px] font-semibold text-muted">JPG, PNG, or WEBP · max 5MB</p>
+            </div>
+          </div>
+
+          <p className="mt-5 text-[11px] font-extrabold uppercase tracking-wider text-muted">
             Personal Information
           </p>
           <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -708,5 +779,33 @@ function Th({ children, className }: { children: React.ReactNode; className?: st
     <th className={cn("px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider", className)}>
       {children}
     </th>
+  );
+}
+
+function EmployeeAvatar({ photoPath }: { photoPath: string | null }): React.JSX.Element {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!photoPath) {
+      setPreviewUrl(null);
+      return;
+    }
+    let cancelled = false;
+    void window.blueLedger.employee.readPhotoPreview(photoPath).then((url) => {
+      if (!cancelled) setPreviewUrl(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [photoPath]);
+
+  return (
+    <div className="grid size-8 flex-none place-items-center overflow-hidden rounded-full border border-line bg-soft">
+      {previewUrl ? (
+        <img src={previewUrl} alt="" className="size-full object-cover" />
+      ) : (
+        <UserCog className="size-3.5 text-muted" aria-hidden="true" />
+      )}
+    </div>
   );
 }

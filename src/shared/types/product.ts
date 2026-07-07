@@ -44,5 +44,6 @@ export type Product = ProductInputFields & {
 /** Product row enriched with catalog-list-only aggregates, computed via joins. */
 export type ProductListItem = Product & {
   categoryName: string | null;
+  categoryColor: string | null;
   totalStock: number;
 };

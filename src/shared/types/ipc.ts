@@ -2,11 +2,14 @@ import type { AppContext, TenantRecord } from "./tenant";
 import type { BrandTheme } from "./theme";
 import type { AuthSession } from "./auth";
 import type { Category, CategoryStatus } from "./category";
+import type { Customer, CustomerStatus } from "./customer";
 import type { Employee, EmployeeListItem, EmployeeStatus } from "./employee";
-import type { InventoryBalance } from "./inventory";
+import type { InventoryBalance, LocationStockLevel } from "./inventory";
 import type { Location, LocationStatus } from "./location";
+import type { PaymentMethod } from "./payment-method";
 import type { Product, ProductListItem, ProductStatus } from "./product";
 import type { Role, RoleListItem } from "./role";
+import type { PendingSaleListItem, Sale } from "./sale";
 import type { StockMovement, StockTransferResult } from "./stock-movement";
 import type { SyncQueueItem, SyncSnapshot } from "./sync";
 
@@ -123,6 +126,10 @@ export type IpcInvokeMap = {
     args: [string];
     result: InventoryBalance[];
   };
+  "inventory:list-for-location": {
+    args: [string];
+    result: LocationStockLevel[];
+  };
   "stock-movement:list": {
     args: [string, { limit?: number }];
     result: StockMovement[];
@@ -178,6 +185,78 @@ export type IpcInvokeMap = {
   "employee:delete": {
     args: [string];
     result: { id: string };
+  };
+  "employee:pick-photo": {
+    args: [];
+    result: string | null;
+  };
+  "employee:read-photo-preview": {
+    args: [string];
+    result: string | null;
+  };
+  "payment-method:list": {
+    args: [];
+    result: PaymentMethod[];
+  };
+  "payment-method:get": {
+    args: [string];
+    result: PaymentMethod;
+  };
+  "payment-method:create": {
+    args: [Record<string, unknown>];
+    result: PaymentMethod;
+  };
+  "payment-method:update": {
+    args: [string, Record<string, unknown>];
+    result: PaymentMethod;
+  };
+  "payment-method:set-active": {
+    args: [string, boolean];
+    result: PaymentMethod;
+  };
+  "payment-method:delete": {
+    args: [string];
+    result: { id: string };
+  };
+  "customer:list": {
+    args: [];
+    result: Customer[];
+  };
+  "customer:get": {
+    args: [string];
+    result: Customer;
+  };
+  "customer:create": {
+    args: [Record<string, unknown>];
+    result: Customer;
+  };
+  "customer:update": {
+    args: [string, Record<string, unknown>];
+    result: Customer;
+  };
+  "customer:set-status": {
+    args: [string, CustomerStatus];
+    result: Customer;
+  };
+  "sale:list-pending": {
+    args: [];
+    result: PendingSaleListItem[];
+  };
+  "sale:get": {
+    args: [string];
+    result: Sale;
+  };
+  "sale:suspend": {
+    args: [Record<string, unknown>];
+    result: { id: string };
+  };
+  "sale:delete-pending": {
+    args: [string];
+    result: { id: string };
+  };
+  "sale:complete": {
+    args: [Record<string, unknown>];
+    result: Sale;
   };
   "sync:get-snapshot": {
     args: [];
@@ -261,6 +340,9 @@ export type BlueLedgerApi = {
   };
   inventory: {
     overview: (productId: string) => Promise<IpcInvokeMap["inventory:overview"]["result"]>;
+    listForLocation: (
+      locationId: string
+    ) => Promise<IpcInvokeMap["inventory:list-for-location"]["result"]>;
   };
   stockMovement: {
     list: (
@@ -292,6 +374,46 @@ export type BlueLedgerApi = {
       status: EmployeeStatus
     ) => Promise<IpcInvokeMap["employee:set-status"]["result"]>;
     delete: (id: string) => Promise<IpcInvokeMap["employee:delete"]["result"]>;
+    pickPhoto: () => Promise<IpcInvokeMap["employee:pick-photo"]["result"]>;
+    readPhotoPreview: (
+      relativePath: string
+    ) => Promise<IpcInvokeMap["employee:read-photo-preview"]["result"]>;
+  };
+  paymentMethod: {
+    list: () => Promise<IpcInvokeMap["payment-method:list"]["result"]>;
+    get: (id: string) => Promise<IpcInvokeMap["payment-method:get"]["result"]>;
+    create: (
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["payment-method:create"]["result"]>;
+    update: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["payment-method:update"]["result"]>;
+    setActive: (
+      id: string,
+      isActive: boolean
+    ) => Promise<IpcInvokeMap["payment-method:set-active"]["result"]>;
+    delete: (id: string) => Promise<IpcInvokeMap["payment-method:delete"]["result"]>;
+  };
+  customer: {
+    list: () => Promise<IpcInvokeMap["customer:list"]["result"]>;
+    get: (id: string) => Promise<IpcInvokeMap["customer:get"]["result"]>;
+    create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["customer:create"]["result"]>;
+    update: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["customer:update"]["result"]>;
+    setStatus: (
+      id: string,
+      status: CustomerStatus
+    ) => Promise<IpcInvokeMap["customer:set-status"]["result"]>;
+  };
+  sale: {
+    listPending: () => Promise<IpcInvokeMap["sale:list-pending"]["result"]>;
+    get: (id: string) => Promise<IpcInvokeMap["sale:get"]["result"]>;
+    suspend: (input: Record<string, unknown>) => Promise<IpcInvokeMap["sale:suspend"]["result"]>;
+    deletePending: (id: string) => Promise<IpcInvokeMap["sale:delete-pending"]["result"]>;
+    complete: (input: Record<string, unknown>) => Promise<IpcInvokeMap["sale:complete"]["result"]>;
   };
   sync: {
     getSnapshot: () => Promise<IpcInvokeMap["sync:get-snapshot"]["result"]>;

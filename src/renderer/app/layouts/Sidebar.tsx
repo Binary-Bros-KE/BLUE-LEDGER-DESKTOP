@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Building2, ChevronLeft, ChevronRight, CloudOff, LogOut } from "lucide-react";
+import { ChevronLeft, ChevronRight, LogOut, Store, UserRound } from "lucide-react";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
-import { useAppStore } from "@renderer/shared/stores/app-store";
 import { useAuthStore } from "@renderer/shared/stores/auth-store";
 import { useUiStore } from "@renderer/shared/stores/ui-store";
 import { cn } from "@renderer/shared/lib/cn";
@@ -19,8 +18,6 @@ export function Sidebar(): React.JSX.Element {
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
   const activeNavKey = useUiStore((state) => state.activeNavKey);
   const setActiveNavKey = useUiStore((state) => state.setActiveNavKey);
-  const context = useAppStore((state) => state.context);
-  const sync = useAppStore((state) => state.sync);
   const { can, session } = usePermissions();
   const logout = useAuthStore((state) => state.logout);
 
@@ -35,25 +32,25 @@ export function Sidebar(): React.JSX.Element {
     [can]
   );
 
-  const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
-  const logoPath = context?.tenant.businessLogoPath;
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  const photoPath = session?.employee.photoPath;
 
   useEffect(() => {
     let cancelled = false;
 
-    if (!logoPath) {
-      setLogoPreviewUrl(null);
+    if (!photoPath) {
+      setPhotoPreviewUrl(null);
       return;
     }
 
-    void window.blueLedger.tenant.readImagePreview(logoPath).then((dataUrl) => {
-      if (!cancelled) setLogoPreviewUrl(dataUrl);
+    void window.blueLedger.employee.readPhotoPreview(photoPath).then((dataUrl) => {
+      if (!cancelled) setPhotoPreviewUrl(dataUrl);
     });
 
     return () => {
       cancelled = true;
     };
-  }, [logoPath]);
+  }, [photoPath]);
 
   return (
     <motion.aside
@@ -144,73 +141,70 @@ export function Sidebar(): React.JSX.Element {
         <div className={cn("mt-4 px-3", collapsed && "px-2")}>
           <div
             className={cn(
-              "flex items-center gap-2.5 rounded-lg border border-white/15 bg-white/10 p-2.5",
-              collapsed && "justify-center p-2"
+              "rounded-lg border border-line bg-white p-3.5 shadow-soft",
+              collapsed && "flex justify-center p-2"
             )}
           >
-            {!collapsed && (
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-extrabold text-white">
-                  {session.employee.firstName} {session.employee.lastName}
-                </p>
-                <p className="truncate text-[10px] font-semibold text-white/60">
-                  {session.role?.roleName ?? "No role assigned"}
-                </p>
+            {collapsed ? (
+              <div className="grid size-8 flex-none place-items-center overflow-hidden rounded-full border border-line">
+                {photoPreviewUrl ? (
+                  <img src={photoPreviewUrl} alt="" className="size-full object-cover" />
+                ) : (
+                  <UserRound className="size-4 text-muted" aria-hidden="true" />
+                )}
               </div>
+            ) : (
+              <>
+                <div className="flex items-center gap-2.5">
+                  <div className="grid size-9 flex-none place-items-center overflow-hidden rounded-full border border-line">
+                    {photoPreviewUrl ? (
+                      <img src={photoPreviewUrl} alt="" className="size-full object-cover" />
+                    ) : (
+                      <UserRound className="size-4 text-muted" aria-hidden="true" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-extrabold text-ink">
+                      {session.employee.firstName} {session.employee.lastName}
+                    </p>
+                    <p className="truncate text-[11px] font-semibold text-muted">
+                      {session.role?.roleName ?? "No role assigned"}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void logout()}
+                    aria-label="Sign out"
+                    title="Sign out"
+                    className="grid size-7 flex-none place-items-center rounded-md text-muted transition hover:bg-soft hover:text-danger cursor-pointer"
+                  >
+                    <LogOut className="size-3.5" aria-hidden="true" />
+                  </button>
+                </div>
+
+                <div className="relative mt-3 pt-3">
+                  <div
+                    className="pointer-events-none absolute inset-x-1 top-0 border-t-2 border-dashed border-line"
+                    aria-hidden="true"
+                  />
+                  <span
+                    className="pointer-events-none absolute -top-[5px] left-0 size-2.5 -translate-x-1/2 rounded-full border-2 border-line bg-white"
+                    aria-hidden="true"
+                  />
+                  <span
+                    className="pointer-events-none absolute -top-[5px] right-0 size-2.5 translate-x-1/2 rounded-full border-2 border-line bg-white"
+                    aria-hidden="true"
+                  />
+                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-muted">
+                    <Store className="size-3.5 flex-none text-primary" aria-hidden="true" />
+                    {session.branch?.locationName ?? "No branch assigned"}
+                  </div>
+                </div>
+              </>
             )}
-            <button
-              type="button"
-              onClick={() => void logout()}
-              aria-label="Sign out"
-              title="Sign out"
-              className="grid size-7 flex-none place-items-center rounded-md text-white/70 transition hover:bg-white/10 hover:text-white cursor-pointer"
-            >
-              <LogOut className="size-3.5" aria-hidden="true" />
-            </button>
           </div>
         </div>
       )}
-
-      <div className={cn("mt-4 px-3", collapsed && "px-2")}>
-        <div
-          className={cn(
-            "rounded-lg border border-line bg-white p-3.5 shadow-soft",
-            collapsed && "flex justify-center p-2"
-          )}
-        >
-          {collapsed ? (
-            <Building2 className="size-5 text-primary" aria-hidden="true" />
-          ) : (
-            <>
-              <div className="flex items-center gap-2.5">
-                <div className="grid size-9 flex-none place-items-center overflow-hidden rounded-lg border border-line">
-                  {logoPreviewUrl ? (
-                    <img
-                      src={logoPreviewUrl}
-                      alt="Business logo"
-                      className="max-h-full max-w-full object-contain"
-                    />
-                  ) : (
-                    <Building2 className="size-4 text-muted" aria-hidden="true" />
-                  )}
-                </div>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-extrabold text-ink">
-                    {context?.tenant.businessName ?? "Loading"}
-                  </p>
-                  <p className="truncate text-[11px] font-semibold text-muted">
-                    {context?.tenant.currency ? `${context.tenant.currency} Workspace` : "Preparing"}
-                  </p>
-                </div>
-              </div>
-              <div className="mt-3 flex items-center gap-1.5 border-t-2 border-dashed border-gray-300 pt-3 text-[11px] font-bold text-muted">
-                <CloudOff className="size-3.5 flex-none text-warning" aria-hidden="true" />
-                {sync?.queuedCount ?? 0} queued sync items
-              </div>
-            </>
-          )}
-        </div>
-      </div>
     </motion.aside>
   );
 }
