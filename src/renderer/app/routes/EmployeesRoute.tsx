@@ -9,6 +9,7 @@ import { Field, SelectField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
+import { getErrorMessage } from "@renderer/shared/lib/errors";
 import {
   EMPLOYEE_STATUS_OPTIONS,
   GENDER_OPTIONS,
@@ -133,7 +134,7 @@ export function EmployeesRoute(): React.JSX.Element {
       setRoles(roleList);
       setLocations(locationList);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Failed to load employees");
+      setLoadError(getErrorMessage(err, "Failed to load employees"));
     }
   }, []);
 
@@ -201,7 +202,7 @@ export function EmployeesRoute(): React.JSX.Element {
         updateField("photoPath", relativePath);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to attach photo");
+      setError(getErrorMessage(err, "Failed to attach photo"));
     } finally {
       setPhotoBusy(false);
     }
@@ -264,7 +265,7 @@ export function EmployeesRoute(): React.JSX.Element {
       await loadAll();
       setModalOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save employee");
+      setError(getErrorMessage(err, "Failed to save employee"));
     } finally {
       setSaving(false);
     }
@@ -276,7 +277,7 @@ export function EmployeesRoute(): React.JSX.Element {
       await window.blueLedger.employee.setStatus(employee.id, status);
       await loadAll();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to update status");
+      setActionError(getErrorMessage(err, "Failed to update status"));
     }
   }
 
@@ -289,7 +290,7 @@ export function EmployeesRoute(): React.JSX.Element {
       await window.blueLedger.employee.delete(employee.id);
       await loadAll();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to delete employee");
+      setActionError(getErrorMessage(err, "Failed to delete employee"));
     }
   }
 
@@ -478,7 +479,7 @@ export function EmployeesRoute(): React.JSX.Element {
                         {employee.roleName ?? "Unassigned"}
                       </td>
                       <td className="truncate px-4 py-3 text-sm font-semibold text-muted">
-                        {employee.branchName ?? "Unassigned"}
+                        {employee.branchName ?? "All storefronts"}
                       </td>
                       <td className="truncate px-4 py-3 text-sm tabular-nums">{employee.phone ?? "—"}</td>
                       <td className="px-4 py-3">
@@ -674,7 +675,7 @@ export function EmployeesRoute(): React.JSX.Element {
                 label="Assigned Branch"
                 value={form.branchId}
                 onChange={(value) => updateField("branchId", value)}
-                options={[{ value: "", label: "Unassigned" }, ...branchOptions]}
+                options={[{ value: "", label: "No branch — sees every storefront" }, ...branchOptions]}
               />
               <Field
                 label="Job Title"

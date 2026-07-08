@@ -5,14 +5,16 @@ const toneClass = {
   primary: "bg-primary text-white",
   accent: "bg-accent text-white",
   success: "bg-success text-white",
-  warning: "bg-white text-ink border border-line"
+  warning: "bg-white text-ink border border-line",
+  danger: "bg-danger text-white"
 } as const;
 
 const mutedClass = {
   primary: "text-white/60",
   accent: "text-white/60",
   success: "text-white/60",
-  warning: "text-muted"
+  warning: "text-muted",
+  danger: "text-white/60"
 } as const;
 
 export function StatTile({

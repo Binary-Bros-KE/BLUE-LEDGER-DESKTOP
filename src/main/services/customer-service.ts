@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import * as customerRepository from "@main/database/repositories/customer-repository";
-import { requirePermission } from "@main/services/auth-service";
+import { getCurrentBranchScope, requirePermission } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { customerInputSchema } from "@shared/schemas/customer";
 import type { Customer, CustomerStatus } from "@shared/types/customer";
@@ -22,7 +22,8 @@ function assertUniquePhone(tenantId: string, phone: string, excludeId?: string):
 export function listCustomers(): Customer[] {
   requirePermission("customers", "view");
   const { tenantId } = getCurrentTenant();
-  return customerRepository.findAllCustomerRows(tenantId).map(customerRepository.mapCustomerRow);
+  const locationId = getCurrentBranchScope();
+  return customerRepository.findAllCustomerRows(tenantId, locationId).map(customerRepository.mapCustomerRow);
 }
 
 export function getCustomer(id: string): Customer {
@@ -45,7 +46,8 @@ export function createCustomer(input: unknown): Customer {
     ...parsed,
     id: `customer_${randomUUID()}`,
     tenantId,
-    customerCode: generateCustomerCode(tenantId)
+    customerCode: generateCustomerCode(tenantId),
+    locationId: getCurrentBranchScope()
   });
   return customerRepository.mapCustomerRow(row);
 }

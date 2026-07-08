@@ -550,6 +550,166 @@ const migrations = [
       CREATE INDEX idx_sale_items_sale ON sale_items(sale_id);
       CREATE INDEX idx_sale_items_product ON sale_items(product_id);
     `
+  },
+  {
+    version: 14,
+    name: "sale_returns_and_voids",
+    sql: `
+      CREATE TABLE IF NOT EXISTS sale_voids (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        sale_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending_approval' CHECK (status IN ('pending_approval', 'approved', 'rejected')),
+        reason TEXT NOT NULL,
+        notes TEXT,
+        requested_by TEXT NOT NULL,
+        requested_at TEXT NOT NULL,
+        approved_by TEXT,
+        approved_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (sale_id) REFERENCES sales(id),
+        FOREIGN KEY (requested_by) REFERENCES employees(id),
+        FOREIGN KEY (approved_by) REFERENCES employees(id)
+      );
+
+      CREATE INDEX idx_sale_voids_tenant_status ON sale_voids(tenant_id, status);
+      CREATE INDEX idx_sale_voids_sale ON sale_voids(sale_id);
+
+      CREATE TABLE IF NOT EXISTS sale_returns (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        sale_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending_approval' CHECK (status IN ('pending_approval', 'approved', 'rejected')),
+        reason TEXT NOT NULL,
+        notes TEXT,
+        requested_by TEXT NOT NULL,
+        requested_at TEXT NOT NULL,
+        approved_by TEXT,
+        approved_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (sale_id) REFERENCES sales(id),
+        FOREIGN KEY (requested_by) REFERENCES employees(id),
+        FOREIGN KEY (approved_by) REFERENCES employees(id)
+      );
+
+      CREATE INDEX idx_sale_returns_tenant_status ON sale_returns(tenant_id, status);
+      CREATE INDEX idx_sale_returns_sale ON sale_returns(sale_id);
+
+      CREATE TABLE IF NOT EXISTS sale_return_items (
+        id TEXT PRIMARY KEY,
+        sale_return_id TEXT NOT NULL,
+        sale_item_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        quantity INTEGER NOT NULL,
+        unit_price_cents INTEGER NOT NULL,
+        line_total_cents INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (sale_return_id) REFERENCES sale_returns(id),
+        FOREIGN KEY (sale_item_id) REFERENCES sale_items(id),
+        FOREIGN KEY (product_id) REFERENCES products(id)
+      );
+
+      CREATE INDEX idx_sale_return_items_return ON sale_return_items(sale_return_id);
+    `
+  },
+  {
+    version: 15,
+    name: "invoices",
+    sql: `
+      ALTER TABLE sales ADD COLUMN transaction_type TEXT NOT NULL DEFAULT 'retail_sale' CHECK (transaction_type IN ('retail_sale', 'wholesale_sale', 'invoice', 'return', 'exchange'));
+      ALTER TABLE sales ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'paid' CHECK (payment_status IN ('unpaid', 'partially_paid', 'paid', 'overdue', 'cancelled'));
+      ALTER TABLE sales ADD COLUMN invoice_number TEXT;
+      ALTER TABLE sales ADD COLUMN invoice_date TEXT;
+      ALTER TABLE sales ADD COLUMN due_date TEXT;
+      ALTER TABLE sales ADD COLUMN amount_paid_cents INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE sales ADD COLUMN balance_due_cents INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE sales ADD COLUMN invoice_notes TEXT;
+      ALTER TABLE sales ADD COLUMN payments TEXT NOT NULL DEFAULT '[]';
+
+      UPDATE sales SET amount_paid_cents = grand_total_cents, balance_due_cents = 0 WHERE sale_status = 'completed';
+
+      CREATE UNIQUE INDEX idx_sales_tenant_invoice_number ON sales(tenant_id, invoice_number);
+      CREATE INDEX idx_sales_transaction_type ON sales(tenant_id, transaction_type);
+      CREATE INDEX idx_sales_payment_status ON sales(tenant_id, payment_status);
+    `
+  },
+  {
+    version: 16,
+    name: "managed_logos",
+    sql: `
+      ALTER TABLE tenant ADD COLUMN business_logo_ratio TEXT CHECK (business_logo_ratio IN ('landscape', 'portrait', 'square'));
+      ALTER TABLE locations ADD COLUMN logo_path TEXT;
+      ALTER TABLE locations ADD COLUMN logo_ratio TEXT CHECK (logo_ratio IN ('landscape', 'portrait', 'square'));
+    `
+  },
+  {
+    version: 17,
+    name: "customer_branch_scoping",
+    sql: `
+      ALTER TABLE customers ADD COLUMN location_id TEXT REFERENCES locations(id);
+      CREATE INDEX idx_customers_location ON customers(location_id);
+    `
+  },
+  {
+    version: 18,
+    name: "quotations",
+    sql: `
+      CREATE TABLE IF NOT EXISTS quotations (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        quotation_number TEXT NOT NULL,
+        customer_id TEXT NOT NULL,
+        location_id TEXT NOT NULL,
+        employee_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'sent', 'accepted', 'rejected', 'expired', 'converted')),
+        subtotal_cents INTEGER NOT NULL DEFAULT 0,
+        discount_amount_cents INTEGER NOT NULL DEFAULT 0,
+        tax_amount_cents INTEGER NOT NULL DEFAULT 0,
+        grand_total_cents INTEGER NOT NULL DEFAULT 0,
+        valid_until TEXT NOT NULL,
+        notes TEXT,
+        converted_sale_id TEXT,
+        converted_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (customer_id) REFERENCES customers(id),
+        FOREIGN KEY (location_id) REFERENCES locations(id),
+        FOREIGN KEY (employee_id) REFERENCES employees(id),
+        FOREIGN KEY (converted_sale_id) REFERENCES sales(id)
+      );
+
+      CREATE UNIQUE INDEX idx_quotations_tenant_number ON quotations(tenant_id, quotation_number);
+      CREATE INDEX idx_quotations_tenant_status ON quotations(tenant_id, status);
+      CREATE INDEX idx_quotations_location ON quotations(location_id);
+      CREATE INDEX idx_quotations_customer ON quotations(customer_id);
+
+      CREATE TABLE IF NOT EXISTS quotation_items (
+        id TEXT PRIMARY KEY,
+        quotation_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        quantity INTEGER NOT NULL,
+        unit_price_cents INTEGER NOT NULL,
+        discount_amount_cents INTEGER NOT NULL DEFAULT 0,
+        tax_amount_cents INTEGER NOT NULL DEFAULT 0,
+        line_total_cents INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (quotation_id) REFERENCES quotations(id),
+        FOREIGN KEY (product_id) REFERENCES products(id)
+      );
+
+      CREATE INDEX idx_quotation_items_quotation ON quotation_items(quotation_id);
+    `
   }
 ] as const;
 

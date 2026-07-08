@@ -7,6 +7,7 @@ import { CheckboxField, Field, TextAreaField } from "@renderer/shared/components
 import { Modal } from "@renderer/shared/components/Modal";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
+import { getErrorMessage } from "@renderer/shared/lib/errors";
 import type { PaymentMethod } from "@shared/types/payment-method";
 
 type FormState = {
@@ -62,7 +63,7 @@ export function PaymentMethodsRoute(): React.JSX.Element {
       const list = await window.blueLedger.paymentMethod.list();
       setMethods(list);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Failed to load payment methods");
+      setLoadError(getErrorMessage(err, "Failed to load payment methods"));
     }
   }, []);
 
@@ -121,7 +122,7 @@ export function PaymentMethodsRoute(): React.JSX.Element {
       await loadMethods();
       setModalOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save payment method");
+      setError(getErrorMessage(err, "Failed to save payment method"));
     } finally {
       setSaving(false);
     }
@@ -133,7 +134,7 @@ export function PaymentMethodsRoute(): React.JSX.Element {
       await window.blueLedger.paymentMethod.setActive(method.id, !method.isActive);
       await loadMethods();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to update status");
+      setActionError(getErrorMessage(err, "Failed to update status"));
     }
   }
 
@@ -145,7 +146,7 @@ export function PaymentMethodsRoute(): React.JSX.Element {
       await window.blueLedger.paymentMethod.delete(method.id);
       await loadMethods();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to delete payment method");
+      setActionError(getErrorMessage(err, "Failed to delete payment method"));
     }
   }
 

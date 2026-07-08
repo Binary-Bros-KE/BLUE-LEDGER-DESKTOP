@@ -5,7 +5,7 @@ import * as productRepository from "@main/database/repositories/product-reposito
 import * as saleRepository from "@main/database/repositories/sale-repository";
 import { runInTransaction } from "@main/database/connection";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
-import { getSession, requirePermission } from "@main/services/auth-service";
+import { getCurrentBranchScope, getSession, requirePermission } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import {
   checkoutInputSchema,
@@ -13,10 +13,10 @@ import {
   type CheckoutInput,
   type SaleCartInput
 } from "@shared/schemas/sale";
-import type { PendingSaleListItem, Sale } from "@shared/types/sale";
+import type { PendingSaleListItem, Sale, SaleListItem } from "@shared/types/sale";
 import type { ProductRow } from "@main/database/repositories/product-repository";
 
-type PreparedItem = {
+export type PreparedItem = {
   product: ProductRow;
   quantity: number;
   unitPriceCents: number;
@@ -25,7 +25,7 @@ type PreparedItem = {
   lineTotalCents: number;
 };
 
-type PreparedCart = {
+export type PreparedCart = {
   items: PreparedItem[];
   subtotalCents: number;
   discountAmountCents: number;
@@ -34,7 +34,7 @@ type PreparedCart = {
 };
 
 /** The employee/branch the POS screen always acts as — never taken from renderer input. */
-function requireActiveSession(): { tenantId: string; employeeId: string; locationId: string } {
+export function requireActiveSession(): { tenantId: string; employeeId: string; locationId: string } {
   const session = getSession();
   if (!session) {
     throw new Error("You must be signed in to use the POS");
@@ -55,7 +55,7 @@ function assertCustomerExists(tenantId: string, customerId: string | null): void
 }
 
 /** Prices and taxes every cart line from live product data — never trusts client-supplied money math. */
-function prepareCart(tenantId: string, items: SaleCartInput["items"]): PreparedCart {
+export function prepareCart(tenantId: string, items: SaleCartInput["items"]): PreparedCart {
   let subtotalCents = 0;
   let discountAmountCents = 0;
   let taxAmountCents = 0;
@@ -126,7 +126,7 @@ function generateReceiptNumber(tenantId: string): string {
   return `BL-${String(nextNumber).padStart(7, "0")}`;
 }
 
-function getSaleDetail(id: string): Sale {
+export function getSaleDetail(id: string): Sale {
   const row = saleRepository.findSaleDetailRowById(id);
   if (!row) {
     throw new Error("Sale not found");
@@ -148,6 +148,14 @@ export function listPendingSales(): PendingSaleListItem[] {
 export function getSale(id: string): Sale {
   requirePermission("sales", "view");
   return getSaleDetail(id);
+}
+
+/** Completed POS sales for the Receipts screen, latest first — invoices live on the Invoices screen instead. */
+export function listSales(): SaleListItem[] {
+  requirePermission("sales", "view");
+  const { tenantId } = getCurrentTenant();
+  const locationId = getCurrentBranchScope();
+  return saleRepository.findAllSaleSummaryRows(tenantId, locationId).map(saleRepository.mapSaleSummaryRow);
 }
 
 /** Holds the current cart for later — no inventory impact, since nothing has been sold yet. */
@@ -219,39 +227,35 @@ export function deletePendingSale(id: string): { id: string } {
 }
 
 /**
- * Completes checkout: validates stock/payment/totals, then atomically creates the sale + items,
- * writes stock movements, and updates inventory balances. Everything happens in one transaction —
- * either the whole sale goes through, or none of it does.
+ * Inserts a completed sale from an already-priced cart — shared by checkout (which prices the cart
+ * itself from live product data) and quotation conversion (which carries over the quotation's frozen
+ * prices instead of re-quoting). Always re-validates stock at insert time via applyValidatedStockMovement,
+ * regardless of where the cart's prices came from.
  */
-export function completeSale(input: unknown): Sale {
-  requirePermission("sales", "create");
-  const parsed: CheckoutInput = checkoutInputSchema.parse(input);
-  const { tenantId, employeeId, locationId } = requireActiveSession();
+export function insertCompletedSaleFromCart(input: {
+  tenantId: string;
+  employeeId: string;
+  locationId: string;
+  customerId: string | null;
+  cart: PreparedCart;
+  paymentMethodId: string;
+  paymentReference: string | null;
+  amountReceivedCents: number | null;
+  notes: string | null;
+  resumeSaleId?: string | null;
+}): Sale {
+  const { tenantId, employeeId, locationId, cart } = input;
 
-  const paymentMethod = paymentMethodRepository.findPaymentMethodRowById(parsed.paymentMethodId);
-  if (!paymentMethod || paymentMethod.tenant_id !== tenantId) {
-    throw new Error("Payment method not found");
-  }
-  if (!paymentMethod.is_active) {
-    throw new Error(`"${paymentMethod.name}" is not active`);
-  }
-  if (paymentMethod.requires_reference && !parsed.paymentReference) {
-    throw new Error(`${paymentMethod.name} requires a reference number`);
-  }
-
-  assertCustomerExists(tenantId, parsed.customerId);
-  const cart = prepareCart(tenantId, parsed.items);
-
-  if (parsed.amountReceivedCents !== null && parsed.amountReceivedCents < cart.grandTotalCents) {
+  if (input.amountReceivedCents !== null && input.amountReceivedCents < cart.grandTotalCents) {
     throw new Error("Amount received is less than the total due");
   }
   const changeGivenCents =
-    parsed.amountReceivedCents !== null ? parsed.amountReceivedCents - cart.grandTotalCents : null;
+    input.amountReceivedCents !== null ? input.amountReceivedCents - cart.grandTotalCents : null;
 
   const saleId = `sale_${randomUUID()}`;
 
   return runInTransaction(() => {
-    discardResumedSale(tenantId, parsed.resumeSaleId);
+    discardResumedSale(tenantId, input.resumeSaleId ?? null);
 
     const receiptNumber = generateReceiptNumber(tenantId);
     const now = new Date().toISOString();
@@ -262,17 +266,17 @@ export function completeSale(input: unknown): Sale {
       receiptNumber,
       locationId,
       employeeId,
-      customerId: parsed.customerId,
+      customerId: input.customerId,
       saleStatus: "completed",
       subtotalCents: cart.subtotalCents,
       discountAmountCents: cart.discountAmountCents,
       taxAmountCents: cart.taxAmountCents,
       grandTotalCents: cart.grandTotalCents,
-      paymentMethodId: parsed.paymentMethodId,
-      paymentReference: parsed.paymentReference,
-      amountReceivedCents: parsed.amountReceivedCents,
+      paymentMethodId: input.paymentMethodId,
+      paymentReference: input.paymentReference,
+      amountReceivedCents: input.amountReceivedCents,
       changeGivenCents,
-      notes: parsed.notes,
+      notes: input.notes,
       completedAt: now
     });
 
@@ -306,5 +310,43 @@ export function completeSale(input: unknown): Sale {
     }
 
     return getSaleDetail(saleId);
+  });
+}
+
+/**
+ * Completes checkout: validates stock/payment/totals, then atomically creates the sale + items,
+ * writes stock movements, and updates inventory balances. Everything happens in one transaction —
+ * either the whole sale goes through, or none of it does.
+ */
+export function completeSale(input: unknown): Sale {
+  requirePermission("sales", "create");
+  const parsed: CheckoutInput = checkoutInputSchema.parse(input);
+  const { tenantId, employeeId, locationId } = requireActiveSession();
+
+  const paymentMethod = paymentMethodRepository.findPaymentMethodRowById(parsed.paymentMethodId);
+  if (!paymentMethod || paymentMethod.tenant_id !== tenantId) {
+    throw new Error("Payment method not found");
+  }
+  if (!paymentMethod.is_active) {
+    throw new Error(`"${paymentMethod.name}" is not active`);
+  }
+  if (paymentMethod.requires_reference && !parsed.paymentReference) {
+    throw new Error(`${paymentMethod.name} requires a reference number`);
+  }
+
+  assertCustomerExists(tenantId, parsed.customerId);
+  const cart = prepareCart(tenantId, parsed.items);
+
+  return insertCompletedSaleFromCart({
+    tenantId,
+    employeeId,
+    locationId,
+    customerId: parsed.customerId,
+    cart,
+    paymentMethodId: parsed.paymentMethodId,
+    paymentReference: parsed.paymentReference,
+    amountReceivedCents: parsed.amountReceivedCents,
+    notes: parsed.notes,
+    resumeSaleId: parsed.resumeSaleId
   });
 }

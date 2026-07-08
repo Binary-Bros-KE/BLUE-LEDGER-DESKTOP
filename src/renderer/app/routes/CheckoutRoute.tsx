@@ -18,9 +18,12 @@ import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { Field, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
+import { ReceiptPreview } from "@renderer/shared/components/ReceiptPreview";
 import { StampBadge } from "@renderer/shared/components/StampBadge";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
+import { computeLinePricing, type LinePricing } from "@renderer/shared/lib/cart-pricing";
 import { cn } from "@renderer/shared/lib/cn";
+import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import type { Customer } from "@shared/types/customer";
@@ -50,44 +53,14 @@ type OpenSaleDraft = {
   createdAt: number;
 };
 
-type LinePricing = {
-  unitPriceCents: number;
-  lineSubtotalCents: number;
-  discountAmountCents: number;
-  taxCents: number;
-  lineTotalCents: number;
-};
-
 const BARCODE_STYLE = {
   backgroundImage:
     "repeating-linear-gradient(90deg, var(--color-ink) 0px, var(--color-ink) 2px, transparent 2px, transparent 5px)"
 };
 
-function computeLinePricing(
-  product: ProductListItem,
-  quantity: number,
-  discountAmountCents: number
-): LinePricing {
-  const useWholesale =
-    product.wholesalePriceCents !== null &&
-    product.wholesaleMinQuantity > 0 &&
-    quantity >= product.wholesaleMinQuantity;
-  const unitPriceCents = useWholesale ? (product.wholesalePriceCents as number) : product.sellingPriceCents;
-  const lineSubtotalCents = unitPriceCents * quantity;
-  const clampedDiscountCents = Math.max(0, Math.min(discountAmountCents, lineSubtotalCents));
-  const taxableCents = lineSubtotalCents - clampedDiscountCents;
-  const taxCents = Math.round(taxableCents * (product.taxRate / 100));
-  return {
-    unitPriceCents,
-    lineSubtotalCents,
-    discountAmountCents: clampedDiscountCents,
-    taxCents,
-    lineTotalCents: taxableCents + taxCents
-  };
-}
-
 export function CheckoutRoute(): React.JSX.Element {
   const currency = useAppStore((state) => state.context?.tenant.currency ?? "");
+  const tenantContext = useAppStore((state) => state.context?.tenant ?? null);
   const { can, session } = usePermissions();
   const canDeletePending = can("sales", "delete");
 
@@ -156,7 +129,7 @@ export function CheckoutRoute(): React.JSX.Element {
         );
         setOpenSales(drafts);
       } catch (err) {
-        setLoadError(err instanceof Error ? err.message : "Failed to load the POS screen");
+        setLoadError(getErrorMessage(err, "Failed to load the POS screen"));
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -347,7 +320,7 @@ export function CheckoutRoute(): React.JSX.Element {
       setOpenSales((prev) => prev.filter((entry) => entry.key !== draft.key));
       if (activeKey === draft.key) setActiveKey(null);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to delete sale");
+      setActionError(getErrorMessage(err, "Failed to delete sale"));
     }
   }
 
@@ -374,7 +347,7 @@ export function CheckoutRoute(): React.JSX.Element {
       );
       setActiveKey(null);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to suspend sale");
+      setActionError(getErrorMessage(err, "Failed to suspend sale"));
     } finally {
       setSuspending(false);
     }
@@ -405,7 +378,7 @@ export function CheckoutRoute(): React.JSX.Element {
       setCompletedSale(sale);
       if (branchId) void window.blueLedger.inventory.listForLocation(branchId).then(setStockLevels);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to complete sale");
+      setActionError(getErrorMessage(err, "Failed to complete sale"));
     } finally {
       setCompleting(false);
     }
@@ -875,21 +848,16 @@ export function CheckoutRoute(): React.JSX.Element {
         widthClassName="max-w-sm"
       >
         {completedSale && (
-          <div className="text-center">
+          <div>
             <div className="mx-auto grid size-14 place-items-center rounded-2xl bg-success/15 text-success">
               <CheckCircle2 className="size-7" aria-hidden="true" />
             </div>
-            <p className="mt-4 text-lg font-extrabold text-ink">{completedSale.receiptNumber}</p>
-            <p className="mt-1 text-sm font-semibold text-muted">
-              {completedSale.items.length} item{completedSale.items.length === 1 ? "" : "s"} ·{" "}
-              {formatCents(completedSale.grandTotalCents)}
-            </p>
-            {completedSale.changeGivenCents !== null && completedSale.changeGivenCents > 0 && (
-              <p className="mt-2 text-sm font-bold text-ink">
-                Change due: {formatCents(completedSale.changeGivenCents)}
-              </p>
+            {tenantContext && (
+              <div className="mt-4">
+                <ReceiptPreview sale={completedSale} tenant={tenantContext} />
+              </div>
             )}
-            <Button type="button" onClick={() => setCompletedSale(null)} className="mt-6 h-9 w-full text-xs">
+            <Button type="button" onClick={() => setCompletedSale(null)} className="mt-4 h-9 w-full text-xs">
               Done
             </Button>
           </div>

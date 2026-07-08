@@ -31,7 +31,9 @@ const api: BlueLedgerApi = {
     get: (id) => invoke("location:get", id),
     create: (input) => invoke("location:create", input),
     update: (id, input) => invoke("location:update", id, input),
-    setStatus: (id, status) => invoke("location:set-status", id, status)
+    setStatus: (id, status) => invoke("location:set-status", id, status),
+    pickLogo: () => invoke("location:pick-logo"),
+    readLogoPreview: (relativePath) => invoke("location:read-logo-preview", relativePath)
   },
   category: {
     list: () => invoke("category:list"),
@@ -92,11 +94,58 @@ const api: BlueLedgerApi = {
     setStatus: (id, status) => invoke("customer:set-status", id, status)
   },
   sale: {
+    list: () => invoke("sale:list"),
     listPending: () => invoke("sale:list-pending"),
     get: (id) => invoke("sale:get", id),
     suspend: (input) => invoke("sale:suspend", input),
     deletePending: (id) => invoke("sale:delete-pending", id),
     complete: (input) => invoke("sale:complete", input)
+  },
+  saleVoid: {
+    list: () => invoke("sale-void:list"),
+    get: (id) => invoke("sale-void:get", id),
+    request: (input) => invoke("sale-void:request", input),
+    approve: (id, input) => invoke("sale-void:approve", id, input),
+    reject: (id, input) => invoke("sale-void:reject", id, input)
+  },
+  saleReturn: {
+    list: () => invoke("sale-return:list"),
+    get: (id) => invoke("sale-return:get", id),
+    request: (input) => invoke("sale-return:request", input),
+    approve: (id, input) => invoke("sale-return:approve", id, input),
+    reject: (id, input) => invoke("sale-return:reject", id, input)
+  },
+  invoice: {
+    list: () => invoke("invoice:list"),
+    summary: () => invoke("invoice:summary"),
+    create: (input) => invoke("invoice:create", input),
+    recordPayment: (id, input) => invoke("invoice:record-payment", id, input),
+    cancel: (id) => invoke("invoice:cancel", id),
+    markPaid: (id, input) => invoke("invoice:mark-paid", id, input),
+    duplicate: (id) => invoke("invoice:duplicate", id)
+  },
+  quotation: {
+    list: () => invoke("quotation:list"),
+    summary: () => invoke("quotation:summary"),
+    get: (id) => invoke("quotation:get", id),
+    create: (input) => invoke("quotation:create", input),
+    update: (id, input) => invoke("quotation:update", id, input),
+    delete: (id) => invoke("quotation:delete", id),
+    setStatus: (id, status) => invoke("quotation:set-status", id, status),
+    checkStock: (id) => invoke("quotation:check-stock", id),
+    convertToSale: (id, input) => invoke("quotation:convert-to-sale", id, input),
+    convertToInvoice: (id, input) => invoke("quotation:convert-to-invoice", id, input)
+  },
+  printer: {
+    getSettings: () => invoke("printer:get-settings"),
+    saveSettings: (input) => invoke("printer:save-settings", input),
+    testConnection: () => invoke("printer:test-connection"),
+    printReceipt: (saleId) => invoke("printer:print-receipt", saleId),
+    generateReceiptPdf: (saleId) => invoke("printer:generate-receipt-pdf", saleId),
+    generateInvoicePdf: (saleId) => invoke("printer:generate-invoice-pdf", saleId),
+    printInvoiceDocument: (saleId) => invoke("printer:print-invoice-document", saleId),
+    generateQuotationPdf: (quotationId) => invoke("printer:generate-quotation-pdf", quotationId),
+    printQuotationDocument: (quotationId) => invoke("printer:print-quotation-document", quotationId)
   },
   sync: {
     getSnapshot: () => invoke("sync:get-snapshot"),

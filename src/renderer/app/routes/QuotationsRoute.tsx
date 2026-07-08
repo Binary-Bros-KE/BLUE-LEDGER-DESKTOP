@@ -1,0 +1,1210 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { motion } from "framer-motion";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ClipboardList,
+  Download,
+  Eye,
+  FileText,
+  Loader2,
+  Plus,
+  Printer,
+  Search,
+  Send,
+  ShoppingCart,
+  Trash2,
+  XCircle
+} from "lucide-react";
+import { Button } from "@renderer/shared/components/Button";
+import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
+import { Modal } from "@renderer/shared/components/Modal";
+import { StatTile } from "@renderer/shared/components/StatTile";
+import { usePermissions } from "@renderer/shared/hooks/use-permissions";
+import { computeLinePricing } from "@renderer/shared/lib/cart-pricing";
+import { cn } from "@renderer/shared/lib/cn";
+import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
+import { useAppStore } from "@renderer/shared/stores/app-store";
+import type { Customer } from "@shared/types/customer";
+import type { PaymentMethod } from "@shared/types/payment-method";
+import type { ProductListItem } from "@shared/types/product";
+import {
+  QUOTATION_STATUS_OPTIONS,
+  type Quotation,
+  type QuotationListItem,
+  type QuotationStatus,
+  type QuotationStockCheckItem,
+  type QuotationSummary
+} from "@shared/types/quotation";
+
+type FilterTab = "all" | QuotationStatus;
+
+const FILTER_TABS: Array<{ value: FilterTab; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "draft", label: "Draft" },
+  { value: "sent", label: "Sent" },
+  { value: "accepted", label: "Accepted" },
+  { value: "expired", label: "Expired" },
+  { value: "rejected", label: "Rejected" },
+  { value: "converted", label: "Converted" }
+];
+
+type CartLine = {
+  productId: string;
+  name: string;
+  sku: string;
+  quantity: number;
+  discountAmountCents: number;
+};
+
+function statusTone(status: QuotationStatus): "success" | "warning" | "danger" | "neutral" | "accent" {
+  if (status === "accepted" || status === "converted") return "success";
+  if (status === "expired" || status === "rejected") return "danger";
+  if (status === "sent") return "warning";
+  return "neutral";
+}
+
+function statusLabel(status: QuotationStatus): string {
+  return QUOTATION_STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status;
+}
+
+function formatDate(value: string | null): string {
+  if (!value) return "—";
+  try {
+    return new Date(value).toLocaleDateString();
+  } catch {
+    return value;
+  }
+}
+
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function addDaysIso(days: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function Th({ children, className }: { children: React.ReactNode; className?: string }): React.JSX.Element {
+  return (
+    <th className={cn("px-3 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider", className)}>
+      {children}
+    </th>
+  );
+}
+
+export function QuotationsRoute(): React.JSX.Element {
+  const currency = useAppStore((state) => state.context?.tenant.currency ?? "");
+  const { can } = usePermissions();
+  const canCreate = can("quotations", "create");
+  const canEdit = can("quotations", "edit");
+  const canDelete = can("quotations", "delete");
+
+  const [summary, setSummary] = useState<QuotationSummary | null>(null);
+  const [quotations, setQuotations] = useState<QuotationListItem[] | null>(null);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [products, setProducts] = useState<ProductListItem[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const [activeTab, setActiveTab] = useState<FilterTab>("all");
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const [viewingQuotation, setViewingQuotation] = useState<Quotation | null>(null);
+  const [viewLoading, setViewLoading] = useState(false);
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createCustomerId, setCreateCustomerId] = useState<string | null>(null);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [createValidUntil, setCreateValidUntil] = useState(addDaysIso(7));
+  const [createNotes, setCreateNotes] = useState("");
+  const [createItems, setCreateItems] = useState<CartLine[]>([]);
+  const [productSearch, setProductSearch] = useState("");
+  const [createSaving, setCreateSaving] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  const [convertSaleOpen, setConvertSaleOpen] = useState(false);
+  const [convertInvoiceOpen, setConvertInvoiceOpen] = useState(false);
+  const [stockCheck, setStockCheck] = useState<QuotationStockCheckItem[] | null>(null);
+  const [stockCheckLoading, setStockCheckLoading] = useState(false);
+  const [quantityEdits, setQuantityEdits] = useState<Record<string, number>>({});
+  const [convertPaymentMethodId, setConvertPaymentMethodId] = useState("");
+  const [convertPaymentReference, setConvertPaymentReference] = useState("");
+  const [convertAmountReceived, setConvertAmountReceived] = useState("");
+  const [convertDueDate, setConvertDueDate] = useState(addDaysIso(30));
+  const [convertSaving, setConvertSaving] = useState(false);
+  const [convertError, setConvertError] = useState<string | null>(null);
+
+  const loadAll = useCallback(async () => {
+    setLoadError(null);
+    try {
+      const [summaryResult, quotationList, customerList, productList, methodList] = await Promise.all([
+        window.blueLedger.quotation.summary(),
+        window.blueLedger.quotation.list(),
+        window.blueLedger.customer.list(),
+        window.blueLedger.product.list(),
+        window.blueLedger.paymentMethod.list()
+      ]);
+      setSummary(summaryResult);
+      setQuotations(quotationList);
+      setCustomers(customerList);
+      setProducts(productList);
+      setPaymentMethods(methodList);
+    } catch (err) {
+      setLoadError(getErrorMessage(err, "Failed to load quotations"));
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAll();
+  }, [loadAll]);
+
+  const activePaymentMethods = useMemo(
+    () => paymentMethods.filter((method) => method.isActive).sort((a, b) => a.sortOrder - b.sortOrder),
+    [paymentMethods]
+  );
+  const selectedConvertMethod = activePaymentMethods.find((method) => method.id === convertPaymentMethodId) ?? null;
+
+  const filteredQuotations = useMemo(() => {
+    if (!quotations) return null;
+    let list = quotations;
+
+    if (activeTab !== "all") {
+      list = list.filter((quotation) => quotation.status === activeTab);
+    }
+
+    const term = searchTerm.trim().toLowerCase();
+    if (term) {
+      list = list.filter((quotation) => {
+        const haystack =
+          `${quotation.quotationNumber} ${quotation.customerName} ${quotation.employeeName} ${quotation.createdAt}`.toLowerCase();
+        return haystack.includes(term);
+      });
+    }
+
+    return [...list].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [quotations, activeTab, searchTerm]);
+
+  async function openView(id: string): Promise<void> {
+    setViewLoading(true);
+    setActionError(null);
+    try {
+      const quotation = await window.blueLedger.quotation.get(id);
+      setViewingQuotation(quotation);
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to load quotation"));
+    } finally {
+      setViewLoading(false);
+    }
+  }
+
+  function closeView(): void {
+    setViewingQuotation(null);
+    setNotice(null);
+  }
+
+  async function refreshViewing(id: string): Promise<void> {
+    const quotation = await window.blueLedger.quotation.get(id);
+    setViewingQuotation(quotation);
+  }
+
+  async function handleSetStatus(status: QuotationStatus): Promise<void> {
+    if (!viewingQuotation) return;
+    setActionError(null);
+    try {
+      await window.blueLedger.quotation.setStatus(viewingQuotation.id, status);
+      await refreshViewing(viewingQuotation.id);
+      await loadAll();
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to update status"));
+    }
+  }
+
+  async function handleDelete(): Promise<void> {
+    if (!viewingQuotation) return;
+    if (!window.confirm(`Delete draft quotation ${viewingQuotation.quotationNumber}? This can't be undone.`)) return;
+    setActionError(null);
+    try {
+      await window.blueLedger.quotation.delete(viewingQuotation.id);
+      closeView();
+      await loadAll();
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to delete quotation"));
+    }
+  }
+
+  async function handlePrint(): Promise<void> {
+    if (!viewingQuotation) return;
+    setActionError(null);
+    try {
+      const result = await window.blueLedger.printer.printQuotationDocument(viewingQuotation.id);
+      if (!result.success) setActionError(result.message);
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to print quotation"));
+    }
+  }
+
+  async function handleDownload(): Promise<void> {
+    if (!viewingQuotation) return;
+    setActionError(null);
+    try {
+      const savedPath = await window.blueLedger.printer.generateQuotationPdf(viewingQuotation.id);
+      if (savedPath) setNotice(`Saved to ${savedPath}`);
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to generate PDF"));
+    }
+  }
+
+  async function openConvert(kind: "sale" | "invoice"): Promise<void> {
+    if (!viewingQuotation) return;
+    setConvertError(null);
+    setConvertPaymentMethodId("");
+    setConvertPaymentReference("");
+    setConvertAmountReceived("");
+    setConvertDueDate(addDaysIso(30));
+    setQuantityEdits({});
+    setStockCheck(null);
+    if (kind === "sale") setConvertSaleOpen(true);
+    else setConvertInvoiceOpen(true);
+
+    setStockCheckLoading(true);
+    try {
+      const result = await window.blueLedger.quotation.checkStock(viewingQuotation.id);
+      setStockCheck(result);
+      const edits: Record<string, number> = {};
+      for (const item of result) {
+        if (!item.sufficient) edits[item.productId] = item.availableQuantity;
+      }
+      setQuantityEdits(edits);
+    } catch (err) {
+      setConvertError(getErrorMessage(err, "Failed to check stock"));
+    } finally {
+      setStockCheckLoading(false);
+    }
+  }
+
+  function closeConvert(): void {
+    setConvertSaleOpen(false);
+    setConvertInvoiceOpen(false);
+  }
+
+  function buildQuantityOverrides(): Array<{ productId: string; quantity: number }> {
+    if (!viewingQuotation) return [];
+    return Object.entries(quantityEdits)
+      .map(([productId, quantity]) => ({ productId, quantity }))
+      .filter(({ productId, quantity }) => {
+        const original = viewingQuotation.items.find((item) => item.productId === productId);
+        return original && quantity > 0 && quantity !== original.quantity;
+      });
+  }
+
+  const hasInsufficientStock = stockCheck?.some((item) => item.sufficient === false && (quantityEdits[item.productId] ?? item.requestedQuantity) > item.availableQuantity) ?? false;
+
+  async function submitConvertToSale(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    if (!viewingQuotation) return;
+    setConvertSaving(true);
+    setConvertError(null);
+    try {
+      const sale = await window.blueLedger.quotation.convertToSale(viewingQuotation.id, {
+        paymentMethodId: convertPaymentMethodId,
+        paymentReference: convertPaymentReference,
+        amountReceivedCents: convertAmountReceived.trim() !== "" ? toCents(convertAmountReceived) : null,
+        quantityOverrides: buildQuantityOverrides()
+      });
+      closeConvert();
+      await refreshViewing(viewingQuotation.id);
+      await loadAll();
+      setNotice(`Converted to Sale — receipt ${sale.receiptNumber ?? sale.id}`);
+    } catch (err) {
+      setConvertError(getErrorMessage(err, "Failed to convert to sale"));
+    } finally {
+      setConvertSaving(false);
+    }
+  }
+
+  async function submitConvertToInvoice(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    if (!viewingQuotation) return;
+    setConvertSaving(true);
+    setConvertError(null);
+    try {
+      const sale = await window.blueLedger.quotation.convertToInvoice(viewingQuotation.id, {
+        dueDate: convertDueDate,
+        quantityOverrides: buildQuantityOverrides()
+      });
+      closeConvert();
+      await refreshViewing(viewingQuotation.id);
+      await loadAll();
+      setNotice(`Converted to Invoice ${sale.invoiceNumber ?? ""}`);
+    } catch (err) {
+      setConvertError(getErrorMessage(err, "Failed to convert to invoice"));
+    } finally {
+      setConvertSaving(false);
+    }
+  }
+
+  const filteredCustomers = useMemo(() => {
+    const active = customers.filter((customer) => customer.status === "active");
+    const term = customerSearch.trim().toLowerCase();
+    if (!term) return active.slice(0, 20);
+    return active
+      .filter((customer) => `${customer.name} ${customer.phone}`.toLowerCase().includes(term))
+      .slice(0, 20);
+  }, [customers, customerSearch]);
+
+  const selectedCreateCustomer = customers.find((customer) => customer.id === createCustomerId) ?? null;
+
+  const filteredCreateProducts = useMemo(() => {
+    const term = productSearch.trim().toLowerCase();
+    if (!term) return [];
+    return products
+      .filter((product) => product.status === "active")
+      .filter((product) => `${product.name} ${product.sku}`.toLowerCase().includes(term))
+      .slice(0, 8);
+  }, [products, productSearch]);
+
+  const productById = useMemo(() => {
+    const map = new Map<string, ProductListItem>();
+    for (const product of products) map.set(product.id, product);
+    return map;
+  }, [products]);
+
+  const createLinePricing = useMemo(
+    () =>
+      createItems
+        .map((line) => {
+          const product = productById.get(line.productId);
+          if (!product) return null;
+          return { line, product, pricing: computeLinePricing(product, line.quantity, line.discountAmountCents) };
+        })
+        .filter((entry): entry is { line: CartLine; product: ProductListItem; pricing: ReturnType<typeof computeLinePricing> } => entry !== null),
+    [createItems, productById]
+  );
+
+  const createTotals = useMemo(() => {
+    let subtotalCents = 0;
+    let discountAmountCents = 0;
+    let taxAmountCents = 0;
+    for (const entry of createLinePricing) {
+      subtotalCents += entry.pricing.lineSubtotalCents;
+      discountAmountCents += entry.pricing.discountAmountCents;
+      taxAmountCents += entry.pricing.taxCents;
+    }
+    return {
+      subtotalCents,
+      discountAmountCents,
+      taxAmountCents,
+      grandTotalCents: subtotalCents - discountAmountCents + taxAmountCents
+    };
+  }, [createLinePricing]);
+
+  function openCreateModal(): void {
+    setCreateCustomerId(null);
+    setCustomerSearch("");
+    setCreateValidUntil(addDaysIso(7));
+    setCreateNotes("");
+    setCreateItems([]);
+    setProductSearch("");
+    setCreateError(null);
+    setCreateOpen(true);
+  }
+
+  function addCreateLine(product: ProductListItem): void {
+    setCreateItems((prev) => {
+      const existing = prev.find((line) => line.productId === product.id);
+      if (existing) {
+        return prev.map((line) => (line.productId === product.id ? { ...line, quantity: line.quantity + 1 } : line));
+      }
+      return [...prev, { productId: product.id, name: product.name, sku: product.sku, quantity: 1, discountAmountCents: 0 }];
+    });
+    setProductSearch("");
+  }
+
+  function updateCreateQuantity(productId: string, quantity: number): void {
+    const next = Number.isFinite(quantity) && quantity > 0 ? Math.floor(quantity) : 1;
+    setCreateItems((prev) => prev.map((line) => (line.productId === productId ? { ...line, quantity: next } : line)));
+  }
+
+  function updateCreateDiscount(productId: string, value: string): void {
+    const cents = toCents(value);
+    setCreateItems((prev) =>
+      prev.map((line) => (line.productId === productId ? { ...line, discountAmountCents: cents } : line))
+    );
+  }
+
+  function removeCreateLine(productId: string): void {
+    setCreateItems((prev) => prev.filter((line) => line.productId !== productId));
+  }
+
+  async function submitCreateQuotation(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    setCreateSaving(true);
+    setCreateError(null);
+
+    if (!createCustomerId) {
+      setCreateError("Select a customer");
+      setCreateSaving(false);
+      return;
+    }
+    if (createItems.length === 0) {
+      setCreateError("Add at least one product");
+      setCreateSaving(false);
+      return;
+    }
+
+    try {
+      await window.blueLedger.quotation.create({
+        customerId: createCustomerId,
+        validUntil: createValidUntil,
+        notes: createNotes,
+        items: createItems.map((line) => ({
+          productId: line.productId,
+          quantity: line.quantity,
+          discountAmountCents: line.discountAmountCents
+        }))
+      });
+      setCreateOpen(false);
+      await loadAll();
+    } catch (err) {
+      setCreateError(getErrorMessage(err, "Failed to create quotation"));
+    } finally {
+      setCreateSaving(false);
+    }
+  }
+
+  const canConvert = viewingQuotation?.status === "accepted" && canEdit;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25 }}
+      className="relative mt-6 space-y-5 pb-10 pl-4"
+    >
+      <span
+        className="pointer-events-none absolute -left-[5px] top-2 size-2.5 rounded-full border-2 border-line bg-app"
+        aria-hidden="true"
+      />
+      <div
+        className="pointer-events-none absolute bottom-2 left-0 top-2 border-l-2 border-dashed border-line"
+        aria-hidden="true"
+      />
+      <span
+        className="pointer-events-none absolute -left-[5px] bottom-2 size-2.5 rounded-full border-2 border-line bg-app"
+        aria-hidden="true"
+      />
+
+      <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Quotations</p>
+            <h2 className="mt-1 flex items-center gap-2 text-xl font-extrabold">
+              <ClipboardList className="size-5 text-primary" aria-hidden="true" />
+              Price Offers
+            </h2>
+            <p className="mt-1 text-xs font-semibold text-muted">
+              Prepare quotes for customers, then convert accepted ones straight into a sale or invoice.
+            </p>
+          </div>
+          {canCreate && (
+            <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
+              <Plus className="mr-1.5 size-4" aria-hidden="true" />
+              New Quotation
+            </Button>
+          )}
+        </div>
+
+        {(loadError ?? actionError) && (
+          <div className="mt-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
+            {loadError ?? actionError}
+          </div>
+        )}
+
+        {summary && (
+          <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <StatTile icon={ClipboardList} label="Total Quotations" value={String(summary.totalQuotations)} tone="primary" />
+            <StatTile icon={FileText} label="Draft" value={String(summary.draftCount)} tone="warning" />
+            <StatTile icon={Send} label="Sent" value={String(summary.sentCount)} tone="accent" />
+            <StatTile icon={CheckCircle2} label="Accepted" value={String(summary.acceptedCount)} tone="success" />
+            <StatTile icon={AlertTriangle} label="Expired" value={String(summary.expiredCount)} tone="danger" />
+            <StatTile icon={ShoppingCart} label="Converted" value={String(summary.convertedCount)} tone="accent" />
+          </div>
+        )}
+
+        <div className="mt-5 flex flex-wrap items-center gap-2 border-b border-line pb-3">
+          {FILTER_TABS.map((tab) => (
+            <button
+              key={tab.value}
+              type="button"
+              onClick={() => setActiveTab(tab.value)}
+              className={cn(
+                "h-8 rounded-lg px-3 text-xs font-extrabold transition cursor-pointer",
+                activeTab === tab.value ? "bg-primary text-white" : "text-muted hover:bg-soft"
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-4">
+          <label className="block sm:max-w-xs">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Search</span>
+            <div className="relative mt-1.5">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted"
+                aria-hidden="true"
+              />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder="Search by quotation #, customer, or salesperson"
+                className="h-10 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm font-semibold text-ink outline-none transition placeholder:font-normal placeholder:text-muted/60 focus:border-accent focus:ring-4 focus:ring-accent/15"
+              />
+            </div>
+          </label>
+        </div>
+
+        <div className="mt-5">
+          {quotations === null ? (
+            <div className="flex min-h-[240px] items-center justify-center text-muted">
+              <Loader2 className="size-6 animate-spin" aria-hidden="true" />
+            </div>
+          ) : filteredQuotations && filteredQuotations.length === 0 ? (
+            <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-line bg-soft/60 p-10 text-center">
+              <div className="grid size-14 place-items-center rounded-2xl bg-soft text-primary">
+                <ClipboardList className="size-7" aria-hidden="true" />
+              </div>
+              <h3 className="mt-4 text-lg font-extrabold">No quotations found</h3>
+              <p className="mt-1 max-w-sm text-sm font-semibold text-muted">
+                {quotations.length === 0
+                  ? "Create your first quotation to start offering prices to customers."
+                  : "Try a different filter or search term."}
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-line">
+              <table className="w-full min-w-[1300px] table-fixed border-collapse text-sm">
+                <colgroup>
+                  <col className="w-[11%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[11%]" />
+                  <col className="w-[11%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[9%]" />
+                </colgroup>
+                <thead>
+                  <tr className="bg-primary text-white">
+                    <Th>Quotation #</Th>
+                    <Th>Customer</Th>
+                    <Th>Storefront</Th>
+                    <Th>Salesperson</Th>
+                    <Th>Created</Th>
+                    <Th>Valid Until</Th>
+                    <Th className="text-right">Total Amount</Th>
+                    <Th>Status</Th>
+                    <Th className="text-right">Actions</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(filteredQuotations ?? []).map((quotation) => (
+                    <tr
+                      key={quotation.id}
+                      onClick={() => void openView(quotation.id)}
+                      className="cursor-pointer border-t border-line odd:bg-white even:bg-soft/50 hover:bg-soft"
+                    >
+                      <td className="truncate px-3 py-2.5 text-xs font-bold tabular-nums text-ink">
+                        {quotation.quotationNumber}
+                      </td>
+                      <td className="truncate px-3 py-2.5 font-extrabold">{quotation.customerName}</td>
+                      <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">{quotation.locationName}</td>
+                      <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">{quotation.employeeName}</td>
+                      <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">
+                        {formatDate(quotation.createdAt)}
+                      </td>
+                      <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">
+                        {formatDate(quotation.validUntil)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right text-xs font-bold tabular-nums text-ink">
+                        {formatCents(quotation.grandTotalCents)}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <DashedPill tone={statusTone(quotation.status)}>{statusLabel(quotation.status)}</DashedPill>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center justify-end">
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void openView(quotation.id);
+                            }}
+                            aria-label="View quotation"
+                            className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-ink cursor-pointer"
+                          >
+                            <Eye className="size-3.5" aria-hidden="true" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <Modal
+        open={viewingQuotation !== null || viewLoading}
+        onClose={closeView}
+        title={viewingQuotation?.quotationNumber ?? "Quotation"}
+        description="Customer, products, totals, and validity for this price offer."
+        widthClassName="max-w-2xl"
+      >
+        {viewLoading ? (
+          <div className="flex min-h-[220px] items-center justify-center text-muted">
+            <Loader2 className="size-6 animate-spin" aria-hidden="true" />
+          </div>
+        ) : viewingQuotation ? (
+          <div>
+            {notice && (
+              <div className="mb-3 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-xs font-bold text-success">
+                {notice}
+              </div>
+            )}
+            {actionError && (
+              <div className="mb-3 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2 text-xs font-bold text-danger">
+                {actionError}
+              </div>
+            )}
+
+            <DashedPill tone={statusTone(viewingQuotation.status)}>{statusLabel(viewingQuotation.status)}</DashedPill>
+
+            <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+              <div className="rounded-lg border border-line bg-soft px-3 py-2.5">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Customer</p>
+                <p className="mt-0.5 truncate text-sm font-bold text-ink">{viewingQuotation.customerName}</p>
+              </div>
+              <div className="rounded-lg border border-line bg-soft px-3 py-2.5">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Storefront</p>
+                <p className="mt-0.5 truncate text-sm font-bold text-ink">{viewingQuotation.locationName}</p>
+              </div>
+              <div className="rounded-lg border border-line bg-soft px-3 py-2.5">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Prepared By</p>
+                <p className="mt-0.5 truncate text-sm font-bold text-ink">{viewingQuotation.employeeName}</p>
+              </div>
+              <div className="rounded-lg border border-line bg-soft px-3 py-2.5">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Prepared On</p>
+                <p className="mt-0.5 text-sm font-bold text-ink">{formatDate(viewingQuotation.createdAt)}</p>
+              </div>
+              <div className="rounded-lg border border-line bg-soft px-3 py-2.5">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Valid Until</p>
+                <p className="mt-0.5 text-sm font-bold text-ink">{formatDate(viewingQuotation.validUntil)}</p>
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Products</p>
+              <div className="mt-2 space-y-1.5">
+                {viewingQuotation.items.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between rounded-lg border border-line px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-ink">{item.productName}</p>
+                      <p className="text-[11px] font-semibold text-muted">
+                        {item.quantity} x {currency} {formatCents(item.unitPriceCents)}
+                      </p>
+                    </div>
+                    <p className="flex-none text-sm font-extrabold text-ink">{formatCents(item.lineTotalCents)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {viewingQuotation.notes && (
+              <div className="mt-4 rounded-lg border border-line bg-soft px-3.5 py-2.5">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Notes</p>
+                <p className="mt-1 whitespace-pre-line text-sm font-semibold text-ink">{viewingQuotation.notes}</p>
+              </div>
+            )}
+
+            <div className="mt-4 space-y-1 border-t border-line pt-3 text-sm">
+              <div className="flex justify-between text-muted">
+                <span className="font-semibold">Subtotal</span>
+                <span className="font-bold tabular-nums">{formatCents(viewingQuotation.subtotalCents)}</span>
+              </div>
+              <div className="flex justify-between text-muted">
+                <span className="font-semibold">Discount</span>
+                <span className="font-bold tabular-nums">-{formatCents(viewingQuotation.discountAmountCents)}</span>
+              </div>
+              <div className="flex justify-between text-muted">
+                <span className="font-semibold">Tax</span>
+                <span className="font-bold tabular-nums">{formatCents(viewingQuotation.taxAmountCents)}</span>
+              </div>
+              <div className="flex justify-between text-base font-extrabold text-ink">
+                <span>Total</span>
+                <span>{formatCents(viewingQuotation.grandTotalCents)}</span>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                onClick={() => void handlePrint()}
+                className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+              >
+                <Printer className="mr-1.5 size-3.5" aria-hidden="true" />
+                Print
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void handleDownload()}
+                className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+              >
+                <Download className="mr-1.5 size-3.5" aria-hidden="true" />
+                Download PDF
+              </Button>
+            </div>
+
+            {canEdit && viewingQuotation.status === "draft" && (
+              <div className="mt-2">
+                <Button type="button" onClick={() => void handleSetStatus("sent")} className="h-9 w-full text-xs">
+                  <Send className="mr-1.5 size-3.5" aria-hidden="true" />
+                  Mark as Sent
+                </Button>
+              </div>
+            )}
+
+            {canEdit && (viewingQuotation.status === "sent" || viewingQuotation.status === "draft") && (
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  onClick={() => void handleSetStatus("accepted")}
+                  className="h-9 border border-success/40 bg-white text-xs text-success shadow-none hover:bg-success/10"
+                >
+                  <CheckCircle2 className="mr-1.5 size-3.5" aria-hidden="true" />
+                  Accepted
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void handleSetStatus("rejected")}
+                  className="h-9 border border-danger/30 bg-white text-xs text-danger shadow-none hover:bg-danger-soft"
+                >
+                  <XCircle className="mr-1.5 size-3.5" aria-hidden="true" />
+                  Rejected
+                </Button>
+              </div>
+            )}
+
+            {canConvert && (
+              <div className="mt-3 rounded-lg border border-line bg-soft p-3">
+                <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Convert Quotation</p>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <Button type="button" onClick={() => void openConvert("sale")} className="h-9 text-xs">
+                    <ShoppingCart className="mr-1.5 size-3.5" aria-hidden="true" />
+                    Convert to Sale
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => void openConvert("invoice")}
+                    className="h-9 border border-primary/40 bg-white text-xs text-primary shadow-none hover:bg-primary/10"
+                  >
+                    <FileText className="mr-1.5 size-3.5" aria-hidden="true" />
+                    Convert to Invoice
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {viewingQuotation.status === "converted" && viewingQuotation.convertedAt && (
+              <div className="mt-3 rounded-lg border border-success/30 bg-success/10 px-3.5 py-2.5 text-xs font-bold text-success">
+                Converted on {formatDate(viewingQuotation.convertedAt)}.
+              </div>
+            )}
+
+            {canDelete && viewingQuotation.status === "draft" && (
+              <div className="mt-2">
+                <Button
+                  type="button"
+                  onClick={() => void handleDelete()}
+                  className="h-9 w-full border border-danger/30 bg-white text-xs text-danger shadow-none hover:bg-danger-soft"
+                >
+                  <Trash2 className="mr-1.5 size-3.5" aria-hidden="true" />
+                  Delete Draft
+                </Button>
+              </div>
+            )}
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={convertSaleOpen}
+        onClose={closeConvert}
+        title="Convert to Sale"
+        description="Completes a retail sale now, using this quotation's quoted prices."
+        widthClassName="max-w-lg"
+      >
+        <form onSubmit={submitConvertToSale}>
+          {convertError && (
+            <div className="mb-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
+              {convertError}
+            </div>
+          )}
+
+          {stockCheckLoading ? (
+            <div className="flex min-h-[100px] items-center justify-center text-muted">
+              <Loader2 className="size-5 animate-spin" aria-hidden="true" />
+            </div>
+          ) : (
+            stockCheck && (
+              <div className="space-y-2">
+                <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Live Stock Check</p>
+                {stockCheck.map((item) => (
+                  <div
+                    key={item.productId}
+                    className={cn(
+                      "flex items-center justify-between gap-2 rounded-lg border px-3 py-2",
+                      item.sufficient ? "border-line" : "border-danger/40 bg-danger-soft"
+                    )}
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-ink">{item.productName}</p>
+                      <p className="text-[11px] font-semibold text-muted">
+                        Requested {item.requestedQuantity} · Available {item.availableQuantity}
+                        {!item.sufficient && " · Insufficient stock"}
+                      </p>
+                    </div>
+                    {!item.sufficient && (
+                      <input
+                        type="number"
+                        min={0}
+                        max={item.availableQuantity}
+                        value={quantityEdits[item.productId] ?? item.availableQuantity}
+                        onChange={(event) =>
+                          setQuantityEdits((prev) => ({ ...prev, [item.productId]: Number(event.target.value) }))
+                        }
+                        className="h-8 w-16 flex-none rounded-md border border-danger/40 text-center text-xs font-bold outline-none focus:border-danger"
+                      />
+                    )}
+                  </div>
+                ))}
+                {hasInsufficientStock && (
+                  <p className="text-[11px] font-bold text-danger">
+                    Adjust quantities to the available amount before completing the sale.
+                  </p>
+                )}
+              </div>
+            )
+          )}
+
+          <SelectField
+            label="Payment Method"
+            value={convertPaymentMethodId}
+            onChange={setConvertPaymentMethodId}
+            options={[
+              { value: "", label: "Select payment method" },
+              ...activePaymentMethods.map((method) => ({ value: method.id, label: method.name }))
+            ]}
+            className="mt-4"
+          />
+          {selectedConvertMethod?.requiresReference && (
+            <Field
+              label="Reference"
+              value={convertPaymentReference}
+              onChange={setConvertPaymentReference}
+              placeholder="e.g. M-Pesa code, transaction ID"
+              required
+              className="mt-4"
+            />
+          )}
+          <Field
+            label="Amount Received (optional)"
+            type="number"
+            value={convertAmountReceived}
+            onChange={setConvertAmountReceived}
+            placeholder="0.00"
+            className="mt-4"
+          />
+
+          <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
+            <Button type="button" onClick={closeConvert} className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft">
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={convertSaving || !convertPaymentMethodId || hasInsufficientStock}
+              className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {convertSaving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
+              {convertSaving ? "Converting..." : "Complete Sale"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        open={convertInvoiceOpen}
+        onClose={closeConvert}
+        title="Convert to Invoice"
+        description="Creates an unpaid invoice using this quotation's quoted prices."
+        widthClassName="max-w-lg"
+      >
+        <form onSubmit={submitConvertToInvoice}>
+          {convertError && (
+            <div className="mb-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
+              {convertError}
+            </div>
+          )}
+
+          {stockCheckLoading ? (
+            <div className="flex min-h-[100px] items-center justify-center text-muted">
+              <Loader2 className="size-5 animate-spin" aria-hidden="true" />
+            </div>
+          ) : (
+            stockCheck && (
+              <div className="space-y-2">
+                <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Live Stock Check</p>
+                {stockCheck.map((item) => (
+                  <div
+                    key={item.productId}
+                    className={cn(
+                      "flex items-center justify-between gap-2 rounded-lg border px-3 py-2",
+                      item.sufficient ? "border-line" : "border-danger/40 bg-danger-soft"
+                    )}
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-ink">{item.productName}</p>
+                      <p className="text-[11px] font-semibold text-muted">
+                        Requested {item.requestedQuantity} · Available {item.availableQuantity}
+                        {!item.sufficient && " · Insufficient stock"}
+                      </p>
+                    </div>
+                    {!item.sufficient && (
+                      <input
+                        type="number"
+                        min={0}
+                        max={item.availableQuantity}
+                        value={quantityEdits[item.productId] ?? item.availableQuantity}
+                        onChange={(event) =>
+                          setQuantityEdits((prev) => ({ ...prev, [item.productId]: Number(event.target.value) }))
+                        }
+                        className="h-8 w-16 flex-none rounded-md border border-danger/40 text-center text-xs font-bold outline-none focus:border-danger"
+                      />
+                    )}
+                  </div>
+                ))}
+                {hasInsufficientStock && (
+                  <p className="text-[11px] font-bold text-danger">
+                    Adjust quantities to the available amount before completing the invoice.
+                  </p>
+                )}
+              </div>
+            )
+          )}
+
+          <Field label="Due Date" type="date" value={convertDueDate} onChange={setConvertDueDate} required className="mt-4" />
+
+          <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
+            <Button type="button" onClick={closeConvert} className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft">
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={convertSaving || hasInsufficientStock}
+              className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {convertSaving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
+              {convertSaving ? "Converting..." : "Create Invoice"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title="New Quotation"
+        description="A price offer for a customer — nothing here affects stock or payments until it's converted."
+        widthClassName="max-w-2xl"
+      >
+        <form onSubmit={submitCreateQuotation}>
+          {createError && (
+            <div className="mb-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
+              {createError}
+            </div>
+          )}
+
+          <div>
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Customer</span>
+            {selectedCreateCustomer ? (
+              <div className="mt-1.5 flex items-center justify-between rounded-lg border border-line bg-soft px-3.5 py-2.5">
+                <div>
+                  <p className="text-sm font-extrabold text-ink">{selectedCreateCustomer.name}</p>
+                  <p className="text-[11px] font-semibold text-muted">{selectedCreateCustomer.phone}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCreateCustomerId(null)}
+                  className="text-[11px] font-extrabold uppercase text-accent hover:underline cursor-pointer"
+                >
+                  Change
+                </button>
+              </div>
+            ) : (
+              <div className="relative mt-1.5">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden="true" />
+                <input
+                  type="text"
+                  value={customerSearch}
+                  onChange={(event) => setCustomerSearch(event.target.value)}
+                  placeholder="Search customer by name or phone"
+                  className="h-10 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+                />
+                {filteredCustomers.length > 0 && (
+                  <div className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-line bg-white shadow-soft">
+                    {filteredCustomers.map((customer) => (
+                      <button
+                        key={customer.id}
+                        type="button"
+                        onClick={() => {
+                          setCreateCustomerId(customer.id);
+                          setCustomerSearch("");
+                        }}
+                        className="flex w-full items-center justify-between px-3.5 py-2 text-left text-sm hover:bg-soft cursor-pointer"
+                      >
+                        <span className="font-bold text-ink">{customer.name}</span>
+                        <span className="text-xs font-semibold text-muted">{customer.phone}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <Field label="Valid Until" type="date" value={createValidUntil} onChange={setCreateValidUntil} required className="mt-4" />
+
+          <div className="mt-4">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Products</span>
+            <div className="relative mt-1.5">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden="true" />
+              <input
+                type="text"
+                value={productSearch}
+                onChange={(event) => setProductSearch(event.target.value)}
+                placeholder="Search product by name or SKU"
+                className="h-10 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+              />
+              {filteredCreateProducts.length > 0 && (
+                <div className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-line bg-white shadow-soft">
+                  {filteredCreateProducts.map((product) => (
+                    <button
+                      key={product.id}
+                      type="button"
+                      onClick={() => addCreateLine(product)}
+                      className="flex w-full items-center justify-between px-3.5 py-2 text-left text-sm hover:bg-soft cursor-pointer"
+                    >
+                      <span className="font-bold text-ink">{product.name}</span>
+                      <span className="text-xs font-semibold text-muted">{formatCents(product.sellingPriceCents)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3 space-y-2">
+              {createLinePricing.length === 0 ? (
+                <p className="text-xs font-semibold text-muted">No products added yet.</p>
+              ) : (
+                createLinePricing.map(({ line, pricing }) => (
+                  <div key={line.productId} className="rounded-lg border border-line p-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-extrabold text-ink">{line.name}</p>
+                        <p className="text-[11px] font-semibold text-muted">@ {formatCents(pricing.unitPriceCents)}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeCreateLine(line.productId)}
+                        className="text-[11px] font-extrabold uppercase text-danger hover:underline cursor-pointer"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted">
+                        Qty
+                        <input
+                          type="number"
+                          min={1}
+                          value={line.quantity}
+                          onChange={(event) => updateCreateQuantity(line.productId, Number(event.target.value))}
+                          className="h-8 w-16 rounded-md border border-line text-center text-xs font-bold outline-none focus:border-accent"
+                        />
+                      </label>
+                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted">
+                        Discount
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={fromCents(line.discountAmountCents) || "0.00"}
+                          onChange={(event) => updateCreateDiscount(line.productId, event.target.value)}
+                          className="h-8 w-20 rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
+                        />
+                      </label>
+                      <span className="text-sm font-extrabold text-ink">{formatCents(pricing.lineTotalCents)}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <TextAreaField label="Notes" value={createNotes} onChange={setCreateNotes} className="mt-4" rows={2} />
+
+          <div className="mt-4 space-y-1 border-t border-line pt-4 text-sm">
+            <div className="flex justify-between text-muted">
+              <span className="font-semibold">Subtotal</span>
+              <span className="font-bold tabular-nums">{formatCents(createTotals.subtotalCents)}</span>
+            </div>
+            <div className="flex justify-between text-muted">
+              <span className="font-semibold">Discount</span>
+              <span className="font-bold tabular-nums">-{formatCents(createTotals.discountAmountCents)}</span>
+            </div>
+            <div className="flex justify-between text-muted">
+              <span className="font-semibold">Tax</span>
+              <span className="font-bold tabular-nums">{formatCents(createTotals.taxAmountCents)}</span>
+            </div>
+            <div className="flex justify-between text-base font-extrabold text-ink">
+              <span>Total</span>
+              <span>{formatCents(createTotals.grandTotalCents)}</span>
+            </div>
+          </div>
+
+          <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
+            <Button type="button" onClick={() => setCreateOpen(false)} className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft">
+              Cancel
+            </Button>
+            <Button type="submit" disabled={createSaving} className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50">
+              {createSaving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
+              {createSaving ? "Creating..." : "Create Quotation"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+    </motion.div>
+  );
+}

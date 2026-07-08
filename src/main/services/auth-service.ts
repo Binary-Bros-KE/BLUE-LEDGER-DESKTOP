@@ -6,6 +6,7 @@ import { verifySecret } from "@main/lib/password-hash";
 import { loginInputSchema } from "@shared/schemas/auth";
 import type { AuthSession } from "@shared/types/auth";
 import type { EmployeeRow } from "@main/database/repositories/employee-repository";
+import type { LogoRatio } from "@shared/types/logo";
 import type { PermissionAction, PermissionModuleKey } from "@shared/types/role";
 
 const MAX_FAILED_ATTEMPTS = 5;
@@ -30,7 +31,14 @@ function buildSession(row: EmployeeRow, tenantId: string): AuthSession {
       photoPath: row.photo_path
     },
     role: role ? { id: role.id, roleName: role.roleName } : null,
-    branch: branchRow ? { id: branchRow.id, locationName: branchRow.location_name } : null,
+    branch: branchRow
+      ? {
+          id: branchRow.id,
+          locationName: branchRow.location_name,
+          logoPath: branchRow.logo_path,
+          logoRatio: branchRow.logo_ratio as LogoRatio | null
+        }
+      : null,
     permissions: role?.permissions ?? {}
   };
 }
@@ -107,4 +115,13 @@ export function requirePermission(module: PermissionModuleKey, action: Permissio
 /** The signed-in employee's id, for stamping created_by/updated_by/performed_by columns. Null when signed out. */
 export function getCurrentEmployeeId(): string | null {
   return currentSession?.employee.id ?? null;
+}
+
+/**
+ * The branch this session's data visibility is restricted to. Null means no restriction — either
+ * nobody is signed in, or the signed-in employee has no branch assigned, which is exactly how a
+ * super-admin (able to see every storefront's records) is defined: an account with no single branch.
+ */
+export function getCurrentBranchScope(): string | null {
+  return currentSession?.branch?.id ?? null;
 }

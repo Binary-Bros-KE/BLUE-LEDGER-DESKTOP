@@ -1,3 +1,5 @@
+import type { LogoRatio } from "./logo";
+
 export type LocationId = string;
 
 export const LOCATION_TYPE_OPTIONS = [
@@ -18,6 +20,8 @@ export type LocationInputFields = {
   locationName: string;
   locationCode: string;
   locationType: LocationType;
+  logoPath: string | null;
+  logoRatio: LogoRatio | null;
   phone: string | null;
   alternativePhone: string | null;
   email: string | null;

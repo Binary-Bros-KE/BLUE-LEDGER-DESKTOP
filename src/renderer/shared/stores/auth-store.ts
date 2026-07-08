@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { getErrorMessage } from "@renderer/shared/lib/errors";
 import type { AuthSession } from "@shared/types/auth";
 
 type AuthStatus = "loading" | "authenticated" | "unauthenticated";
@@ -34,7 +35,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
       set({
         session: null,
         status: "unauthenticated",
-        error: err instanceof Error ? err.message : "Failed to sign in"
+        error: getErrorMessage(err, "Failed to sign in")
       });
       return false;
     }

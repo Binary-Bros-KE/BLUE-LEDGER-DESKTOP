@@ -26,6 +26,11 @@ export const PERMISSION_MODULES = [
     actions: ["view", "create", "edit", "delete", "approve", "export"]
   },
   {
+    key: "quotations",
+    label: "Quotations",
+    actions: ["view", "create", "edit", "delete", "export"]
+  },
+  {
     key: "purchases",
     label: "Purchases",
     actions: ["view", "create", "edit", "delete", "approve", "export"]
@@ -43,6 +48,7 @@ export const PERMISSION_MODULES = [
     label: "Payment Methods",
     actions: ["view", "create", "edit", "delete"]
   },
+  { key: "approvals", label: "Approvals", actions: ["view", "approve"] },
   { key: "cloud_sync", label: "Cloud Sync", actions: ["view", "edit"] },
   { key: "administration", label: "Administration", actions: ["view", "edit"] }
 ] as const satisfies ReadonlyArray<{ key: string; label: string; actions: readonly PermissionAction[] }>;

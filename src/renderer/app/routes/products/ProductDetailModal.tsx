@@ -7,6 +7,7 @@ import { Field, SelectField, TextAreaField } from "@renderer/shared/components/f
 import { Modal } from "@renderer/shared/components/Modal";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
+import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import type { InventoryBalance } from "@shared/types/inventory";
 import type { Location } from "@shared/types/location";
@@ -100,7 +101,7 @@ export function ProductDetailModal({
       setOverview(overviewResult);
       setMovements(movementsResult);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Failed to load inventory data");
+      setLoadError(getErrorMessage(err, "Failed to load inventory data"));
     }
   }, [product.id]);
 
@@ -149,7 +150,7 @@ export function ProductDetailModal({
       setSingleForm(emptySingleForm(locations));
       await refresh();
     } catch (err) {
-      setRecordError(err instanceof Error ? err.message : "Failed to record movement");
+      setRecordError(getErrorMessage(err, "Failed to record movement"));
     } finally {
       setRecording(false);
     }
@@ -183,7 +184,7 @@ export function ProductDetailModal({
       setTransferForm(emptyTransferForm(locations));
       await refresh();
     } catch (err) {
-      setRecordError(err instanceof Error ? err.message : "Failed to record transfer");
+      setRecordError(getErrorMessage(err, "Failed to record transfer"));
     } finally {
       setRecording(false);
     }

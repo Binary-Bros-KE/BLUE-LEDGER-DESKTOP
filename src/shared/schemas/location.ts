@@ -1,11 +1,14 @@
 import { z } from "zod";
 import { optionalText } from "@shared/schemas/common";
 import { LOCATION_TYPE_OPTIONS, type LocationType } from "@shared/types/location";
+import { LOGO_RATIO_OPTIONS, type LogoRatio } from "@shared/types/logo";
 
 const locationTypeValues = LOCATION_TYPE_OPTIONS.map((option) => option.value) as [
   LocationType,
   ...LocationType[]
 ];
+
+const logoRatioValues = LOGO_RATIO_OPTIONS.map((option) => option.value) as [LogoRatio, ...LogoRatio[]];
 
 export const locationInputSchema = z.object({
   locationName: z.string().trim().min(1, "Location name is required").max(200),
@@ -16,6 +19,12 @@ export const locationInputSchema = z.object({
     .max(50)
     .transform((value) => value.toUpperCase()),
   locationType: z.enum(locationTypeValues),
+  logoPath: optionalText(500),
+  logoRatio: z
+    .enum(logoRatioValues)
+    .nullable()
+    .optional()
+    .transform((value) => value ?? null),
   phone: optionalText(50),
   alternativePhone: optionalText(50),
   email: optionalText(),

@@ -2,7 +2,10 @@ import type { LucideIcon } from "lucide-react";
 import {
   BarChart3,
   Building2,
+  ClipboardCheck,
+  ClipboardList,
   CreditCard,
+  FileText,
   FolderTree,
   LayoutDashboard,
   Package,
@@ -65,6 +68,20 @@ export const navGroups: NavGroup[] = [
         permissionModule: "sales"
       },
       {
+        key: "invoices",
+        label: "Invoices",
+        description: "Wholesale billing & payments",
+        icon: FileText,
+        permissionModule: "sales"
+      },
+      {
+        key: "quotations",
+        label: "Quotations",
+        description: "Price offers & conversions",
+        icon: ClipboardList,
+        permissionModule: "quotations"
+      },
+      {
         key: "customers",
         label: "Customers",
         description: "Customer directory",
@@ -77,6 +94,13 @@ export const navGroups: NavGroup[] = [
         description: "How customers can pay",
         icon: CreditCard,
         permissionModule: "payment_methods"
+      },
+      {
+        key: "approvals",
+        label: "Approvals",
+        description: "Returns & voids awaiting sign-off",
+        icon: ClipboardCheck,
+        permissionModule: "approvals"
       }
     ]
   },
@@ -125,6 +149,25 @@ export const navGroups: NavGroup[] = [
       }
     ]
   },
+    {
+    title: "Team",
+    items: [
+      {
+        key: "employees",
+        label: "Employees",
+        description: "Staff accounts & access",
+        icon: UserCog,
+        permissionModule: "employees"
+      },
+      {
+        key: "roles",
+        label: "Roles & Permissions",
+        description: "Permission groups",
+        icon: ShieldCheck,
+        permissionModule: "roles"
+      }
+    ]
+  },
   {
     title: "Business",
     items: [
@@ -144,25 +187,7 @@ export const navGroups: NavGroup[] = [
       }
     ]
   },
-  {
-    title: "Team",
-    items: [
-      {
-        key: "employees",
-        label: "Employees",
-        description: "Staff accounts & access",
-        icon: UserCog,
-        permissionModule: "employees"
-      },
-      {
-        key: "roles",
-        label: "Roles & Permissions",
-        description: "Permission groups",
-        icon: ShieldCheck,
-        permissionModule: "roles"
-      }
-    ]
-  },
+
   {
     title: "System",
     items: [

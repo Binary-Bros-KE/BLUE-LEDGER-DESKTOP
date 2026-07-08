@@ -75,7 +75,7 @@ export function EmployeeDetailModal({
         </Section>
 
         <Section title="Employment">
-          <InfoRow label="Assigned Branch" value={employee.branchName ?? "Unassigned"} />
+          <InfoRow label="Assigned Branch" value={employee.branchName ?? "All storefronts"} />
           <InfoRow label="Department" value={employee.department ?? "—"} />
           <InfoRow label="Job Title" value={employee.jobTitle ?? "—"} />
           <InfoRow label="Hire Date" value={formatDate(employee.hireDate)} />

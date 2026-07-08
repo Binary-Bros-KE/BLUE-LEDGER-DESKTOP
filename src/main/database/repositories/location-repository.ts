@@ -1,6 +1,7 @@
 import { getDatabase } from "@main/database/connection";
 import type { LocationInput } from "@shared/schemas/location";
 import type { Location, LocationStatus, LocationSyncStatus, LocationType } from "@shared/types/location";
+import type { LogoRatio } from "@shared/types/logo";
 
 export type LocationRow = {
   id: string;
@@ -9,6 +10,8 @@ export type LocationRow = {
   location_name: string;
   display_name: string | null;
   location_type: string;
+  logo_path: string | null;
+  logo_ratio: string | null;
   phone: string | null;
   alternative_phone: string | null;
   email: string | null;
@@ -67,13 +70,13 @@ export function insertLocationRow(
     .prepare(
       `
       INSERT INTO locations (
-        id, tenant_id, location_code, location_name, location_type,
+        id, tenant_id, location_code, location_name, location_type, logo_path, logo_ratio,
         phone, alternative_phone, email, country, county, city, physical_address,
         manager_name, manager_phone, manager_email, opening_time, closing_time,
         description, can_receive_stock, can_sell_stock, can_transfer_stock,
         status, created_at, updated_at, created_by, sync_status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
     `
     )
     .run(
@@ -82,6 +85,8 @@ export function insertLocationRow(
       input.locationCode,
       input.locationName,
       input.locationType,
+      input.logoPath,
+      input.logoRatio,
       input.phone,
       input.alternativePhone,
       input.email,
@@ -123,6 +128,8 @@ export function updateLocationRow(
         location_code = ?,
         location_name = ?,
         location_type = ?,
+        logo_path = ?,
+        logo_ratio = ?,
         phone = ?,
         alternative_phone = ?,
         email = ?,
@@ -149,6 +156,8 @@ export function updateLocationRow(
       input.locationCode,
       input.locationName,
       input.locationType,
+      input.logoPath,
+      input.logoRatio,
       input.phone,
       input.alternativePhone,
       input.email,
@@ -201,6 +210,8 @@ export function mapLocationRow(row: LocationRow): Location {
     locationName: row.location_name,
     displayName: row.display_name,
     locationType: row.location_type as LocationType,
+    logoPath: row.logo_path,
+    logoRatio: row.logo_ratio as LogoRatio | null,
     phone: row.phone,
     alternativePhone: row.alternative_phone,
     email: row.email,

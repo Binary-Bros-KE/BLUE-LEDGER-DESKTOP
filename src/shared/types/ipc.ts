@@ -5,11 +5,16 @@ import type { Category, CategoryStatus } from "./category";
 import type { Customer, CustomerStatus } from "./customer";
 import type { Employee, EmployeeListItem, EmployeeStatus } from "./employee";
 import type { InventoryBalance, LocationStockLevel } from "./inventory";
+import type { InvoiceListItem, InvoiceSummary } from "./invoice";
 import type { Location, LocationStatus } from "./location";
 import type { PaymentMethod } from "./payment-method";
 import type { Product, ProductListItem, ProductStatus } from "./product";
+import type { PrinterActionResult, PrinterSettings } from "./printer";
+import type { Quotation, QuotationListItem, QuotationStatus, QuotationStockCheckItem, QuotationSummary } from "./quotation";
 import type { Role, RoleListItem } from "./role";
-import type { PendingSaleListItem, Sale } from "./sale";
+import type { PendingSaleListItem, Sale, SaleListItem } from "./sale";
+import type { SaleReturn } from "./sale-return";
+import type { SaleVoid } from "./sale-void";
 import type { StockMovement, StockTransferResult } from "./stock-movement";
 import type { SyncQueueItem, SyncSnapshot } from "./sync";
 
@@ -69,6 +74,14 @@ export type IpcInvokeMap = {
   "location:set-status": {
     args: [string, LocationStatus];
     result: Location;
+  };
+  "location:pick-logo": {
+    args: [];
+    result: string | null;
+  };
+  "location:read-logo-preview": {
+    args: [string];
+    result: string | null;
   };
   "category:list": {
     args: [];
@@ -238,6 +251,10 @@ export type IpcInvokeMap = {
     args: [string, CustomerStatus];
     result: Customer;
   };
+  "sale:list": {
+    args: [];
+    result: SaleListItem[];
+  };
   "sale:list-pending": {
     args: [];
     result: PendingSaleListItem[];
@@ -257,6 +274,150 @@ export type IpcInvokeMap = {
   "sale:complete": {
     args: [Record<string, unknown>];
     result: Sale;
+  };
+  "sale-void:list": {
+    args: [];
+    result: SaleVoid[];
+  };
+  "sale-void:get": {
+    args: [string];
+    result: SaleVoid;
+  };
+  "sale-void:request": {
+    args: [Record<string, unknown>];
+    result: SaleVoid;
+  };
+  "sale-void:approve": {
+    args: [string, Record<string, unknown>];
+    result: SaleVoid;
+  };
+  "sale-void:reject": {
+    args: [string, Record<string, unknown>];
+    result: SaleVoid;
+  };
+  "sale-return:list": {
+    args: [];
+    result: SaleReturn[];
+  };
+  "sale-return:get": {
+    args: [string];
+    result: SaleReturn;
+  };
+  "sale-return:request": {
+    args: [Record<string, unknown>];
+    result: SaleReturn;
+  };
+  "sale-return:approve": {
+    args: [string, Record<string, unknown>];
+    result: SaleReturn;
+  };
+  "sale-return:reject": {
+    args: [string, Record<string, unknown>];
+    result: SaleReturn;
+  };
+  "invoice:list": {
+    args: [];
+    result: InvoiceListItem[];
+  };
+  "invoice:summary": {
+    args: [];
+    result: InvoiceSummary;
+  };
+  "invoice:create": {
+    args: [Record<string, unknown>];
+    result: Sale;
+  };
+  "invoice:record-payment": {
+    args: [string, Record<string, unknown>];
+    result: Sale;
+  };
+  "invoice:cancel": {
+    args: [string];
+    result: Sale;
+  };
+  "invoice:mark-paid": {
+    args: [string, Record<string, unknown>];
+    result: Sale;
+  };
+  "invoice:duplicate": {
+    args: [string];
+    result: Sale;
+  };
+  "quotation:list": {
+    args: [];
+    result: QuotationListItem[];
+  };
+  "quotation:summary": {
+    args: [];
+    result: QuotationSummary;
+  };
+  "quotation:get": {
+    args: [string];
+    result: Quotation;
+  };
+  "quotation:create": {
+    args: [Record<string, unknown>];
+    result: Quotation;
+  };
+  "quotation:update": {
+    args: [string, Record<string, unknown>];
+    result: Quotation;
+  };
+  "quotation:delete": {
+    args: [string];
+    result: { id: string };
+  };
+  "quotation:set-status": {
+    args: [string, QuotationStatus];
+    result: Quotation;
+  };
+  "quotation:check-stock": {
+    args: [string];
+    result: QuotationStockCheckItem[];
+  };
+  "quotation:convert-to-sale": {
+    args: [string, Record<string, unknown>];
+    result: Sale;
+  };
+  "quotation:convert-to-invoice": {
+    args: [string, Record<string, unknown>];
+    result: Sale;
+  };
+  "printer:get-settings": {
+    args: [];
+    result: PrinterSettings;
+  };
+  "printer:save-settings": {
+    args: [Record<string, unknown>];
+    result: PrinterSettings;
+  };
+  "printer:test-connection": {
+    args: [];
+    result: PrinterActionResult;
+  };
+  "printer:print-receipt": {
+    args: [string];
+    result: PrinterActionResult;
+  };
+  "printer:generate-receipt-pdf": {
+    args: [string];
+    result: string | null;
+  };
+  "printer:generate-invoice-pdf": {
+    args: [string];
+    result: string | null;
+  };
+  "printer:print-invoice-document": {
+    args: [string];
+    result: PrinterActionResult;
+  };
+  "printer:generate-quotation-pdf": {
+    args: [string];
+    result: string | null;
+  };
+  "printer:print-quotation-document": {
+    args: [string];
+    result: PrinterActionResult;
   };
   "sync:get-snapshot": {
     args: [];
@@ -306,6 +467,8 @@ export type BlueLedgerApi = {
       id: string,
       status: LocationStatus
     ) => Promise<IpcInvokeMap["location:set-status"]["result"]>;
+    pickLogo: () => Promise<IpcInvokeMap["location:pick-logo"]["result"]>;
+    readLogoPreview: (relativePath: string) => Promise<IpcInvokeMap["location:read-logo-preview"]["result"]>;
   };
   category: {
     list: () => Promise<IpcInvokeMap["category:list"]["result"]>;
@@ -409,11 +572,94 @@ export type BlueLedgerApi = {
     ) => Promise<IpcInvokeMap["customer:set-status"]["result"]>;
   };
   sale: {
+    list: () => Promise<IpcInvokeMap["sale:list"]["result"]>;
     listPending: () => Promise<IpcInvokeMap["sale:list-pending"]["result"]>;
     get: (id: string) => Promise<IpcInvokeMap["sale:get"]["result"]>;
     suspend: (input: Record<string, unknown>) => Promise<IpcInvokeMap["sale:suspend"]["result"]>;
     deletePending: (id: string) => Promise<IpcInvokeMap["sale:delete-pending"]["result"]>;
     complete: (input: Record<string, unknown>) => Promise<IpcInvokeMap["sale:complete"]["result"]>;
+  };
+  saleVoid: {
+    list: () => Promise<IpcInvokeMap["sale-void:list"]["result"]>;
+    get: (id: string) => Promise<IpcInvokeMap["sale-void:get"]["result"]>;
+    request: (input: Record<string, unknown>) => Promise<IpcInvokeMap["sale-void:request"]["result"]>;
+    approve: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["sale-void:approve"]["result"]>;
+    reject: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["sale-void:reject"]["result"]>;
+  };
+  saleReturn: {
+    list: () => Promise<IpcInvokeMap["sale-return:list"]["result"]>;
+    get: (id: string) => Promise<IpcInvokeMap["sale-return:get"]["result"]>;
+    request: (input: Record<string, unknown>) => Promise<IpcInvokeMap["sale-return:request"]["result"]>;
+    approve: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["sale-return:approve"]["result"]>;
+    reject: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["sale-return:reject"]["result"]>;
+  };
+  invoice: {
+    list: () => Promise<IpcInvokeMap["invoice:list"]["result"]>;
+    summary: () => Promise<IpcInvokeMap["invoice:summary"]["result"]>;
+    create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["invoice:create"]["result"]>;
+    recordPayment: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["invoice:record-payment"]["result"]>;
+    cancel: (id: string) => Promise<IpcInvokeMap["invoice:cancel"]["result"]>;
+    markPaid: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["invoice:mark-paid"]["result"]>;
+    duplicate: (id: string) => Promise<IpcInvokeMap["invoice:duplicate"]["result"]>;
+  };
+  quotation: {
+    list: () => Promise<IpcInvokeMap["quotation:list"]["result"]>;
+    summary: () => Promise<IpcInvokeMap["quotation:summary"]["result"]>;
+    get: (id: string) => Promise<IpcInvokeMap["quotation:get"]["result"]>;
+    create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["quotation:create"]["result"]>;
+    update: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["quotation:update"]["result"]>;
+    delete: (id: string) => Promise<IpcInvokeMap["quotation:delete"]["result"]>;
+    setStatus: (
+      id: string,
+      status: QuotationStatus
+    ) => Promise<IpcInvokeMap["quotation:set-status"]["result"]>;
+    checkStock: (id: string) => Promise<IpcInvokeMap["quotation:check-stock"]["result"]>;
+    convertToSale: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["quotation:convert-to-sale"]["result"]>;
+    convertToInvoice: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["quotation:convert-to-invoice"]["result"]>;
+  };
+  printer: {
+    getSettings: () => Promise<IpcInvokeMap["printer:get-settings"]["result"]>;
+    saveSettings: (input: Record<string, unknown>) => Promise<IpcInvokeMap["printer:save-settings"]["result"]>;
+    testConnection: () => Promise<IpcInvokeMap["printer:test-connection"]["result"]>;
+    printReceipt: (saleId: string) => Promise<IpcInvokeMap["printer:print-receipt"]["result"]>;
+    generateReceiptPdf: (saleId: string) => Promise<IpcInvokeMap["printer:generate-receipt-pdf"]["result"]>;
+    generateInvoicePdf: (saleId: string) => Promise<IpcInvokeMap["printer:generate-invoice-pdf"]["result"]>;
+    printInvoiceDocument: (
+      saleId: string
+    ) => Promise<IpcInvokeMap["printer:print-invoice-document"]["result"]>;
+    generateQuotationPdf: (
+      quotationId: string
+    ) => Promise<IpcInvokeMap["printer:generate-quotation-pdf"]["result"]>;
+    printQuotationDocument: (
+      quotationId: string
+    ) => Promise<IpcInvokeMap["printer:print-quotation-document"]["result"]>;
   };
   sync: {
     getSnapshot: () => Promise<IpcInvokeMap["sync:get-snapshot"]["result"]>;

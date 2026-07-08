@@ -6,6 +6,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { useAuthStore } from "@renderer/shared/stores/auth-store";
 import { useUiStore } from "@renderer/shared/stores/ui-store";
 import { cn } from "@renderer/shared/lib/cn";
+import { smallLogoBoxClassName } from "@renderer/shared/lib/logo";
 import { navGroups, type NavItem } from "./navigation";
 
 const EXPANDED_WIDTH = 272;
@@ -51,6 +52,26 @@ export function Sidebar(): React.JSX.Element {
       cancelled = true;
     };
   }, [photoPath]);
+
+  const [branchLogoPreviewUrl, setBranchLogoPreviewUrl] = useState<string | null>(null);
+  const branchLogoPath = session?.branch?.logoPath;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!branchLogoPath) {
+      setBranchLogoPreviewUrl(null);
+      return;
+    }
+
+    void window.blueLedger.location.readLogoPreview(branchLogoPath).then((dataUrl) => {
+      if (!cancelled) setBranchLogoPreviewUrl(dataUrl);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [branchLogoPath]);
 
   return (
     <motion.aside
@@ -196,7 +217,18 @@ export function Sidebar(): React.JSX.Element {
                     aria-hidden="true"
                   />
                   <div className="flex items-center gap-1.5 text-[11px] font-bold text-muted">
-                    <Store className="size-3.5 flex-none text-primary" aria-hidden="true" />
+                    <div
+                      className={cn(
+                        "grid flex-none place-items-center overflow-hidden rounded-sm",
+                        smallLogoBoxClassName(session.branch?.logoRatio)
+                      )}
+                    >
+                      {branchLogoPreviewUrl ? (
+                        <img src={branchLogoPreviewUrl} alt="" className="size-full object-contain" />
+                      ) : (
+                        <Store className="size-3.5 text-primary" aria-hidden="true" />
+                      )}
+                    </div>
                     {session.branch?.locationName ?? "No branch assigned"}
                   </div>
                 </div>

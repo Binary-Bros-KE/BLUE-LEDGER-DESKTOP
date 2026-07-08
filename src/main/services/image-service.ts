@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { copyFileSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { extname, isAbsolute, join } from "node:path";
 import electron from "electron";
 
 const { app, dialog } = electron;
@@ -94,12 +94,16 @@ function createManagedImageStore(options: {
     return storeFromSourcePath(firstPath);
   }
 
-  async function readPreview(relativePath: string): Promise<string | null> {
-    return readLocalImagePreview(resolveManagedPath(relativePath));
+  /** Accepts a managed relative path, but also a pre-migration raw absolute path for backward compatibility. */
+  async function readPreview(relativePathOrLegacyAbsolute: string): Promise<string | null> {
+    const resolved = isAbsolute(relativePathOrLegacyAbsolute)
+      ? relativePathOrLegacyAbsolute
+      : resolveManagedPath(relativePathOrLegacyAbsolute);
+    return readLocalImagePreview(resolved);
   }
 
   function remove(relativePath: string | null): void {
-    if (!relativePath) return;
+    if (!relativePath || isAbsolute(relativePath)) return;
     try {
       rmSync(resolveManagedPath(relativePath), { force: true });
     } catch {
@@ -133,3 +137,27 @@ export const pickAndStoreEmployeePhoto = employeePhotoStore.pickAndStore;
 export const readManagedEmployeePhotoPreview = employeePhotoStore.readPreview;
 /** Removes a managed employee photo from disk. Safe to call even if the file no longer exists. */
 export const deleteManagedEmployeePhoto = employeePhotoStore.remove;
+
+const businessLogoStore = createManagedImageStore({
+  relativeDir: join("images", "business"),
+  dialogTitle: "Select business logo"
+});
+
+/** Opens a file picker and copies the chosen logo into managed storage. Returns the relative path to persist. */
+export const pickAndStoreBusinessLogo = businessLogoStore.pickAndStore;
+/** Reads a previously-stored managed business logo (relative path) for renderer preview. */
+export const readManagedBusinessLogoPreview = businessLogoStore.readPreview;
+/** Removes a managed business logo from disk. Safe to call even if the file no longer exists. */
+export const deleteManagedBusinessLogo = businessLogoStore.remove;
+
+const locationLogoStore = createManagedImageStore({
+  relativeDir: join("images", "locations"),
+  dialogTitle: "Select storefront logo"
+});
+
+/** Opens a file picker and copies the chosen logo into managed storage. Returns the relative path to persist. */
+export const pickAndStoreLocationLogo = locationLogoStore.pickAndStore;
+/** Reads a previously-stored managed storefront logo (relative path) for renderer preview. */
+export const readManagedLocationLogoPreview = locationLogoStore.readPreview;
+/** Removes a managed storefront logo from disk. Safe to call even if the file no longer exists. */
+export const deleteManagedLocationLogo = locationLogoStore.remove;

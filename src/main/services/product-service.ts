@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { runInTransaction } from "@main/database/connection";
 import * as categoryRepository from "@main/database/repositories/category-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
-import { getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
+import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
 import { deleteManagedProductImage } from "@main/services/image-service";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
@@ -36,7 +36,10 @@ function assertUniqueFields(
 export function listProducts(): ProductListItem[] {
   requirePermission("products", "view");
   const { tenantId } = getCurrentTenant();
-  return productRepository.findAllProductRows(tenantId).map(productRepository.mapProductListRow);
+  const locationId = getCurrentBranchScope();
+  return productRepository
+    .findAllProductRows(tenantId, locationId)
+    .map(productRepository.mapProductListRow);
 }
 
 export function getProduct(id: string): Product {

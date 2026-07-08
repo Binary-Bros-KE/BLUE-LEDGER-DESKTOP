@@ -10,3 +10,4 @@ export const SYNC_ENDPOINTS = {
 } as const;
 
 export const THEME_STORAGE_KEY = "blue-ledger-theme";
+export const PRINTER_SETTINGS_STORAGE_KEY = "blue-ledger-printer-settings";

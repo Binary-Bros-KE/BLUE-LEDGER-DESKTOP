@@ -1,0 +1,1294 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { motion } from "framer-motion";
+import {
+  Ban,
+  CheckCircle2,
+  Copy,
+  Download,
+  Eye,
+  FileText,
+  Loader2,
+  Plus,
+  Printer,
+  Search,
+  Wallet,
+  X
+} from "lucide-react";
+import { Button } from "@renderer/shared/components/Button";
+import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
+import { Modal } from "@renderer/shared/components/Modal";
+import { StatTile } from "@renderer/shared/components/StatTile";
+import { usePermissions } from "@renderer/shared/hooks/use-permissions";
+import { computeLinePricing } from "@renderer/shared/lib/cart-pricing";
+import { cn } from "@renderer/shared/lib/cn";
+import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
+import { useAppStore } from "@renderer/shared/stores/app-store";
+import type { Customer } from "@shared/types/customer";
+import type { InvoiceListItem, InvoiceSummary } from "@shared/types/invoice";
+import type { PaymentMethod } from "@shared/types/payment-method";
+import type { ProductListItem } from "@shared/types/product";
+import {
+  PAYMENT_STATUS_OPTIONS,
+  TRANSACTION_TYPE_OPTIONS,
+  type PaymentStatus,
+  type Sale,
+  type TransactionType
+} from "@shared/types/sale";
+
+type FilterTab = "all" | "outstanding" | "overdue" | "paid" | "cancelled" | "recent";
+
+const FILTER_TABS: Array<{ value: FilterTab; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "outstanding", label: "Outstanding" },
+  { value: "overdue", label: "Overdue" },
+  { value: "paid", label: "Paid" },
+  { value: "cancelled", label: "Cancelled" },
+  { value: "recent", label: "Recently Created" }
+];
+
+type SortKey = "invoiceNumber" | "customerName" | "invoiceDate" | "dueDate" | "grandTotalCents" | "balanceDueCents";
+
+type CartLine = {
+  productId: string;
+  name: string;
+  sku: string;
+  quantity: number;
+  discountAmountCents: number;
+};
+
+function statusTone(status: PaymentStatus): "success" | "warning" | "danger" | "neutral" | "accent" {
+  if (status === "paid") return "success";
+  if (status === "overdue") return "danger";
+  if (status === "partially_paid") return "warning";
+  if (status === "cancelled") return "neutral";
+  return "accent";
+}
+
+function statusLabel(status: PaymentStatus): string {
+  return PAYMENT_STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status;
+}
+
+function transactionTypeLabel(type: TransactionType): string {
+  return TRANSACTION_TYPE_OPTIONS.find((option) => option.value === type)?.label ?? type;
+}
+
+function formatDate(value: string | null): string {
+  if (!value) return "—";
+  try {
+    return new Date(value).toLocaleDateString();
+  } catch {
+    return value;
+  }
+}
+
+function formatDateTime(value: string | null): string {
+  if (!value) return "—";
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return value;
+  }
+}
+
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function Th({
+  children,
+  className,
+  onClick,
+  active,
+  direction
+}: {
+  children: React.ReactNode;
+  className?: string;
+  onClick?: () => void;
+  active?: boolean;
+  direction?: "asc" | "desc";
+}): React.JSX.Element {
+  return (
+    <th
+      onClick={onClick}
+      className={cn(
+        "px-3 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider",
+        onClick && "cursor-pointer select-none hover:text-white/80",
+        className
+      )}
+    >
+      {children}
+      {active && <span className="ml-1">{direction === "asc" ? "▲" : "▼"}</span>}
+    </th>
+  );
+}
+
+export function InvoicesRoute(): React.JSX.Element {
+  const currency = useAppStore((state) => state.context?.tenant.currency ?? "");
+  const { can } = usePermissions();
+  const canCreate = can("sales", "create");
+  const canEdit = can("sales", "edit");
+
+  const [summary, setSummary] = useState<InvoiceSummary | null>(null);
+  const [invoices, setInvoices] = useState<InvoiceListItem[] | null>(null);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [products, setProducts] = useState<ProductListItem[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const [activeTab, setActiveTab] = useState<FilterTab>("all");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("invoiceDate");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  const [viewingSale, setViewingSale] = useState<Sale | null>(null);
+  const [viewLoading, setViewLoading] = useState(false);
+
+  const [recordPaymentOpen, setRecordPaymentOpen] = useState(false);
+  const [paymentMethodId, setPaymentMethodId] = useState("");
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentReference, setPaymentReference] = useState("");
+  const [paymentNotes, setPaymentNotes] = useState("");
+  const [paymentSaving, setPaymentSaving] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+
+  const [markPaidOpen, setMarkPaidOpen] = useState(false);
+  const [markPaidMethodId, setMarkPaidMethodId] = useState("");
+  const [markPaidReference, setMarkPaidReference] = useState("");
+  const [markPaidSaving, setMarkPaidSaving] = useState(false);
+  const [markPaidError, setMarkPaidError] = useState<string | null>(null);
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createCustomerId, setCreateCustomerId] = useState<string | null>(null);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [createTransactionType, setCreateTransactionType] = useState<"invoice" | "wholesale_sale">("invoice");
+  const [createDueDate, setCreateDueDate] = useState(todayIsoDate());
+  const [createNotes, setCreateNotes] = useState("");
+  const [createItems, setCreateItems] = useState<CartLine[]>([]);
+  const [productSearch, setProductSearch] = useState("");
+  const [includeInitialPayment, setIncludeInitialPayment] = useState(false);
+  const [initialPaymentMethodId, setInitialPaymentMethodId] = useState("");
+  const [initialPaymentAmount, setInitialPaymentAmount] = useState("");
+  const [initialPaymentReference, setInitialPaymentReference] = useState("");
+  const [createSaving, setCreateSaving] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  const loadAll = useCallback(async () => {
+    setLoadError(null);
+    try {
+      const [summaryResult, invoiceList, customerList, productList, methodList] = await Promise.all([
+        window.blueLedger.invoice.summary(),
+        window.blueLedger.invoice.list(),
+        window.blueLedger.customer.list(),
+        window.blueLedger.product.list(),
+        window.blueLedger.paymentMethod.list()
+      ]);
+      setSummary(summaryResult);
+      setInvoices(invoiceList);
+      setCustomers(customerList);
+      setProducts(productList);
+      setPaymentMethods(methodList);
+    } catch (err) {
+      setLoadError(getErrorMessage(err, "Failed to load invoices"));
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAll();
+  }, [loadAll]);
+
+  const activePaymentMethods = useMemo(
+    () => paymentMethods.filter((method) => method.isActive).sort((a, b) => a.sortOrder - b.sortOrder),
+    [paymentMethods]
+  );
+  const selectedRecordMethod = activePaymentMethods.find((method) => method.id === paymentMethodId) ?? null;
+  const selectedMarkPaidMethod = activePaymentMethods.find((method) => method.id === markPaidMethodId) ?? null;
+  const selectedInitialMethod = activePaymentMethods.find((method) => method.id === initialPaymentMethodId) ?? null;
+
+  const filteredInvoices = useMemo(() => {
+    if (!invoices) return null;
+    let list = invoices;
+
+    if (activeTab === "outstanding") {
+      list = list.filter((invoice) => ["unpaid", "partially_paid", "overdue"].includes(invoice.paymentStatus));
+    } else if (activeTab === "overdue") {
+      list = list.filter((invoice) => invoice.paymentStatus === "overdue");
+    } else if (activeTab === "paid") {
+      list = list.filter((invoice) => invoice.paymentStatus === "paid");
+    } else if (activeTab === "cancelled") {
+      list = list.filter((invoice) => invoice.paymentStatus === "cancelled");
+    } else if (activeTab === "recent") {
+      const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      list = list.filter((invoice) => new Date(invoice.createdAt).getTime() >= sevenDaysAgo);
+    }
+
+    const term = searchTerm.trim().toLowerCase();
+    if (term) {
+      list = list.filter((invoice) => {
+        const haystack = `${invoice.invoiceNumber ?? ""} ${invoice.customerName ?? ""} ${invoice.receiptNumber ?? ""}`.toLowerCase();
+        return haystack.includes(term);
+      });
+    }
+
+    const sorted = [...list].sort((a, b) => {
+      const direction = sortDir === "asc" ? 1 : -1;
+      const aValue = a[sortKey];
+      const bValue = b[sortKey];
+      if (aValue === null && bValue === null) return 0;
+      if (aValue === null) return 1;
+      if (bValue === null) return -1;
+      if (typeof aValue === "number" && typeof bValue === "number") {
+        return (aValue - bValue) * direction;
+      }
+      return String(aValue).localeCompare(String(bValue)) * direction;
+    });
+
+    return sorted;
+  }, [invoices, activeTab, searchTerm, sortKey, sortDir]);
+
+  function toggleSort(key: SortKey): void {
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  }
+
+  async function openView(saleId: string): Promise<void> {
+    setViewLoading(true);
+    setActionError(null);
+    try {
+      const sale = await window.blueLedger.sale.get(saleId);
+      setViewingSale(sale);
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to load invoice"));
+    } finally {
+      setViewLoading(false);
+    }
+  }
+
+  function closeView(): void {
+    setViewingSale(null);
+  }
+
+  async function refreshViewing(saleId: string): Promise<void> {
+    const sale = await window.blueLedger.sale.get(saleId);
+    setViewingSale(sale);
+  }
+
+  function openRecordPayment(): void {
+    setPaymentMethodId("");
+    setPaymentAmount(viewingSale ? fromCents(viewingSale.balanceDueCents) : "");
+    setPaymentReference("");
+    setPaymentNotes("");
+    setPaymentError(null);
+    setRecordPaymentOpen(true);
+  }
+
+  async function submitRecordPayment(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    if (!viewingSale) return;
+    setPaymentSaving(true);
+    setPaymentError(null);
+    try {
+      await window.blueLedger.invoice.recordPayment(viewingSale.id, {
+        paymentMethodId,
+        amountCents: toCents(paymentAmount),
+        reference: paymentReference,
+        notes: paymentNotes
+      });
+      setRecordPaymentOpen(false);
+      await refreshViewing(viewingSale.id);
+      await loadAll();
+    } catch (err) {
+      setPaymentError(getErrorMessage(err, "Failed to record payment"));
+    } finally {
+      setPaymentSaving(false);
+    }
+  }
+
+  function openMarkPaid(): void {
+    setMarkPaidMethodId("");
+    setMarkPaidReference("");
+    setMarkPaidError(null);
+    setMarkPaidOpen(true);
+  }
+
+  async function submitMarkPaid(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    if (!viewingSale) return;
+    setMarkPaidSaving(true);
+    setMarkPaidError(null);
+    try {
+      await window.blueLedger.invoice.markPaid(viewingSale.id, {
+        paymentMethodId: markPaidMethodId,
+        reference: markPaidReference,
+        notes: null
+      });
+      setMarkPaidOpen(false);
+      await refreshViewing(viewingSale.id);
+      await loadAll();
+    } catch (err) {
+      setMarkPaidError(getErrorMessage(err, "Failed to mark invoice as paid"));
+    } finally {
+      setMarkPaidSaving(false);
+    }
+  }
+
+  async function handleCancelInvoice(): Promise<void> {
+    if (!viewingSale) return;
+    if (!window.confirm(`Cancel invoice ${viewingSale.invoiceNumber}? This can't be undone.`)) return;
+    setActionError(null);
+    try {
+      await window.blueLedger.invoice.cancel(viewingSale.id);
+      await refreshViewing(viewingSale.id);
+      await loadAll();
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to cancel invoice"));
+    }
+  }
+
+  async function handleDuplicateInvoice(): Promise<void> {
+    if (!viewingSale) return;
+    setActionError(null);
+    try {
+      const duplicate = await window.blueLedger.invoice.duplicate(viewingSale.id);
+      await loadAll();
+      setViewingSale(duplicate);
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to duplicate invoice"));
+    }
+  }
+
+  async function handlePrint(): Promise<void> {
+    if (!viewingSale) return;
+    setActionError(null);
+    try {
+      const result = await window.blueLedger.printer.printInvoiceDocument(viewingSale.id);
+      if (!result.success) setActionError(result.message);
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to print invoice"));
+    }
+  }
+
+  async function handleDownload(): Promise<void> {
+    if (!viewingSale) return;
+    setActionError(null);
+    try {
+      await window.blueLedger.printer.generateInvoicePdf(viewingSale.id);
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to generate PDF"));
+    }
+  }
+
+  const filteredCustomers = useMemo(() => {
+    const active = customers.filter((customer) => customer.status === "active");
+    const term = customerSearch.trim().toLowerCase();
+    if (!term) return active.slice(0, 20);
+    return active
+      .filter((customer) => `${customer.name} ${customer.phone}`.toLowerCase().includes(term))
+      .slice(0, 20);
+  }, [customers, customerSearch]);
+
+  const selectedCreateCustomer = customers.find((customer) => customer.id === createCustomerId) ?? null;
+
+  const filteredCreateProducts = useMemo(() => {
+    const term = productSearch.trim().toLowerCase();
+    if (!term) return [];
+    return products
+      .filter((product) => product.status === "active")
+      .filter((product) => `${product.name} ${product.sku}`.toLowerCase().includes(term))
+      .slice(0, 8);
+  }, [products, productSearch]);
+
+  const productById = useMemo(() => {
+    const map = new Map<string, ProductListItem>();
+    for (const product of products) map.set(product.id, product);
+    return map;
+  }, [products]);
+
+  const createLinePricing = useMemo(
+    () =>
+      createItems
+        .map((line) => {
+          const product = productById.get(line.productId);
+          if (!product) return null;
+          return { line, product, pricing: computeLinePricing(product, line.quantity, line.discountAmountCents) };
+        })
+        .filter((entry): entry is { line: CartLine; product: ProductListItem; pricing: ReturnType<typeof computeLinePricing> } => entry !== null),
+    [createItems, productById]
+  );
+
+  const createTotals = useMemo(() => {
+    let subtotalCents = 0;
+    let discountAmountCents = 0;
+    let taxAmountCents = 0;
+    for (const entry of createLinePricing) {
+      subtotalCents += entry.pricing.lineSubtotalCents;
+      discountAmountCents += entry.pricing.discountAmountCents;
+      taxAmountCents += entry.pricing.taxCents;
+    }
+    return {
+      subtotalCents,
+      discountAmountCents,
+      taxAmountCents,
+      grandTotalCents: subtotalCents - discountAmountCents + taxAmountCents
+    };
+  }, [createLinePricing]);
+
+  const initialPaymentCents = includeInitialPayment && initialPaymentAmount.trim() !== "" ? toCents(initialPaymentAmount) : 0;
+
+  function openCreateModal(): void {
+    setCreateCustomerId(null);
+    setCustomerSearch("");
+    setCreateTransactionType("invoice");
+    setCreateDueDate(todayIsoDate());
+    setCreateNotes("");
+    setCreateItems([]);
+    setProductSearch("");
+    setIncludeInitialPayment(false);
+    setInitialPaymentMethodId("");
+    setInitialPaymentAmount("");
+    setInitialPaymentReference("");
+    setCreateError(null);
+    setCreateOpen(true);
+  }
+
+  function addCreateLine(product: ProductListItem): void {
+    setCreateItems((prev) => {
+      const existing = prev.find((line) => line.productId === product.id);
+      if (existing) {
+        return prev.map((line) => (line.productId === product.id ? { ...line, quantity: line.quantity + 1 } : line));
+      }
+      return [...prev, { productId: product.id, name: product.name, sku: product.sku, quantity: 1, discountAmountCents: 0 }];
+    });
+    setProductSearch("");
+  }
+
+  function updateCreateQuantity(productId: string, quantity: number): void {
+    const next = Number.isFinite(quantity) && quantity > 0 ? Math.floor(quantity) : 1;
+    setCreateItems((prev) => prev.map((line) => (line.productId === productId ? { ...line, quantity: next } : line)));
+  }
+
+  function updateCreateDiscount(productId: string, value: string): void {
+    const cents = toCents(value);
+    setCreateItems((prev) =>
+      prev.map((line) => (line.productId === productId ? { ...line, discountAmountCents: cents } : line))
+    );
+  }
+
+  function removeCreateLine(productId: string): void {
+    setCreateItems((prev) => prev.filter((line) => line.productId !== productId));
+  }
+
+  async function submitCreateInvoice(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    setCreateSaving(true);
+    setCreateError(null);
+
+    if (!createCustomerId) {
+      setCreateError("Select a customer");
+      setCreateSaving(false);
+      return;
+    }
+    if (createItems.length === 0) {
+      setCreateError("Add at least one product");
+      setCreateSaving(false);
+      return;
+    }
+
+    try {
+      await window.blueLedger.invoice.create({
+        customerId: createCustomerId,
+        transactionType: createTransactionType,
+        dueDate: createDueDate,
+        invoiceNotes: createNotes,
+        items: createItems.map((line) => ({
+          productId: line.productId,
+          quantity: line.quantity,
+          discountAmountCents: line.discountAmountCents
+        })),
+        initialPayment:
+          includeInitialPayment && initialPaymentMethodId && initialPaymentCents > 0
+            ? {
+                paymentMethodId: initialPaymentMethodId,
+                amountCents: initialPaymentCents,
+                reference: initialPaymentReference
+              }
+            : null
+      });
+      setCreateOpen(false);
+      await loadAll();
+    } catch (err) {
+      setCreateError(getErrorMessage(err, "Failed to create invoice"));
+    } finally {
+      setCreateSaving(false);
+    }
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25 }}
+      className="relative mt-6 space-y-5 pb-10 pl-4"
+    >
+      <span
+        className="pointer-events-none absolute -left-[5px] top-2 size-2.5 rounded-full border-2 border-line bg-app"
+        aria-hidden="true"
+      />
+      <div
+        className="pointer-events-none absolute bottom-2 left-0 top-2 border-l-2 border-dashed border-line"
+        aria-hidden="true"
+      />
+      <span
+        className="pointer-events-none absolute -left-[5px] bottom-2 size-2.5 rounded-full border-2 border-line bg-app"
+        aria-hidden="true"
+      />
+
+      <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Invoices</p>
+            <h2 className="mt-1 flex items-center gap-2 text-xl font-extrabold">
+              <FileText className="size-5 text-primary" aria-hidden="true" />
+              Billing &amp; Receivables
+            </h2>
+            <p className="mt-1 text-xs font-semibold text-muted">
+              Wholesale invoices and credit sales — track balances and collect payments over time.
+            </p>
+          </div>
+          {canCreate && (
+            <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
+              <Plus className="mr-1.5 size-4" aria-hidden="true" />
+              New Invoice
+            </Button>
+          )}
+        </div>
+
+        {(loadError ?? actionError) && (
+          <div className="mt-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
+            {loadError ?? actionError}
+          </div>
+        )}
+
+        {summary && (
+          <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <StatTile
+              icon={Wallet}
+              label="Total Outstanding"
+              value={`${currency} ${formatCents(summary.totalOutstandingCents)}`}
+              tone="primary"
+            />
+            <StatTile
+              icon={Ban}
+              label="Total Overdue"
+              value={`${currency} ${formatCents(summary.totalOverdueCents)}`}
+              tone="danger"
+            />
+            <StatTile
+              icon={CheckCircle2}
+              label="Total Paid"
+              value={`${currency} ${formatCents(summary.totalPaidCents)}`}
+              tone="success"
+            />
+            <StatTile icon={FileText} label="Total Invoices" value={String(summary.totalInvoices)} tone="accent" />
+            <StatTile
+              icon={FileText}
+              label="Total Invoice Value"
+              value={`${currency} ${formatCents(summary.totalInvoiceValueCents)}`}
+              tone="warning"
+            />
+          </div>
+        )}
+
+        <div className="mt-5 flex flex-wrap items-center gap-2 border-b border-line pb-3">
+          {FILTER_TABS.map((tab) => (
+            <button
+              key={tab.value}
+              type="button"
+              onClick={() => setActiveTab(tab.value)}
+              className={cn(
+                "h-8 rounded-lg px-3 text-xs font-extrabold transition cursor-pointer",
+                activeTab === tab.value ? "bg-primary text-white" : "text-muted hover:bg-soft"
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-4">
+          <label className="block sm:max-w-xs">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Search</span>
+            <div className="relative mt-1.5">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted"
+                aria-hidden="true"
+              />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder="Search by invoice number or customer"
+                className="h-10 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm font-semibold text-ink outline-none transition placeholder:font-normal placeholder:text-muted/60 focus:border-accent focus:ring-4 focus:ring-accent/15"
+              />
+            </div>
+          </label>
+        </div>
+
+        <div className="mt-5">
+          {invoices === null ? (
+            <div className="flex min-h-[240px] items-center justify-center text-muted">
+              <Loader2 className="size-6 animate-spin" aria-hidden="true" />
+            </div>
+          ) : filteredInvoices && filteredInvoices.length === 0 ? (
+            <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-line bg-soft/60 p-10 text-center">
+              <div className="grid size-14 place-items-center rounded-2xl bg-soft text-primary">
+                <FileText className="size-7" aria-hidden="true" />
+              </div>
+              <h3 className="mt-4 text-lg font-extrabold">No invoices found</h3>
+              <p className="mt-1 max-w-sm text-sm font-semibold text-muted">
+                {invoices.length === 0
+                  ? "Create your first invoice to start tracking wholesale billing."
+                  : "Try a different filter or search term."}
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-line">
+              <table className="w-full min-w-[1300px] table-fixed border-collapse text-sm">
+                <colgroup>
+                  <col className="w-[10%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[9%]" />
+                </colgroup>
+                <thead>
+                  <tr className="bg-primary text-white">
+                    <Th onClick={() => toggleSort("invoiceNumber")} active={sortKey === "invoiceNumber"} direction={sortDir}>
+                      Invoice #
+                    </Th>
+                    <Th onClick={() => toggleSort("customerName")} active={sortKey === "customerName"} direction={sortDir}>
+                      Customer
+                    </Th>
+                    <Th>Type</Th>
+                    <Th onClick={() => toggleSort("invoiceDate")} active={sortKey === "invoiceDate"} direction={sortDir}>
+                      Issued
+                    </Th>
+                    <Th onClick={() => toggleSort("dueDate")} active={sortKey === "dueDate"} direction={sortDir}>
+                      Due
+                    </Th>
+                    <Th onClick={() => toggleSort("grandTotalCents")} active={sortKey === "grandTotalCents"} direction={sortDir} className="text-right">
+                      Amount
+                    </Th>
+                    <Th className="text-right">Paid</Th>
+                    <Th onClick={() => toggleSort("balanceDueCents")} active={sortKey === "balanceDueCents"} direction={sortDir} className="text-right">
+                      Balance
+                    </Th>
+                    <Th>Status</Th>
+                    <Th className="text-right">Actions</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(filteredInvoices ?? []).map((invoice) => (
+                    <tr
+                      key={invoice.id}
+                      onClick={() => void openView(invoice.id)}
+                      className="cursor-pointer border-t border-line odd:bg-white even:bg-soft/50 hover:bg-soft"
+                    >
+                      <td className="truncate px-3 py-2.5 text-xs font-bold tabular-nums text-ink">
+                        {invoice.invoiceNumber}
+                      </td>
+                      <td className="truncate px-3 py-2.5 font-extrabold">{invoice.customerName ?? "—"}</td>
+                      <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">
+                        {transactionTypeLabel(invoice.transactionType)}
+                      </td>
+                      <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">
+                        {formatDate(invoice.invoiceDate)}
+                      </td>
+                      <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">
+                        {formatDate(invoice.dueDate)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right text-xs font-bold tabular-nums text-ink">
+                        {formatCents(invoice.grandTotalCents)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right text-xs font-bold tabular-nums text-muted">
+                        {formatCents(invoice.amountPaidCents)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right text-xs font-bold tabular-nums text-ink">
+                        {formatCents(invoice.balanceDueCents)}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <DashedPill tone={statusTone(invoice.paymentStatus)}>
+                          {statusLabel(invoice.paymentStatus)}
+                        </DashedPill>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center justify-end">
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void openView(invoice.id);
+                            }}
+                            aria-label="View invoice"
+                            className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-ink cursor-pointer"
+                          >
+                            <Eye className="size-3.5" aria-hidden="true" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <Modal
+        open={viewingSale !== null || viewLoading}
+        onClose={closeView}
+        title={viewingSale?.invoiceNumber ?? "Invoice"}
+        description="Products sold, payment history, and outstanding balance."
+        widthClassName="max-w-2xl"
+      >
+        {viewLoading ? (
+          <div className="flex min-h-[220px] items-center justify-center text-muted">
+            <Loader2 className="size-6 animate-spin" aria-hidden="true" />
+          </div>
+        ) : viewingSale ? (
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <DashedPill tone={statusTone(viewingSale.paymentStatus)}>{statusLabel(viewingSale.paymentStatus)}</DashedPill>
+              <DashedPill tone="accent">{transactionTypeLabel(viewingSale.transactionType)}</DashedPill>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+              <div className="rounded-lg border border-line bg-soft px-3 py-2.5">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Customer</p>
+                <p className="mt-0.5 truncate text-sm font-bold text-ink">{viewingSale.customerName ?? "—"}</p>
+              </div>
+              <div className="rounded-lg border border-line bg-soft px-3 py-2.5">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Storefront</p>
+                <p className="mt-0.5 truncate text-sm font-bold text-ink">{viewingSale.locationName}</p>
+              </div>
+              <div className="rounded-lg border border-line bg-soft px-3 py-2.5">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Issued By</p>
+                <p className="mt-0.5 truncate text-sm font-bold text-ink">{viewingSale.employeeName}</p>
+              </div>
+              <div className="rounded-lg border border-line bg-soft px-3 py-2.5">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Invoice Date</p>
+                <p className="mt-0.5 text-sm font-bold text-ink">{formatDate(viewingSale.invoiceDate)}</p>
+              </div>
+              <div className="rounded-lg border border-line bg-soft px-3 py-2.5">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Due Date</p>
+                <p className="mt-0.5 text-sm font-bold text-ink">{formatDate(viewingSale.dueDate)}</p>
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Products</p>
+              <div className="mt-2 space-y-1.5">
+                {viewingSale.items.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between rounded-lg border border-line px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-ink">{item.productName}</p>
+                      <p className="text-[11px] font-semibold text-muted">
+                        {item.quantity} x {currency} {formatCents(item.unitPriceCents)}
+                      </p>
+                    </div>
+                    <p className="flex-none text-sm font-extrabold text-ink">{formatCents(item.lineTotalCents)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {viewingSale.invoiceNotes && (
+              <div className="mt-4 rounded-lg border border-line bg-soft px-3.5 py-2.5">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Invoice Notes</p>
+                <p className="mt-1 whitespace-pre-line text-sm font-semibold text-ink">{viewingSale.invoiceNotes}</p>
+              </div>
+            )}
+
+            <div className="mt-4 space-y-1 border-t border-line pt-3 text-sm">
+              <div className="flex justify-between text-muted">
+                <span className="font-semibold">Subtotal</span>
+                <span className="font-bold tabular-nums">{formatCents(viewingSale.subtotalCents)}</span>
+              </div>
+              <div className="flex justify-between text-muted">
+                <span className="font-semibold">Discount</span>
+                <span className="font-bold tabular-nums">-{formatCents(viewingSale.discountAmountCents)}</span>
+              </div>
+              <div className="flex justify-between text-muted">
+                <span className="font-semibold">Tax</span>
+                <span className="font-bold tabular-nums">{formatCents(viewingSale.taxAmountCents)}</span>
+              </div>
+              <div className="flex justify-between text-base font-extrabold text-ink">
+                <span>Total</span>
+                <span>{formatCents(viewingSale.grandTotalCents)}</span>
+              </div>
+              <div className="flex justify-between text-muted">
+                <span className="font-semibold">Amount Paid</span>
+                <span className="font-bold tabular-nums">{formatCents(viewingSale.amountPaidCents)}</span>
+              </div>
+              <div className="flex justify-between rounded-lg bg-danger-soft px-3 py-2 text-base font-extrabold text-danger">
+                <span>Balance Due</span>
+                <span>{formatCents(viewingSale.balanceDueCents)}</span>
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Payment History</p>
+              {viewingSale.payments.length === 0 ? (
+                <p className="mt-2 text-xs font-semibold text-muted">No payments recorded yet.</p>
+              ) : (
+                <div className="mt-2 space-y-1.5">
+                  {viewingSale.payments.map((payment) => (
+                    <div key={payment.id} className="flex items-center justify-between rounded-lg border border-line px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-bold text-ink">
+                          {payment.paymentMethodName}
+                          {payment.reference ? ` · ${payment.reference}` : ""}
+                        </p>
+                        <p className="text-[11px] font-semibold text-muted">
+                          {formatDateTime(payment.receivedAt)} · {payment.receivedByName}
+                        </p>
+                      </div>
+                      <p className="flex-none text-sm font-extrabold text-success">{formatCents(payment.amountCents)}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {canEdit && viewingSale.paymentStatus !== "cancelled" && viewingSale.paymentStatus !== "paid" && (
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <Button type="button" onClick={openRecordPayment} className="h-9 text-xs">
+                  <Wallet className="mr-1.5 size-3.5" aria-hidden="true" />
+                  Record Payment
+                </Button>
+                <Button
+                  type="button"
+                  onClick={openMarkPaid}
+                  className="h-9 border border-success/40 bg-white text-xs text-success shadow-none hover:bg-success/10"
+                >
+                  <CheckCircle2 className="mr-1.5 size-3.5" aria-hidden="true" />
+                  Mark as Paid
+                </Button>
+              </div>
+            )}
+
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                onClick={() => void handlePrint()}
+                className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+              >
+                <Printer className="mr-1.5 size-3.5" aria-hidden="true" />
+                Print
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void handleDownload()}
+                className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+              >
+                <Download className="mr-1.5 size-3.5" aria-hidden="true" />
+                Download PDF
+              </Button>
+            </div>
+
+            {canCreate && (
+              <div className="mt-2">
+                <Button
+                  type="button"
+                  onClick={() => void handleDuplicateInvoice()}
+                  className="h-9 w-full border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+                >
+                  <Copy className="mr-1.5 size-3.5" aria-hidden="true" />
+                  Duplicate Invoice
+                </Button>
+              </div>
+            )}
+
+            {canEdit && viewingSale.paymentStatus !== "cancelled" && (
+              <div className="mt-2">
+                <Button
+                  type="button"
+                  onClick={() => void handleCancelInvoice()}
+                  className="h-9 w-full border border-danger/30 bg-white text-xs text-danger shadow-none hover:bg-danger-soft"
+                >
+                  <X className="mr-1.5 size-3.5" aria-hidden="true" />
+                  Cancel Invoice
+                </Button>
+              </div>
+            )}
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={recordPaymentOpen}
+        onClose={() => setRecordPaymentOpen(false)}
+        title="Record Payment"
+        description="Multiple payments are supported — collect balances over several days or weeks."
+        widthClassName="max-w-md"
+      >
+        <form onSubmit={submitRecordPayment}>
+          {paymentError && (
+            <div className="mb-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
+              {paymentError}
+            </div>
+          )}
+          <SelectField
+            label="Payment Method"
+            value={paymentMethodId}
+            onChange={setPaymentMethodId}
+            options={[
+              { value: "", label: "Select payment method" },
+              ...activePaymentMethods.map((method) => ({ value: method.id, label: method.name }))
+            ]}
+          />
+          <Field
+            label="Amount"
+            type="number"
+            value={paymentAmount}
+            onChange={setPaymentAmount}
+            placeholder="0.00"
+            required
+            className="mt-4"
+          />
+          {selectedRecordMethod?.requiresReference && (
+            <Field
+              label="Reference"
+              value={paymentReference}
+              onChange={setPaymentReference}
+              placeholder="e.g. M-Pesa code, transaction ID, cheque number"
+              required
+              className="mt-4"
+            />
+          )}
+          <TextAreaField label="Notes" value={paymentNotes} onChange={setPaymentNotes} className="mt-4" rows={2} />
+          <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
+            <Button
+              type="button"
+              onClick={() => setRecordPaymentOpen(false)}
+              className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={paymentSaving || !paymentMethodId} className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50">
+              {paymentSaving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
+              {paymentSaving ? "Saving..." : "Record Payment"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        open={markPaidOpen}
+        onClose={() => setMarkPaidOpen(false)}
+        title="Mark as Paid"
+        description="Records a final payment for the full remaining balance."
+        widthClassName="max-w-sm"
+      >
+        <form onSubmit={submitMarkPaid}>
+          {markPaidError && (
+            <div className="mb-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
+              {markPaidError}
+            </div>
+          )}
+          {viewingSale && (
+            <div className="mb-4 rounded-lg border border-line bg-soft px-3.5 py-2.5">
+              <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Remaining Balance</p>
+              <p className="mt-0.5 text-lg font-extrabold text-ink">{formatCents(viewingSale.balanceDueCents)}</p>
+            </div>
+          )}
+          <SelectField
+            label="Payment Method"
+            value={markPaidMethodId}
+            onChange={setMarkPaidMethodId}
+            options={[
+              { value: "", label: "Select payment method" },
+              ...activePaymentMethods.map((method) => ({ value: method.id, label: method.name }))
+            ]}
+          />
+          {selectedMarkPaidMethod?.requiresReference && (
+            <Field
+              label="Reference"
+              value={markPaidReference}
+              onChange={setMarkPaidReference}
+              placeholder="e.g. M-Pesa code, transaction ID"
+              required
+              className="mt-4"
+            />
+          )}
+          <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
+            <Button
+              type="button"
+              onClick={() => setMarkPaidOpen(false)}
+              className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={markPaidSaving || !markPaidMethodId}
+              className="h-9 bg-success text-xs hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {markPaidSaving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
+              {markPaidSaving ? "Saving..." : "Confirm Paid"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title="New Invoice"
+        description="Goods are considered delivered now — payment can be collected in full or over time."
+        widthClassName="max-w-2xl"
+      >
+        <form onSubmit={submitCreateInvoice}>
+          {createError && (
+            <div className="mb-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
+              {createError}
+            </div>
+          )}
+
+          <div>
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Customer</span>
+            {selectedCreateCustomer ? (
+              <div className="mt-1.5 flex items-center justify-between rounded-lg border border-line bg-soft px-3.5 py-2.5">
+                <div>
+                  <p className="text-sm font-extrabold text-ink">{selectedCreateCustomer.name}</p>
+                  <p className="text-[11px] font-semibold text-muted">{selectedCreateCustomer.phone}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCreateCustomerId(null)}
+                  className="text-[11px] font-extrabold uppercase text-accent hover:underline cursor-pointer"
+                >
+                  Change
+                </button>
+              </div>
+            ) : (
+              <div className="relative mt-1.5">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden="true" />
+                <input
+                  type="text"
+                  value={customerSearch}
+                  onChange={(event) => setCustomerSearch(event.target.value)}
+                  placeholder="Search customer by name or phone"
+                  className="h-10 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+                />
+                {filteredCustomers.length > 0 && (
+                  <div className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-line bg-white shadow-soft">
+                    {filteredCustomers.map((customer) => (
+                      <button
+                        key={customer.id}
+                        type="button"
+                        onClick={() => {
+                          setCreateCustomerId(customer.id);
+                          setCustomerSearch("");
+                        }}
+                        className="flex w-full items-center justify-between px-3.5 py-2 text-left text-sm hover:bg-soft cursor-pointer"
+                      >
+                        <span className="font-bold text-ink">{customer.name}</span>
+                        <span className="text-xs font-semibold text-muted">{customer.phone}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-4">
+            <SelectField
+              label="Transaction Type"
+              value={createTransactionType}
+              onChange={(value) => setCreateTransactionType(value as "invoice" | "wholesale_sale")}
+              options={[
+                { value: "invoice", label: "Invoice" },
+                { value: "wholesale_sale", label: "Wholesale Sale" }
+              ]}
+            />
+            <Field label="Due Date" type="date" value={createDueDate} onChange={setCreateDueDate} required />
+          </div>
+
+          <div className="mt-4">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Products</span>
+            <div className="relative mt-1.5">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden="true" />
+              <input
+                type="text"
+                value={productSearch}
+                onChange={(event) => setProductSearch(event.target.value)}
+                placeholder="Search product by name or SKU"
+                className="h-10 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+              />
+              {filteredCreateProducts.length > 0 && (
+                <div className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-line bg-white shadow-soft">
+                  {filteredCreateProducts.map((product) => (
+                    <button
+                      key={product.id}
+                      type="button"
+                      onClick={() => addCreateLine(product)}
+                      className="flex w-full items-center justify-between px-3.5 py-2 text-left text-sm hover:bg-soft cursor-pointer"
+                    >
+                      <span className="font-bold text-ink">{product.name}</span>
+                      <span className="text-xs font-semibold text-muted">{formatCents(product.sellingPriceCents)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3 space-y-2">
+              {createLinePricing.length === 0 ? (
+                <p className="text-xs font-semibold text-muted">No products added yet.</p>
+              ) : (
+                createLinePricing.map(({ line, pricing }) => (
+                  <div key={line.productId} className="rounded-lg border border-line p-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-extrabold text-ink">{line.name}</p>
+                        <p className="text-[11px] font-semibold text-muted">@ {formatCents(pricing.unitPriceCents)}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeCreateLine(line.productId)}
+                        className="text-[11px] font-extrabold uppercase text-danger hover:underline cursor-pointer"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted">
+                        Qty
+                        <input
+                          type="number"
+                          min={1}
+                          value={line.quantity}
+                          onChange={(event) => updateCreateQuantity(line.productId, Number(event.target.value))}
+                          className="h-8 w-16 rounded-md border border-line text-center text-xs font-bold outline-none focus:border-accent"
+                        />
+                      </label>
+                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted">
+                        Discount
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={fromCents(line.discountAmountCents) || "0.00"}
+                          onChange={(event) => updateCreateDiscount(line.productId, event.target.value)}
+                          className="h-8 w-20 rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
+                        />
+                      </label>
+                      <span className="text-sm font-extrabold text-ink">{formatCents(pricing.lineTotalCents)}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <TextAreaField label="Invoice Notes" value={createNotes} onChange={setCreateNotes} className="mt-4" rows={2} />
+
+          <div className="mt-4">
+            <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-line bg-soft px-3.5 py-2.5">
+              <input
+                type="checkbox"
+                checked={includeInitialPayment}
+                onChange={(event) => setIncludeInitialPayment(event.target.checked)}
+                className="size-4 accent-primary"
+              />
+              <span className="text-sm font-bold text-ink">Record an initial payment now</span>
+            </label>
+
+            {includeInitialPayment && (
+              <div className="mt-3 grid grid-cols-2 gap-4">
+                <SelectField
+                  label="Payment Method"
+                  value={initialPaymentMethodId}
+                  onChange={setInitialPaymentMethodId}
+                  options={[
+                    { value: "", label: "Select payment method" },
+                    ...activePaymentMethods.map((method) => ({ value: method.id, label: method.name }))
+                  ]}
+                />
+                <Field label="Amount" type="number" value={initialPaymentAmount} onChange={setInitialPaymentAmount} placeholder="0.00" />
+                {selectedInitialMethod?.requiresReference && (
+                  <Field
+                    label="Reference"
+                    value={initialPaymentReference}
+                    onChange={setInitialPaymentReference}
+                    placeholder="e.g. M-Pesa code"
+                    className="col-span-2"
+                  />
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 space-y-1 border-t border-line pt-4 text-sm">
+            <div className="flex justify-between text-muted">
+              <span className="font-semibold">Subtotal</span>
+              <span className="font-bold tabular-nums">{formatCents(createTotals.subtotalCents)}</span>
+            </div>
+            <div className="flex justify-between text-muted">
+              <span className="font-semibold">Discount</span>
+              <span className="font-bold tabular-nums">-{formatCents(createTotals.discountAmountCents)}</span>
+            </div>
+            <div className="flex justify-between text-muted">
+              <span className="font-semibold">Tax</span>
+              <span className="font-bold tabular-nums">{formatCents(createTotals.taxAmountCents)}</span>
+            </div>
+            <div className="flex justify-between text-base font-extrabold text-ink">
+              <span>Total</span>
+              <span>{formatCents(createTotals.grandTotalCents)}</span>
+            </div>
+            {includeInitialPayment && initialPaymentCents > 0 && (
+              <>
+                <div className="flex justify-between text-muted">
+                  <span className="font-semibold">Initial Payment</span>
+                  <span className="font-bold tabular-nums">{formatCents(initialPaymentCents)}</span>
+                </div>
+                <div className="flex justify-between text-base font-extrabold text-danger">
+                  <span>Balance Due</span>
+                  <span>{formatCents(Math.max(createTotals.grandTotalCents - initialPaymentCents, 0))}</span>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
+            <Button
+              type="button"
+              onClick={() => setCreateOpen(false)}
+              className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={createSaving} className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50">
+              {createSaving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
+              {createSaving ? "Creating..." : "Create Invoice"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+    </motion.div>
+  );
+}

@@ -50,6 +50,12 @@ const DEFAULT_SYSTEM_ROLES: Array<{
   permissions: PermissionsMap;
 }> = [
   {
+    roleName: "Super Admin",
+    description:
+      "Cross-branch oversight. Leave this employee's branch unassigned so they see every storefront's data instead of being limited to one.",
+    permissions: fullAccess(ALL_MODULE_KEYS)
+  },
+  {
     roleName: "Owner",
     description: "Full, unrestricted access to every area of the business account.",
     permissions: fullAccess(ALL_MODULE_KEYS)
@@ -69,11 +75,13 @@ const DEFAULT_SYSTEM_ROLES: Array<{
       "inventory",
       "stock_transfers",
       "sales",
+      "quotations",
       "purchases",
       "customers",
       "suppliers",
       "reports",
-      "locations"
+      "locations",
+      "approvals"
     ])
   },
   {
@@ -83,7 +91,8 @@ const DEFAULT_SYSTEM_ROLES: Array<{
       dashboard: ["view"],
       products: ["view"],
       inventory: ["view"],
-      sales: ["view", "create", "delete"],
+      sales: ["view", "create", "edit", "delete"],
+      quotations: ["view", "create", "edit"],
       customers: ["view", "create"],
       payment_methods: ["view"]
     }
@@ -135,6 +144,52 @@ export function ensureDefaultRoles(tenantId: string): void {
       permissions: defaultRole.permissions,
       isSystemRole: true,
       createdBy: null
+    });
+  }
+}
+
+/**
+ * Retroactively adds the "Super Admin" role for tenants that already had their default roles
+ * seeded before this role existed. Safe to call every boot — it's a no-op once the role exists.
+ */
+export function ensureSuperAdminRole(tenantId: string): void {
+  const superAdminDefault = DEFAULT_SYSTEM_ROLES.find((role) => role.roleName === "Super Admin");
+  if (!superAdminDefault) return;
+  if (roleRepository.findRoleByNameRow(tenantId, superAdminDefault.roleName)) return;
+
+  roleRepository.insertRoleRow({
+    id: `role_${randomUUID()}`,
+    tenantId,
+    roleName: superAdminDefault.roleName,
+    description: superAdminDefault.description,
+    permissions: superAdminDefault.permissions,
+    isSystemRole: true,
+    createdBy: null
+  });
+}
+
+/**
+ * Retroactively grants "quotations" permissions to system roles seeded before this module existed —
+ * new installs get it for free via DEFAULT_SYSTEM_ROLES, but a tenant's existing role rows are frozen
+ * JSON snapshots that a change to that constant never reaches on its own. Safe every boot: a no-op
+ * once a role's stored permissions already include quotations.
+ */
+export function ensureQuotationsPermission(tenantId: string): void {
+  const defaultsByName = new Map(DEFAULT_SYSTEM_ROLES.map((role) => [role.roleName, role.permissions.quotations]));
+
+  for (const row of roleRepository.findAllRoleRows(tenantId)) {
+    if (!row.is_system_role) continue;
+    const grant = defaultsByName.get(row.role_name);
+    if (!grant || grant.length === 0) continue;
+
+    const role = roleRepository.mapRoleRow(row);
+    if (role.permissions.quotations) continue;
+
+    roleRepository.updateRoleRow(row.id, {
+      roleName: role.roleName,
+      description: role.description,
+      permissions: { ...role.permissions, quotations: grant },
+      updatedBy: null
     });
   }
 }

@@ -1,3 +1,4 @@
+import type { LogoRatio } from "./logo";
 import type { PermissionsMap } from "./role";
 
 export type AuthEmployeeSummary = {
@@ -17,6 +18,8 @@ export type AuthRoleSummary = {
 export type AuthBranchSummary = {
   id: string;
   locationName: string;
+  logoPath: string | null;
+  logoRatio: LogoRatio | null;
 } | null;
 
 /** The authenticated session held in the main process and mirrored into the renderer. */

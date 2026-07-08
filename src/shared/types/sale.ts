@@ -11,6 +11,39 @@ export type SaleStatus = (typeof SALE_STATUS_OPTIONS)[number]["value"];
 
 export type SaleSyncStatus = "pending" | "synced" | "syncing" | "error";
 
+export const TRANSACTION_TYPE_OPTIONS = [
+  { value: "retail_sale", label: "Retail Sale" },
+  { value: "wholesale_sale", label: "Wholesale Sale" },
+  { value: "invoice", label: "Invoice" },
+  { value: "return", label: "Return" },
+  { value: "exchange", label: "Exchange" }
+] as const;
+
+export type TransactionType = (typeof TRANSACTION_TYPE_OPTIONS)[number]["value"];
+
+export const PAYMENT_STATUS_OPTIONS = [
+  { value: "unpaid", label: "Unpaid" },
+  { value: "partially_paid", label: "Partially Paid" },
+  { value: "paid", label: "Paid" },
+  { value: "overdue", label: "Overdue" },
+  { value: "cancelled", label: "Cancelled" }
+] as const;
+
+export type PaymentStatus = (typeof PAYMENT_STATUS_OPTIONS)[number]["value"];
+
+/** One entry in a sale's payment history — invoices can accumulate several of these over time. */
+export type SalePayment = {
+  id: string;
+  paymentMethodId: string;
+  paymentMethodName: string;
+  amountCents: number;
+  reference: string | null;
+  receivedBy: string;
+  receivedByName: string;
+  receivedAt: string;
+  notes: string | null;
+};
+
 export type SaleItem = {
   id: SaleItemId;
   saleId: string;
@@ -37,6 +70,8 @@ export type Sale = {
   customerId: string | null;
   customerName: string | null;
   saleStatus: SaleStatus;
+  transactionType: TransactionType;
+  paymentStatus: PaymentStatus;
   subtotalCents: number;
   discountAmountCents: number;
   taxAmountCents: number;
@@ -47,6 +82,13 @@ export type Sale = {
   amountReceivedCents: number | null;
   changeGivenCents: number | null;
   notes: string | null;
+  invoiceNumber: string | null;
+  invoiceDate: string | null;
+  dueDate: string | null;
+  amountPaidCents: number;
+  balanceDueCents: number;
+  invoiceNotes: string | null;
+  payments: SalePayment[];
   completedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -65,4 +107,19 @@ export type PendingSaleListItem = {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+/** Lightweight row for the Receipts list — no line items, just enough to identify and act on the sale. */
+export type SaleListItem = {
+  id: string;
+  receiptNumber: string | null;
+  customerName: string | null;
+  employeeName: string;
+  locationName: string;
+  paymentMethodName: string | null;
+  itemCount: number;
+  grandTotalCents: number;
+  saleStatus: SaleStatus;
+  completedAt: string | null;
+  createdAt: string;
 };

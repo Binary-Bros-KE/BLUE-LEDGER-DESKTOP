@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { optionalText } from "@shared/schemas/common";
+import { LOGO_RATIO_OPTIONS, type LogoRatio } from "@shared/types/logo";
 import { BUSINESS_TYPE_OPTIONS, CURRENCY_OPTIONS, type BusinessType, type Currency } from "@shared/types/tenant";
 
 const businessTypeValues = BUSINESS_TYPE_OPTIONS.map((option) => option.value) as [
@@ -9,9 +10,16 @@ const businessTypeValues = BUSINESS_TYPE_OPTIONS.map((option) => option.value) a
 
 const currencyValues = CURRENCY_OPTIONS.map((option) => option.value) as [Currency, ...Currency[]];
 
+const logoRatioValues = LOGO_RATIO_OPTIONS.map((option) => option.value) as [LogoRatio, ...LogoRatio[]];
+
 export const businessProfileInputSchema = z.object({
   businessName: z.string().trim().min(1, "Business name is required").max(200),
   businessLogoPath: optionalText(1000),
+  businessLogoRatio: z
+    .enum(logoRatioValues)
+    .nullable()
+    .optional()
+    .transform((value) => value ?? null),
   businessRegistrationNumber: optionalText(),
   kraPin: optionalText(50),
   primaryPhone: optionalText(50),

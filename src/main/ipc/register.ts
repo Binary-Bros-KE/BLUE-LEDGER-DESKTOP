@@ -25,11 +25,22 @@ import {
 } from "@main/services/employee-service";
 import {
   pickAndStoreEmployeePhoto,
+  pickAndStoreLocationLogo,
   pickAndStoreProductImage,
-  readLocalImagePreview,
+  readManagedBusinessLogoPreview,
   readManagedEmployeePhotoPreview,
+  readManagedLocationLogoPreview,
   readManagedProductImagePreview
 } from "@main/services/image-service";
+import {
+  cancelInvoice,
+  createInvoice,
+  duplicateInvoice,
+  getInvoiceSummary,
+  listInvoices,
+  markInvoicePaid,
+  recordInvoicePayment
+} from "@main/services/invoice-service";
 import {
   getInventoryOverview,
   listInventoryForLocation,
@@ -53,20 +64,58 @@ import {
   updatePaymentMethod
 } from "@main/services/payment-method-service";
 import {
+  generateInvoicePdf,
+  generateQuotationPdf,
+  generateReceiptPdf,
+  getPrinterSettings,
+  printInvoiceDocument,
+  printQuotationDocument,
+  printReceipt,
+  savePrinterSettings,
+  testPrinterConnection
+} from "@main/services/printer-service";
+import {
   createProduct,
   getProduct,
   listProducts,
   setProductStatus,
   updateProduct
 } from "@main/services/product-service";
+import {
+  checkQuotationStock,
+  convertQuotationToInvoice,
+  convertQuotationToSale,
+  createQuotation,
+  deleteQuotation,
+  getQuotation,
+  getQuotationSummary,
+  listQuotations,
+  setQuotationStatus,
+  updateQuotation
+} from "@main/services/quotation-service";
 import { createRole, deleteRole, getRole, listRoles, updateRole } from "@main/services/role-service";
+import {
+  approveSaleReturn,
+  getSaleReturn,
+  listSaleReturns,
+  rejectSaleReturn,
+  requestSaleReturn
+} from "@main/services/sale-return-service";
 import {
   completeSale,
   deletePendingSale,
   getSale,
   listPendingSales,
+  listSales,
   suspendSale
 } from "@main/services/sale-service";
+import {
+  approveSaleVoid,
+  getSaleVoid,
+  listSaleVoids,
+  rejectSaleVoid,
+  requestSaleVoid
+} from "@main/services/sale-void-service";
 import {
   getAppContext,
   getCurrentTenant,
@@ -82,6 +131,7 @@ import type { CustomerStatus } from "@shared/types/customer";
 import type { EmployeeStatus } from "@shared/types/employee";
 import type { LocationStatus } from "@shared/types/location";
 import type { ProductStatus } from "@shared/types/product";
+import type { QuotationStatus } from "@shared/types/quotation";
 import { ipcChannels } from "./channels";
 
 const { ipcMain } = electron;
@@ -101,7 +151,7 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.tenantPickLogo, () => pickBusinessLogoPath());
   ipcMain.handle(ipcChannels.tenantReadImagePreview, (_event, path: string) =>
-    readLocalImagePreview(path)
+    readManagedBusinessLogoPreview(path)
   );
   ipcMain.handle(ipcChannels.locationList, () => listLocations());
   ipcMain.handle(ipcChannels.locationGet, (_event, id: string) => getLocation(id));
@@ -111,6 +161,10 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.locationSetStatus, (_event, id: string, status: LocationStatus) =>
     setLocationStatus(id, status)
+  );
+  ipcMain.handle(ipcChannels.locationPickLogo, () => pickAndStoreLocationLogo());
+  ipcMain.handle(ipcChannels.locationReadLogoPreview, (_event, relativePath: string) =>
+    readManagedLocationLogoPreview(relativePath)
   );
   ipcMain.handle(ipcChannels.categoryList, () => listCategories());
   ipcMain.handle(ipcChannels.categoryGet, (_event, id: string) => getCategory(id));
@@ -186,11 +240,78 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.customerSetStatus, (_event, id: string, status: CustomerStatus) =>
     setCustomerStatus(id, status)
   );
+  ipcMain.handle(ipcChannels.saleList, () => listSales());
   ipcMain.handle(ipcChannels.saleListPending, () => listPendingSales());
   ipcMain.handle(ipcChannels.saleGet, (_event, id: string) => getSale(id));
   ipcMain.handle(ipcChannels.saleSuspend, (_event, input: unknown) => suspendSale(input));
   ipcMain.handle(ipcChannels.saleDeletePending, (_event, id: string) => deletePendingSale(id));
   ipcMain.handle(ipcChannels.saleComplete, (_event, input: unknown) => completeSale(input));
+  ipcMain.handle(ipcChannels.saleVoidList, () => listSaleVoids());
+  ipcMain.handle(ipcChannels.saleVoidGet, (_event, id: string) => getSaleVoid(id));
+  ipcMain.handle(ipcChannels.saleVoidRequest, (_event, input: unknown) => requestSaleVoid(input));
+  ipcMain.handle(ipcChannels.saleVoidApprove, (_event, id: string, input: unknown) =>
+    approveSaleVoid(id, input)
+  );
+  ipcMain.handle(ipcChannels.saleVoidReject, (_event, id: string, input: unknown) =>
+    rejectSaleVoid(id, input)
+  );
+  ipcMain.handle(ipcChannels.saleReturnList, () => listSaleReturns());
+  ipcMain.handle(ipcChannels.saleReturnGet, (_event, id: string) => getSaleReturn(id));
+  ipcMain.handle(ipcChannels.saleReturnRequest, (_event, input: unknown) => requestSaleReturn(input));
+  ipcMain.handle(ipcChannels.saleReturnApprove, (_event, id: string, input: unknown) =>
+    approveSaleReturn(id, input)
+  );
+  ipcMain.handle(ipcChannels.saleReturnReject, (_event, id: string, input: unknown) =>
+    rejectSaleReturn(id, input)
+  );
+  ipcMain.handle(ipcChannels.invoiceList, () => listInvoices());
+  ipcMain.handle(ipcChannels.invoiceSummary, () => getInvoiceSummary());
+  ipcMain.handle(ipcChannels.invoiceCreate, (_event, input: unknown) => createInvoice(input));
+  ipcMain.handle(ipcChannels.invoiceRecordPayment, (_event, id: string, input: unknown) =>
+    recordInvoicePayment(id, input)
+  );
+  ipcMain.handle(ipcChannels.invoiceCancel, (_event, id: string) => cancelInvoice(id));
+  ipcMain.handle(ipcChannels.invoiceMarkPaid, (_event, id: string, input: unknown) =>
+    markInvoicePaid(id, input)
+  );
+  ipcMain.handle(ipcChannels.invoiceDuplicate, (_event, id: string) => duplicateInvoice(id));
+  ipcMain.handle(ipcChannels.quotationList, () => listQuotations());
+  ipcMain.handle(ipcChannels.quotationSummary, () => getQuotationSummary());
+  ipcMain.handle(ipcChannels.quotationGet, (_event, id: string) => getQuotation(id));
+  ipcMain.handle(ipcChannels.quotationCreate, (_event, input: unknown) => createQuotation(input));
+  ipcMain.handle(ipcChannels.quotationUpdate, (_event, id: string, input: unknown) =>
+    updateQuotation(id, input)
+  );
+  ipcMain.handle(ipcChannels.quotationDelete, (_event, id: string) => deleteQuotation(id));
+  ipcMain.handle(ipcChannels.quotationSetStatus, (_event, id: string, status: QuotationStatus) =>
+    setQuotationStatus(id, status)
+  );
+  ipcMain.handle(ipcChannels.quotationCheckStock, (_event, id: string) => checkQuotationStock(id));
+  ipcMain.handle(ipcChannels.quotationConvertToSale, (_event, id: string, input: unknown) =>
+    convertQuotationToSale(id, input)
+  );
+  ipcMain.handle(ipcChannels.quotationConvertToInvoice, (_event, id: string, input: unknown) =>
+    convertQuotationToInvoice(id, input)
+  );
+  ipcMain.handle(ipcChannels.printerGetSettings, () => getPrinterSettings());
+  ipcMain.handle(ipcChannels.printerSaveSettings, (_event, input: unknown) => savePrinterSettings(input));
+  ipcMain.handle(ipcChannels.printerTestConnection, () => testPrinterConnection());
+  ipcMain.handle(ipcChannels.printerPrintReceipt, (_event, saleId: string) => printReceipt(saleId));
+  ipcMain.handle(ipcChannels.printerGenerateReceiptPdf, (_event, saleId: string) =>
+    generateReceiptPdf(saleId)
+  );
+  ipcMain.handle(ipcChannels.printerGenerateInvoicePdf, (_event, saleId: string) =>
+    generateInvoicePdf(saleId)
+  );
+  ipcMain.handle(ipcChannels.printerPrintInvoiceDocument, (_event, saleId: string) =>
+    printInvoiceDocument(saleId)
+  );
+  ipcMain.handle(ipcChannels.printerGenerateQuotationPdf, (_event, quotationId: string) =>
+    generateQuotationPdf(quotationId)
+  );
+  ipcMain.handle(ipcChannels.printerPrintQuotationDocument, (_event, quotationId: string) =>
+    printQuotationDocument(quotationId)
+  );
   ipcMain.handle(ipcChannels.syncGetSnapshot, () => getSyncSnapshot());
   ipcMain.handle(ipcChannels.syncListQueue, (_event, input?: { limit?: number }) =>
     listSyncQueue(input?.limit)

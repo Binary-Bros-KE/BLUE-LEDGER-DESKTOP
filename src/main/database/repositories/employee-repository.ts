@@ -39,7 +39,8 @@ export type EmployeeListRow = EmployeeRow & {
   branch_name: string | null;
 };
 
-export function findAllEmployeeRows(tenantId: string): EmployeeListRow[] {
+/** Pass null for locationId to see every branch's employees (e.g. a super-admin with no assigned branch). */
+export function findAllEmployeeRows(tenantId: string, locationId: string | null): EmployeeListRow[] {
   return getDatabase()
     .prepare(
       `
@@ -48,10 +49,11 @@ export function findAllEmployeeRows(tenantId: string): EmployeeListRow[] {
       LEFT JOIN roles r ON r.id = e.role_id
       LEFT JOIN locations l ON l.id = e.branch_id
       WHERE e.tenant_id = ?
+        AND (? IS NULL OR e.branch_id = ?)
       ORDER BY e.first_name ASC, e.last_name ASC
     `
     )
-    .all(tenantId) as EmployeeListRow[];
+    .all(tenantId, locationId, locationId) as EmployeeListRow[];
 }
 
 export function findEmployeeRowById(id: string): EmployeeRow | undefined {

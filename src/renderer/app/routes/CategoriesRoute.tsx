@@ -7,6 +7,7 @@ import { Field, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
+import { getErrorMessage } from "@renderer/shared/lib/errors";
 import {
   CATEGORY_COLOR_SWATCHES,
   type Category,
@@ -97,7 +98,7 @@ export function CategoriesRoute(): React.JSX.Element {
       const list = await window.blueLedger.category.list();
       setCategories(list);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Failed to load categories");
+      setLoadError(getErrorMessage(err, "Failed to load categories"));
     }
   }, []);
 
@@ -153,7 +154,7 @@ export function CategoriesRoute(): React.JSX.Element {
       await loadCategories();
       setModalOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save category");
+      setError(getErrorMessage(err, "Failed to save category"));
     } finally {
       setSaving(false);
     }
@@ -172,7 +173,7 @@ export function CategoriesRoute(): React.JSX.Element {
       await window.blueLedger.category.delete(node.id);
       await loadCategories();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete category");
+      setError(getErrorMessage(err, "Failed to delete category"));
     }
   }
 

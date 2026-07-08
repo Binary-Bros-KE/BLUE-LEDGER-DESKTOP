@@ -1,3 +1,5 @@
+import type { LogoRatio } from "./logo";
+
 export type TenantId = string;
 export type ClientId = string;
 export type ServerId = string;
@@ -36,6 +38,7 @@ export type TenantSyncStatus = "pending" | "synced" | "syncing" | "error";
 export type BusinessProfile = {
   businessName: string;
   businessLogoPath: string | null;
+  businessLogoRatio: LogoRatio | null;
   businessRegistrationNumber: string | null;
   kraPin: string | null;
   primaryPhone: string | null;
@@ -83,7 +86,7 @@ export type TenantRecord = BusinessProfile &
     updatedAt: string;
   };
 
-/** Lightweight tenant snapshot used for app boot / sidebar display. */
+/** Lightweight tenant snapshot used for app boot / sidebar display, and receipt rendering. */
 export type TenantContext = {
   tenantId: TenantId;
   clientId: ClientId;
@@ -91,6 +94,10 @@ export type TenantContext = {
   workstationId: WorkstationId;
   businessName: string;
   businessLogoPath: string | null;
+  physicalAddress: string | null;
+  primaryPhone: string | null;
+  receiptHeader: string | null;
+  receiptFooter: string | null;
   currency: Currency;
   createdAt: string;
   updatedAt: string;

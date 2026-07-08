@@ -37,20 +37,29 @@ export type ProductListRow = ProductRow & {
   total_stock: number;
 };
 
-export function findAllProductRows(tenantId: string): ProductListRow[] {
+/**
+ * Lists products for the tenant. When locationId is provided, only products with an inventory
+ * record at that branch are included (branch-exclusive catalogs), and total_stock reflects only
+ * that branch's quantity. Pass null (e.g. for a super-admin with no assigned branch) to see the
+ * full tenant-wide catalog with stock summed across every location.
+ */
+export function findAllProductRows(tenantId: string, locationId: string | null): ProductListRow[] {
   return getDatabase()
     .prepare(
       `
       SELECT p.*, c.name AS category_name, c.color AS category_color, COALESCE(SUM(i.quantity), 0) AS total_stock
       FROM products p
       LEFT JOIN categories c ON c.id = p.category_id
-      LEFT JOIN inventory i ON i.product_id = p.id
+      LEFT JOIN inventory i ON i.product_id = p.id AND (? IS NULL OR i.location_id = ?)
       WHERE p.tenant_id = ?
+        AND (? IS NULL OR EXISTS (
+          SELECT 1 FROM inventory ei WHERE ei.product_id = p.id AND ei.location_id = ?
+        ))
       GROUP BY p.id
       ORDER BY p.name ASC
     `
     )
-    .all(tenantId) as ProductListRow[];
+    .all(locationId, locationId, tenantId, locationId, locationId) as ProductListRow[];
 }
 
 export function findProductRowById(id: string): ProductRow | undefined {

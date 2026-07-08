@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import * as locationRepository from "@main/database/repositories/location-repository";
 import { getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
+import { deleteManagedLocationLogo } from "@main/services/image-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { locationInputSchema } from "@shared/schemas/location";
 import type { Location, LocationStatus } from "@shared/types/location";
@@ -36,7 +37,14 @@ export function createLocation(input: unknown): Location {
 export function updateLocation(id: string, input: unknown): Location {
   requirePermission("locations", "edit");
   const parsed = locationInputSchema.parse(input);
+  const existing = locationRepository.findLocationRowById(id);
+
   const row = locationRepository.updateLocationRow(id, { ...parsed, updatedBy: getCurrentEmployeeId() });
+
+  if (existing?.logo_path && existing.logo_path !== parsed.logoPath) {
+    deleteManagedLocationLogo(existing.logo_path);
+  }
+
   return locationRepository.mapLocationRow(row);
 }
 

@@ -7,6 +7,7 @@ import { Field, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
+import { getErrorMessage } from "@renderer/shared/lib/errors";
 import {
   PERMISSION_ACTIONS,
   PERMISSION_ACTION_LABELS,
@@ -64,7 +65,7 @@ export function RolesRoute(): React.JSX.Element {
       const list = await window.blueLedger.role.list();
       setRoles(list);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Failed to load roles");
+      setLoadError(getErrorMessage(err, "Failed to load roles"));
     }
   }, []);
 
@@ -165,7 +166,7 @@ export function RolesRoute(): React.JSX.Element {
       await loadRoles();
       setModalOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save role");
+      setError(getErrorMessage(err, "Failed to save role"));
     } finally {
       setSaving(false);
     }
@@ -179,7 +180,7 @@ export function RolesRoute(): React.JSX.Element {
       await window.blueLedger.role.delete(role.id);
       await loadRoles();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to delete role");
+      setActionError(getErrorMessage(err, "Failed to delete role"));
     }
   }
 

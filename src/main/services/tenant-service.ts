@@ -4,8 +4,9 @@ import electron from "electron";
 import { getDatabase, getDatabasePath, runInTransaction } from "@main/database/connection";
 import * as tenantRepository from "@main/database/repositories/tenant-repository";
 import { requirePermission } from "@main/services/auth-service";
+import { deleteManagedBusinessLogo, pickAndStoreBusinessLogo } from "@main/services/image-service";
 
-const { app, dialog } = electron;
+const { app } = electron;
 import { APP_NAME } from "@shared/constants/app";
 import { businessProfileInputSchema } from "@shared/schemas/tenant";
 import type { AppContext, Currency, TenantContext, TenantRecord } from "@shared/types/tenant";
@@ -26,6 +27,10 @@ function toTenantContext(row: tenantRepository.TenantRow): TenantContext {
     workstationId: workstation?.id ?? "",
     businessName: row.business_name,
     businessLogoPath: row.business_logo_path,
+    physicalAddress: row.physical_address,
+    primaryPhone: row.primary_phone,
+    receiptHeader: row.receipt_header,
+    receiptFooter: row.receipt_footer,
     currency: row.currency as Currency,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -96,22 +101,19 @@ export function getTenantProfile(): TenantRecord {
 export function updateTenantProfile(input: unknown): TenantRecord {
   requirePermission("business_profile", "edit");
   const parsed = businessProfileInputSchema.parse(input);
+  const existing = tenantRepository.findTenantRow();
+
   const row = tenantRepository.updateTenantProfileRow(parsed);
+
+  if (existing?.business_logo_path && existing.business_logo_path !== parsed.businessLogoPath) {
+    deleteManagedBusinessLogo(existing.business_logo_path);
+  }
+
   return tenantRepository.mapTenantRow(row, app.getVersion());
 }
 
+/** Copies the chosen logo into managed app storage so it survives the source file moving or being deleted. */
 export async function pickBusinessLogoPath(): Promise<string | null> {
   requirePermission("business_profile", "edit");
-  const result = await dialog.showOpenDialog({
-    title: "Choose a business logo",
-    properties: ["openFile"],
-    filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }]
-  });
-
-  const [firstPath] = result.filePaths;
-  if (result.canceled || !firstPath) {
-    return null;
-  }
-
-  return firstPath;
+  return pickAndStoreBusinessLogo();
 }

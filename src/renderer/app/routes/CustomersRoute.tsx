@@ -7,6 +7,7 @@ import { Field, SelectField, TextAreaField } from "@renderer/shared/components/f
 import { Modal } from "@renderer/shared/components/Modal";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
+import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
 import { CUSTOMER_TYPE_OPTIONS, type Customer, type CustomerType } from "@shared/types/customer";
 import { CustomerDetailModal } from "./customers/CustomerDetailModal";
@@ -71,7 +72,7 @@ export function CustomersRoute(): React.JSX.Element {
       const list = await window.blueLedger.customer.list();
       setCustomers(list);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Failed to load customers");
+      setLoadError(getErrorMessage(err, "Failed to load customers"));
     }
   }, []);
 
@@ -131,7 +132,7 @@ export function CustomersRoute(): React.JSX.Element {
       await loadCustomers();
       setModalOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save customer");
+      setError(getErrorMessage(err, "Failed to save customer"));
     } finally {
       setSaving(false);
     }
@@ -146,7 +147,7 @@ export function CustomersRoute(): React.JSX.Element {
       );
       await loadCustomers();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to update status");
+      setActionError(getErrorMessage(err, "Failed to update status"));
     }
   }
 

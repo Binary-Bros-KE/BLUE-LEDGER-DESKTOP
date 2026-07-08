@@ -15,16 +15,29 @@ export type CustomerRow = {
   current_balance_cents: number;
   notes: string | null;
   status: string;
+  location_id: string | null;
   created_at: string;
   updated_at: string;
   sync_status: string;
   last_synced_at: string | null;
 };
 
-export function findAllCustomerRows(tenantId: string): CustomerRow[] {
+/**
+ * Lists customers for the tenant. When locationId is provided, includes only customers created at
+ * that branch plus "shared" customers with no branch (legacy records from before branch-tagging, or
+ * ones created by a super-admin). Pass null to see every customer regardless of branch.
+ */
+export function findAllCustomerRows(tenantId: string, locationId: string | null): CustomerRow[] {
   return getDatabase()
-    .prepare("SELECT * FROM customers WHERE tenant_id = ? ORDER BY name ASC")
-    .all(tenantId) as CustomerRow[];
+    .prepare(
+      `
+      SELECT * FROM customers
+      WHERE tenant_id = ?
+        AND (? IS NULL OR location_id IS NULL OR location_id = ?)
+      ORDER BY name ASC
+    `
+    )
+    .all(tenantId, locationId, locationId) as CustomerRow[];
 }
 
 export function findCustomerRowById(id: string): CustomerRow | undefined {
@@ -55,7 +68,7 @@ export function findMaxCustomerCodeRow(tenantId: string): string | null {
 }
 
 export function insertCustomerRow(
-  input: CustomerInput & { id: string; tenantId: string; customerCode: string }
+  input: CustomerInput & { id: string; tenantId: string; customerCode: string; locationId: string | null }
 ): CustomerRow {
   const now = new Date().toISOString();
 
@@ -65,9 +78,9 @@ export function insertCustomerRow(
       INSERT INTO customers (
         id, tenant_id, customer_code, customer_type, name, phone, email,
         physical_address, credit_limit_cents, current_balance_cents, notes,
-        status, created_at, updated_at, sync_status
+        status, location_id, created_at, updated_at, sync_status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'active', ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'active', ?, ?, ?, 'pending')
     `
     )
     .run(
@@ -81,6 +94,7 @@ export function insertCustomerRow(
       input.physicalAddress,
       input.creditLimitCents,
       input.notes,
+      input.locationId,
       now,
       now
     );

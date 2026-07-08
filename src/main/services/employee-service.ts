@@ -3,7 +3,7 @@ import * as employeeRepository from "@main/database/repositories/employee-reposi
 import * as locationRepository from "@main/database/repositories/location-repository";
 import * as roleRepository from "@main/database/repositories/role-repository";
 import { hashSecret } from "@main/lib/password-hash";
-import { getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
+import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
 import { deleteManagedEmployeePhoto } from "@main/services/image-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { employeeCreateSchema, employeeUpdateSchema, type EmployeeCreateInput } from "@shared/schemas/employee";
@@ -76,7 +76,7 @@ function createEmployeeInternal(
  * createEmployee(), since nobody can hold a permission before an employee (and a session) exists.
  */
 export function ensureDefaultSystemEmployee(tenantId: string): void {
-  const hasAnyEmployee = employeeRepository.findAllEmployeeRows(tenantId).length > 0;
+  const hasAnyEmployee = employeeRepository.findAllEmployeeRows(tenantId, null).length > 0;
   if (hasAnyEmployee) return;
 
   const ownerRoleRow = roleRepository
@@ -115,7 +115,10 @@ export function ensureDefaultSystemEmployee(tenantId: string): void {
 export function listEmployees(): EmployeeListItem[] {
   requirePermission("employees", "view");
   const { tenantId } = getCurrentTenant();
-  return employeeRepository.findAllEmployeeRows(tenantId).map(employeeRepository.mapEmployeeListRow);
+  const locationId = getCurrentBranchScope();
+  return employeeRepository
+    .findAllEmployeeRows(tenantId, locationId)
+    .map(employeeRepository.mapEmployeeListRow);
 }
 
 export function getEmployee(id: string): Employee {

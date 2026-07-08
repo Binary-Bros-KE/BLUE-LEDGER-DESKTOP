@@ -20,6 +20,7 @@ import { Modal } from "@renderer/shared/components/Modal";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { cn } from "@renderer/shared/lib/cn";
+import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
 import type { Category } from "@shared/types/category";
 import type { Location } from "@shared/types/location";
@@ -146,7 +147,7 @@ export function ProductsRoute(): React.JSX.Element {
       setCategories(categoryList);
       setLocations(locationList);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Failed to load products");
+      setLoadError(getErrorMessage(err, "Failed to load products"));
     }
   }, []);
 
@@ -221,7 +222,7 @@ export function ProductsRoute(): React.JSX.Element {
         updateField("imagePath", relativePath);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to attach image");
+      setError(getErrorMessage(err, "Failed to attach image"));
     } finally {
       setImageBusy(false);
     }
@@ -264,7 +265,7 @@ export function ProductsRoute(): React.JSX.Element {
       await loadAll();
       setModalOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save product");
+      setError(getErrorMessage(err, "Failed to save product"));
     } finally {
       setSaving(false);
     }

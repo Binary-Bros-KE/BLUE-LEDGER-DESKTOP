@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   ArrowLeftRight,
+  ImagePlus,
   Loader2,
   Pencil,
   Plus,
@@ -9,7 +10,8 @@ import {
   PowerOff,
   ShoppingCart,
   Store,
-  TruckIcon
+  TruckIcon,
+  X
 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
@@ -17,12 +19,17 @@ import { CheckboxField, Field, SelectField, TextAreaField } from "@renderer/shar
 import { Modal } from "@renderer/shared/components/Modal";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
+import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { logoBoxClassName } from "@renderer/shared/lib/logo";
 import { LOCATION_TYPE_OPTIONS, type Location, type LocationType } from "@shared/types/location";
+import { LOGO_RATIO_OPTIONS, type LogoRatio } from "@shared/types/logo";
 
 type FormState = {
   locationName: string;
   locationCode: string;
   locationType: LocationType;
+  logoPath: string | null;
+  logoRatio: LogoRatio | "";
   phone: string;
   alternativePhone: string;
   email: string;
@@ -45,6 +52,8 @@ const emptyForm: FormState = {
   locationName: "",
   locationCode: "",
   locationType: "retail_store",
+  logoPath: null,
+  logoRatio: "",
   phone: "",
   alternativePhone: "",
   email: "",
@@ -68,6 +77,8 @@ function toFormState(location: Location): FormState {
     locationName: location.locationName,
     locationCode: location.locationCode,
     locationType: location.locationType,
+    logoPath: location.logoPath,
+    logoRatio: location.logoRatio ?? "",
     phone: location.phone ?? "",
     alternativePhone: location.alternativePhone ?? "",
     email: location.email ?? "",
@@ -100,6 +111,8 @@ export function StorefrontsRoute(): React.JSX.Element {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
+  const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
+  const [logoBusy, setLogoBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -110,7 +123,7 @@ export function StorefrontsRoute(): React.JSX.Element {
       const list = await window.blueLedger.location.list();
       setLocations(list);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Failed to load storefronts");
+      setLoadError(getErrorMessage(err, "Failed to load storefronts"));
     }
   }, []);
 
@@ -118,8 +131,36 @@ export function StorefrontsRoute(): React.JSX.Element {
     void loadLocations();
   }, [loadLocations]);
 
+  useEffect(() => {
+    if (!form.logoPath) {
+      setLogoPreviewUrl(null);
+      return;
+    }
+    let cancelled = false;
+    void window.blueLedger.location.readLogoPreview(form.logoPath).then((url) => {
+      if (!cancelled) setLogoPreviewUrl(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.logoPath]);
+
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]): void {
     setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function handlePickLogo(): Promise<void> {
+    setLogoBusy(true);
+    try {
+      const relativePath = await window.blueLedger.location.pickLogo();
+      if (relativePath) {
+        updateField("logoPath", relativePath);
+      }
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to attach logo"));
+    } finally {
+      setLogoBusy(false);
+    }
   }
 
   function openCreateModal(): void {
@@ -141,16 +182,18 @@ export function StorefrontsRoute(): React.JSX.Element {
     setSaving(true);
     setError(null);
 
+    const payload = { ...form, logoRatio: form.logoRatio || null };
+
     try {
       if (editingId) {
-        await window.blueLedger.location.update(editingId, form);
+        await window.blueLedger.location.update(editingId, payload);
       } else {
-        await window.blueLedger.location.create(form);
+        await window.blueLedger.location.create(payload);
       }
       await loadLocations();
       setModalOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save location");
+      setError(getErrorMessage(err, "Failed to save location"));
     } finally {
       setSaving(false);
     }
@@ -233,6 +276,7 @@ export function StorefrontsRoute(): React.JSX.Element {
               <table className="w-full min-w-[900px] border-collapse text-sm">
                 <thead>
                   <tr className="bg-primary text-white">
+                    <Th className="w-14">Logo</Th>
                     <Th>Location</Th>
                     <Th>Type</Th>
                     <Th>Manager</Th>
@@ -245,6 +289,9 @@ export function StorefrontsRoute(): React.JSX.Element {
                 <tbody>
                   {locations.map((location) => (
                     <tr key={location.id} className="border-t border-line odd:bg-white even:bg-soft/50">
+                      <td className="px-3 py-2.5">
+                        <LocationLogo logoPath={location.logoPath} />
+                      </td>
                       <td className="px-4 py-3">
                         <p className="font-extrabold">{location.locationName}</p>
                         <p className="text-xs tabular-nums text-muted">{location.locationCode}</p>
@@ -332,7 +379,61 @@ export function StorefrontsRoute(): React.JSX.Element {
             </div>
           )}
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="flex items-center gap-4">
+            <div
+              className={cn(
+                "grid flex-none place-items-center overflow-hidden rounded-2xl border border-dashed border-line bg-white",
+                logoBoxClassName(form.logoRatio)
+              )}
+            >
+              {logoPreviewUrl ? (
+                <img src={logoPreviewUrl} alt="" className="size-full object-contain p-1.5" />
+              ) : (
+                <Store className="size-6 text-muted" aria-hidden="true" />
+              )}
+            </div>
+            <div>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  onClick={() => void handlePickLogo()}
+                  disabled={logoBusy}
+                  className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <ImagePlus className="mr-1.5 size-4" aria-hidden="true" />
+                  {form.logoPath ? "Replace Logo" : "Upload Logo"}
+                </Button>
+                {form.logoPath && (
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      updateField("logoPath", null);
+                      updateField("logoRatio", "");
+                    }}
+                    className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+                  >
+                    <X className="mr-1 size-3.5" aria-hidden="true" />
+                    Remove
+                  </Button>
+                )}
+              </div>
+              <p className="mt-1.5 text-[11px] font-semibold text-muted">
+                JPG, PNG, or WEBP · max 5MB. Optional — falls back to the business logo on documents.
+              </p>
+            </div>
+          </div>
+
+          {form.logoPath && (
+            <SelectField
+              label="Logo Shape"
+              value={form.logoRatio}
+              onChange={(value) => updateField("logoRatio", value as LogoRatio)}
+              options={[{ value: "", label: "Not set" }, ...LOGO_RATIO_OPTIONS]}
+              className="mt-4 max-w-xs"
+            />
+          )}
+
+          <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field
               label="Location Name"
               value={form.locationName}
@@ -491,6 +592,34 @@ function Th({ children, className }: { children: React.ReactNode; className?: st
     <th className={cn("px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider", className)}>
       {children}
     </th>
+  );
+}
+
+function LocationLogo({ logoPath }: { logoPath: string | null }): React.JSX.Element {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!logoPath) {
+      setPreviewUrl(null);
+      return;
+    }
+    let cancelled = false;
+    void window.blueLedger.location.readLogoPreview(logoPath).then((url) => {
+      if (!cancelled) setPreviewUrl(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [logoPath]);
+
+  return (
+    <div className="grid size-9 flex-none place-items-center overflow-hidden rounded-lg border border-line bg-white">
+      {previewUrl ? (
+        <img src={previewUrl} alt="" className="size-full object-contain p-0.5" />
+      ) : (
+        <Store className="size-4 text-muted" aria-hidden="true" />
+      )}
+    </div>
   );
 }
 

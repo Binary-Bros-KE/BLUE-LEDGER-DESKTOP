@@ -9,7 +9,8 @@ import {
   Loader2,
   PenLine,
   Save,
-  ShieldCheck
+  ShieldCheck,
+  X
 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
@@ -17,6 +18,9 @@ import { Field, SelectField, TextAreaField } from "@renderer/shared/components/f
 import { StampBadge } from "@renderer/shared/components/StampBadge";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
+import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { logoBoxClassName } from "@renderer/shared/lib/logo";
+import { LOGO_RATIO_OPTIONS, type LogoRatio } from "@shared/types/logo";
 import {
   BUSINESS_TYPE_OPTIONS,
   CURRENCY_OPTIONS,
@@ -28,6 +32,7 @@ import {
 type FormState = {
   businessName: string;
   businessLogoPath: string;
+  businessLogoRatio: LogoRatio | "";
   businessRegistrationNumber: string;
   kraPin: string;
   primaryPhone: string;
@@ -51,6 +56,7 @@ function toFormState(record: TenantRecord): FormState {
   return {
     businessName: record.businessName,
     businessLogoPath: record.businessLogoPath ?? "",
+    businessLogoRatio: record.businessLogoRatio ?? "",
     businessRegistrationNumber: record.businessRegistrationNumber ?? "",
     kraPin: record.kraPin ?? "",
     primaryPhone: record.primaryPhone ?? "",
@@ -156,12 +162,15 @@ export function BusinessProfileRoute(): React.JSX.Element {
     setError(null);
 
     try {
-      const updated = await window.blueLedger.tenant.updateProfile(form);
+      const updated = await window.blueLedger.tenant.updateProfile({
+        ...form,
+        businessLogoRatio: form.businessLogoRatio || null
+      });
       setProfile(updated);
       setForm(toFormState(updated));
       setSavedAt(Date.now());
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save business profile");
+      setError(getErrorMessage(err, "Failed to save business profile"));
     } finally {
       setSaving(false);
     }
@@ -222,31 +231,60 @@ export function BusinessProfileRoute(): React.JSX.Element {
         )}
 
         <div className="mt-5 flex items-center gap-4">
-          <div className="grid size-16 flex-none place-items-center overflow-hidden rounded-2xl border border-dashed border-gray-300">
+          <div
+            className={cn(
+              "grid flex-none place-items-center overflow-hidden rounded-2xl border border-dashed border-gray-300 bg-white",
+              logoBoxClassName(form.businessLogoRatio)
+            )}
+          >
             {logoPreviewUrl ? (
-              <img src={logoPreviewUrl} alt="Business logo" className="size-full object-cover" />
+              <img src={logoPreviewUrl} alt="Business logo" className="size-full object-contain p-1.5" />
             ) : (
               <ImageIcon className="size-6 text-muted" aria-hidden="true" />
             )}
           </div>
           <div>
             {canEdit && (
-              <Button
-                type="button"
-                onClick={() => void handlePickLogo()}
-                className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
-              >
-                <Camera className="mr-2 size-4" aria-hidden="true" />
-                Choose logo
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  onClick={() => void handlePickLogo()}
+                  className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+                >
+                  <Camera className="mr-2 size-4" aria-hidden="true" />
+                  {form.businessLogoPath ? "Replace logo" : "Choose logo"}
+                </Button>
+                {form.businessLogoPath && (
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      updateField("businessLogoPath", "");
+                      updateField("businessLogoRatio", "");
+                    }}
+                    className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+                  >
+                    <X className="mr-1.5 size-3.5" aria-hidden="true" />
+                    Remove
+                  </Button>
+                )}
+              </div>
             )}
             <p className="mt-2 text-xs font-semibold text-muted">
-              {form.businessLogoPath
-                ? form.businessLogoPath.split(/[\\/]/).pop()
-                : "PNG or JPG. Kept on disk — only the file path is stored."}
+              JPG, PNG, or WEBP · max 5MB. Copied into Blue Ledger's own storage, so it stays put even
+              if you move or delete the original file.
             </p>
           </div>
         </div>
+
+        {form.businessLogoPath && (
+          <SelectField
+            label="Logo Shape"
+            value={form.businessLogoRatio}
+            onChange={(value) => updateField("businessLogoRatio", value as LogoRatio)}
+            options={[{ value: "", label: "Not set" }, ...LOGO_RATIO_OPTIONS]}
+            className="mt-3 max-w-xs"
+          />
+        )}
 
         <FormSection title="Business Information">
           <Field

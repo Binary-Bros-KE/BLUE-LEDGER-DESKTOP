@@ -3,17 +3,22 @@ import { Loader2 } from "lucide-react";
 import { AppShell } from "@renderer/app/layouts/AppShell";
 import { navItemsByKey } from "@renderer/app/layouts/navigation";
 import { AccessDeniedRoute } from "@renderer/app/routes/AccessDeniedRoute";
+import { ApprovalsRoute } from "@renderer/app/routes/ApprovalsRoute";
 import { BusinessProfileRoute } from "@renderer/app/routes/BusinessProfileRoute";
 import { CategoriesRoute } from "@renderer/app/routes/CategoriesRoute";
 import { CheckoutRoute } from "@renderer/app/routes/CheckoutRoute";
 import { CustomersRoute } from "@renderer/app/routes/CustomersRoute";
 import { DashboardRoute } from "@renderer/app/routes/DashboardRoute";
 import { EmployeesRoute } from "@renderer/app/routes/EmployeesRoute";
+import { InvoicesRoute } from "@renderer/app/routes/InvoicesRoute";
 import { LoginRoute } from "@renderer/app/routes/LoginRoute";
 import { PaymentMethodsRoute } from "@renderer/app/routes/PaymentMethodsRoute";
 import { PlaceholderRoute } from "@renderer/app/routes/PlaceholderRoute";
 import { ProductsRoute } from "@renderer/app/routes/ProductsRoute";
+import { QuotationsRoute } from "@renderer/app/routes/QuotationsRoute";
+import { ReceiptsRoute } from "@renderer/app/routes/ReceiptsRoute";
 import { RolesRoute } from "@renderer/app/routes/RolesRoute";
+import { SettingsRoute } from "@renderer/app/routes/SettingsRoute";
 import { StorefrontsRoute } from "@renderer/app/routes/StorefrontsRoute";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { useAppStore } from "@renderer/shared/stores/app-store";
@@ -72,6 +77,16 @@ export function App(): React.JSX.Element {
         <CustomersRoute />
       ) : activeNavKey === "checkout" ? (
         <CheckoutRoute />
+      ) : activeNavKey === "receipts" ? (
+        <ReceiptsRoute />
+      ) : activeNavKey === "invoices" ? (
+        <InvoicesRoute />
+      ) : activeNavKey === "quotations" ? (
+        <QuotationsRoute />
+      ) : activeNavKey === "approvals" ? (
+        <ApprovalsRoute />
+      ) : activeNavKey === "settings" ? (
+        <SettingsRoute />
       ) : (
         <PlaceholderRoute
           icon={activeItem.icon}

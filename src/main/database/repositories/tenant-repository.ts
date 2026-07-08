@@ -1,5 +1,6 @@
 import { getDatabase } from "@main/database/connection";
 import type { BusinessProfileInput } from "@shared/schemas/tenant";
+import type { LogoRatio } from "@shared/types/logo";
 import type {
   BusinessType,
   Currency,
@@ -15,6 +16,7 @@ export type TenantRow = {
   server_id: string | null;
   business_name: string;
   business_logo_path: string | null;
+  business_logo_ratio: string | null;
   business_registration_number: string | null;
   kra_pin: string | null;
   primary_phone: string | null;
@@ -87,6 +89,7 @@ export function updateTenantProfileRow(input: BusinessProfileInput): TenantRow {
       UPDATE tenant SET
         business_name = ?,
         business_logo_path = ?,
+        business_logo_ratio = ?,
         business_registration_number = ?,
         kra_pin = ?,
         primary_phone = ?,
@@ -112,6 +115,7 @@ export function updateTenantProfileRow(input: BusinessProfileInput): TenantRow {
     .run(
       input.businessName,
       input.businessLogoPath,
+      input.businessLogoRatio,
       input.businessRegistrationNumber,
       input.kraPin,
       input.primaryPhone,
@@ -153,6 +157,7 @@ export function mapTenantRow(row: TenantRow, appVersion: string): TenantRecord {
     serverId: row.server_id,
     businessName: row.business_name,
     businessLogoPath: row.business_logo_path,
+    businessLogoRatio: row.business_logo_ratio as LogoRatio | null,
     businessRegistrationNumber: row.business_registration_number,
     kraPin: row.kra_pin,
     primaryPhone: row.primary_phone,
