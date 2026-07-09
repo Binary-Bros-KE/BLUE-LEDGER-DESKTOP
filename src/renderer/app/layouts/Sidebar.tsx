@@ -229,7 +229,7 @@ export function Sidebar(): React.JSX.Element {
                         <Store className="size-3.5 text-primary" aria-hidden="true" />
                       )}
                     </div>
-                    {session.branch?.locationName ?? "No branch assigned"}
+                    {session.branch?.locationName ?? "Super Administrator"}
                   </div>
                 </div>
               </>

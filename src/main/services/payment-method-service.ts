@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import * as paymentMethodRepository from "@main/database/repositories/payment-method-repository";
-import { requirePermission } from "@main/services/auth-service";
+import { requirePermission, requireSignedIn } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { paymentMethodInputSchema } from "@shared/schemas/payment-method";
 import type { PaymentMethod } from "@shared/types/payment-method";
@@ -57,8 +57,11 @@ function assertUniqueFields(
   }
 }
 
+/** Every signed-in employee can read the list — choosing a payment method is part of completing a
+ * sale/invoice/quotation, which is already gated by its own permission. Managing payment methods
+ * (create/edit/delete) below remains gated behind the "payment_methods" permission. */
 export function listPaymentMethods(): PaymentMethod[] {
-  requirePermission("payment_methods", "view");
+  requireSignedIn();
   const { tenantId } = getCurrentTenant();
   return paymentMethodRepository
     .findAllPaymentMethodRows(tenantId)

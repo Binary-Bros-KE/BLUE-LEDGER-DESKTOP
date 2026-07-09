@@ -112,6 +112,18 @@ export function requirePermission(module: PermissionModuleKey, action: Permissio
   }
 }
 
+/**
+ * Throws if nobody is signed in — for data every employee needs to do their job (e.g. picking a
+ * payment method during checkout) but that shouldn't require a specific module permission. Module
+ * permissions like "payment_methods" still gate managing (create/edit/delete) that data, and the nav
+ * item that leads there — this is only for reading it as an input to an already-permitted action.
+ */
+export function requireSignedIn(): void {
+  if (!currentSession) {
+    throw new Error("You must be signed in to do that");
+  }
+}
+
 /** The signed-in employee's id, for stamping created_by/updated_by/performed_by columns. Null when signed out. */
 export function getCurrentEmployeeId(): string | null {
   return currentSession?.employee.id ?? null;
