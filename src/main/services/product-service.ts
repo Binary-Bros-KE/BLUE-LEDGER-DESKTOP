@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { runInTransaction } from "@main/database/connection";
 import * as categoryRepository from "@main/database/repositories/category-repository";
+import * as locationRepository from "@main/database/repositories/location-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
 import { deleteManagedProductImage } from "@main/services/image-service";
@@ -14,6 +15,15 @@ function assertCategoryBelongsToTenant(categoryId: string | null, tenantId: stri
   const row = categoryRepository.findCategoryRowById(categoryId);
   if (!row || row.tenant_id !== tenantId) {
     throw new Error("Selected category was not found");
+  }
+}
+
+/** null means "All Storefronts" — every storefront can see and sell this product. */
+function assertStorefrontBelongsToTenant(storefrontId: string | null, tenantId: string): void {
+  if (!storefrontId) return;
+  const row = locationRepository.findLocationRowById(storefrontId);
+  if (!row || row.tenant_id !== tenantId) {
+    throw new Error("Selected storefront was not found");
   }
 }
 
@@ -42,6 +52,26 @@ export function listProducts(): ProductListItem[] {
     .map(productRepository.mapProductListRow);
 }
 
+/**
+ * The Main Store's cross-storefront catalog view — unlike listProducts(), this ISN'T restricted to
+ * the caller's own assigned branch, since managing stock across every storefront is exactly what the
+ * Main Store is for. Pass a specific storefront id to see just its tagged products and its own
+ * quantity, or null to see the whole tenant catalog (every storefront tag) with stock summed everywhere.
+ */
+export function listProductsForStorefront(locationId: string | null): ProductListItem[] {
+  requirePermission("inventory", "view");
+  const { tenantId } = getCurrentTenant();
+
+  if (locationId) {
+    const location = locationRepository.findLocationRowById(locationId);
+    if (!location || location.tenant_id !== tenantId) {
+      throw new Error("Storefront not found");
+    }
+  }
+
+  return productRepository.findAllProductRows(tenantId, locationId).map(productRepository.mapProductListRow);
+}
+
 export function getProduct(id: string): Product {
   requirePermission("products", "view");
   const row = productRepository.findProductRowById(id);
@@ -58,6 +88,7 @@ export function createProduct(input: unknown): Product {
   const performedBy = getCurrentEmployeeId();
 
   assertCategoryBelongsToTenant(parsed.categoryId, tenantId);
+  assertStorefrontBelongsToTenant(parsed.storefrontId, tenantId);
   assertUniqueFields(tenantId, parsed);
 
   const productId = `product_${randomUUID()}`;
@@ -101,6 +132,7 @@ export function updateProduct(id: string, input: unknown): Product {
 
   const { tenantId } = getCurrentTenant();
   assertCategoryBelongsToTenant(parsed.categoryId, tenantId);
+  assertStorefrontBelongsToTenant(parsed.storefrontId, tenantId);
   assertUniqueFields(tenantId, parsed, id);
 
   const row = productRepository.updateProductRow(id, { ...parsed, updatedBy: getCurrentEmployeeId() });

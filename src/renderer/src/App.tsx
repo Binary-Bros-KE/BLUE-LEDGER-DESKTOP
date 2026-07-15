@@ -10,16 +10,22 @@ import { CheckoutRoute } from "@renderer/app/routes/CheckoutRoute";
 import { CustomersRoute } from "@renderer/app/routes/CustomersRoute";
 import { DashboardRoute } from "@renderer/app/routes/DashboardRoute";
 import { EmployeesRoute } from "@renderer/app/routes/EmployeesRoute";
+import { ExpensesRoute } from "@renderer/app/routes/ExpensesRoute";
 import { InvoicesRoute } from "@renderer/app/routes/InvoicesRoute";
 import { LoginRoute } from "@renderer/app/routes/LoginRoute";
+import { MainStoreRoute } from "@renderer/app/routes/MainStoreRoute";
 import { PaymentMethodsRoute } from "@renderer/app/routes/PaymentMethodsRoute";
 import { PlaceholderRoute } from "@renderer/app/routes/PlaceholderRoute";
 import { ProductsRoute } from "@renderer/app/routes/ProductsRoute";
+import { PurchasesRoute } from "@renderer/app/routes/PurchasesRoute";
 import { QuotationsRoute } from "@renderer/app/routes/QuotationsRoute";
 import { ReceiptsRoute } from "@renderer/app/routes/ReceiptsRoute";
 import { RolesRoute } from "@renderer/app/routes/RolesRoute";
+import { SalariesRoute } from "@renderer/app/routes/SalariesRoute";
 import { SettingsRoute } from "@renderer/app/routes/SettingsRoute";
+import { StockLedgerRoute } from "@renderer/app/routes/StockLedgerRoute";
 import { StorefrontsRoute } from "@renderer/app/routes/StorefrontsRoute";
+import { SuppliersRoute } from "@renderer/app/routes/SuppliersRoute";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { useAuthStore } from "@renderer/shared/stores/auth-store";
@@ -67,14 +73,26 @@ export function App(): React.JSX.Element {
         <CategoriesRoute />
       ) : activeNavKey === "products" ? (
         <ProductsRoute />
+      ) : activeNavKey === "main-store" ? (
+        <MainStoreRoute />
+      ) : activeNavKey === "stock" ? (
+        <StockLedgerRoute />
       ) : activeNavKey === "employees" ? (
         <EmployeesRoute />
       ) : activeNavKey === "roles" ? (
         <RolesRoute />
+      ) : activeNavKey === "salaries" ? (
+        <SalariesRoute />
       ) : activeNavKey === "payment-methods" ? (
         <PaymentMethodsRoute />
       ) : activeNavKey === "customers" ? (
         <CustomersRoute />
+      ) : activeNavKey === "suppliers" ? (
+        <SuppliersRoute />
+      ) : activeNavKey === "purchases" ? (
+        <PurchasesRoute />
+      ) : activeNavKey === "expenses" ? (
+        <ExpensesRoute />
       ) : activeNavKey === "checkout" ? (
         <CheckoutRoute />
       ) : activeNavKey === "receipts" ? (

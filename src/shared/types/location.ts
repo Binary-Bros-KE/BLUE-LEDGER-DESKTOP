@@ -12,6 +12,20 @@ export const LOCATION_TYPE_OPTIONS = [
 
 export type LocationType = (typeof LOCATION_TYPE_OPTIONS)[number]["value"];
 
+/**
+ * The subset of location types selectable when creating/editing a storefront — storefronts can only
+ * sell. "warehouse" and "distribution_center" are reserved for the Main Store, which is provisioned
+ * automatically per tenant and isn't created through the Storefronts screen.
+ */
+export const STOREFRONT_TYPE_OPTIONS = LOCATION_TYPE_OPTIONS.filter(
+  (option) => option.value !== "warehouse" && option.value !== "distribution_center"
+);
+
+/** True for a storefront (sells to customers) as opposed to the Main Store (warehouse/distribution). */
+export function isStorefrontType(locationType: LocationType): boolean {
+  return locationType !== "warehouse" && locationType !== "distribution_center";
+}
+
 export type LocationStatus = "active" | "inactive";
 export type LocationSyncStatus = "pending" | "synced" | "syncing" | "error";
 

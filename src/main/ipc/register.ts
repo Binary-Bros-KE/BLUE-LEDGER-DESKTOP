@@ -20,13 +20,18 @@ import {
   deleteEmployee,
   getEmployee,
   listEmployees,
+  listEmployeesForSalaryPicker,
   setEmployeeStatus,
   updateEmployee
 } from "@main/services/employee-service";
 import {
+  openManagedExpenseAttachment,
+  openManagedPurchaseAttachment,
   pickAndStoreEmployeePhoto,
+  pickAndStoreExpenseAttachment,
   pickAndStoreLocationLogo,
   pickAndStoreProductImage,
+  pickAndStorePurchaseAttachment,
   readManagedBusinessLogoPreview,
   readManagedEmployeePhotoPreview,
   readManagedLocationLogoPreview,
@@ -43,6 +48,7 @@ import {
 } from "@main/services/invoice-service";
 import {
   getInventoryOverview,
+  listAllStockMovements,
   listInventoryForLocation,
   listStockMovements,
   recordStockMovement,
@@ -67,20 +73,40 @@ import {
   generateInvoicePdf,
   generateQuotationPdf,
   generateReceiptPdf,
+  generateSalaryPdf,
   getPrinterSettings,
   printInvoiceDocument,
   printQuotationDocument,
   printReceipt,
   savePrinterSettings,
+  shareSalaryPayslip,
   testPrinterConnection
 } from "@main/services/printer-service";
+import {
+  createSalary,
+  getSalary,
+  listSalaries,
+  restoreSalary,
+  voidSalary
+} from "@main/services/salary-service";
 import {
   createProduct,
   getProduct,
   listProducts,
+  listProductsForStorefront,
   setProductStatus,
   updateProduct
 } from "@main/services/product-service";
+import {
+  distributeFromMainStore,
+  getMainStoreAllocationSummary,
+  getMainStoreProductDetail,
+  listMainStoreProductRows,
+  reallocateMainStoreStock,
+  receiveMainStoreStock,
+  recordMainStoreDamage,
+  returnToMainStore
+} from "@main/services/main-store-service";
 import {
   checkQuotationStock,
   convertQuotationToInvoice,
@@ -94,6 +120,41 @@ import {
   updateQuotation
 } from "@main/services/quotation-service";
 import { createRole, deleteRole, getRole, listRoles, updateRole } from "@main/services/role-service";
+import {
+  createSupplier,
+  getSupplier,
+  listSuppliers,
+  setSupplierStatus,
+  updateSupplier
+} from "@main/services/supplier-service";
+import {
+  cancelPurchase,
+  createPurchase,
+  getPurchase,
+  getPurchaseSummary,
+  listPurchases,
+  markPurchaseOrdered,
+  markPurchasePaid,
+  receivePurchaseGoods,
+  recordPurchasePayment,
+  updatePurchase
+} from "@main/services/purchase-service";
+import {
+  createExpenseCategory,
+  listExpenseCategories,
+  setExpenseCategoryStatus,
+  updateExpenseCategory
+} from "@main/services/expense-category-service";
+import {
+  archiveExpense,
+  createExpense,
+  deleteExpense,
+  getExpense,
+  getExpenseSummary,
+  listExpenses,
+  restoreExpense,
+  updateExpense
+} from "@main/services/expense-service";
 import {
   approveSaleReturn,
   getSaleReturn,
@@ -128,6 +189,8 @@ import { saveTheme } from "@main/services/theme-service";
 import { brandThemeSchema } from "@shared/schemas/theme";
 import type { CategoryStatus } from "@shared/types/category";
 import type { CustomerStatus } from "@shared/types/customer";
+import type { ExpenseCategoryStatus } from "@shared/types/expense-category";
+import type { SupplierStatus } from "@shared/types/supplier";
 import type { EmployeeStatus } from "@shared/types/employee";
 import type { LocationStatus } from "@shared/types/location";
 import type { ProductStatus } from "@shared/types/product";
@@ -189,6 +252,19 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.productReadImagePreview, (_event, relativePath: string) =>
     readManagedProductImagePreview(relativePath)
   );
+  ipcMain.handle(ipcChannels.mainStoreProductList, (_event, locationId: string | null) =>
+    listProductsForStorefront(locationId)
+  );
+  ipcMain.handle(ipcChannels.mainStoreAllocationSummary, () => getMainStoreAllocationSummary());
+  ipcMain.handle(ipcChannels.mainStoreProductRows, () => listMainStoreProductRows());
+  ipcMain.handle(ipcChannels.mainStoreProductDetail, (_event, productId: string) =>
+    getMainStoreProductDetail(productId)
+  );
+  ipcMain.handle(ipcChannels.mainStoreReceive, (_event, input: unknown) => receiveMainStoreStock(input));
+  ipcMain.handle(ipcChannels.mainStoreDistribute, (_event, input: unknown) => distributeFromMainStore(input));
+  ipcMain.handle(ipcChannels.mainStoreReturn, (_event, input: unknown) => returnToMainStore(input));
+  ipcMain.handle(ipcChannels.mainStoreReallocate, (_event, input: unknown) => reallocateMainStoreStock(input));
+  ipcMain.handle(ipcChannels.mainStoreDamage, (_event, input: unknown) => recordMainStoreDamage(input));
   ipcMain.handle(ipcChannels.inventoryOverview, (_event, productId: string) =>
     getInventoryOverview(productId)
   );
@@ -198,6 +274,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.stockMovementList, (_event, productId: string, input?: { limit?: number }) =>
     listStockMovements(productId, input?.limit)
   );
+  ipcMain.handle(ipcChannels.stockMovementListAll, (_event, input?: { limit?: number }) =>
+    listAllStockMovements(input?.limit)
+  );
   ipcMain.handle(ipcChannels.stockMovementCreate, (_event, input: unknown) => recordStockMovement(input));
   ipcMain.handle(ipcChannels.stockMovementTransfer, (_event, input: unknown) => recordStockTransfer(input));
   ipcMain.handle(ipcChannels.roleList, () => listRoles());
@@ -206,6 +285,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.roleUpdate, (_event, id: string, input: unknown) => updateRole(id, input));
   ipcMain.handle(ipcChannels.roleDelete, (_event, id: string) => deleteRole(id));
   ipcMain.handle(ipcChannels.employeeList, () => listEmployees());
+  ipcMain.handle(ipcChannels.employeeListForSalaryPicker, () => listEmployeesForSalaryPicker());
   ipcMain.handle(ipcChannels.employeeGet, (_event, id: string) => getEmployee(id));
   ipcMain.handle(ipcChannels.employeeCreate, (_event, input: unknown) => createEmployee(input));
   ipcMain.handle(ipcChannels.employeeUpdate, (_event, id: string, input: unknown) =>
@@ -240,6 +320,60 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.customerSetStatus, (_event, id: string, status: CustomerStatus) =>
     setCustomerStatus(id, status)
   );
+  ipcMain.handle(ipcChannels.supplierList, () => listSuppliers());
+  ipcMain.handle(ipcChannels.supplierGet, (_event, id: string) => getSupplier(id));
+  ipcMain.handle(ipcChannels.supplierCreate, (_event, input: unknown) => createSupplier(input));
+  ipcMain.handle(ipcChannels.supplierUpdate, (_event, id: string, input: unknown) =>
+    updateSupplier(id, input)
+  );
+  ipcMain.handle(ipcChannels.supplierSetStatus, (_event, id: string, status: SupplierStatus) =>
+    setSupplierStatus(id, status)
+  );
+  ipcMain.handle(ipcChannels.purchaseList, () => listPurchases());
+  ipcMain.handle(ipcChannels.purchaseSummary, () => getPurchaseSummary());
+  ipcMain.handle(ipcChannels.purchaseGet, (_event, id: string) => getPurchase(id));
+  ipcMain.handle(ipcChannels.purchaseCreate, (_event, input: unknown) => createPurchase(input));
+  ipcMain.handle(ipcChannels.purchaseUpdate, (_event, id: string, input: unknown) => updatePurchase(id, input));
+  ipcMain.handle(ipcChannels.purchaseMarkOrdered, (_event, id: string) => markPurchaseOrdered(id));
+  ipcMain.handle(ipcChannels.purchaseCancel, (_event, id: string) => cancelPurchase(id));
+  ipcMain.handle(ipcChannels.purchaseReceiveGoods, (_event, id: string, input: unknown) =>
+    receivePurchaseGoods(id, input)
+  );
+  ipcMain.handle(ipcChannels.purchaseRecordPayment, (_event, id: string, input: unknown) =>
+    recordPurchasePayment(id, input)
+  );
+  ipcMain.handle(ipcChannels.purchaseMarkPaid, (_event, id: string, input: unknown) =>
+    markPurchasePaid(id, input)
+  );
+  ipcMain.handle(ipcChannels.purchasePickAttachment, () => pickAndStorePurchaseAttachment());
+  ipcMain.handle(ipcChannels.purchaseOpenAttachment, (_event, relativePath: string) =>
+    openManagedPurchaseAttachment(relativePath).then(() => ({ success: true as const }))
+  );
+  ipcMain.handle(ipcChannels.expenseCategoryList, () => listExpenseCategories());
+  ipcMain.handle(ipcChannels.expenseCategoryCreate, (_event, input: unknown) => createExpenseCategory(input));
+  ipcMain.handle(ipcChannels.expenseCategoryUpdate, (_event, id: string, input: unknown) =>
+    updateExpenseCategory(id, input)
+  );
+  ipcMain.handle(ipcChannels.expenseCategorySetStatus, (_event, id: string, status: ExpenseCategoryStatus) =>
+    setExpenseCategoryStatus(id, status)
+  );
+  ipcMain.handle(ipcChannels.expenseList, () => listExpenses());
+  ipcMain.handle(ipcChannels.expenseSummary, () => getExpenseSummary());
+  ipcMain.handle(ipcChannels.expenseGet, (_event, id: string) => getExpense(id));
+  ipcMain.handle(ipcChannels.expenseCreate, (_event, input: unknown) => createExpense(input));
+  ipcMain.handle(ipcChannels.expenseUpdate, (_event, id: string, input: unknown) => updateExpense(id, input));
+  ipcMain.handle(ipcChannels.expenseArchive, (_event, id: string) => archiveExpense(id));
+  ipcMain.handle(ipcChannels.expenseRestore, (_event, id: string) => restoreExpense(id));
+  ipcMain.handle(ipcChannels.expenseDelete, (_event, id: string) => deleteExpense(id));
+  ipcMain.handle(ipcChannels.expensePickAttachment, () => pickAndStoreExpenseAttachment());
+  ipcMain.handle(ipcChannels.expenseOpenAttachment, (_event, relativePath: string) =>
+    openManagedExpenseAttachment(relativePath).then(() => ({ success: true as const }))
+  );
+  ipcMain.handle(ipcChannels.salaryList, () => listSalaries());
+  ipcMain.handle(ipcChannels.salaryGet, (_event, id: string) => getSalary(id));
+  ipcMain.handle(ipcChannels.salaryCreate, (_event, input: unknown) => createSalary(input));
+  ipcMain.handle(ipcChannels.salaryVoid, (_event, id: string) => voidSalary(id));
+  ipcMain.handle(ipcChannels.salaryRestore, (_event, id: string) => restoreSalary(id));
   ipcMain.handle(ipcChannels.saleList, () => listSales());
   ipcMain.handle(ipcChannels.saleListPending, () => listPendingSales());
   ipcMain.handle(ipcChannels.saleGet, (_event, id: string) => getSale(id));
@@ -311,6 +445,10 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.printerPrintQuotationDocument, (_event, quotationId: string) =>
     printQuotationDocument(quotationId)
+  );
+  ipcMain.handle(ipcChannels.printerGenerateSalaryPdf, (_event, salaryId: string) => generateSalaryPdf(salaryId));
+  ipcMain.handle(ipcChannels.printerShareSalaryPayslip, (_event, salaryId: string) =>
+    shareSalaryPayslip(salaryId)
   );
   ipcMain.handle(ipcChannels.syncGetSnapshot, () => getSyncSnapshot());
   ipcMain.handle(ipcChannels.syncListQueue, (_event, input?: { limit?: number }) =>

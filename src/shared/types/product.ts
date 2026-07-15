@@ -17,6 +17,8 @@ export type ProductInputFields = {
   shortName: string | null;
   description: string | null;
   categoryId: string | null;
+  /** Which storefront this product belongs to — null means it's available to every storefront ("All"). */
+  storefrontId: string | null;
   buyingPriceCents: number;
   sellingPriceCents: number;
   wholesalePriceCents: number | null;

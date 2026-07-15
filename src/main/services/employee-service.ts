@@ -121,6 +121,18 @@ export function listEmployees(): EmployeeListItem[] {
     .map(employeeRepository.mapEmployeeListRow);
 }
 
+/** A narrower read path for the Salaries "Process Salary" employee picker — gated by the ability to
+ * process payroll rather than full employee management, so a Manager who can run payroll but isn't
+ * granted HR administration can still pick who to pay. */
+export function listEmployeesForSalaryPicker(): EmployeeListItem[] {
+  requirePermission("salaries", "create");
+  const { tenantId } = getCurrentTenant();
+  const locationId = getCurrentBranchScope();
+  return employeeRepository
+    .findAllEmployeeRows(tenantId, locationId)
+    .map(employeeRepository.mapEmployeeListRow);
+}
+
 export function getEmployee(id: string): Employee {
   requirePermission("employees", "view");
   const row = employeeRepository.findEmployeeRowById(id);

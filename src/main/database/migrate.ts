@@ -710,6 +710,246 @@ const migrations = [
 
       CREATE INDEX idx_quotation_items_quotation ON quotation_items(quotation_id);
     `
+  },
+  {
+    version: 19,
+    name: "product_storefront_tag",
+    sql: `
+      ALTER TABLE products ADD COLUMN storefront_id TEXT REFERENCES locations(id);
+      CREATE INDEX idx_products_storefront ON products(storefront_id);
+    `
+  },
+  {
+    version: 20,
+    name: "main_store_allocations",
+    sql: `
+      CREATE TABLE IF NOT EXISTS main_store_allocations (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        storefront_id TEXT,
+        quantity INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (product_id) REFERENCES products(id),
+        FOREIGN KEY (storefront_id) REFERENCES locations(id)
+      );
+
+      CREATE INDEX idx_main_store_allocations_product ON main_store_allocations(product_id);
+      CREATE INDEX idx_main_store_allocations_storefront ON main_store_allocations(storefront_id);
+      CREATE UNIQUE INDEX idx_main_store_allocations_unique_storefront
+        ON main_store_allocations(product_id, storefront_id) WHERE storefront_id IS NOT NULL;
+    `
+  },
+  {
+    version: 21,
+    name: "suppliers",
+    sql: `
+      CREATE TABLE IF NOT EXISTS suppliers (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        supplier_code TEXT NOT NULL,
+        business_name TEXT NOT NULL,
+        contact_person TEXT,
+        phone_1 TEXT NOT NULL,
+        phone_2 TEXT,
+        email TEXT,
+        website TEXT,
+        country TEXT,
+        county TEXT,
+        town TEXT,
+        physical_address TEXT,
+        payment_option TEXT NOT NULL DEFAULT 'cash' CHECK (payment_option IN ('cash', 'mpesa', 'bank_transfer', 'other')),
+        mpesa_name TEXT,
+        mpesa_number TEXT,
+        mpesa_alternative_number TEXT,
+        bank_name TEXT,
+        bank_account_name TEXT,
+        bank_account_number TEXT,
+        credit_limit_cents INTEGER,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id)
+      );
+
+      CREATE UNIQUE INDEX idx_suppliers_tenant_code ON suppliers(tenant_id, supplier_code);
+      CREATE UNIQUE INDEX idx_suppliers_tenant_business_name ON suppliers(tenant_id, business_name COLLATE NOCASE);
+      CREATE INDEX idx_suppliers_tenant_status ON suppliers(tenant_id, status);
+    `
+  },
+  {
+    version: 22,
+    name: "purchases",
+    sql: `
+      CREATE TABLE IF NOT EXISTS purchases (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        purchase_number TEXT NOT NULL,
+        supplier_id TEXT NOT NULL,
+        supplier_invoice_number TEXT,
+        location_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'ordered', 'partially_received', 'received', 'cancelled')),
+        tax_type TEXT NOT NULL DEFAULT 'no_vat' CHECK (tax_type IN ('vat', 'no_vat', 'zero_rated')),
+        subtotal_cents INTEGER NOT NULL DEFAULT 0,
+        discount_amount_cents INTEGER NOT NULL DEFAULT 0,
+        tax_amount_cents INTEGER NOT NULL DEFAULT 0,
+        grand_total_cents INTEGER NOT NULL DEFAULT 0,
+        payment_method_id TEXT,
+        payment_reference TEXT,
+        payment_status TEXT NOT NULL DEFAULT 'unpaid' CHECK (payment_status IN ('unpaid', 'partially_paid', 'paid')),
+        amount_paid_cents INTEGER NOT NULL DEFAULT 0,
+        payments TEXT NOT NULL DEFAULT '[]',
+        notes TEXT,
+        attachment_path TEXT,
+        ordered_at TEXT,
+        received_at TEXT,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (supplier_id) REFERENCES suppliers(id),
+        FOREIGN KEY (location_id) REFERENCES locations(id),
+        FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id),
+        FOREIGN KEY (created_by) REFERENCES employees(id)
+      );
+
+      CREATE UNIQUE INDEX idx_purchases_tenant_number ON purchases(tenant_id, purchase_number);
+      CREATE UNIQUE INDEX idx_purchases_tenant_supplier_invoice_number
+        ON purchases(tenant_id, supplier_id, supplier_invoice_number) WHERE supplier_invoice_number IS NOT NULL;
+      CREATE INDEX idx_purchases_tenant_status ON purchases(tenant_id, status);
+      CREATE INDEX idx_purchases_tenant_created ON purchases(tenant_id, created_at);
+      CREATE INDEX idx_purchases_supplier ON purchases(supplier_id);
+      CREATE INDEX idx_purchases_location ON purchases(location_id);
+
+      CREATE TABLE IF NOT EXISTS purchase_items (
+        id TEXT PRIMARY KEY,
+        purchase_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        ordered_quantity INTEGER NOT NULL,
+        received_quantity INTEGER NOT NULL DEFAULT 0,
+        remaining_quantity INTEGER GENERATED ALWAYS AS (ordered_quantity - received_quantity) STORED,
+        unit_cost_cents INTEGER NOT NULL,
+        discount_amount_cents INTEGER NOT NULL DEFAULT 0,
+        tax_amount_cents INTEGER NOT NULL DEFAULT 0,
+        line_total_cents INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (purchase_id) REFERENCES purchases(id),
+        FOREIGN KEY (product_id) REFERENCES products(id)
+      );
+
+      CREATE INDEX idx_purchase_items_purchase ON purchase_items(purchase_id);
+      CREATE INDEX idx_purchase_items_product ON purchase_items(product_id);
+    `
+  },
+  {
+    version: 23,
+    name: "expenses",
+    sql: `
+      CREATE TABLE IF NOT EXISTS expense_categories (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id)
+      );
+
+      CREATE UNIQUE INDEX idx_expense_categories_tenant_name ON expense_categories(tenant_id, name COLLATE NOCASE);
+      CREATE INDEX idx_expense_categories_tenant_status ON expense_categories(tenant_id, status);
+
+      CREATE TABLE IF NOT EXISTS expenses (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        expense_number TEXT NOT NULL,
+        expense_date TEXT NOT NULL,
+        category_id TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL,
+        paid_by TEXT,
+        payment_method_id TEXT NOT NULL,
+        storefront_id TEXT,
+        reference TEXT,
+        description TEXT,
+        attachment_path TEXT,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
+        is_recurring INTEGER NOT NULL DEFAULT 0,
+        recurrence_frequency TEXT,
+        next_due_date TEXT,
+        last_reminder_sent TEXT,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (category_id) REFERENCES expense_categories(id),
+        FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id),
+        FOREIGN KEY (storefront_id) REFERENCES locations(id),
+        FOREIGN KEY (created_by) REFERENCES employees(id)
+      );
+
+      CREATE UNIQUE INDEX idx_expenses_tenant_number ON expenses(tenant_id, expense_number);
+      CREATE INDEX idx_expenses_tenant_date ON expenses(tenant_id, expense_date);
+      CREATE INDEX idx_expenses_tenant_status ON expenses(tenant_id, status);
+      CREATE INDEX idx_expenses_category ON expenses(category_id);
+      CREATE INDEX idx_expenses_storefront ON expenses(storefront_id);
+    `
+  },
+  {
+    version: 24,
+    name: "employee_salaries",
+    sql: `
+      CREATE TABLE IF NOT EXISTS salaries (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        payslip_number TEXT NOT NULL,
+        employee_id TEXT NOT NULL,
+        pay_period TEXT NOT NULL,
+        basic_salary_cents INTEGER NOT NULL,
+        allowances_cents INTEGER NOT NULL DEFAULT 0,
+        deductions_cents INTEGER NOT NULL DEFAULT 0,
+        net_pay_cents INTEGER NOT NULL,
+        payment_method_id TEXT NOT NULL,
+        payment_reference TEXT,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'voided')),
+        notes TEXT,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (employee_id) REFERENCES employees(id),
+        FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id),
+        FOREIGN KEY (created_by) REFERENCES employees(id)
+      );
+
+      CREATE UNIQUE INDEX idx_salaries_tenant_payslip_number ON salaries(tenant_id, payslip_number);
+      CREATE UNIQUE INDEX idx_salaries_tenant_employee_period
+        ON salaries(tenant_id, employee_id, pay_period) WHERE status = 'active';
+      CREATE INDEX idx_salaries_tenant_employee ON salaries(tenant_id, employee_id);
+      CREATE INDEX idx_salaries_tenant_status ON salaries(tenant_id, status);
+      CREATE INDEX idx_salaries_tenant_created ON salaries(tenant_id, created_at);
+    `
+  },
+  {
+    version: 25,
+    name: "salary_itemized_allowances_deductions",
+    sql: `
+      ALTER TABLE salaries ADD COLUMN allowances_json TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE salaries ADD COLUMN deductions_json TEXT NOT NULL DEFAULT '[]';
+    `
   }
 ] as const;
 

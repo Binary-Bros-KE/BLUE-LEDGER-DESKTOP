@@ -12,6 +12,7 @@ export type ProductRow = {
   short_name: string | null;
   description: string | null;
   category_id: string | null;
+  storefront_id: string | null;
   buying_price_cents: number;
   selling_price_cents: number;
   wholesale_price_cents: number | null;
@@ -38,10 +39,11 @@ export type ProductListRow = ProductRow & {
 };
 
 /**
- * Lists products for the tenant. When locationId is provided, only products with an inventory
- * record at that branch are included (branch-exclusive catalogs), and total_stock reflects only
- * that branch's quantity. Pass null (e.g. for a super-admin with no assigned branch) to see the
- * full tenant-wide catalog with stock summed across every location.
+ * Lists products for the tenant. When locationId is provided, only products tagged to that
+ * storefront OR tagged "All Storefronts" (storefront_id IS NULL) are included, and total_stock
+ * reflects only that storefront's quantity. Pass null to see the full tenant-wide catalog (every
+ * storefront tag) with stock summed across every location — used both for a super-admin's view and
+ * for the Main Store's cross-storefront management screen.
  */
 export function findAllProductRows(tenantId: string, locationId: string | null): ProductListRow[] {
   return getDatabase()
@@ -52,9 +54,7 @@ export function findAllProductRows(tenantId: string, locationId: string | null):
       LEFT JOIN categories c ON c.id = p.category_id
       LEFT JOIN inventory i ON i.product_id = p.id AND (? IS NULL OR i.location_id = ?)
       WHERE p.tenant_id = ?
-        AND (? IS NULL OR EXISTS (
-          SELECT 1 FROM inventory ei WHERE ei.product_id = p.id AND ei.location_id = ?
-        ))
+        AND (? IS NULL OR p.storefront_id IS NULL OR p.storefront_id = ?)
       GROUP BY p.id
       ORDER BY p.name ASC
     `
@@ -114,11 +114,11 @@ export function insertProductRow(
       `
       INSERT INTO products (
         id, tenant_id, sku, barcode, supplier_sku, name, short_name, description,
-        category_id, buying_price_cents, selling_price_cents, wholesale_price_cents,
+        category_id, storefront_id, buying_price_cents, selling_price_cents, wholesale_price_cents,
         wholesale_min_quantity, minimum_price_cents, tax_rate, reorder_level, track_stock,
         allow_negative_stock, image_path, status, created_at, updated_at, created_by, sync_status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
     `
     )
     .run(
@@ -131,6 +131,7 @@ export function insertProductRow(
       input.shortName,
       input.description,
       input.categoryId,
+      input.storefrontId,
       input.buyingPriceCents,
       input.sellingPriceCents,
       input.wholesalePriceCents,
@@ -170,6 +171,7 @@ export function updateProductRow(
         short_name = ?,
         description = ?,
         category_id = ?,
+        storefront_id = ?,
         buying_price_cents = ?,
         selling_price_cents = ?,
         wholesale_price_cents = ?,
@@ -194,6 +196,7 @@ export function updateProductRow(
       input.shortName,
       input.description,
       input.categoryId,
+      input.storefrontId,
       input.buyingPriceCents,
       input.sellingPriceCents,
       input.wholesalePriceCents,
@@ -241,6 +244,7 @@ export function mapProductRow(row: ProductRow): Product {
     shortName: row.short_name,
     description: row.description,
     categoryId: row.category_id,
+    storefrontId: row.storefront_id,
     buyingPriceCents: row.buying_price_cents,
     sellingPriceCents: row.selling_price_cents,
     wholesalePriceCents: row.wholesale_price_cents,
@@ -269,3 +273,4 @@ export function mapProductListRow(row: ProductListRow): ProductListItem {
     totalStock: row.total_stock
   };
 }
+

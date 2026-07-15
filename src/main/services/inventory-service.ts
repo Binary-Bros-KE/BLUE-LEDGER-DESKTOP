@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import { runInTransaction } from "@main/database/connection";
 import * as inventoryRepository from "@main/database/repositories/inventory-repository";
 import * as locationRepository from "@main/database/repositories/location-repository";
+import * as mainStoreAllocationRepository from "@main/database/repositories/main-store-allocation-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
 import * as stockMovementRepository from "@main/database/repositories/stock-movement-repository";
-import { getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
+import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import {
   stockMovementInputSchema,
@@ -12,7 +13,12 @@ import {
   type StockMovementInput
 } from "@shared/schemas/stock-movement";
 import type { InventoryBalance, LocationStockLevel } from "@shared/types/inventory";
-import type { StockMovement, StockMovementType, StockTransferResult } from "@shared/types/stock-movement";
+import type {
+  StockMovement,
+  StockMovementFeedItem,
+  StockMovementType,
+  StockTransferResult
+} from "@shared/types/stock-movement";
 
 const INCREASING_MOVEMENT_TYPES = new Set(["purchase", "transfer_in", "return", "opening_stock"]);
 const DECREASING_MOVEMENT_TYPES = new Set(["sale", "transfer_out", "damage"]);
@@ -32,8 +38,22 @@ function assertValidDirection(input: StockMovementInput): void {
 /**
  * Applies an already-validated movement: inserts the ledger row, then upserts the balance.
  * Must be called from within a transaction (own or a caller's, e.g. product creation with opening stock).
+ *
+ * When the movement's location is the tenant's Main Store, this also keeps the Main Store allocation
+ * breakdown (main-store-service.ts) in lockstep with the plain inventory total, so the two numbers can
+ * never drift apart:
+ *  - Pass allocationStorefrontId to target a SPECIFIC bucket precisely (throws if that bucket doesn't
+ *    have enough — used by the Main Store's own receive/distribute/return actions).
+ *  - Leave it unset and the change is reflected in the "unallocated" bucket instead, clamped at zero.
+ *    This is the fallback for every other existing caller (manual add/remove, product-creation opening
+ *    stock, generic transfers) that doesn't know about allocations — it keeps the total correct, but
+ *    can't tell an already-earmarked bucket from a general one, so use the dedicated Main Store actions
+ *    when precise per-storefront tracking matters.
  */
-export function applyValidatedStockMovement(input: StockMovementInput, tenantId: string): StockMovement {
+export function applyValidatedStockMovement(
+  input: StockMovementInput & { allocationStorefrontId?: string | null },
+  tenantId: string
+): StockMovement {
   assertValidDirection(input);
 
   const product = productRepository.findProductRowById(input.productId);
@@ -68,6 +88,26 @@ export function applyValidatedStockMovement(input: StockMovementInput, tenantId:
     locationId: input.locationId,
     quantity: nextQuantity
   });
+
+  const mainStore = locationRepository.findMainStoreLocationRow(tenantId);
+  if (mainStore && input.locationId === mainStore.id) {
+    if (input.allocationStorefrontId !== undefined) {
+      mainStoreAllocationRepository.adjustAllocationQuantity({
+        tenantId,
+        productId: input.productId,
+        storefrontId: input.allocationStorefrontId,
+        delta: input.quantityChange
+      });
+    } else {
+      const unallocated = mainStoreAllocationRepository.findAllocationRow(input.productId, null)?.quantity ?? 0;
+      mainStoreAllocationRepository.setAllocationQuantity({
+        tenantId,
+        productId: input.productId,
+        storefrontId: null,
+        quantity: Math.max(0, unallocated + input.quantityChange)
+      });
+    }
+  }
 
   return stockMovementRepository.mapStockMovementRow(movementRow);
 }
@@ -144,6 +184,17 @@ export function listStockMovements(productId: string, limit?: number): StockMove
   return stockMovementRepository
     .findStockMovementRowsForProduct(productId, limit)
     .map(stockMovementRepository.mapStockMovementRow);
+}
+
+/** Every product's stock movements in one feed — the Stock Ledger. Branch-scoped like everything
+ * else: a storekeeper assigned to the Main Store sees only its movements, a super-admin sees all. */
+export function listAllStockMovements(limit = 200): StockMovementFeedItem[] {
+  requirePermission("inventory", "view");
+  const { tenantId } = getCurrentTenant();
+  const locationId = getCurrentBranchScope();
+  return stockMovementRepository
+    .findAllStockMovementRows(tenantId, locationId, limit)
+    .map(stockMovementRepository.mapStockMovementFeedRow);
 }
 
 /** Every stocked product's balance at one location — feeds the POS screen's available-stock display. */

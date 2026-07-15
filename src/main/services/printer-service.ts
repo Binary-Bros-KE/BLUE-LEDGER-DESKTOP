@@ -1,4 +1,6 @@
+import { mkdirSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import electron from "electron";
 import { ThermalPrinter, PrinterTypes } from "node-thermal-printer";
 import { getDatabase } from "@main/database/connection";
@@ -8,6 +10,7 @@ import * as saleRepository from "@main/database/repositories/sale-repository";
 import * as tenantRepository from "@main/database/repositories/tenant-repository";
 import { requirePermission } from "@main/services/auth-service";
 import { readManagedBusinessLogoPreview, readManagedLocationLogoPreview } from "@main/services/image-service";
+import { getSalary } from "@main/services/salary-service";
 import { PRINTER_SETTINGS_STORAGE_KEY } from "@shared/constants/app";
 import { buildReceiptViewModel, formatReceiptCents, type ReceiptViewModel } from "@shared/lib/receipt";
 import { printerSettingsSchema } from "@shared/schemas/printer";
@@ -20,8 +23,9 @@ import {
 } from "@shared/types/printer";
 import { QUOTATION_STATUS_OPTIONS, type Quotation } from "@shared/types/quotation";
 import { PAYMENT_STATUS_OPTIONS, TRANSACTION_TYPE_OPTIONS, type Sale } from "@shared/types/sale";
+import type { Salary } from "@shared/types/salary";
 
-const { BrowserWindow, dialog } = electron;
+const { app, BrowserWindow, dialog, shell } = electron;
 
 const PRINTER_TYPE_MAP: Record<PrinterType, PrinterTypes> = {
   epson: PrinterTypes.EPSON,
@@ -765,5 +769,185 @@ export async function printQuotationDocument(quotationId: string): Promise<Print
     return { success: false, message: err instanceof Error ? err.message : "Failed to print quotation" };
   } finally {
     win.destroy();
+  }
+}
+
+function formatPayPeriodLabel(payPeriod: string): string {
+  try {
+    const [year, month] = payPeriod.split("-").map(Number);
+    return new Date(year ?? 0, (month ?? 1) - 1, 1).toLocaleDateString(undefined, {
+      month: "long",
+      year: "numeric"
+    });
+  } catch {
+    return payPeriod;
+  }
+}
+
+/** getSalary() (not the raw repository) is used here deliberately — it re-enforces the same
+ * self-vs-admin visibility boundary as the rest of the Salaries module, so an employee can only
+ * ever generate a PDF or share link for their own payslip, never someone else's. */
+function loadSalaryData(salaryId: string): {
+  salary: Salary;
+  business: { businessName: string; physicalAddress: string | null; primaryPhone: string | null; receiptFooter: string | null; currency: string };
+} {
+  const salary = getSalary(salaryId);
+  const tenantRow = tenantRepository.findTenantRow();
+  if (!tenantRow) {
+    throw new Error("Business profile not found");
+  }
+
+  return {
+    salary,
+    business: {
+      businessName: tenantRow.business_name,
+      physicalAddress: tenantRow.physical_address,
+      primaryPhone: tenantRow.primary_phone,
+      receiptFooter: tenantRow.receipt_footer,
+      currency: tenantRow.currency
+    }
+  };
+}
+
+/** Builds a professional, letterhead-style A4 payslip — the same visual language as the invoice
+ * and quotation documents, reused for both PDF download and the manual-share flow. */
+function buildPayslipHtml(
+  salary: Salary,
+  business: { businessName: string; physicalAddress: string | null; primaryPhone: string | null; receiptFooter: string | null; currency: string },
+  logo: DocumentLogo
+): string {
+  const money = (cents: number): string => `${business.currency} ${formatReceiptCents(cents)}`;
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #1c1710; margin: 0; padding: 48px; font-size: 13px; }
+  .sheet { max-width: 720px; margin: 0 auto; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #061e64; padding-bottom: 16px; }
+  .logo { display: block; height: auto; max-height: 64px; width: auto; max-width: 220px; object-fit: contain; margin-bottom: 8px; }
+  .business-name { font-size: 20px; font-weight: bold; color: #061e64; margin: 0; }
+  .muted { color: #666; font-size: 11px; }
+  .doc-title { font-size: 26px; font-weight: bold; text-align: right; color: #061e64; margin: 0; letter-spacing: 1px; }
+  .badge { display: inline-block; margin-top: 6px; padding: 3px 10px; border-radius: 999px; font-size: 10px; font-weight: bold; text-transform: uppercase; background: #f1ede1; color: #1c1710; }
+  .meta { display: flex; justify-content: space-between; margin-top: 20px; gap: 24px; }
+  .meta-block p { margin: 2px 0; }
+  .meta-block .label { font-size: 10px; text-transform: uppercase; color: #83795f; font-weight: bold; }
+  table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+  th { text-align: left; font-size: 10px; text-transform: uppercase; color: #83795f; border-bottom: 2px solid #ddd5c2; padding: 6px 4px; }
+  td { padding: 8px 4px; border-bottom: 1px solid #eee; vertical-align: top; }
+  .right { text-align: right; white-space: nowrap; }
+  .totals { width: 280px; margin-left: auto; margin-top: 16px; }
+  .totals td { border-bottom: none; padding: 3px 4px; }
+  .totals .grand td { font-size: 15px; font-weight: bold; border-top: 2px solid #061e64; padding-top: 8px; }
+  .notes { margin-top: 24px; padding: 12px; background: #f1ede1; border-radius: 8px; }
+  .footer { margin-top: 32px; text-align: center; color: #83795f; font-size: 11px; }
+</style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="header">
+      <div>
+        ${logo.logoDataUrl ? `<img src="${logo.logoDataUrl}" class="logo" alt="" />` : ""}
+        <p class="business-name">${escapeHtml(business.businessName)}</p>
+        ${business.physicalAddress ? `<p class="muted">${escapeHtml(business.physicalAddress)}</p>` : ""}
+        ${business.primaryPhone ? `<p class="muted">${escapeHtml(business.primaryPhone)}</p>` : ""}
+      </div>
+      <div>
+        <p class="doc-title">PAYSLIP</p>
+        <p class="muted" style="text-align:right;">${escapeHtml(salary.payslipNumber)}</p>
+        ${salary.status === "voided" ? `<div style="text-align:right;"><span class="badge">Voided</span></div>` : ""}
+      </div>
+    </div>
+
+    <div class="meta">
+      <div class="meta-block">
+        <p class="label">Employee</p>
+        <p><strong>${escapeHtml(salary.employeeName)}</strong></p>
+        <p class="muted">${escapeHtml(salary.employeeCode)}</p>
+      </div>
+      <div class="meta-block">
+        <p class="label">Pay Period</p>
+        <p>${escapeHtml(formatPayPeriodLabel(salary.payPeriod))}</p>
+        <p class="label" style="margin-top:10px;">Date Processed</p>
+        <p>${formatInvoiceDate(salary.createdAt)}</p>
+      </div>
+      <div class="meta-block">
+        <p class="label">Payment Method</p>
+        <p>${escapeHtml(salary.paymentMethodName)}</p>
+        ${salary.paymentReference ? `<p class="label" style="margin-top:10px;">Reference</p><p>${escapeHtml(salary.paymentReference)}</p>` : ""}
+      </div>
+    </div>
+
+    <table class="totals">
+      <tr><td>Basic Salary</td><td class="right">${money(salary.basicSalaryCents)}</td></tr>
+      ${salary.allowances.map((item) => `<tr><td>${escapeHtml(item.name)}</td><td class="right">${money(item.amountCents)}</td></tr>`).join("")}
+      ${salary.deductions.map((item) => `<tr><td>${escapeHtml(item.name)}</td><td class="right">-${money(item.amountCents)}</td></tr>`).join("")}
+      <tr class="grand"><td>Net Pay</td><td class="right">${money(salary.netPayCents)}</td></tr>
+    </table>
+
+    ${salary.notes ? `<div class="notes"><strong>Notes</strong><p>${escapeHtml(salary.notes)}</p></div>` : ""}
+
+    <div class="footer">${escapeHtml(business.receiptFooter ?? "This is a system-generated payslip.")}</div>
+  </div>
+</body>
+</html>`;
+}
+
+async function resolveBusinessLogo(): Promise<DocumentLogo> {
+  const tenantRow = tenantRepository.findTenantRow();
+  if (!tenantRow?.business_logo_path) {
+    return { logoDataUrl: null, logoRatio: null };
+  }
+  const logoDataUrl = await readManagedBusinessLogoPreview(tenantRow.business_logo_path);
+  return logoDataUrl
+    ? { logoDataUrl, logoRatio: tenantRow.business_logo_ratio as LogoRatio | null }
+    : { logoDataUrl: null, logoRatio: null };
+}
+
+/** Renders the payslip to PDF and prompts the user for a save location. Returns the saved path, or
+ * null if cancelled. Access is gated inside loadSalaryData() -> getSalary(), not here. */
+export async function generateSalaryPdf(salaryId: string): Promise<string | null> {
+  const { salary, business } = loadSalaryData(salaryId);
+  const logo = await resolveBusinessLogo();
+  const html = buildPayslipHtml(salary, business, logo);
+  const buffer = await renderHtmlToPdfBuffer(html);
+
+  const result = await dialog.showSaveDialog({
+    title: "Save Payslip",
+    defaultPath: `${salary.payslipNumber}.pdf`,
+    filters: [{ name: "PDF", extensions: ["pdf"] }]
+  });
+  if (result.canceled || !result.filePath) {
+    return null;
+  }
+
+  await writeFile(result.filePath, buffer);
+  return result.filePath;
+}
+
+/**
+ * "Share" for a desktop app without a native OS share sheet: renders the payslip to a PDF in a
+ * scratch folder, then reveals it in the file explorer so the user can manually attach it to
+ * WhatsApp, email, etc. Nothing here is persisted as managed application data.
+ */
+export async function shareSalaryPayslip(salaryId: string): Promise<PrinterActionResult> {
+  try {
+    const { salary, business } = loadSalaryData(salaryId);
+    const logo = await resolveBusinessLogo();
+    const html = buildPayslipHtml(salary, business, logo);
+    const buffer = await renderHtmlToPdfBuffer(html);
+
+    const shareDir = join(app.getPath("temp"), "BlueLedger", "payslips");
+    mkdirSync(shareDir, { recursive: true });
+    const filePath = join(shareDir, `${salary.payslipNumber}.pdf`);
+    await writeFile(filePath, buffer);
+
+    shell.showItemInFolder(filePath);
+    return { success: true, message: "Payslip ready — attach it from the file that just opened." };
+  } catch (err) {
+    return { success: false, message: err instanceof Error ? err.message : "Failed to prepare payslip for sharing" };
   }
 }

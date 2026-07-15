@@ -1,92 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import {
-  Boxes,
-  ImagePlus,
-  Loader2,
-  Package,
-  Pencil,
-  Plus,
-  Power,
-  PowerOff,
-  Search,
-  X
-} from "lucide-react";
+import { Boxes, Loader2, Package, Pencil, Power, PowerOff, Search } from "lucide-react";
 import { ProductDetailModal } from "@renderer/app/routes/products/ProductDetailModal";
+import { ProductEditModal } from "@renderer/app/routes/products/ProductEditModal";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
-import { CheckboxField, Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
-import { Modal } from "@renderer/shared/components/Modal";
+import { SelectField } from "@renderer/shared/components/form-fields";
+import { ProductThumbnail } from "@renderer/shared/components/ProductThumbnail";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
-import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
+import { formatCents } from "@renderer/shared/lib/money";
 import type { Category } from "@shared/types/category";
-import type { Location } from "@shared/types/location";
+import { isStorefrontType, type Location } from "@shared/types/location";
 import type { ProductListItem } from "@shared/types/product";
-
-type FormState = {
-  sku: string;
-  barcode: string;
-  supplierSku: string;
-  name: string;
-  shortName: string;
-  description: string;
-  categoryId: string;
-  buyingPrice: string;
-  sellingPrice: string;
-  wholesalePrice: string;
-  wholesaleMinQuantity: string;
-  minimumPrice: string;
-  taxRate: string;
-  reorderLevel: string;
-  trackStock: boolean;
-  allowNegativeStock: boolean;
-  imagePath: string | null;
-};
-
-const emptyForm: FormState = {
-  sku: "",
-  barcode: "",
-  supplierSku: "",
-  name: "",
-  shortName: "",
-  description: "",
-  categoryId: "",
-  buyingPrice: "0.00",
-  sellingPrice: "0.00",
-  wholesalePrice: "",
-  wholesaleMinQuantity: "0",
-  minimumPrice: "",
-  taxRate: "0",
-  reorderLevel: "0",
-  trackStock: true,
-  allowNegativeStock: false,
-  imagePath: null
-};
-
-function toFormState(product: ProductListItem): FormState {
-  return {
-    sku: product.sku,
-    barcode: product.barcode ?? "",
-    supplierSku: product.supplierSku ?? "",
-    name: product.name,
-    shortName: product.shortName ?? "",
-    description: product.description ?? "",
-    categoryId: product.categoryId ?? "",
-    buyingPrice: fromCents(product.buyingPriceCents),
-    sellingPrice: fromCents(product.sellingPriceCents),
-    wholesalePrice: product.wholesalePriceCents !== null ? fromCents(product.wholesalePriceCents) : "",
-    wholesaleMinQuantity: String(product.wholesaleMinQuantity),
-    minimumPrice: product.minimumPriceCents !== null ? fromCents(product.minimumPriceCents) : "",
-    taxRate: String(product.taxRate),
-    reorderLevel: String(product.reorderLevel),
-    trackStock: product.trackStock,
-    allowNegativeStock: product.allowNegativeStock,
-    imagePath: product.imagePath
-  };
-}
 
 function buildCategoryOptions(categories: Category[]): { value: string; label: string }[] {
   const byId = new Map(categories.map((category) => [category.id, category]));
@@ -111,7 +39,6 @@ function buildCategoryOptions(categories: Category[]): { value: string; label: s
 export function ProductsRoute(): React.JSX.Element {
   const currency = useAppStore((state) => state.context?.tenant.currency ?? "");
   const { can } = usePermissions();
-  const canCreate = can("products", "create");
   const canEdit = can("products", "edit");
   const canViewInventory = can("inventory", "view");
 
@@ -120,14 +47,8 @@ export function ProductsRoute(): React.JSX.Element {
   const [locations, setLocations] = useState<Location[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<FormState>(emptyForm);
-  const [openingStock, setOpeningStock] = useState<Record<string, string>>({});
-  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
-  const [imageBusy, setImageBusy] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [editingProduct, setEditingProduct] = useState<ProductListItem | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const [detailProduct, setDetailProduct] = useState<ProductListItem | null>(null);
 
@@ -156,20 +77,13 @@ export function ProductsRoute(): React.JSX.Element {
   }, [loadAll]);
 
   useEffect(() => {
-    if (!form.imagePath) {
-      setImagePreviewUrl(null);
-      return;
-    }
-    let cancelled = false;
-    void window.blueLedger.product.readImagePreview(form.imagePath).then((url) => {
-      if (!cancelled) setImagePreviewUrl(url);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [form.imagePath]);
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   const categoryOptions = useMemo(() => buildCategoryOptions(categories), [categories]);
+  const storefronts = useMemo(() => locations.filter((location) => isStorefrontType(location.locationType)), [locations]);
 
   const filteredProducts = useMemo(() => {
     if (!products) return null;
@@ -194,87 +108,21 @@ export function ProductsRoute(): React.JSX.Element {
     setStatusFilter("");
   }
 
-  function updateField<K extends keyof FormState>(key: K, value: FormState[K]): void {
-    setForm((prev) => ({ ...prev, [key]: value }));
-  }
-
-  function openCreateModal(): void {
-    setEditingId(null);
-    setForm(emptyForm);
-    setOpeningStock({});
-    setError(null);
-    setModalOpen(true);
-  }
-
   function openEditModal(product: ProductListItem): void {
-    setEditingId(product.id);
-    setForm(toFormState(product));
-    setOpeningStock({});
-    setError(null);
-    setModalOpen(true);
+    setEditingProduct(product);
   }
 
-  async function handlePickImage(): Promise<void> {
-    setImageBusy(true);
-    try {
-      const relativePath = await window.blueLedger.product.pickImage();
-      if (relativePath) {
-        updateField("imagePath", relativePath);
-      }
-    } catch (err) {
-      setError(getErrorMessage(err, "Failed to attach image"));
-    } finally {
-      setImageBusy(false);
-    }
-  }
-
-  async function handleSubmit(event: React.FormEvent): Promise<void> {
-    event.preventDefault();
-    setSaving(true);
-    setError(null);
-
-    const payload = {
-      sku: form.sku,
-      barcode: form.barcode,
-      supplierSku: form.supplierSku,
-      name: form.name,
-      shortName: form.shortName,
-      description: form.description,
-      categoryId: form.categoryId ? form.categoryId : null,
-      buyingPriceCents: toCents(form.buyingPrice),
-      sellingPriceCents: toCents(form.sellingPrice),
-      wholesalePriceCents: form.wholesalePrice.trim() ? toCents(form.wholesalePrice) : null,
-      wholesaleMinQuantity: Number(form.wholesaleMinQuantity) || 0,
-      minimumPriceCents: form.minimumPrice.trim() ? toCents(form.minimumPrice) : null,
-      taxRate: Number(form.taxRate) || 0,
-      reorderLevel: Number(form.reorderLevel) || 0,
-      trackStock: form.trackStock,
-      allowNegativeStock: form.allowNegativeStock,
-      imagePath: form.imagePath
-    };
-
-    try {
-      if (editingId) {
-        await window.blueLedger.product.update(editingId, payload);
-      } else {
-        const openingStockEntries = Object.entries(openingStock)
-          .map(([locationId, quantity]) => ({ locationId, quantity: Number(quantity) || 0 }))
-          .filter((entry) => entry.quantity > 0);
-        await window.blueLedger.product.create({ ...payload, openingStock: openingStockEntries });
-      }
-      await loadAll();
-      setModalOpen(false);
-    } catch (err) {
-      setError(getErrorMessage(err, "Failed to save product"));
-    } finally {
-      setSaving(false);
-    }
+  async function handleProductSaved(): Promise<void> {
+    await loadAll();
+    setEditingProduct(null);
+    setNotice("Product updated.");
   }
 
   async function handleToggleStatus(product: ProductListItem): Promise<void> {
     const nextStatus = product.status === "active" ? "inactive" : "active";
     await window.blueLedger.product.setStatus(product.id, nextStatus);
     await loadAll();
+    setNotice(nextStatus === "active" ? "Product activated." : "Product deactivated.");
   }
 
   return (
@@ -303,16 +151,17 @@ export function ProductsRoute(): React.JSX.Element {
             <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Products</p>
             <h2 className="mt-1 text-xl font-extrabold">Product catalog</h2>
             <p className="mt-1 text-xs font-semibold text-muted">
-              Master catalog — stock balances are tracked per location in Inventory.
+              Master catalog — stock balances are tracked per location in Inventory. New products and
+              stock receiving happen in Main Store.
             </p>
           </div>
-          {canCreate && (
-            <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
-              <Plus className="mr-1.5 size-4" aria-hidden="true" />
-              New Product
-            </Button>
-          )}
         </div>
+
+        {notice && (
+          <div className="mt-4 rounded-lg border border-success/30 bg-success/10 px-4 py-3 text-sm font-bold text-success">
+            {notice}
+          </div>
+        )}
 
         {products !== null && products.length > 0 && (
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
@@ -381,14 +230,8 @@ export function ProductsRoute(): React.JSX.Element {
               </div>
               <h3 className="mt-4 text-lg font-extrabold">No products yet</h3>
               <p className="mt-1 max-w-sm text-sm font-semibold text-muted">
-                Add your first product to start tracking pricing and stock across locations.
+                Add your first product from Main Store to start tracking pricing and stock.
               </p>
-              {canCreate && (
-                <Button type="button" onClick={openCreateModal} className="mt-5 h-9 text-xs">
-                  <Plus className="mr-1.5 size-4" aria-hidden="true" />
-                  New Product
-                </Button>
-              )}
             </div>
           ) : filteredProducts && filteredProducts.length === 0 ? (
             <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-line bg-soft/60 p-10 text-center">
@@ -516,225 +359,15 @@ export function ProductsRoute(): React.JSX.Element {
         </div>
       </section>
 
-      <Modal
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        title={editingId ? "Edit product" : "New product"}
-        description="SKU, name, and category power search and receipts across every location."
-        widthClassName="max-w-2xl"
-      >
-        <form onSubmit={handleSubmit}>
-          {error && (
-            <div className="mb-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
-              {error}
-            </div>
-          )}
-
-          <div className="flex items-center gap-4">
-            <div className="grid size-20 flex-none place-items-center overflow-hidden rounded-lg border border-line bg-soft">
-              {imagePreviewUrl ? (
-                <img src={imagePreviewUrl} alt="" className="size-full object-cover" />
-              ) : (
-                <Package className="size-7 text-muted" aria-hidden="true" />
-              )}
-            </div>
-            <div>
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  onClick={() => void handlePickImage()}
-                  disabled={imageBusy}
-                  className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <ImagePlus className="mr-1.5 size-4" aria-hidden="true" />
-                  {form.imagePath ? "Replace Image" : "Upload Image"}
-                </Button>
-                {form.imagePath && (
-                  <Button
-                    type="button"
-                    onClick={() => updateField("imagePath", null)}
-                    className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
-                  >
-                    <X className="mr-1 size-3.5" aria-hidden="true" />
-                    Remove
-                  </Button>
-                )}
-              </div>
-              <p className="mt-1.5 text-[11px] font-semibold text-muted">JPG, PNG, or WEBP · max 5MB</p>
-            </div>
-          </div>
-
-          <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field
-              label="Product Name"
-              value={form.name}
-              onChange={(value) => updateField("name", value)}
-              placeholder="e.g. Coca Cola 500ml"
-              required
-            />
-            <Field
-              label="SKU"
-              value={form.sku}
-              onChange={(value) => updateField("sku", value)}
-              placeholder="e.g. BEV-COKE-500"
-              required
-            />
-            <Field
-              label="Barcode"
-              value={form.barcode}
-              onChange={(value) => updateField("barcode", value)}
-              placeholder="e.g. 5449000000996"
-            />
-            <Field
-              label="Short Name"
-              value={form.shortName}
-              onChange={(value) => updateField("shortName", value)}
-              placeholder="e.g. Coke 500ml"
-            />
-            <SelectField
-              label="Category"
-              value={form.categoryId}
-              onChange={(value) => updateField("categoryId", value)}
-              options={[{ value: "", label: "Uncategorized" }, ...categoryOptions]}
-            />
-            <Field
-              label="Supplier SKU"
-              value={form.supplierSku}
-              onChange={(value) => updateField("supplierSku", value)}
-              placeholder="e.g. supplier's own code"
-            />
-            <TextAreaField
-              label="Description"
-              value={form.description}
-              onChange={(value) => updateField("description", value)}
-              placeholder="e.g. 500ml glass bottle, returnable"
-              className="sm:col-span-2"
-            />
-          </div>
-
-          <div className="mt-5 border-t border-line pt-5">
-            <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Pricing</p>
-            <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-5">
-              <Field
-                label="Buying Price"
-                type="number"
-                value={form.buyingPrice}
-                onChange={(value) => updateField("buyingPrice", value)}
-                placeholder="0.00"
-                required
-              />
-              <Field
-                label="Selling Price"
-                type="number"
-                value={form.sellingPrice}
-                onChange={(value) => updateField("sellingPrice", value)}
-                placeholder="0.00"
-                required
-              />
-              <Field
-                label="Wholesale Price"
-                type="number"
-                value={form.wholesalePrice}
-                onChange={(value) => updateField("wholesalePrice", value)}
-                placeholder="Optional"
-              />
-              <Field
-                label="Wholesale Min Qty"
-                type="number"
-                value={form.wholesaleMinQuantity}
-                onChange={(value) => updateField("wholesaleMinQuantity", value)}
-                placeholder="e.g. 12"
-              />
-              <Field
-                label="Minimum Price"
-                type="number"
-                value={form.minimumPrice}
-                onChange={(value) => updateField("minimumPrice", value)}
-                placeholder="Optional"
-              />
-            </div>
-            <p className="mt-2 text-[11px] font-semibold text-muted">
-              Wholesale Min Qty is the quantity a customer must buy to qualify for the wholesale price.
-            </p>
-          </div>
-
-          <div className="mt-5 border-t border-line pt-5">
-            <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
-              Stock Settings
-            </p>
-            <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-3">
-              <Field
-                label="Tax Rate (%)"
-                type="number"
-                value={form.taxRate}
-                onChange={(value) => updateField("taxRate", value)}
-                placeholder="0"
-              />
-              <Field
-                label="Reorder Level"
-                type="number"
-                value={form.reorderLevel}
-                onChange={(value) => updateField("reorderLevel", value)}
-                placeholder="0"
-              />
-            </div>
-            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <CheckboxField
-                label="Track Stock"
-                description="Deduct inventory on sale"
-                checked={form.trackStock}
-                onChange={(checked) => updateField("trackStock", checked)}
-              />
-              <CheckboxField
-                label="Allow Negative Stock"
-                description="Permit overselling below zero"
-                checked={form.allowNegativeStock}
-                onChange={(checked) => updateField("allowNegativeStock", checked)}
-              />
-            </div>
-          </div>
-
-          {!editingId && locations.length > 0 && (
-            <div className="mt-5 border-t border-line pt-5">
-              <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
-                Opening Stock (optional)
-              </p>
-              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {locations.map((location) => (
-                  <Field
-                    key={location.id}
-                    label={location.locationName}
-                    type="number"
-                    value={openingStock[location.id] ?? ""}
-                    onChange={(value) =>
-                      setOpeningStock((prev) => ({ ...prev, [location.id]: value }))
-                    }
-                    placeholder="0"
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
-            <Button
-              type="button"
-              onClick={() => setModalOpen(false)}
-              className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              disabled={saving}
-              className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {saving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
-              {saving ? "Saving..." : editingId ? "Save changes" : "Create product"}
-            </Button>
-          </div>
-        </form>
-      </Modal>
+      {editingProduct && (
+        <ProductEditModal
+          product={editingProduct}
+          categories={categories}
+          storefronts={storefronts}
+          onClose={() => setEditingProduct(null)}
+          onSaved={() => void handleProductSaved()}
+        />
+      )}
 
       {detailProduct && (
         <ProductDetailModal
@@ -753,33 +386,5 @@ function Th({ children, className }: { children: React.ReactNode; className?: st
     <th className={cn("px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider", className)}>
       {children}
     </th>
-  );
-}
-
-function ProductThumbnail({ imagePath }: { imagePath: string | null }): React.JSX.Element {
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!imagePath) {
-      setPreviewUrl(null);
-      return;
-    }
-    let cancelled = false;
-    void window.blueLedger.product.readImagePreview(imagePath).then((url) => {
-      if (!cancelled) setPreviewUrl(url);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [imagePath]);
-
-  return (
-    <div className="grid size-10 flex-none place-items-center overflow-hidden rounded-lg border border-line bg-soft">
-      {previewUrl ? (
-        <img src={previewUrl} alt="" className="size-full object-cover" />
-      ) : (
-        <Package className="size-4 text-muted" aria-hidden="true" />
-      )}
-    </div>
   );
 }

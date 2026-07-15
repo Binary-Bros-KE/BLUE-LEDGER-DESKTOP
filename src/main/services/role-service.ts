@@ -79,6 +79,9 @@ const DEFAULT_SYSTEM_ROLES: Array<{
       "purchases",
       "customers",
       "suppliers",
+      "expenses",
+      "expense_categories",
+      "salaries",
       "reports",
       "locations",
       "approvals"
@@ -94,7 +97,8 @@ const DEFAULT_SYSTEM_ROLES: Array<{
       sales: ["view", "create", "edit", "delete"],
       quotations: ["view", "create", "edit"],
       customers: ["view", "create"],
-      payment_methods: ["view"]
+      payment_methods: ["view"],
+      salaries: ["view"]
     }
   },
   {
@@ -102,11 +106,12 @@ const DEFAULT_SYSTEM_ROLES: Array<{
     description: "Manages stock levels, receiving, and transfers between locations.",
     permissions: {
       dashboard: ["view"],
-      products: ["view"],
+      products: ["view", "create", "edit"],
       inventory: ["view", "create", "edit"],
       stock_transfers: ["view", "create", "approve"],
       purchases: ["view", "create"],
-      suppliers: ["view", "create"]
+      suppliers: ["view", "create"],
+      salaries: ["view"]
     }
   },
   {
@@ -116,6 +121,9 @@ const DEFAULT_SYSTEM_ROLES: Array<{
       dashboard: ["view"],
       sales: ["view", "export"],
       purchases: ["view", "export"],
+      expenses: ["view", "create", "edit", "export"],
+      expense_categories: ["view"],
+      salaries: ["view", "export"],
       reports: ["view", "export"],
       customers: ["view"],
       suppliers: ["view"],
@@ -189,6 +197,101 @@ export function ensureQuotationsPermission(tenantId: string): void {
       roleName: role.roleName,
       description: role.description,
       permissions: { ...role.permissions, quotations: grant },
+      updatedBy: null
+    });
+  }
+}
+
+/**
+ * Retroactively grants Storekeeper "create" and "edit" on products for tenants seeded before product
+ * management moved into the Main Store (creating products, and now activating/deactivating them) — new
+ * installs get it for free via DEFAULT_SYSTEM_ROLES. Safe every boot: a no-op once the role's stored
+ * permissions already include both.
+ */
+export function ensureStorekeeperProductPermissions(tenantId: string): void {
+  const storekeeperDefault = DEFAULT_SYSTEM_ROLES.find((role) => role.roleName === "Storekeeper");
+  const productsGrant = storekeeperDefault?.permissions.products;
+  if (!productsGrant) return;
+
+  const row = roleRepository.findRoleByNameRow(tenantId, "Storekeeper");
+  if (!row || !row.is_system_role) return;
+
+  const role = roleRepository.mapRoleRow(row);
+  const hasAll = productsGrant.every((action) => role.permissions.products?.includes(action));
+  if (hasAll) return;
+
+  roleRepository.updateRoleRow(row.id, {
+    roleName: role.roleName,
+    description: role.description,
+    permissions: { ...role.permissions, products: productsGrant },
+    updatedBy: null
+  });
+}
+
+/**
+ * Retroactively grants "expenses"/"expense_categories" permissions to system roles seeded before
+ * this module existed — new installs get it for free via DEFAULT_SYSTEM_ROLES, but a tenant's
+ * existing role rows are frozen JSON snapshots that a change to that constant never reaches on its
+ * own. Safe every boot: a no-op once a role's stored permissions already include both.
+ */
+export function ensureExpensesPermissions(tenantId: string): void {
+  const defaultsByName = new Map(
+    DEFAULT_SYSTEM_ROLES.map((role) => [
+      role.roleName,
+      { expenses: role.permissions.expenses, expense_categories: role.permissions.expense_categories }
+    ])
+  );
+
+  for (const row of roleRepository.findAllRoleRows(tenantId)) {
+    if (!row.is_system_role) continue;
+    const grants = defaultsByName.get(row.role_name);
+    if (!grants) continue;
+
+    const role = roleRepository.mapRoleRow(row);
+    const nextPermissions = { ...role.permissions };
+    let changed = false;
+
+    if (grants.expenses && grants.expenses.length > 0 && !role.permissions.expenses) {
+      nextPermissions.expenses = grants.expenses;
+      changed = true;
+    }
+    if (grants.expense_categories && grants.expense_categories.length > 0 && !role.permissions.expense_categories) {
+      nextPermissions.expense_categories = grants.expense_categories;
+      changed = true;
+    }
+    if (!changed) continue;
+
+    roleRepository.updateRoleRow(row.id, {
+      roleName: role.roleName,
+      description: role.description,
+      permissions: nextPermissions,
+      updatedBy: null
+    });
+  }
+}
+
+/**
+ * Retroactively grants "salaries" permissions to system roles seeded before this module existed —
+ * new installs get it for free via DEFAULT_SYSTEM_ROLES, but a tenant's existing role rows are
+ * frozen JSON snapshots that a change to that constant never reaches on its own. Every default role
+ * gets at least "view" (self-only payslip access) so the tab is never hidden from anyone. Safe every
+ * boot: a no-op once a role's stored permissions already include salaries.
+ */
+export function ensureSalariesPermission(tenantId: string): void {
+  const defaultsByName = new Map(DEFAULT_SYSTEM_ROLES.map((role) => [role.roleName, role.permissions.salaries]));
+
+  for (const row of roleRepository.findAllRoleRows(tenantId)) {
+    if (!row.is_system_role) continue;
+    const grant = defaultsByName.get(row.role_name);
+    if (!grant || grant.length === 0) continue;
+
+    const role = roleRepository.mapRoleRow(row);
+    if (role.permissions.salaries) continue;
+
+    roleRepository.updateRoleRow(row.id, {
+      roleName: role.roleName,
+      description: role.description,
+      permissions: { ...role.permissions, salaries: grant },
       updatedBy: null
     });
   }

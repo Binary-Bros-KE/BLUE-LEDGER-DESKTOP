@@ -37,6 +37,7 @@ export const productCreateSchema = z.object({
   shortName: optionalText(60),
   description: optionalText(1000),
   categoryId: nullableId,
+  storefrontId: nullableId,
   buyingPriceCents: priceCents,
   sellingPriceCents: priceCents,
   wholesalePriceCents: nullablePriceCents,

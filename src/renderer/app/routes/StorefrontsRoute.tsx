@@ -21,7 +21,12 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { logoBoxClassName } from "@renderer/shared/lib/logo";
-import { LOCATION_TYPE_OPTIONS, type Location, type LocationType } from "@shared/types/location";
+import {
+  LOCATION_TYPE_OPTIONS,
+  STOREFRONT_TYPE_OPTIONS,
+  type Location,
+  type LocationType
+} from "@shared/types/location";
 import { LOGO_RATIO_OPTIONS, type LogoRatio } from "@shared/types/logo";
 
 type FormState = {
@@ -452,7 +457,7 @@ export function StorefrontsRoute(): React.JSX.Element {
               label="Location Type"
               value={form.locationType}
               onChange={(value) => updateField("locationType", value as LocationType)}
-              options={LOCATION_TYPE_OPTIONS}
+              options={STOREFRONT_TYPE_OPTIONS}
             />
             <Field
               label="Phone"

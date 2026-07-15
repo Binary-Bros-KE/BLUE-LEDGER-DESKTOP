@@ -1,0 +1,168 @@
+import { randomUUID } from "node:crypto";
+import * as expenseCategoryRepository from "@main/database/repositories/expense-category-repository";
+import * as expenseRepository from "@main/database/repositories/expense-repository";
+import * as locationRepository from "@main/database/repositories/location-repository";
+import * as paymentMethodRepository from "@main/database/repositories/payment-method-repository";
+import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
+import { deleteManagedExpenseAttachment } from "@main/services/image-service";
+import { getCurrentTenant } from "@main/services/tenant-service";
+import { expenseInputSchema, type ExpenseInput } from "@shared/schemas/expense";
+import type { Expense, ExpenseSummary } from "@shared/types/expense";
+
+function generateExpenseNumber(tenantId: string): string {
+  const maxNumber = expenseRepository.findMaxExpenseNumberRow(tenantId);
+  const currentNumber = maxNumber ? Number(maxNumber.slice("EXP-".length)) : 0;
+  const nextNumber = Number.isFinite(currentNumber) ? currentNumber + 1 : 1;
+  return `EXP-${String(nextNumber).padStart(6, "0")}`;
+}
+
+function assertCategoryExists(tenantId: string, categoryId: string): void {
+  const row = expenseCategoryRepository.findExpenseCategoryRowById(categoryId);
+  if (!row || row.tenant_id !== tenantId) {
+    throw new Error("Expense category not found");
+  }
+}
+
+function assertStorefrontBelongsToTenant(tenantId: string, storefrontId: string | null): void {
+  if (!storefrontId) return;
+  const row = locationRepository.findLocationRowById(storefrontId);
+  if (!row || row.tenant_id !== tenantId) {
+    throw new Error("Selected storefront was not found");
+  }
+}
+
+function assertValidPaymentMethod(tenantId: string, input: ExpenseInput): void {
+  const method = paymentMethodRepository.findPaymentMethodRowById(input.paymentMethodId);
+  if (!method || method.tenant_id !== tenantId) {
+    throw new Error("Payment method not found");
+  }
+  if (!method.is_active) {
+    throw new Error(`"${method.name}" is not active`);
+  }
+  if (method.requires_reference && !input.reference) {
+    throw new Error(`${method.name} requires a transaction/reference number`);
+  }
+}
+
+function getExpenseDetail(id: string): Expense {
+  const row = expenseRepository.findExpenseDetailRowById(id);
+  if (!row) {
+    throw new Error("Expense not found");
+  }
+  return expenseRepository.mapExpenseDetailRow(row);
+}
+
+/** Tenant-wide by default; branch-scoped to the caller's assigned location like Sales/Purchases —
+ * general expenses with no storefront (head-office costs) are always included. */
+export function listExpenses(): Expense[] {
+  requirePermission("expenses", "view");
+  const { tenantId } = getCurrentTenant();
+  const locationId = getCurrentBranchScope();
+  return expenseRepository.findAllExpenseDetailRows(tenantId, locationId).map(expenseRepository.mapExpenseDetailRow);
+}
+
+export function getExpenseSummary(): ExpenseSummary {
+  requirePermission("expenses", "view");
+  const { tenantId } = getCurrentTenant();
+  const locationId = getCurrentBranchScope();
+  const totals = expenseRepository.findExpenseSummaryRow(tenantId, locationId);
+  const byCategory = expenseRepository
+    .findExpenseCategoryBreakdownRows(tenantId, locationId)
+    .map(expenseRepository.mapExpenseCategoryBreakdownRow);
+
+  return {
+    todayCents: totals.today_cents,
+    thisMonthCents: totals.this_month_cents,
+    totalCents: totals.total_cents,
+    byCategory
+  };
+}
+
+export function getExpense(id: string): Expense {
+  requirePermission("expenses", "view");
+  return getExpenseDetail(id);
+}
+
+export function createExpense(input: unknown): Expense {
+  requirePermission("expenses", "create");
+  const parsed: ExpenseInput = expenseInputSchema.parse(input);
+  const { tenantId } = getCurrentTenant();
+  const employeeId = getCurrentEmployeeId();
+
+  assertCategoryExists(tenantId, parsed.categoryId);
+  assertStorefrontBelongsToTenant(tenantId, parsed.storefrontId);
+  assertValidPaymentMethod(tenantId, parsed);
+
+  const row = expenseRepository.insertExpenseRow({
+    ...parsed,
+    id: `expense_${randomUUID()}`,
+    tenantId,
+    expenseNumber: generateExpenseNumber(tenantId),
+    createdBy: employeeId
+  });
+  return getExpenseDetail(row.id);
+}
+
+function requireEditableExpense(id: string, tenantId: string): expenseRepository.ExpenseRow {
+  const row = expenseRepository.findExpenseRowById(id);
+  if (!row || row.tenant_id !== tenantId) {
+    throw new Error("Expense not found");
+  }
+  if (row.status === "archived") {
+    throw new Error("Archived expenses can't be edited — restore it first");
+  }
+  return row;
+}
+
+export function updateExpense(id: string, input: unknown): Expense {
+  requirePermission("expenses", "edit");
+  const parsed: ExpenseInput = expenseInputSchema.parse(input);
+  const { tenantId } = getCurrentTenant();
+  const existing = requireEditableExpense(id, tenantId);
+
+  assertCategoryExists(tenantId, parsed.categoryId);
+  assertStorefrontBelongsToTenant(tenantId, parsed.storefrontId);
+  assertValidPaymentMethod(tenantId, parsed);
+
+  if (existing.attachment_path && existing.attachment_path !== parsed.attachmentPath) {
+    deleteManagedExpenseAttachment(existing.attachment_path);
+  }
+
+  const row = expenseRepository.updateExpenseRow(id, parsed);
+  return getExpenseDetail(row.id);
+}
+
+/** The soft-delete path — hides the expense from normal views while keeping the financial record
+ * intact for audit. Use this once an expense has been synced or might be referenced elsewhere. */
+export function archiveExpense(id: string): Expense {
+  requirePermission("expenses", "delete");
+  const row = expenseRepository.setExpenseStatusRow(id, "archived");
+  return getExpenseDetail(row.id);
+}
+
+export function restoreExpense(id: string): Expense {
+  requirePermission("expenses", "edit");
+  const row = expenseRepository.setExpenseStatusRow(id, "active");
+  return getExpenseDetail(row.id);
+}
+
+/** Permanent deletion is only allowed for expenses that have never synced — once a record has gone
+ * to sync (or later, once accounting modules can reference it), archiving is the only option so the
+ * financial trail is never silently erased. */
+export function deleteExpense(id: string): { id: string } {
+  requirePermission("expenses", "delete");
+  const { tenantId } = getCurrentTenant();
+  const row = expenseRepository.findExpenseRowById(id);
+  if (!row || row.tenant_id !== tenantId) {
+    throw new Error("Expense not found");
+  }
+  if (row.sync_status !== "pending") {
+    throw new Error("This expense has already been synchronized — archive it instead of deleting");
+  }
+
+  if (row.attachment_path) {
+    deleteManagedExpenseAttachment(row.attachment_path);
+  }
+  expenseRepository.deleteExpenseRow(id);
+  return { id };
+}

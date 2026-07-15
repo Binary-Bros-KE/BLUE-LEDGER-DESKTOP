@@ -8,14 +8,20 @@ import type { InventoryBalance, LocationStockLevel } from "./inventory";
 import type { InvoiceListItem, InvoiceSummary } from "./invoice";
 import type { Location, LocationStatus } from "./location";
 import type { PaymentMethod } from "./payment-method";
+import type { MainStoreAllocationSummary, MainStoreProductDetail, MainStoreProductRow } from "./main-store";
 import type { Product, ProductListItem, ProductStatus } from "./product";
 import type { PrinterActionResult, PrinterSettings } from "./printer";
+import type { Expense, ExpenseSummary } from "./expense";
+import type { ExpenseCategory, ExpenseCategoryStatus } from "./expense-category";
+import type { Purchase, PurchaseListItem, PurchaseSummary } from "./purchase";
+import type { Salary } from "./salary";
 import type { Quotation, QuotationListItem, QuotationStatus, QuotationStockCheckItem, QuotationSummary } from "./quotation";
 import type { Role, RoleListItem } from "./role";
+import type { Supplier, SupplierStatus } from "./supplier";
 import type { PendingSaleListItem, Sale, SaleListItem } from "./sale";
 import type { SaleReturn } from "./sale-return";
 import type { SaleVoid } from "./sale-void";
-import type { StockMovement, StockTransferResult } from "./stock-movement";
+import type { StockMovement, StockMovementFeedItem, StockTransferResult } from "./stock-movement";
 import type { SyncQueueItem, SyncSnapshot } from "./sync";
 
 export type IpcInvokeMap = {
@@ -135,6 +141,42 @@ export type IpcInvokeMap = {
     args: [string];
     result: string | null;
   };
+  "main-store:product-list": {
+    args: [string | null];
+    result: ProductListItem[];
+  };
+  "main-store:allocation-summary": {
+    args: [];
+    result: MainStoreAllocationSummary[];
+  };
+  "main-store:product-rows": {
+    args: [];
+    result: MainStoreProductRow[];
+  };
+  "main-store:product-detail": {
+    args: [string];
+    result: MainStoreProductDetail;
+  };
+  "main-store:receive": {
+    args: [Record<string, unknown>];
+    result: MainStoreProductDetail;
+  };
+  "main-store:distribute": {
+    args: [Record<string, unknown>];
+    result: MainStoreProductDetail;
+  };
+  "main-store:return": {
+    args: [Record<string, unknown>];
+    result: MainStoreProductDetail;
+  };
+  "main-store:reallocate": {
+    args: [Record<string, unknown>];
+    result: MainStoreProductDetail;
+  };
+  "main-store:damage": {
+    args: [Record<string, unknown>];
+    result: MainStoreProductDetail;
+  };
   "inventory:overview": {
     args: [string];
     result: InventoryBalance[];
@@ -146,6 +188,10 @@ export type IpcInvokeMap = {
   "stock-movement:list": {
     args: [string, { limit?: number }];
     result: StockMovement[];
+  };
+  "stock-movement:list-all": {
+    args: [{ limit?: number }];
+    result: StockMovementFeedItem[];
   };
   "stock-movement:create": {
     args: [Record<string, unknown>];
@@ -176,6 +222,10 @@ export type IpcInvokeMap = {
     result: { id: string };
   };
   "employee:list": {
+    args: [];
+    result: EmployeeListItem[];
+  };
+  "employee:list-for-salary-picker": {
     args: [];
     result: EmployeeListItem[];
   };
@@ -250,6 +300,150 @@ export type IpcInvokeMap = {
   "customer:set-status": {
     args: [string, CustomerStatus];
     result: Customer;
+  };
+  "supplier:list": {
+    args: [];
+    result: Supplier[];
+  };
+  "supplier:get": {
+    args: [string];
+    result: Supplier;
+  };
+  "supplier:create": {
+    args: [Record<string, unknown>];
+    result: Supplier;
+  };
+  "supplier:update": {
+    args: [string, Record<string, unknown>];
+    result: Supplier;
+  };
+  "supplier:set-status": {
+    args: [string, SupplierStatus];
+    result: Supplier;
+  };
+  "purchase:list": {
+    args: [];
+    result: PurchaseListItem[];
+  };
+  "purchase:summary": {
+    args: [];
+    result: PurchaseSummary;
+  };
+  "purchase:get": {
+    args: [string];
+    result: Purchase;
+  };
+  "purchase:create": {
+    args: [Record<string, unknown>];
+    result: Purchase;
+  };
+  "purchase:update": {
+    args: [string, Record<string, unknown>];
+    result: Purchase;
+  };
+  "purchase:mark-ordered": {
+    args: [string];
+    result: Purchase;
+  };
+  "purchase:cancel": {
+    args: [string];
+    result: Purchase;
+  };
+  "purchase:receive-goods": {
+    args: [string, Record<string, unknown>];
+    result: Purchase;
+  };
+  "purchase:record-payment": {
+    args: [string, Record<string, unknown>];
+    result: Purchase;
+  };
+  "purchase:mark-paid": {
+    args: [string, Record<string, unknown>];
+    result: Purchase;
+  };
+  "purchase:pick-attachment": {
+    args: [];
+    result: string | null;
+  };
+  "purchase:open-attachment": {
+    args: [string];
+    result: { success: true };
+  };
+  "expense-category:list": {
+    args: [];
+    result: ExpenseCategory[];
+  };
+  "expense-category:create": {
+    args: [Record<string, unknown>];
+    result: ExpenseCategory;
+  };
+  "expense-category:update": {
+    args: [string, Record<string, unknown>];
+    result: ExpenseCategory;
+  };
+  "expense-category:set-status": {
+    args: [string, ExpenseCategoryStatus];
+    result: ExpenseCategory;
+  };
+  "expense:list": {
+    args: [];
+    result: Expense[];
+  };
+  "expense:summary": {
+    args: [];
+    result: ExpenseSummary;
+  };
+  "expense:get": {
+    args: [string];
+    result: Expense;
+  };
+  "expense:create": {
+    args: [Record<string, unknown>];
+    result: Expense;
+  };
+  "expense:update": {
+    args: [string, Record<string, unknown>];
+    result: Expense;
+  };
+  "expense:archive": {
+    args: [string];
+    result: Expense;
+  };
+  "expense:restore": {
+    args: [string];
+    result: Expense;
+  };
+  "expense:delete": {
+    args: [string];
+    result: { id: string };
+  };
+  "expense:pick-attachment": {
+    args: [];
+    result: string | null;
+  };
+  "expense:open-attachment": {
+    args: [string];
+    result: { success: true };
+  };
+  "salary:list": {
+    args: [];
+    result: Salary[];
+  };
+  "salary:get": {
+    args: [string];
+    result: Salary;
+  };
+  "salary:create": {
+    args: [Record<string, unknown>];
+    result: Salary;
+  };
+  "salary:void": {
+    args: [string];
+    result: Salary;
+  };
+  "salary:restore": {
+    args: [string];
+    result: Salary;
   };
   "sale:list": {
     args: [];
@@ -419,6 +613,14 @@ export type IpcInvokeMap = {
     args: [string];
     result: PrinterActionResult;
   };
+  "printer:generate-salary-pdf": {
+    args: [string];
+    result: string | null;
+  };
+  "printer:share-salary-payslip": {
+    args: [string];
+    result: PrinterActionResult;
+  };
   "sync:get-snapshot": {
     args: [];
     result: SyncSnapshot;
@@ -501,6 +703,19 @@ export type BlueLedgerApi = {
       relativePath: string
     ) => Promise<IpcInvokeMap["product:read-image-preview"]["result"]>;
   };
+  mainStore: {
+    listProducts: (
+      locationId: string | null
+    ) => Promise<IpcInvokeMap["main-store:product-list"]["result"]>;
+    allocationSummary: () => Promise<IpcInvokeMap["main-store:allocation-summary"]["result"]>;
+    listProductRows: () => Promise<IpcInvokeMap["main-store:product-rows"]["result"]>;
+    getProductDetail: (productId: string) => Promise<IpcInvokeMap["main-store:product-detail"]["result"]>;
+    receive: (input: Record<string, unknown>) => Promise<IpcInvokeMap["main-store:receive"]["result"]>;
+    distribute: (input: Record<string, unknown>) => Promise<IpcInvokeMap["main-store:distribute"]["result"]>;
+    returnStock: (input: Record<string, unknown>) => Promise<IpcInvokeMap["main-store:return"]["result"]>;
+    reallocate: (input: Record<string, unknown>) => Promise<IpcInvokeMap["main-store:reallocate"]["result"]>;
+    damage: (input: Record<string, unknown>) => Promise<IpcInvokeMap["main-store:damage"]["result"]>;
+  };
   inventory: {
     overview: (productId: string) => Promise<IpcInvokeMap["inventory:overview"]["result"]>;
     listForLocation: (
@@ -512,6 +727,7 @@ export type BlueLedgerApi = {
       productId: string,
       input?: { limit?: number }
     ) => Promise<IpcInvokeMap["stock-movement:list"]["result"]>;
+    listAll: (input?: { limit?: number }) => Promise<IpcInvokeMap["stock-movement:list-all"]["result"]>;
     create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["stock-movement:create"]["result"]>;
     transfer: (
       input: Record<string, unknown>
@@ -526,6 +742,7 @@ export type BlueLedgerApi = {
   };
   employee: {
     list: () => Promise<IpcInvokeMap["employee:list"]["result"]>;
+    listForSalaryPicker: () => Promise<IpcInvokeMap["employee:list-for-salary-picker"]["result"]>;
     get: (id: string) => Promise<IpcInvokeMap["employee:get"]["result"]>;
     create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["employee:create"]["result"]>;
     update: (
@@ -570,6 +787,76 @@ export type BlueLedgerApi = {
       id: string,
       status: CustomerStatus
     ) => Promise<IpcInvokeMap["customer:set-status"]["result"]>;
+  };
+  supplier: {
+    list: () => Promise<IpcInvokeMap["supplier:list"]["result"]>;
+    get: (id: string) => Promise<IpcInvokeMap["supplier:get"]["result"]>;
+    create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["supplier:create"]["result"]>;
+    update: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["supplier:update"]["result"]>;
+    setStatus: (
+      id: string,
+      status: SupplierStatus
+    ) => Promise<IpcInvokeMap["supplier:set-status"]["result"]>;
+  };
+  purchase: {
+    list: () => Promise<IpcInvokeMap["purchase:list"]["result"]>;
+    summary: () => Promise<IpcInvokeMap["purchase:summary"]["result"]>;
+    get: (id: string) => Promise<IpcInvokeMap["purchase:get"]["result"]>;
+    create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["purchase:create"]["result"]>;
+    update: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["purchase:update"]["result"]>;
+    markOrdered: (id: string) => Promise<IpcInvokeMap["purchase:mark-ordered"]["result"]>;
+    cancel: (id: string) => Promise<IpcInvokeMap["purchase:cancel"]["result"]>;
+    receiveGoods: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["purchase:receive-goods"]["result"]>;
+    recordPayment: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["purchase:record-payment"]["result"]>;
+    markPaid: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["purchase:mark-paid"]["result"]>;
+    pickAttachment: () => Promise<IpcInvokeMap["purchase:pick-attachment"]["result"]>;
+    openAttachment: (relativePath: string) => Promise<IpcInvokeMap["purchase:open-attachment"]["result"]>;
+  };
+  expenseCategory: {
+    list: () => Promise<IpcInvokeMap["expense-category:list"]["result"]>;
+    create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["expense-category:create"]["result"]>;
+    update: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["expense-category:update"]["result"]>;
+    setStatus: (
+      id: string,
+      status: ExpenseCategoryStatus
+    ) => Promise<IpcInvokeMap["expense-category:set-status"]["result"]>;
+  };
+  expense: {
+    list: () => Promise<IpcInvokeMap["expense:list"]["result"]>;
+    summary: () => Promise<IpcInvokeMap["expense:summary"]["result"]>;
+    get: (id: string) => Promise<IpcInvokeMap["expense:get"]["result"]>;
+    create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["expense:create"]["result"]>;
+    update: (id: string, input: Record<string, unknown>) => Promise<IpcInvokeMap["expense:update"]["result"]>;
+    archive: (id: string) => Promise<IpcInvokeMap["expense:archive"]["result"]>;
+    restore: (id: string) => Promise<IpcInvokeMap["expense:restore"]["result"]>;
+    delete: (id: string) => Promise<IpcInvokeMap["expense:delete"]["result"]>;
+    pickAttachment: () => Promise<IpcInvokeMap["expense:pick-attachment"]["result"]>;
+    openAttachment: (relativePath: string) => Promise<IpcInvokeMap["expense:open-attachment"]["result"]>;
+  };
+  salary: {
+    list: () => Promise<IpcInvokeMap["salary:list"]["result"]>;
+    get: (id: string) => Promise<IpcInvokeMap["salary:get"]["result"]>;
+    create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["salary:create"]["result"]>;
+    void: (id: string) => Promise<IpcInvokeMap["salary:void"]["result"]>;
+    restore: (id: string) => Promise<IpcInvokeMap["salary:restore"]["result"]>;
   };
   sale: {
     list: () => Promise<IpcInvokeMap["sale:list"]["result"]>;
@@ -660,6 +947,8 @@ export type BlueLedgerApi = {
     printQuotationDocument: (
       quotationId: string
     ) => Promise<IpcInvokeMap["printer:print-quotation-document"]["result"]>;
+    generateSalaryPdf: (salaryId: string) => Promise<IpcInvokeMap["printer:generate-salary-pdf"]["result"]>;
+    shareSalaryPayslip: (salaryId: string) => Promise<IpcInvokeMap["printer:share-salary-payslip"]["result"]>;
   };
   sync: {
     getSnapshot: () => Promise<IpcInvokeMap["sync:get-snapshot"]["result"]>;

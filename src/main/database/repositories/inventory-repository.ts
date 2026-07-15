@@ -41,6 +41,22 @@ export function findInventoryRowsForLocation(locationId: string): InventoryRow[]
     .all(locationId) as InventoryRow[];
 }
 
+/** Every product's on-hand quantity at every storefront (never Main Store) for the tenant, in one
+ * query — powers the Main Store list's embedded per-storefront breakdown without a call per row. */
+export function findAllInventoryRowsForStorefronts(tenantId: string): InventoryRow[] {
+  return getDatabase()
+    .prepare(
+      `
+      SELECT i.*
+      FROM inventory i
+      JOIN locations l ON l.id = i.location_id
+      WHERE l.tenant_id = ?
+        AND l.location_type NOT IN ('warehouse', 'distribution_center')
+    `
+    )
+    .all(tenantId) as InventoryRow[];
+}
+
 /** All tenant locations left-joined with this product's inventory rows — missing rows read as zero stock. */
 export function findInventoryOverviewForProduct(
   tenantId: string,

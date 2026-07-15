@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   BarChart3,
+  Boxes,
   Building2,
   ClipboardCheck,
   ClipboardList,
@@ -13,11 +14,14 @@ import {
   RefreshCw,
   Settings,
   ShieldCheck,
+  ShoppingBag,
   ShoppingCart,
   Store,
   Truck,
   Users,
   UserCog,
+  Wallet,
+  WalletMinimal,
   Warehouse
 } from "lucide-react";
 import type { PermissionModuleKey } from "@shared/types/role";
@@ -122,9 +126,16 @@ export const navGroups: NavGroup[] = [
         permissionModule: "products"
       },
       {
+        key: "main-store",
+        label: "Main Store",
+        description: "Central stock & distribution",
+        icon: Boxes,
+        permissionModule: "inventory"
+      },
+      {
         key: "stock",
         label: "Stock Ledger",
-        description: "Levels & stock takes",
+        description: "Every stock movement, in one feed",
         icon: Warehouse,
         permissionModule: "inventory"
       },
@@ -134,6 +145,25 @@ export const navGroups: NavGroup[] = [
         description: "Vendors & purchase orders",
         icon: Truck,
         permissionModule: "suppliers"
+      },
+      {
+        key: "purchases",
+        label: "Purchases",
+        description: "Purchase orders & receiving",
+        icon: ShoppingBag,
+        permissionModule: "purchases"
+      }
+    ]
+  },
+  {
+    title: "Finance",
+    items: [
+      {
+        key: "expenses",
+        label: "Expenses",
+        description: "Operational costs & spending",
+        icon: Wallet,
+        permissionModule: "expenses"
       }
     ]
   },
@@ -165,6 +195,13 @@ export const navGroups: NavGroup[] = [
         description: "Permission groups",
         icon: ShieldCheck,
         permissionModule: "roles"
+      },
+      {
+        key: "salaries",
+        label: "Employee Salaries",
+        description: "Process payroll & payslips",
+        icon: WalletMinimal,
+        permissionModule: "salaries"
       }
     ]
   },

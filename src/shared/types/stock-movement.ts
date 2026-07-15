@@ -52,3 +52,11 @@ export type StockTransferResult = {
   transferOut: StockMovement;
   transferIn: StockMovement;
 };
+
+/** One row in the global Stock Ledger feed — a movement plus enough product context to display it
+ * without a second lookup, and its cost value for the "value of stock moved" column. */
+export type StockMovementFeedItem = StockMovement & {
+  productName: string;
+  sku: string;
+  valueCents: number;
+};

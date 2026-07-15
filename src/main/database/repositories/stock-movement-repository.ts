@@ -1,6 +1,11 @@
 import { getDatabase } from "@main/database/connection";
 import type { StockMovementInput } from "@shared/schemas/stock-movement";
-import type { StockMovement, StockMovementSyncStatus, StockMovementType } from "@shared/types/stock-movement";
+import type {
+  StockMovement,
+  StockMovementFeedItem,
+  StockMovementSyncStatus,
+  StockMovementType
+} from "@shared/types/stock-movement";
 
 export type StockMovementRow = {
   id: string;
@@ -86,6 +91,35 @@ export function findStockMovementRowsForProduct(productId: string, limit = 100):
     .all(productId, limit) as StockMovementListRow[];
 }
 
+export type StockMovementFeedRow = StockMovementListRow & {
+  product_name: string;
+  sku: string;
+  buying_price_cents: number;
+};
+
+/** Pass null for locationId to see every branch's movements (e.g. a super-admin with no assigned
+ * branch, or an audit view). Powers the global Stock Ledger feed. */
+export function findAllStockMovementRows(
+  tenantId: string,
+  locationId: string | null,
+  limit: number
+): StockMovementFeedRow[] {
+  return getDatabase()
+    .prepare(
+      `
+      SELECT sm.*, l.location_name AS location_name, p.name AS product_name, p.sku AS sku, p.buying_price_cents AS buying_price_cents
+      FROM stock_movements sm
+      JOIN locations l ON l.id = sm.location_id
+      JOIN products p ON p.id = sm.product_id
+      WHERE sm.tenant_id = ?
+        AND (? IS NULL OR sm.location_id = ?)
+      ORDER BY sm.created_at DESC
+      LIMIT ?
+    `
+    )
+    .all(tenantId, locationId, locationId, limit) as StockMovementFeedRow[];
+}
+
 export function mapStockMovementRow(row: StockMovementListRow): StockMovement {
   return {
     id: row.id,
@@ -102,5 +136,16 @@ export function mapStockMovementRow(row: StockMovementListRow): StockMovement {
     createdAt: row.created_at,
     syncStatus: row.sync_status as StockMovementSyncStatus,
     lastSyncedAt: row.last_synced_at
+  };
+}
+
+/** The cost value moved (quantity x the product's current buying price) — a simple, live snapshot
+ * rather than a price frozen at the time of the movement. */
+export function mapStockMovementFeedRow(row: StockMovementFeedRow): StockMovementFeedItem {
+  return {
+    ...mapStockMovementRow(row),
+    productName: row.product_name,
+    sku: row.sku,
+    valueCents: Math.abs(row.quantity_change) * row.buying_price_cents
   };
 }

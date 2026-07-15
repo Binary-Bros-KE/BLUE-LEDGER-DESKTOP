@@ -37,7 +37,18 @@ export const PERMISSION_MODULES = [
   },
   { key: "customers", label: "Customers", actions: ["view", "create", "edit", "delete", "export"] },
   { key: "suppliers", label: "Suppliers", actions: ["view", "create", "edit", "delete", "export"] },
+  { key: "expenses", label: "Expenses", actions: ["view", "create", "edit", "delete", "export"] },
+  {
+    key: "expense_categories",
+    label: "Expense Categories",
+    actions: ["view", "create", "edit", "delete"]
+  },
   { key: "employees", label: "Employees", actions: ["view", "create", "edit", "delete"] },
+  {
+    key: "salaries",
+    label: "Salaries",
+    actions: ["view", "create", "edit", "delete", "export"]
+  },
   { key: "roles", label: "Roles", actions: ["view", "create", "edit", "delete"] },
   { key: "reports", label: "Reports", actions: ["view", "export"] },
   { key: "settings", label: "Settings", actions: ["view", "edit"] },

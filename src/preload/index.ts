@@ -52,12 +52,24 @@ const api: BlueLedgerApi = {
     pickImage: () => invoke("product:pick-image"),
     readImagePreview: (relativePath) => invoke("product:read-image-preview", relativePath)
   },
+  mainStore: {
+    listProducts: (locationId) => invoke("main-store:product-list", locationId),
+    allocationSummary: () => invoke("main-store:allocation-summary"),
+    listProductRows: () => invoke("main-store:product-rows"),
+    getProductDetail: (productId) => invoke("main-store:product-detail", productId),
+    receive: (input) => invoke("main-store:receive", input),
+    distribute: (input) => invoke("main-store:distribute", input),
+    returnStock: (input) => invoke("main-store:return", input),
+    reallocate: (input) => invoke("main-store:reallocate", input),
+    damage: (input) => invoke("main-store:damage", input)
+  },
   inventory: {
     overview: (productId) => invoke("inventory:overview", productId),
     listForLocation: (locationId) => invoke("inventory:list-for-location", locationId)
   },
   stockMovement: {
     list: (productId, input) => invoke("stock-movement:list", productId, input ?? {}),
+    listAll: (input) => invoke("stock-movement:list-all", input ?? {}),
     create: (input) => invoke("stock-movement:create", input),
     transfer: (input) => invoke("stock-movement:transfer", input)
   },
@@ -70,6 +82,7 @@ const api: BlueLedgerApi = {
   },
   employee: {
     list: () => invoke("employee:list"),
+    listForSalaryPicker: () => invoke("employee:list-for-salary-picker"),
     get: (id) => invoke("employee:get", id),
     create: (input) => invoke("employee:create", input),
     update: (id, input) => invoke("employee:update", id, input),
@@ -92,6 +105,52 @@ const api: BlueLedgerApi = {
     create: (input) => invoke("customer:create", input),
     update: (id, input) => invoke("customer:update", id, input),
     setStatus: (id, status) => invoke("customer:set-status", id, status)
+  },
+  supplier: {
+    list: () => invoke("supplier:list"),
+    get: (id) => invoke("supplier:get", id),
+    create: (input) => invoke("supplier:create", input),
+    update: (id, input) => invoke("supplier:update", id, input),
+    setStatus: (id, status) => invoke("supplier:set-status", id, status)
+  },
+  purchase: {
+    list: () => invoke("purchase:list"),
+    summary: () => invoke("purchase:summary"),
+    get: (id) => invoke("purchase:get", id),
+    create: (input) => invoke("purchase:create", input),
+    update: (id, input) => invoke("purchase:update", id, input),
+    markOrdered: (id) => invoke("purchase:mark-ordered", id),
+    cancel: (id) => invoke("purchase:cancel", id),
+    receiveGoods: (id, input) => invoke("purchase:receive-goods", id, input),
+    recordPayment: (id, input) => invoke("purchase:record-payment", id, input),
+    markPaid: (id, input) => invoke("purchase:mark-paid", id, input),
+    pickAttachment: () => invoke("purchase:pick-attachment"),
+    openAttachment: (relativePath) => invoke("purchase:open-attachment", relativePath)
+  },
+  expenseCategory: {
+    list: () => invoke("expense-category:list"),
+    create: (input) => invoke("expense-category:create", input),
+    update: (id, input) => invoke("expense-category:update", id, input),
+    setStatus: (id, status) => invoke("expense-category:set-status", id, status)
+  },
+  expense: {
+    list: () => invoke("expense:list"),
+    summary: () => invoke("expense:summary"),
+    get: (id) => invoke("expense:get", id),
+    create: (input) => invoke("expense:create", input),
+    update: (id, input) => invoke("expense:update", id, input),
+    archive: (id) => invoke("expense:archive", id),
+    restore: (id) => invoke("expense:restore", id),
+    delete: (id) => invoke("expense:delete", id),
+    pickAttachment: () => invoke("expense:pick-attachment"),
+    openAttachment: (relativePath) => invoke("expense:open-attachment", relativePath)
+  },
+  salary: {
+    list: () => invoke("salary:list"),
+    get: (id) => invoke("salary:get", id),
+    create: (input) => invoke("salary:create", input),
+    void: (id) => invoke("salary:void", id),
+    restore: (id) => invoke("salary:restore", id)
   },
   sale: {
     list: () => invoke("sale:list"),
@@ -145,7 +204,9 @@ const api: BlueLedgerApi = {
     generateInvoicePdf: (saleId) => invoke("printer:generate-invoice-pdf", saleId),
     printInvoiceDocument: (saleId) => invoke("printer:print-invoice-document", saleId),
     generateQuotationPdf: (quotationId) => invoke("printer:generate-quotation-pdf", quotationId),
-    printQuotationDocument: (quotationId) => invoke("printer:print-quotation-document", quotationId)
+    printQuotationDocument: (quotationId) => invoke("printer:print-quotation-document", quotationId),
+    generateSalaryPdf: (salaryId) => invoke("printer:generate-salary-pdf", salaryId),
+    shareSalaryPayslip: (salaryId) => invoke("printer:share-salary-payslip", salaryId)
   },
   sync: {
     getSnapshot: () => invoke("sync:get-snapshot"),

@@ -61,6 +61,15 @@ export function findLocationRowById(id: string): LocationRow | undefined {
     | undefined;
 }
 
+/** The tenant's one Main Store (warehouse/distribution-center type) — never a sell-only storefront. */
+export function findMainStoreLocationRow(tenantId: string): LocationRow | undefined {
+  return getDatabase()
+    .prepare(
+      "SELECT * FROM locations WHERE tenant_id = ? AND location_type = 'distribution_center' LIMIT 1"
+    )
+    .get(tenantId) as LocationRow | undefined;
+}
+
 export function insertLocationRow(
   input: LocationInput & { id: string; tenantId: string; createdBy: string | null }
 ): LocationRow {
