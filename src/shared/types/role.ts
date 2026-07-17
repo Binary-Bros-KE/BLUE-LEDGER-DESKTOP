@@ -37,6 +37,7 @@ export const PERMISSION_MODULES = [
   },
   { key: "customers", label: "Customers", actions: ["view", "create", "edit", "delete", "export"] },
   { key: "suppliers", label: "Suppliers", actions: ["view", "create", "edit", "delete", "export"] },
+  { key: "riders", label: "Riders", actions: ["view", "create", "edit", "delete", "export"] },
   { key: "expenses", label: "Expenses", actions: ["view", "create", "edit", "delete", "export"] },
   {
     key: "expense_categories",

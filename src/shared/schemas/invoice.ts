@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { deliveryFieldSchema, serviceChargesFieldSchema } from "@shared/schemas/charges";
 import { optionalText } from "@shared/schemas/common";
 
 const invoiceCartItemSchema = z.object({
@@ -22,7 +23,9 @@ export const createInvoiceSchema = z.object({
   initialPayment: initialPaymentSchema
     .nullable()
     .optional()
-    .transform((value) => (value === undefined ? null : value))
+    .transform((value) => (value === undefined ? null : value)),
+  serviceCharges: serviceChargesFieldSchema,
+  delivery: deliveryFieldSchema
 });
 
 export type CreateInvoiceInput = z.infer<typeof createInvoiceSchema>;

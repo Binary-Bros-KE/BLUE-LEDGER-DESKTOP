@@ -7,6 +7,7 @@ import type {
   QuotationStatus,
   QuotationSyncStatus
 } from "@shared/types/quotation";
+import type { SaleDelivery, SaleServiceCharge } from "@shared/types/sale";
 
 export type QuotationRow = {
   id: string;
@@ -343,7 +344,12 @@ function liveStatus(row: QuotationRow): QuotationStatus {
   return computeQuotationStatus({ storedStatus: row.status as QuotationStatus, validUntil: row.valid_until });
 }
 
-export function mapQuotationDetailRow(row: QuotationDetailRow, items: QuotationItem[]): Quotation {
+export function mapQuotationDetailRow(
+  row: QuotationDetailRow,
+  items: QuotationItem[],
+  serviceCharges: SaleServiceCharge[],
+  delivery: SaleDelivery | null
+): Quotation {
   return {
     id: row.id,
     tenantId: row.tenant_id,
@@ -367,7 +373,9 @@ export function mapQuotationDetailRow(row: QuotationDetailRow, items: QuotationI
     updatedAt: row.updated_at,
     syncStatus: row.sync_status as QuotationSyncStatus,
     lastSyncedAt: row.last_synced_at,
-    items
+    items,
+    serviceCharges,
+    delivery
   };
 }
 

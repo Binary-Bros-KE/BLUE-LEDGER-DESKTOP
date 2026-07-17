@@ -1,14 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { runInTransaction } from "@main/database/connection";
 import * as categoryRepository from "@main/database/repositories/category-repository";
+import * as inventoryRepository from "@main/database/repositories/inventory-repository";
 import * as locationRepository from "@main/database/repositories/location-repository";
+import * as mainStoreAllocationRepository from "@main/database/repositories/main-store-allocation-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
 import { deleteManagedProductImage } from "@main/services/image-service";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { productCreateSchema, productUpdateSchema } from "@shared/schemas/product";
-import type { Product, ProductListItem, ProductStatus } from "@shared/types/product";
+import type { Product, ProductListItem, ProductStatus, ProductStockSummary } from "@shared/types/product";
 
 function assertCategoryBelongsToTenant(categoryId: string | null, tenantId: string): void {
   if (!categoryId) return;
@@ -50,6 +52,35 @@ export function listProducts(): ProductListItem[] {
   return productRepository
     .findAllProductRows(tenantId, locationId)
     .map(productRepository.mapProductListRow);
+}
+
+/** Just two numbers — this location's own stock and Main Store's — for a quick "do we have it, can
+ * we get more" check from the Products list or Checkout. Deliberately not a per-storefront
+ * breakdown (that's the Main Store screen's job, and requires "inventory" permission); this only
+ * needs "products:view" so every role that can browse the catalog can use it. */
+export function getProductStockSummary(productId: string): ProductStockSummary {
+  requirePermission("products", "view");
+  const { tenantId } = getCurrentTenant();
+  const locationId = getCurrentBranchScope();
+  const mainStore = locationRepository.findMainStoreLocationRow(tenantId);
+
+  const ownLocation = locationId ? locationRepository.findLocationRowById(locationId) : undefined;
+  const ownLocationQuantity = locationId
+    ? (inventoryRepository.findInventoryRow(productId, locationId)?.quantity ?? 0)
+    : null;
+  const mainStoreQuantity = mainStore
+    ? (inventoryRepository.findInventoryRow(productId, mainStore.id)?.quantity ?? 0)
+    : 0;
+  const mainStoreUnallocatedQuantity = mainStore
+    ? (mainStoreAllocationRepository.findAllocationRow(productId, null)?.quantity ?? 0)
+    : 0;
+
+  return {
+    ownLocationName: ownLocation?.location_name ?? null,
+    ownLocationQuantity,
+    mainStoreQuantity,
+    mainStoreUnallocatedQuantity
+  };
 }
 
 /**

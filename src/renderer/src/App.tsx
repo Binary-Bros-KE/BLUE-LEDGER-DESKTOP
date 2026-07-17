@@ -16,16 +16,23 @@ import { LoginRoute } from "@renderer/app/routes/LoginRoute";
 import { MainStoreRoute } from "@renderer/app/routes/MainStoreRoute";
 import { PaymentMethodsRoute } from "@renderer/app/routes/PaymentMethodsRoute";
 import { PlaceholderRoute } from "@renderer/app/routes/PlaceholderRoute";
+import { SalesReportRoute } from "@renderer/app/routes/SalesReportRoute";
+import { InventoryReportRoute } from "@renderer/app/routes/InventoryReportRoute";
+import { ProductsReportRoute } from "@renderer/app/routes/ProductsReportRoute";
+import { CustomersReportRoute } from "@renderer/app/routes/CustomersReportRoute";
+import { SuppliersReportRoute } from "@renderer/app/routes/SuppliersReportRoute";
 import { ProductsRoute } from "@renderer/app/routes/ProductsRoute";
 import { PurchasesRoute } from "@renderer/app/routes/PurchasesRoute";
 import { QuotationsRoute } from "@renderer/app/routes/QuotationsRoute";
 import { ReceiptsRoute } from "@renderer/app/routes/ReceiptsRoute";
+import { RidersRoute } from "@renderer/app/routes/RidersRoute";
 import { RolesRoute } from "@renderer/app/routes/RolesRoute";
 import { SalariesRoute } from "@renderer/app/routes/SalariesRoute";
 import { SettingsRoute } from "@renderer/app/routes/SettingsRoute";
 import { StockLedgerRoute } from "@renderer/app/routes/StockLedgerRoute";
 import { StorefrontsRoute } from "@renderer/app/routes/StorefrontsRoute";
 import { SuppliersRoute } from "@renderer/app/routes/SuppliersRoute";
+import { TransactionsRoute } from "@renderer/app/routes/TransactionsRoute";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { useAuthStore } from "@renderer/shared/stores/auth-store";
@@ -89,6 +96,8 @@ export function App(): React.JSX.Element {
         <CustomersRoute />
       ) : activeNavKey === "suppliers" ? (
         <SuppliersRoute />
+      ) : activeNavKey === "riders" ? (
+        <RidersRoute />
       ) : activeNavKey === "purchases" ? (
         <PurchasesRoute />
       ) : activeNavKey === "expenses" ? (
@@ -103,6 +112,18 @@ export function App(): React.JSX.Element {
         <QuotationsRoute />
       ) : activeNavKey === "approvals" ? (
         <ApprovalsRoute />
+      ) : activeNavKey === "transactions" ? (
+        <TransactionsRoute />
+      ) : activeNavKey === "reports-sales" ? (
+        <SalesReportRoute />
+      ) : activeNavKey === "reports-inventory" ? (
+        <InventoryReportRoute />
+      ) : activeNavKey === "reports-products" ? (
+        <ProductsReportRoute />
+      ) : activeNavKey === "reports-customers" ? (
+        <CustomersReportRoute />
+      ) : activeNavKey === "reports-suppliers" ? (
+        <SuppliersReportRoute />
       ) : activeNavKey === "settings" ? (
         <SettingsRoute />
       ) : (

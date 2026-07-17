@@ -90,7 +90,7 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
 
         <div className="my-2 border-t border-dashed border-line" />
         <div className="space-y-1.5">
-          {vm.items.map((item, index) => (
+          {[...vm.items, ...vm.extraLines].map((item, index) => (
             <div key={index} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="truncate font-bold">{item.name}</p>

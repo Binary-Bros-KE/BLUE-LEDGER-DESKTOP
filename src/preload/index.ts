@@ -45,6 +45,7 @@ const api: BlueLedgerApi = {
   },
   product: {
     list: () => invoke("product:list"),
+    stockSummary: (id) => invoke("product:stock-summary", id),
     get: (id) => invoke("product:get", id),
     create: (input) => invoke("product:create", input),
     update: (id, input) => invoke("product:update", id, input),
@@ -112,6 +113,13 @@ const api: BlueLedgerApi = {
     create: (input) => invoke("supplier:create", input),
     update: (id, input) => invoke("supplier:update", id, input),
     setStatus: (id, status) => invoke("supplier:set-status", id, status)
+  },
+  rider: {
+    list: () => invoke("rider:list"),
+    get: (id) => invoke("rider:get", id),
+    create: (input) => invoke("rider:create", input),
+    update: (id, input) => invoke("rider:update", id, input),
+    setStatus: (id, status) => invoke("rider:set-status", id, status)
   },
   purchase: {
     list: () => invoke("purchase:list"),
@@ -206,7 +214,16 @@ const api: BlueLedgerApi = {
     generateQuotationPdf: (quotationId) => invoke("printer:generate-quotation-pdf", quotationId),
     printQuotationDocument: (quotationId) => invoke("printer:print-quotation-document", quotationId),
     generateSalaryPdf: (salaryId) => invoke("printer:generate-salary-pdf", salaryId),
-    shareSalaryPayslip: (salaryId) => invoke("printer:share-salary-payslip", salaryId)
+    shareSalaryPayslip: (salaryId) => invoke("printer:share-salary-payslip", salaryId),
+    printDeliveryNote: (deliveryNoteId) => invoke("printer:print-delivery-note", deliveryNoteId),
+    generateDeliveryNotePdf: (deliveryNoteId) => invoke("printer:generate-delivery-note-pdf", deliveryNoteId),
+    shareDeliveryNote: (deliveryNoteId) => invoke("printer:share-delivery-note", deliveryNoteId)
+  },
+  deliveryNote: {
+    get: (id) => invoke("delivery-note:get", id),
+    getForSale: (saleId) => invoke("delivery-note:get-for-sale", saleId),
+    getForQuotation: (quotationId) => invoke("delivery-note:get-for-quotation", quotationId),
+    setDelivered: (id, delivered) => invoke("delivery-note:set-delivered", id, delivered)
   },
   sync: {
     getSnapshot: () => invoke("sync:get-snapshot"),
@@ -214,6 +231,24 @@ const api: BlueLedgerApi = {
   },
   theme: {
     save: (theme) => invoke("theme:save", theme)
+  },
+  report: {
+    salesFinancialOverview: (range) => invoke("report:sales-financial-overview", range),
+    salesTransactions: (range) => invoke("report:sales-transactions", range),
+    paymentTransactions: (range) => invoke("report:payment-transactions", range),
+    mySales: (range) => invoke("report:my-sales", range),
+    salesTrendWindow: (input) => invoke("report:sales-trend-window", input),
+    salesByStorefront: (range) => invoke("report:sales-by-storefront", range),
+    salesByEmployee: (range) => invoke("report:sales-by-employee", range),
+    salesByPaymentMethod: (range) => invoke("report:sales-by-payment-method", range),
+    inventoryData: () => invoke("report:inventory-data"),
+    productsPerformance: (range) => invoke("report:products-performance", range),
+    productSalesHistory: (input) => invoke("report:product-sales-history", input),
+    topCustomers: (range) => invoke("report:top-customers", range),
+    customerPurchaseHistory: (input) => invoke("report:customer-purchase-history", input),
+    outstandingInvoices: () => invoke("report:outstanding-invoices"),
+    outstandingPurchases: () => invoke("report:outstanding-purchases"),
+    supplierPurchaseHistory: (input) => invoke("report:supplier-purchase-history", input)
   }
 };
 

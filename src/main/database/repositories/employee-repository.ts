@@ -95,6 +95,14 @@ export function countEmployeesByRoleRow(roleId: string): number {
   return row.count;
 }
 
+/** Bulk-reassigns every employee on one role to another — used only by the one-time role
+ * consolidation migration, so it skips the full employee-update validation path deliberately. */
+export function reassignEmployeeRoleRow(tenantId: string, fromRoleId: string, toRoleId: string): void {
+  getDatabase()
+    .prepare("UPDATE employees SET role_id = ? WHERE tenant_id = ? AND role_id = ?")
+    .run(toRoleId, tenantId, fromRoleId);
+}
+
 export function insertEmployeeRow(
   input: EmployeeCreateInput & {
     id: string;

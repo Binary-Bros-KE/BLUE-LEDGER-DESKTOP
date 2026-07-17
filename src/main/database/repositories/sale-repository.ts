@@ -5,9 +5,11 @@ import type {
   PaymentStatus,
   PendingSaleListItem,
   Sale,
+  SaleDelivery,
   SaleItem,
   SaleListItem,
   SalePayment,
+  SaleServiceCharge,
   SaleStatus,
   SaleSyncStatus,
   TransactionType
@@ -93,6 +95,7 @@ export type SaleSummaryRow = {
   sale_status: string;
   completed_at: string | null;
   created_at: string;
+  has_delivery_note: number;
 };
 
 /** Pass null for locationId to see every branch's receipts (e.g. a super-admin with no assigned branch). */
@@ -111,7 +114,8 @@ export function findAllSaleSummaryRows(tenantId: string, locationId: string | nu
         s.grand_total_cents,
         s.sale_status,
         s.completed_at,
-        s.created_at
+        s.created_at,
+        EXISTS(SELECT 1 FROM delivery_notes dn WHERE dn.sale_id = s.id) AS has_delivery_note
       FROM sales s
       JOIN employees e ON e.id = s.employee_id
       JOIN locations l ON l.id = s.location_id
@@ -137,7 +141,8 @@ export function mapSaleSummaryRow(row: SaleSummaryRow): SaleListItem {
     grandTotalCents: row.grand_total_cents,
     saleStatus: row.sale_status as SaleStatus,
     completedAt: row.completed_at,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    hasDeliveryNote: row.has_delivery_note === 1
   };
 }
 
@@ -173,6 +178,7 @@ export type InvoiceRow = {
   balance_due_cents: number;
   payment_status: string;
   created_at: string;
+  has_delivery_note: number;
 };
 
 /** Pass null for locationId to see every branch's invoices (e.g. a super-admin with no assigned branch). */
@@ -193,7 +199,8 @@ export function findAllInvoiceRows(tenantId: string, locationId: string | null):
         s.amount_paid_cents,
         s.balance_due_cents,
         s.payment_status,
-        s.created_at
+        s.created_at,
+        EXISTS(SELECT 1 FROM delivery_notes dn WHERE dn.sale_id = s.id) AS has_delivery_note
       FROM sales s
       JOIN locations l ON l.id = s.location_id
       LEFT JOIN customers c ON c.id = s.customer_id
@@ -224,7 +231,8 @@ export function mapInvoiceListRow(row: InvoiceRow): InvoiceListItem {
       dueDate: row.due_date,
       cancelled: row.payment_status === "cancelled"
     }),
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    hasDeliveryNote: row.has_delivery_note === 1
   };
 }
 
@@ -310,7 +318,7 @@ export function findSaleItemDetailRows(saleId: string): SaleItemDetailRow[] {
     .all(saleId) as SaleItemDetailRow[];
 }
 
-export function findPendingSaleListRows(tenantId: string, locationId: string): PendingSaleListRow[] {
+export function findPendingSaleListRows(tenantId: string, locationId: string | null): PendingSaleListRow[] {
   return getDatabase()
     .prepare(
       `
@@ -325,11 +333,11 @@ export function findPendingSaleListRows(tenantId: string, locationId: string): P
         (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.id) AS item_count
       FROM sales s
       LEFT JOIN customers c ON c.id = s.customer_id
-      WHERE s.tenant_id = ? AND s.location_id = ? AND s.sale_status = 'pending'
+      WHERE s.tenant_id = ? AND (? IS NULL OR s.location_id = ?) AND s.sale_status = 'pending'
       ORDER BY s.created_at DESC
     `
     )
-    .all(tenantId, locationId) as PendingSaleListRow[];
+    .all(tenantId, locationId, locationId) as PendingSaleListRow[];
 }
 
 export function insertSaleRow(input: {
@@ -353,6 +361,11 @@ export function insertSaleRow(input: {
 }): SaleRow {
   const now = new Date().toISOString();
 
+  // Retail checkout never allows underpayment (see completeSale), so a 'completed' row is always
+  // paid in full at that instant — a 'pending' (suspended) row has collected nothing yet.
+  const amountPaidCents = input.saleStatus === "completed" ? input.grandTotalCents : 0;
+  const balanceDueCents = input.saleStatus === "completed" ? 0 : input.grandTotalCents;
+
   getDatabase()
     .prepare(
       `
@@ -360,9 +373,9 @@ export function insertSaleRow(input: {
         id, tenant_id, receipt_number, location_id, employee_id, customer_id, sale_status,
         subtotal_cents, discount_amount_cents, tax_amount_cents, grand_total_cents,
         payment_method_id, payment_reference, amount_received_cents, change_given_cents,
-        notes, completed_at, created_at, updated_at, sync_status
+        notes, completed_at, created_at, updated_at, sync_status, amount_paid_cents, balance_due_cents
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
     `
     )
     .run(
@@ -384,7 +397,9 @@ export function insertSaleRow(input: {
       input.notes,
       input.completedAt,
       now,
-      now
+      now,
+      amountPaidCents,
+      balanceDueCents
     );
 
   const row = findSaleRowById(input.id);
@@ -590,7 +605,12 @@ function parseSalePayments(raw: string): SalePayment[] {
   }
 }
 
-export function mapSaleDetailRow(row: SaleDetailRow, items: SaleItem[]): Sale {
+export function mapSaleDetailRow(
+  row: SaleDetailRow,
+  items: SaleItem[],
+  serviceCharges: SaleServiceCharge[],
+  delivery: SaleDelivery | null
+): Sale {
   return {
     id: row.id,
     tenantId: row.tenant_id,
@@ -631,7 +651,9 @@ export function mapSaleDetailRow(row: SaleDetailRow, items: SaleItem[]): Sale {
     updatedAt: row.updated_at,
     syncStatus: row.sync_status as SaleSyncStatus,
     lastSyncedAt: row.last_synced_at,
-    items
+    items,
+    serviceCharges,
+    delivery
   };
 }
 

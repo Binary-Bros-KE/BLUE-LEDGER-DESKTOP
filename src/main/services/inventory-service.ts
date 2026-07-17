@@ -5,7 +5,7 @@ import * as locationRepository from "@main/database/repositories/location-reposi
 import * as mainStoreAllocationRepository from "@main/database/repositories/main-store-allocation-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
 import * as stockMovementRepository from "@main/database/repositories/stock-movement-repository";
-import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
+import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission, requirePermissionAnyOf } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import {
   stockMovementInputSchema,
@@ -199,7 +199,10 @@ export function listAllStockMovements(limit = 200): StockMovementFeedItem[] {
 
 /** Every stocked product's balance at one location — feeds the POS screen's available-stock display. */
 export function listInventoryForLocation(locationId: string): LocationStockLevel[] {
-  requirePermission("inventory", "view");
+  requirePermissionAnyOf([
+    ["inventory", "view"],
+    ["products", "view"]
+  ]);
   return inventoryRepository.findInventoryRowsForLocation(locationId).map((row) => ({
     productId: row.product_id,
     quantity: row.quantity

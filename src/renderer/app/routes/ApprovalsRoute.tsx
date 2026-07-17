@@ -414,7 +414,7 @@ export function ApprovalsRoute(): React.JSX.Element {
               {decisionEntry.action === "approve"
                 ? decisionEntry.entry.kind === "void"
                   ? "This will void the sale and restock every item."
-                  : "This will restock the selected items."
+                  : "This will restock the selected items. Approving assumes the customer has already been refunded in cash — the reports will reduce this sale's revenue accordingly, whether or not a refund actually happened."
                 : "This request will be marked rejected — nothing changes."}
             </p>
             <TextAreaField

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { deliveryFieldSchema, serviceChargesFieldSchema } from "@shared/schemas/charges";
 import { optionalText } from "@shared/schemas/common";
 
 const quotationCartItemSchema = z.object({
@@ -11,7 +12,9 @@ export const quotationCreateSchema = z.object({
   customerId: z.string().trim().min(1, "Select a customer"),
   validUntil: z.string().trim().min(1, "Valid-until date is required"),
   notes: optionalText(1000),
-  items: z.array(quotationCartItemSchema).min(1, "Add at least one product")
+  items: z.array(quotationCartItemSchema).min(1, "Add at least one product"),
+  serviceCharges: serviceChargesFieldSchema,
+  delivery: deliveryFieldSchema
 });
 
 export type QuotationCreateInput = z.infer<typeof quotationCreateSchema>;

@@ -18,6 +18,11 @@ import {
 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import {
+  ExtraChargesSection,
+  type DeliveryDraft,
+  type ServiceChargeDraft
+} from "@renderer/shared/components/ExtraChargesSection";
 import { Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { StatTile } from "@renderer/shared/components/StatTile";
@@ -115,6 +120,8 @@ export function QuotationsRoute(): React.JSX.Element {
 
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
   const [searchTerm, setSearchTerm] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const [viewingQuotation, setViewingQuotation] = useState<Quotation | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
@@ -125,6 +132,8 @@ export function QuotationsRoute(): React.JSX.Element {
   const [createValidUntil, setCreateValidUntil] = useState(addDaysIso(7));
   const [createNotes, setCreateNotes] = useState("");
   const [createItems, setCreateItems] = useState<CartLine[]>([]);
+  const [createServiceCharges, setCreateServiceCharges] = useState<ServiceChargeDraft[]>([]);
+  const [createDelivery, setCreateDelivery] = useState<DeliveryDraft | null>(null);
   const [productSearch, setProductSearch] = useState("");
   const [createSaving, setCreateSaving] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -188,8 +197,17 @@ export function QuotationsRoute(): React.JSX.Element {
       });
     }
 
+    if (dateFrom || dateTo) {
+      list = list.filter((quotation) => {
+        const quotationDate = quotation.createdAt.slice(0, 10);
+        if (dateFrom && quotationDate < dateFrom) return false;
+        if (dateTo && quotationDate > dateTo) return false;
+        return true;
+      });
+    }
+
     return [...list].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [quotations, activeTab, searchTerm]);
+  }, [quotations, activeTab, searchTerm, dateFrom, dateTo]);
 
   async function openView(id: string): Promise<void> {
     setViewLoading(true);
@@ -397,13 +415,18 @@ export function QuotationsRoute(): React.JSX.Element {
       discountAmountCents += entry.pricing.discountAmountCents;
       taxAmountCents += entry.pricing.taxCents;
     }
+    const serviceChargesFeeCents = createServiceCharges.reduce((sum, charge) => sum + toCents(charge.fee), 0);
+    const deliveryFeeCents = createDelivery ? toCents(createDelivery.fee) : 0;
     return {
       subtotalCents,
       discountAmountCents,
       taxAmountCents,
-      grandTotalCents: subtotalCents - discountAmountCents + taxAmountCents
+      serviceChargesFeeCents,
+      deliveryFeeCents,
+      grandTotalCents:
+        subtotalCents - discountAmountCents + taxAmountCents + serviceChargesFeeCents + deliveryFeeCents
     };
-  }, [createLinePricing]);
+  }, [createLinePricing, createServiceCharges, createDelivery]);
 
   function openCreateModal(): void {
     setCreateCustomerId(null);
@@ -411,6 +434,8 @@ export function QuotationsRoute(): React.JSX.Element {
     setCreateValidUntil(addDaysIso(7));
     setCreateNotes("");
     setCreateItems([]);
+    setCreateServiceCharges([]);
+    setCreateDelivery(null);
     setProductSearch("");
     setCreateError(null);
     setCreateOpen(true);
@@ -468,7 +493,24 @@ export function QuotationsRoute(): React.JSX.Element {
           productId: line.productId,
           quantity: line.quantity,
           discountAmountCents: line.discountAmountCents
-        }))
+        })),
+        serviceCharges: createServiceCharges.map((charge) => ({
+          name: charge.name,
+          feeCents: toCents(charge.fee),
+          costCents: toCents(charge.cost)
+        })),
+        delivery: createDelivery
+          ? {
+              riderId: createDelivery.riderId,
+              recipientName: createDelivery.recipientName,
+              country: createDelivery.country,
+              town: createDelivery.town,
+              physicalAddress: createDelivery.physicalAddress,
+              notes: createDelivery.notes,
+              feeCents: toCents(createDelivery.fee),
+              costCents: toCents(createDelivery.cost)
+            }
+          : null
       });
       setCreateOpen(false);
       await loadAll();
@@ -554,8 +596,8 @@ export function QuotationsRoute(): React.JSX.Element {
           ))}
         </div>
 
-        <div className="mt-4">
-          <label className="block sm:max-w-xs">
+        <div className="mt-4 flex flex-wrap items-end gap-3">
+          <label className="block sm:max-w-xs sm:flex-1">
             <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Search</span>
             <div className="relative mt-1.5">
               <Search
@@ -571,6 +613,36 @@ export function QuotationsRoute(): React.JSX.Element {
               />
             </div>
           </label>
+          <label className="block">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">From</span>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(event) => setDateFrom(event.target.value)}
+              className="mt-1.5 h-10 rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+            />
+          </label>
+          <label className="block">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">To</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(event) => setDateTo(event.target.value)}
+              className="mt-1.5 h-10 rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+            />
+          </label>
+          {(dateFrom || dateTo) && (
+            <button
+              type="button"
+              onClick={() => {
+                setDateFrom("");
+                setDateTo("");
+              }}
+              className="h-10 rounded-lg border border-line bg-white px-3 text-xs font-bold text-ink shadow-none transition hover:bg-soft cursor-pointer"
+            >
+              Clear dates
+            </button>
+          )}
         </div>
 
         <div className="mt-5">
@@ -732,6 +804,60 @@ export function QuotationsRoute(): React.JSX.Element {
               </div>
             </div>
 
+            {viewingQuotation.serviceCharges.length > 0 && (
+              <div className="mt-4">
+                <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Service Charges</p>
+                <div className="mt-2 space-y-1.5">
+                  {viewingQuotation.serviceCharges.map((charge) => (
+                    <div
+                      key={charge.id}
+                      className="flex items-center justify-between rounded-lg border border-dashed border-line px-3 py-2"
+                    >
+                      <p className="text-sm font-bold text-ink">{charge.name}</p>
+                      <p className="text-sm font-extrabold text-ink">{formatCents(charge.feeCents)}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {viewingQuotation.delivery && (
+              <div className="mt-4 rounded-lg border border-dashed border-line bg-soft/50 p-3">
+                <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Delivery</p>
+                <div className="mt-2 grid grid-cols-2 gap-2.5 text-sm">
+                  <div>
+                    <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Recipient</p>
+                    <p className="font-bold text-ink">{viewingQuotation.delivery.recipientName}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Fee</p>
+                    <p className="font-bold text-ink">{formatCents(viewingQuotation.delivery.feeCents)}</p>
+                  </div>
+                  <div className="col-span-2">
+                    <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Address</p>
+                    <p className="font-semibold text-ink">
+                      {[viewingQuotation.delivery.physicalAddress, viewingQuotation.delivery.town, viewingQuotation.delivery.country]
+                        .filter(Boolean)
+                        .join(", ")}
+                    </p>
+                  </div>
+                  {viewingQuotation.delivery.riderName && (
+                    <div className="col-span-2">
+                      <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Rider</p>
+                      <p className="font-semibold text-ink">
+                        {viewingQuotation.delivery.riderName}
+                        {viewingQuotation.delivery.riderPhone ? ` · ${viewingQuotation.delivery.riderPhone}` : ""}
+                      </p>
+                    </div>
+                  )}
+                </div>
+                <p className="mt-2 text-[10px] font-semibold text-muted">
+                  Nothing has been delivered yet — a Delivery Note becomes available once this quotation is
+                  converted into a sale or invoice.
+                </p>
+              </div>
+            )}
+
             {viewingQuotation.notes && (
               <div className="mt-4 rounded-lg border border-line bg-soft px-3.5 py-2.5">
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Notes</p>
@@ -752,6 +878,20 @@ export function QuotationsRoute(): React.JSX.Element {
                 <span className="font-semibold">Tax</span>
                 <span className="font-bold tabular-nums">{formatCents(viewingQuotation.taxAmountCents)}</span>
               </div>
+              {viewingQuotation.serviceCharges.length > 0 && (
+                <div className="flex justify-between text-muted">
+                  <span className="font-semibold">Service Charges</span>
+                  <span className="font-bold tabular-nums">
+                    {formatCents(viewingQuotation.serviceCharges.reduce((sum, charge) => sum + charge.feeCents, 0))}
+                  </span>
+                </div>
+              )}
+              {viewingQuotation.delivery && (
+                <div className="flex justify-between text-muted">
+                  <span className="font-semibold">Delivery Fee</span>
+                  <span className="font-bold tabular-nums">{formatCents(viewingQuotation.delivery.feeCents)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-base font-extrabold text-ink">
                 <span>Total</span>
                 <span>{formatCents(viewingQuotation.grandTotalCents)}</span>
@@ -1175,6 +1315,14 @@ export function QuotationsRoute(): React.JSX.Element {
 
           <TextAreaField label="Notes" value={createNotes} onChange={setCreateNotes} className="mt-4" rows={2} />
 
+          <ExtraChargesSection
+            serviceCharges={createServiceCharges}
+            onServiceChargesChange={setCreateServiceCharges}
+            delivery={createDelivery}
+            onDeliveryChange={setCreateDelivery}
+            customerName={selectedCreateCustomer?.name ?? ""}
+          />
+
           <div className="mt-4 space-y-1 border-t border-line pt-4 text-sm">
             <div className="flex justify-between text-muted">
               <span className="font-semibold">Subtotal</span>
@@ -1188,6 +1336,18 @@ export function QuotationsRoute(): React.JSX.Element {
               <span className="font-semibold">Tax</span>
               <span className="font-bold tabular-nums">{formatCents(createTotals.taxAmountCents)}</span>
             </div>
+            {createTotals.serviceChargesFeeCents > 0 && (
+              <div className="flex justify-between text-muted">
+                <span className="font-semibold">Service Charges</span>
+                <span className="font-bold tabular-nums">{formatCents(createTotals.serviceChargesFeeCents)}</span>
+              </div>
+            )}
+            {createTotals.deliveryFeeCents > 0 && (
+              <div className="flex justify-between text-muted">
+                <span className="font-semibold">Delivery Fee</span>
+                <span className="font-bold tabular-nums">{formatCents(createTotals.deliveryFeeCents)}</span>
+              </div>
+            )}
             <div className="flex justify-between text-base font-extrabold text-ink">
               <span>Total</span>
               <span>{formatCents(createTotals.grandTotalCents)}</span>

@@ -5,20 +5,37 @@ import type { Category, CategoryStatus } from "./category";
 import type { Customer, CustomerStatus } from "./customer";
 import type { Employee, EmployeeListItem, EmployeeStatus } from "./employee";
 import type { InventoryBalance, LocationStockLevel } from "./inventory";
+import type { InventoryReportData } from "./inventory-report";
 import type { InvoiceListItem, InvoiceSummary } from "./invoice";
 import type { Location, LocationStatus } from "./location";
 import type { PaymentMethod } from "./payment-method";
 import type { MainStoreAllocationSummary, MainStoreProductDetail, MainStoreProductRow } from "./main-store";
-import type { Product, ProductListItem, ProductStatus } from "./product";
+import type { Product, ProductListItem, ProductStatus, ProductStockSummary } from "./product";
+import type { ProductSalesHistoryEntry, ProductsPerformanceReport } from "./product-report";
+import type { CustomerPurchaseHistoryEntry, OutstandingInvoicesSummary, TopCustomerRow } from "./customer-report";
+import type { OutstandingPurchasesSummary, SupplierPurchaseHistoryEntry } from "./supplier-report";
 import type { PrinterActionResult, PrinterSettings } from "./printer";
 import type { Expense, ExpenseSummary } from "./expense";
 import type { ExpenseCategory, ExpenseCategoryStatus } from "./expense-category";
 import type { Purchase, PurchaseListItem, PurchaseSummary } from "./purchase";
 import type { Salary } from "./salary";
+import type {
+  DateRangeInput,
+  MySaleEntry,
+  PaymentTransactionRow,
+  SalesByEmployeeRow,
+  SalesByPaymentMethodRow,
+  SalesByStorefrontRow,
+  SalesFinancialOverview,
+  SalesTransactionRow,
+  SalesTrendWindowInput,
+  SalesTrendWindowResult,
+} from "./report";
 import type { Quotation, QuotationListItem, QuotationStatus, QuotationStockCheckItem, QuotationSummary } from "./quotation";
 import type { Role, RoleListItem } from "./role";
 import type { Supplier, SupplierStatus } from "./supplier";
-import type { PendingSaleListItem, Sale, SaleListItem } from "./sale";
+import type { Rider, RiderStatus } from "./rider";
+import type { PendingSaleListItem, Sale, SaleDelivery, SaleListItem } from "./sale";
 import type { SaleReturn } from "./sale-return";
 import type { SaleVoid } from "./sale-void";
 import type { StockMovement, StockMovementFeedItem, StockTransferResult } from "./stock-movement";
@@ -116,6 +133,10 @@ export type IpcInvokeMap = {
   "product:list": {
     args: [];
     result: ProductListItem[];
+  };
+  "product:stock-summary": {
+    args: [string];
+    result: ProductStockSummary;
   };
   "product:get": {
     args: [string];
@@ -320,6 +341,26 @@ export type IpcInvokeMap = {
   "supplier:set-status": {
     args: [string, SupplierStatus];
     result: Supplier;
+  };
+  "rider:list": {
+    args: [];
+    result: Rider[];
+  };
+  "rider:get": {
+    args: [string];
+    result: Rider;
+  };
+  "rider:create": {
+    args: [Record<string, unknown>];
+    result: Rider;
+  };
+  "rider:update": {
+    args: [string, Record<string, unknown>];
+    result: Rider;
+  };
+  "rider:set-status": {
+    args: [string, RiderStatus];
+    result: Rider;
   };
   "purchase:list": {
     args: [];
@@ -621,6 +662,34 @@ export type IpcInvokeMap = {
     args: [string];
     result: PrinterActionResult;
   };
+  "printer:print-delivery-note": {
+    args: [string];
+    result: PrinterActionResult;
+  };
+  "printer:generate-delivery-note-pdf": {
+    args: [string];
+    result: string | null;
+  };
+  "printer:share-delivery-note": {
+    args: [string];
+    result: PrinterActionResult;
+  };
+  "delivery-note:get": {
+    args: [string];
+    result: SaleDelivery;
+  };
+  "delivery-note:get-for-sale": {
+    args: [string];
+    result: SaleDelivery | null;
+  };
+  "delivery-note:get-for-quotation": {
+    args: [string];
+    result: SaleDelivery | null;
+  };
+  "delivery-note:set-delivered": {
+    args: [string, boolean];
+    result: SaleDelivery;
+  };
   "sync:get-snapshot": {
     args: [];
     result: SyncSnapshot;
@@ -632,6 +701,70 @@ export type IpcInvokeMap = {
   "theme:save": {
     args: [BrandTheme];
     result: BrandTheme;
+  };
+  "report:sales-financial-overview": {
+    args: [DateRangeInput];
+    result: SalesFinancialOverview;
+  };
+  "report:sales-transactions": {
+    args: [DateRangeInput];
+    result: SalesTransactionRow[];
+  };
+  "report:payment-transactions": {
+    args: [DateRangeInput];
+    result: PaymentTransactionRow[];
+  };
+  "report:my-sales": {
+    args: [DateRangeInput];
+    result: MySaleEntry[];
+  };
+  "report:sales-trend-window": {
+    args: [SalesTrendWindowInput];
+    result: SalesTrendWindowResult;
+  };
+  "report:sales-by-storefront": {
+    args: [DateRangeInput];
+    result: SalesByStorefrontRow[];
+  };
+  "report:sales-by-employee": {
+    args: [DateRangeInput];
+    result: SalesByEmployeeRow[];
+  };
+  "report:sales-by-payment-method": {
+    args: [DateRangeInput];
+    result: SalesByPaymentMethodRow[];
+  };
+  "report:inventory-data": {
+    args: [];
+    result: InventoryReportData;
+  };
+  "report:products-performance": {
+    args: [DateRangeInput];
+    result: ProductsPerformanceReport;
+  };
+  "report:product-sales-history": {
+    args: [{ productId: string }];
+    result: ProductSalesHistoryEntry[];
+  };
+  "report:top-customers": {
+    args: [DateRangeInput];
+    result: TopCustomerRow[];
+  };
+  "report:customer-purchase-history": {
+    args: [{ customerId: string }];
+    result: CustomerPurchaseHistoryEntry[];
+  };
+  "report:outstanding-invoices": {
+    args: [];
+    result: OutstandingInvoicesSummary;
+  };
+  "report:outstanding-purchases": {
+    args: [];
+    result: OutstandingPurchasesSummary;
+  };
+  "report:supplier-purchase-history": {
+    args: [{ supplierId: string }];
+    result: SupplierPurchaseHistoryEntry[];
   };
 };
 
@@ -688,6 +821,7 @@ export type BlueLedgerApi = {
   };
   product: {
     list: () => Promise<IpcInvokeMap["product:list"]["result"]>;
+    stockSummary: (id: string) => Promise<IpcInvokeMap["product:stock-summary"]["result"]>;
     get: (id: string) => Promise<IpcInvokeMap["product:get"]["result"]>;
     create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["product:create"]["result"]>;
     update: (
@@ -800,6 +934,19 @@ export type BlueLedgerApi = {
       id: string,
       status: SupplierStatus
     ) => Promise<IpcInvokeMap["supplier:set-status"]["result"]>;
+  };
+  rider: {
+    list: () => Promise<IpcInvokeMap["rider:list"]["result"]>;
+    get: (id: string) => Promise<IpcInvokeMap["rider:get"]["result"]>;
+    create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["rider:create"]["result"]>;
+    update: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["rider:update"]["result"]>;
+    setStatus: (
+      id: string,
+      status: RiderStatus
+    ) => Promise<IpcInvokeMap["rider:set-status"]["result"]>;
   };
   purchase: {
     list: () => Promise<IpcInvokeMap["purchase:list"]["result"]>;
@@ -949,6 +1096,26 @@ export type BlueLedgerApi = {
     ) => Promise<IpcInvokeMap["printer:print-quotation-document"]["result"]>;
     generateSalaryPdf: (salaryId: string) => Promise<IpcInvokeMap["printer:generate-salary-pdf"]["result"]>;
     shareSalaryPayslip: (salaryId: string) => Promise<IpcInvokeMap["printer:share-salary-payslip"]["result"]>;
+    printDeliveryNote: (
+      deliveryNoteId: string
+    ) => Promise<IpcInvokeMap["printer:print-delivery-note"]["result"]>;
+    generateDeliveryNotePdf: (
+      deliveryNoteId: string
+    ) => Promise<IpcInvokeMap["printer:generate-delivery-note-pdf"]["result"]>;
+    shareDeliveryNote: (
+      deliveryNoteId: string
+    ) => Promise<IpcInvokeMap["printer:share-delivery-note"]["result"]>;
+  };
+  deliveryNote: {
+    get: (id: string) => Promise<IpcInvokeMap["delivery-note:get"]["result"]>;
+    getForSale: (saleId: string) => Promise<IpcInvokeMap["delivery-note:get-for-sale"]["result"]>;
+    getForQuotation: (
+      quotationId: string
+    ) => Promise<IpcInvokeMap["delivery-note:get-for-quotation"]["result"]>;
+    setDelivered: (
+      id: string,
+      delivered: boolean
+    ) => Promise<IpcInvokeMap["delivery-note:set-delivered"]["result"]>;
   };
   sync: {
     getSnapshot: () => Promise<IpcInvokeMap["sync:get-snapshot"]["result"]>;
@@ -956,5 +1123,23 @@ export type BlueLedgerApi = {
   };
   theme: {
     save: (theme: BrandTheme) => Promise<BrandTheme>;
+  };
+  report: {
+    salesFinancialOverview: (range: DateRangeInput) => Promise<SalesFinancialOverview>;
+    salesTransactions: (range: DateRangeInput) => Promise<SalesTransactionRow[]>;
+    paymentTransactions: (range: DateRangeInput) => Promise<PaymentTransactionRow[]>;
+    mySales: (range: DateRangeInput) => Promise<MySaleEntry[]>;
+    salesTrendWindow: (input: SalesTrendWindowInput) => Promise<SalesTrendWindowResult>;
+    salesByStorefront: (range: DateRangeInput) => Promise<SalesByStorefrontRow[]>;
+    salesByEmployee: (range: DateRangeInput) => Promise<SalesByEmployeeRow[]>;
+    salesByPaymentMethod: (range: DateRangeInput) => Promise<SalesByPaymentMethodRow[]>;
+    inventoryData: () => Promise<InventoryReportData>;
+    productsPerformance: (range: DateRangeInput) => Promise<ProductsPerformanceReport>;
+    productSalesHistory: (input: { productId: string }) => Promise<ProductSalesHistoryEntry[]>;
+    topCustomers: (range: DateRangeInput) => Promise<TopCustomerRow[]>;
+    customerPurchaseHistory: (input: { customerId: string }) => Promise<CustomerPurchaseHistoryEntry[]>;
+    outstandingInvoices: () => Promise<OutstandingInvoicesSummary>;
+    outstandingPurchases: () => Promise<OutstandingPurchasesSummary>;
+    supplierPurchaseHistory: (input: { supplierId: string }) => Promise<SupplierPurchaseHistoryEntry[]>;
   };
 };

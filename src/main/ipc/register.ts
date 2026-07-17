@@ -70,18 +70,27 @@ import {
   updatePaymentMethod
 } from "@main/services/payment-method-service";
 import {
+  generateDeliveryNotePdf,
   generateInvoicePdf,
   generateQuotationPdf,
   generateReceiptPdf,
   generateSalaryPdf,
   getPrinterSettings,
+  printDeliveryNote,
   printInvoiceDocument,
   printQuotationDocument,
   printReceipt,
   savePrinterSettings,
+  shareDeliveryNote,
   shareSalaryPayslip,
   testPrinterConnection
 } from "@main/services/printer-service";
+import {
+  getDeliveryNote,
+  getDeliveryNoteForQuotation,
+  getDeliveryNoteForSale,
+  setDeliveryNoteDelivered
+} from "@main/services/delivery-note-service";
 import {
   createSalary,
   getSalary,
@@ -92,6 +101,7 @@ import {
 import {
   createProduct,
   getProduct,
+  getProductStockSummary,
   listProducts,
   listProductsForStorefront,
   setProductStatus,
@@ -127,6 +137,7 @@ import {
   setSupplierStatus,
   updateSupplier
 } from "@main/services/supplier-service";
+import { createRider, getRider, listRiders, setRiderStatus, updateRider } from "@main/services/rider-service";
 import {
   cancelPurchase,
   createPurchase,
@@ -186,11 +197,26 @@ import {
 } from "@main/services/tenant-service";
 import { getSyncSnapshot, listSyncQueue } from "@main/services/sync-service";
 import { saveTheme } from "@main/services/theme-service";
+import {
+  getMySales,
+  getPaymentTransactions,
+  getSalesByEmployee,
+  getSalesByPaymentMethod,
+  getSalesByStorefront,
+  getSalesFinancialOverview,
+  getSalesTransactions,
+  getSalesTrendWindow,
+} from "@main/services/report-service";
+import { getInventoryReportData } from "@main/services/inventory-report-service";
+import { getProductSalesHistory, getProductsPerformanceReport } from "@main/services/product-report-service";
+import { getCustomerPurchaseHistory, getOutstandingInvoices, getTopCustomers } from "@main/services/customer-report-service";
+import { getOutstandingPurchases, getSupplierPurchaseHistory } from "@main/services/supplier-report-service";
 import { brandThemeSchema } from "@shared/schemas/theme";
 import type { CategoryStatus } from "@shared/types/category";
 import type { CustomerStatus } from "@shared/types/customer";
 import type { ExpenseCategoryStatus } from "@shared/types/expense-category";
 import type { SupplierStatus } from "@shared/types/supplier";
+import type { RiderStatus } from "@shared/types/rider";
 import type { EmployeeStatus } from "@shared/types/employee";
 import type { LocationStatus } from "@shared/types/location";
 import type { ProductStatus } from "@shared/types/product";
@@ -240,6 +266,7 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.categoryDelete, (_event, id: string) => deleteCategory(id));
   ipcMain.handle(ipcChannels.productList, () => listProducts());
+  ipcMain.handle(ipcChannels.productStockSummary, (_event, id: string) => getProductStockSummary(id));
   ipcMain.handle(ipcChannels.productGet, (_event, id: string) => getProduct(id));
   ipcMain.handle(ipcChannels.productCreate, (_event, input: unknown) => createProduct(input));
   ipcMain.handle(ipcChannels.productUpdate, (_event, id: string, input: unknown) =>
@@ -328,6 +355,13 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.supplierSetStatus, (_event, id: string, status: SupplierStatus) =>
     setSupplierStatus(id, status)
+  );
+  ipcMain.handle(ipcChannels.riderList, () => listRiders());
+  ipcMain.handle(ipcChannels.riderGet, (_event, id: string) => getRider(id));
+  ipcMain.handle(ipcChannels.riderCreate, (_event, input: unknown) => createRider(input));
+  ipcMain.handle(ipcChannels.riderUpdate, (_event, id: string, input: unknown) => updateRider(id, input));
+  ipcMain.handle(ipcChannels.riderSetStatus, (_event, id: string, status: RiderStatus) =>
+    setRiderStatus(id, status)
   );
   ipcMain.handle(ipcChannels.purchaseList, () => listPurchases());
   ipcMain.handle(ipcChannels.purchaseSummary, () => getPurchaseSummary());
@@ -450,6 +484,23 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.printerShareSalaryPayslip, (_event, salaryId: string) =>
     shareSalaryPayslip(salaryId)
   );
+  ipcMain.handle(ipcChannels.printerPrintDeliveryNote, (_event, deliveryNoteId: string) =>
+    printDeliveryNote(deliveryNoteId)
+  );
+  ipcMain.handle(ipcChannels.printerGenerateDeliveryNotePdf, (_event, deliveryNoteId: string) =>
+    generateDeliveryNotePdf(deliveryNoteId)
+  );
+  ipcMain.handle(ipcChannels.printerShareDeliveryNote, (_event, deliveryNoteId: string) =>
+    shareDeliveryNote(deliveryNoteId)
+  );
+  ipcMain.handle(ipcChannels.deliveryNoteGet, (_event, id: string) => getDeliveryNote(id));
+  ipcMain.handle(ipcChannels.deliveryNoteGetForSale, (_event, saleId: string) => getDeliveryNoteForSale(saleId));
+  ipcMain.handle(ipcChannels.deliveryNoteGetForQuotation, (_event, quotationId: string) =>
+    getDeliveryNoteForQuotation(quotationId)
+  );
+  ipcMain.handle(ipcChannels.deliveryNoteSetDelivered, (_event, id: string, delivered: boolean) =>
+    setDeliveryNoteDelivered(id, delivered)
+  );
   ipcMain.handle(ipcChannels.syncGetSnapshot, () => getSyncSnapshot());
   ipcMain.handle(ipcChannels.syncListQueue, (_event, input?: { limit?: number }) =>
     listSyncQueue(input?.limit)
@@ -457,4 +508,24 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.themeSave, (_event, theme: unknown) =>
     saveTheme(brandThemeSchema.parse(theme))
   );
+  ipcMain.handle(ipcChannels.reportSalesFinancialOverview, (_event, range: unknown) =>
+    getSalesFinancialOverview(range)
+  );
+  ipcMain.handle(ipcChannels.reportSalesTransactions, (_event, range: unknown) => getSalesTransactions(range));
+  ipcMain.handle(ipcChannels.reportPaymentTransactions, (_event, range: unknown) => getPaymentTransactions(range));
+  ipcMain.handle(ipcChannels.reportMySales, (_event, range: unknown) => getMySales(range));
+  ipcMain.handle(ipcChannels.reportSalesTrendWindow, (_event, input: unknown) => getSalesTrendWindow(input));
+  ipcMain.handle(ipcChannels.reportSalesByStorefront, (_event, range: unknown) => getSalesByStorefront(range));
+  ipcMain.handle(ipcChannels.reportSalesByEmployee, (_event, range: unknown) => getSalesByEmployee(range));
+  ipcMain.handle(ipcChannels.reportSalesByPaymentMethod, (_event, range: unknown) =>
+    getSalesByPaymentMethod(range)
+  );
+  ipcMain.handle(ipcChannels.reportInventoryData, () => getInventoryReportData());
+  ipcMain.handle(ipcChannels.reportProductsPerformance, (_event, range: unknown) => getProductsPerformanceReport(range));
+  ipcMain.handle(ipcChannels.reportProductSalesHistory, (_event, input: unknown) => getProductSalesHistory(input));
+  ipcMain.handle(ipcChannels.reportTopCustomers, (_event, range: unknown) => getTopCustomers(range));
+  ipcMain.handle(ipcChannels.reportCustomerPurchaseHistory, (_event, input: unknown) => getCustomerPurchaseHistory(input));
+  ipcMain.handle(ipcChannels.reportOutstandingInvoices, () => getOutstandingInvoices());
+  ipcMain.handle(ipcChannels.reportOutstandingPurchases, () => getOutstandingPurchases());
+  ipcMain.handle(ipcChannels.reportSupplierPurchaseHistory, (_event, input: unknown) => getSupplierPurchaseHistory(input));
 }

@@ -1,12 +1,16 @@
 import { randomUUID } from "node:crypto";
 import * as customerRepository from "@main/database/repositories/customer-repository";
+import * as deliveryNoteRepository from "@main/database/repositories/delivery-note-repository";
 import * as paymentMethodRepository from "@main/database/repositories/payment-method-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
 import * as saleRepository from "@main/database/repositories/sale-repository";
+import * as serviceChargeRepository from "@main/database/repositories/service-charge-repository";
 import { runInTransaction } from "@main/database/connection";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
 import { getCurrentBranchScope, getSession, requirePermission } from "@main/services/auth-service";
+import { generateDeliveryNoteNumber } from "@main/services/delivery-note-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
+import type { DeliveryInput, ServiceChargeInput } from "@shared/schemas/charges";
 import {
   checkoutInputSchema,
   saleCartInputSchema,
@@ -25,12 +29,20 @@ export type PreparedItem = {
   lineTotalCents: number;
 };
 
+export type PreparedCartExtras = {
+  serviceCharges: ServiceChargeInput[];
+  delivery: DeliveryInput | null;
+};
+
 export type PreparedCart = {
   items: PreparedItem[];
   subtotalCents: number;
   discountAmountCents: number;
   taxAmountCents: number;
+  /** Includes serviceCharges/delivery fees folded in — see prepareCart. */
   grandTotalCents: number;
+  serviceCharges: ServiceChargeInput[];
+  delivery: DeliveryInput | null;
 };
 
 /** The employee/branch the POS screen always acts as — never taken from renderer input. */
@@ -54,8 +66,15 @@ function assertCustomerExists(tenantId: string, customerId: string | null): void
   }
 }
 
-/** Prices and taxes every cart line from live product data — never trusts client-supplied money math. */
-export function prepareCart(tenantId: string, items: SaleCartInput["items"]): PreparedCart {
+/** Prices and taxes every cart line from live product data — never trusts client-supplied money math.
+ * extras (service charges + delivery) are optional so callers that never touch them (e.g. quotation
+ * updateQuotation before this feature existed) don't need changes; their fees are folded straight
+ * into grandTotalCents, while subtotal/discount/tax stay pure product math. */
+export function prepareCart(
+  tenantId: string,
+  items: SaleCartInput["items"],
+  extras?: PreparedCartExtras
+): PreparedCart {
   let subtotalCents = 0;
   let discountAmountCents = 0;
   let taxAmountCents = 0;
@@ -100,13 +119,62 @@ export function prepareCart(tenantId: string, items: SaleCartInput["items"]): Pr
     };
   });
 
+  const serviceCharges = extras?.serviceCharges ?? [];
+  const delivery = extras?.delivery ?? null;
+  const extraFeesCents =
+    serviceCharges.reduce((sum, charge) => sum + charge.feeCents, 0) + (delivery?.feeCents ?? 0);
+
   return {
     items: preparedItems,
     subtotalCents,
     discountAmountCents,
     taxAmountCents,
-    grandTotalCents: subtotalCents - discountAmountCents + taxAmountCents
+    grandTotalCents: subtotalCents - discountAmountCents + taxAmountCents + extraFeesCents,
+    serviceCharges,
+    delivery
   };
+}
+
+/** Persists a cart's service charges + delivery (if any) against a sale or quotation — shared by every
+ * cart-insertion site (checkout, suspend, invoice, quotation-create) so charge persistence can never
+ * drift between them the way buildConversionCart's duplicated totals math once could have. Exactly
+ * one of saleId/quotationId is provided, matching the sale_service_charges/delivery_notes CHECK
+ * constraint. */
+export function persistCartExtras(
+  tenantId: string,
+  target: { saleId: string; quotationId?: undefined } | { saleId?: undefined; quotationId: string },
+  cart: PreparedCart
+): void {
+  const saleId = target.saleId ?? null;
+  const quotationId = target.quotationId ?? null;
+
+  for (const charge of cart.serviceCharges) {
+    serviceChargeRepository.insertServiceChargeRow({
+      tenantId,
+      saleId,
+      quotationId,
+      name: charge.name,
+      feeCents: charge.feeCents,
+      costCents: charge.costCents
+    });
+  }
+
+  if (cart.delivery) {
+    deliveryNoteRepository.insertDeliveryNoteRow({
+      tenantId,
+      deliveryNoteNumber: generateDeliveryNoteNumber(tenantId),
+      saleId,
+      quotationId,
+      riderId: cart.delivery.riderId,
+      recipientName: cart.delivery.recipientName,
+      country: cart.delivery.country,
+      town: cart.delivery.town,
+      physicalAddress: cart.delivery.physicalAddress,
+      notes: cart.delivery.notes,
+      feeCents: cart.delivery.feeCents,
+      costCents: cart.delivery.costCents
+    });
+  }
 }
 
 /** Removes a held sale being replaced — either resumed-then-resuspended, or resumed-then-completed. */
@@ -114,6 +182,8 @@ function discardResumedSale(tenantId: string, resumeSaleId: string | null | unde
   if (!resumeSaleId) return;
   const pending = saleRepository.findSaleRowById(resumeSaleId);
   if (pending && pending.tenant_id === tenantId && pending.sale_status === "pending") {
+    serviceChargeRepository.deleteServiceChargesForSaleRow(pending.id);
+    deliveryNoteRepository.deleteDeliveryNoteForSaleRow(pending.id);
     saleRepository.deleteSaleItemsForSaleRow(pending.id);
     saleRepository.deleteSaleRow(pending.id);
   }
@@ -132,16 +202,20 @@ export function getSaleDetail(id: string): Sale {
     throw new Error("Sale not found");
   }
   const items = saleRepository.findSaleItemDetailRows(id).map(saleRepository.mapSaleItemDetailRow);
-  return saleRepository.mapSaleDetailRow(row, items);
+  const serviceCharges = serviceChargeRepository
+    .findServiceChargeRowsForSale(id)
+    .map(serviceChargeRepository.mapServiceChargeRow);
+  const deliveryRow = deliveryNoteRepository.findDeliveryNoteRowBySaleId(id);
+  const delivery = deliveryRow ? deliveryNoteRepository.mapDeliveryNoteRow(deliveryRow) : null;
+  return saleRepository.mapSaleDetailRow(row, items, serviceCharges, delivery);
 }
 
 export function listPendingSales(): PendingSaleListItem[] {
   requirePermission("sales", "view");
-  const session = getSession();
-  if (!session?.branch) return [];
   const { tenantId } = getCurrentTenant();
+  const locationId = getCurrentBranchScope();
   return saleRepository
-    .findPendingSaleListRows(tenantId, session.branch.id)
+    .findPendingSaleListRows(tenantId, locationId)
     .map(saleRepository.mapPendingSaleListRow);
 }
 
@@ -165,7 +239,10 @@ export function suspendSale(input: unknown): { id: string } {
   const { tenantId, employeeId, locationId } = requireActiveSession();
 
   assertCustomerExists(tenantId, parsed.customerId);
-  const cart = prepareCart(tenantId, parsed.items);
+  const cart = prepareCart(tenantId, parsed.items, {
+    serviceCharges: parsed.serviceCharges,
+    delivery: parsed.delivery
+  });
 
   return runInTransaction(() => {
     discardResumedSale(tenantId, parsed.resumeSaleId);
@@ -204,6 +281,8 @@ export function suspendSale(input: unknown): { id: string } {
       });
     }
 
+    persistCartExtras(tenantId, { saleId }, cart);
+
     return { id: saleId };
   });
 }
@@ -220,6 +299,8 @@ export function deletePendingSale(id: string): { id: string } {
   }
 
   runInTransaction(() => {
+    serviceChargeRepository.deleteServiceChargesForSaleRow(id);
+    deliveryNoteRepository.deleteDeliveryNoteForSaleRow(id);
     saleRepository.deleteSaleItemsForSaleRow(id);
     saleRepository.deleteSaleRow(id);
   });
@@ -309,6 +390,8 @@ export function insertCompletedSaleFromCart(input: {
       }
     }
 
+    persistCartExtras(tenantId, { saleId }, cart);
+
     return getSaleDetail(saleId);
   });
 }
@@ -335,7 +418,10 @@ export function completeSale(input: unknown): Sale {
   }
 
   assertCustomerExists(tenantId, parsed.customerId);
-  const cart = prepareCart(tenantId, parsed.items);
+  const cart = prepareCart(tenantId, parsed.items, {
+    serviceCharges: parsed.serviceCharges,
+    delivery: parsed.delivery
+  });
 
   return insertCompletedSaleFromCart({
     tenantId,

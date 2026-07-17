@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Ban, Loader2, ReceiptText, Search, Undo2 } from "lucide-react";
+import { Ban, Eye, Layers, Loader2, Package, ReceiptText, Search, Undo2, Wallet } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { DeliveryNotePreview } from "@renderer/shared/components/DeliveryNotePreview";
 import { Field, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { ReceiptPreview } from "@renderer/shared/components/ReceiptPreview";
+import { StatTile } from "@renderer/shared/components/StatTile";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { cn } from "@renderer/shared/lib/cn";
 import { formatCents } from "@renderer/shared/lib/money";
 import { useAppStore } from "@renderer/shared/stores/app-store";
-import type { Sale, SaleListItem } from "@shared/types/sale";
+import type { Sale, SaleDelivery, SaleListItem } from "@shared/types/sale";
 import type { SaleReturn } from "@shared/types/sale-return";
 import type { SaleVoid } from "@shared/types/sale-void";
 
@@ -43,9 +45,17 @@ export function ReceiptsRoute(): React.JSX.Element {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const [viewingSale, setViewingSale] = useState<Sale | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
+
+  const [viewingDelivery, setViewingDelivery] = useState<{
+    delivery: SaleDelivery;
+    sourceNumber: string | null;
+  } | null>(null);
+  const [deliveryLoading, setDeliveryLoading] = useState(false);
 
   const [returnModalSale, setReturnModalSale] = useState<Sale | null>(null);
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
@@ -110,12 +120,31 @@ export function ReceiptsRoute(): React.JSX.Element {
   const filteredSales = useMemo(() => {
     if (!sales) return null;
     const term = searchTerm.trim().toLowerCase();
-    if (!term) return sales;
     return sales.filter((sale) => {
-      const haystack = `${sale.receiptNumber ?? ""} ${sale.customerName ?? ""} ${sale.employeeName}`.toLowerCase();
-      return haystack.includes(term);
+      if (term) {
+        const haystack = `${sale.receiptNumber ?? ""} ${sale.customerName ?? ""} ${sale.employeeName}`.toLowerCase();
+        if (!haystack.includes(term)) return false;
+      }
+      if (sale.completedAt) {
+        const saleDate = sale.completedAt.slice(0, 10);
+        if (dateFrom && saleDate < dateFrom) return false;
+        if (dateTo && saleDate > dateTo) return false;
+      }
+      return true;
     });
-  }, [sales, searchTerm]);
+  }, [sales, searchTerm, dateFrom, dateTo]);
+
+  const summary = useMemo(() => {
+    if (!filteredSales) return null;
+    const totalRevenueCents = filteredSales.reduce((sum, sale) => sum + sale.grandTotalCents, 0);
+    const totalItems = filteredSales.reduce((sum, sale) => sum + sale.itemCount, 0);
+    return {
+      count: filteredSales.length,
+      totalRevenueCents,
+      totalItems,
+      averageCents: filteredSales.length > 0 ? Math.round(totalRevenueCents / filteredSales.length) : 0
+    };
+  }, [filteredSales]);
 
   async function openReceipt(saleId: string): Promise<void> {
     setViewLoading(true);
@@ -127,6 +156,19 @@ export function ReceiptsRoute(): React.JSX.Element {
       setActionError(getErrorMessage(err, "Failed to load receipt"));
     } finally {
       setViewLoading(false);
+    }
+  }
+
+  async function openDeliveryNote(sale: SaleListItem): Promise<void> {
+    setDeliveryLoading(true);
+    setActionError(null);
+    try {
+      const delivery = await window.blueLedger.deliveryNote.getForSale(sale.id);
+      if (delivery) setViewingDelivery({ delivery, sourceNumber: sale.receiptNumber });
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to load delivery note"));
+    } finally {
+      setDeliveryLoading(false);
     }
   }
 
@@ -250,24 +292,63 @@ export function ReceiptsRoute(): React.JSX.Element {
         )}
 
         {sales !== null && sales.length > 0 && (
-          <div className="mt-4">
-            <label className="block sm:max-w-xs">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Search</span>
-              <div className="relative mt-1.5">
-                <Search
-                  className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted"
-                  aria-hidden="true"
-                />
+          <>
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <StatTile icon={ReceiptText} label="Total Receipts" value={String(summary?.count ?? 0)} tone="primary" />
+              <StatTile icon={Wallet} label="Total Revenue" value={formatCents(summary?.totalRevenueCents ?? 0)} tone="success" />
+              <StatTile icon={Layers} label="Items Sold" value={String(summary?.totalItems ?? 0)} tone="accent" />
+              <StatTile icon={ReceiptText} label="Average Sale" value={formatCents(summary?.averageCents ?? 0)} tone="warning" />
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-end gap-3">
+              <label className="block sm:max-w-xs sm:flex-1">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Search</span>
+                <div className="relative mt-1.5">
+                  <Search
+                    className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted"
+                    aria-hidden="true"
+                  />
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(event) => setSearchTerm(event.target.value)}
+                    placeholder="Search by receipt number, customer, or cashier"
+                    className="h-10 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm font-semibold text-ink outline-none transition placeholder:font-normal placeholder:text-muted/60 focus:border-accent focus:ring-4 focus:ring-accent/15"
+                  />
+                </div>
+              </label>
+              <label className="block">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">From</span>
                 <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
-                  placeholder="Search by receipt number, customer, or cashier"
-                  className="h-10 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm font-semibold text-ink outline-none transition placeholder:font-normal placeholder:text-muted/60 focus:border-accent focus:ring-4 focus:ring-accent/15"
+                  type="date"
+                  value={dateFrom}
+                  onChange={(event) => setDateFrom(event.target.value)}
+                  className="mt-1.5 h-10 rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
                 />
-              </div>
-            </label>
-          </div>
+              </label>
+              <label className="block">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">To</span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(event) => setDateTo(event.target.value)}
+                  className="mt-1.5 h-10 rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+                />
+              </label>
+              {(dateFrom || dateTo) && (
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setDateFrom("");
+                    setDateTo("");
+                  }}
+                  className="h-10 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+                >
+                  Clear dates
+                </Button>
+              )}
+            </div>
+          </>
         )}
 
         <div className="mt-5">
@@ -301,15 +382,16 @@ export function ReceiptsRoute(): React.JSX.Element {
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-line">
-              <table className="w-full min-w-[900px] table-fixed border-collapse text-sm">
+              <table className="w-full min-w-[980px] table-fixed border-collapse text-sm">
                 <colgroup>
-                  <col className="w-[13%]" />
-                  <col className="w-[15%]" />
-                  <col className="w-[17%]" />
-                  <col className="w-[15%]" />
-                  <col className="w-[10%]" />
                   <col className="w-[12%]" />
-                  <col className="w-[18%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[15%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[11%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[14%]" />
                 </colgroup>
                 <thead>
                   <tr className="bg-primary text-white">
@@ -319,18 +401,15 @@ export function ReceiptsRoute(): React.JSX.Element {
                     <Th>Cashier</Th>
                     <Th>Items</Th>
                     <Th>Total</Th>
-                    <Th className="text-right">Status</Th>
+                    <Th>Status</Th>
+                    <Th className="text-right">Actions</Th>
                   </tr>
                 </thead>
                 <tbody>
                   {(filteredSales ?? []).map((sale) => {
                     const status = saleStatusInfo.get(sale.id);
                     return (
-                      <tr
-                        key={sale.id}
-                        onClick={() => void openReceipt(sale.id)}
-                        className="cursor-pointer border-t border-line odd:bg-white even:bg-soft/50 hover:bg-soft"
-                      >
+                      <tr key={sale.id} className="border-t border-line odd:bg-white even:bg-soft/50">
                         <td className="truncate px-4 py-3 text-xs font-bold tabular-nums text-muted">
                           {sale.receiptNumber ?? "—"}
                         </td>
@@ -344,13 +423,37 @@ export function ReceiptsRoute(): React.JSX.Element {
                           {formatCents(sale.grandTotalCents)}
                         </td>
                         <td className="px-4 py-3">
-                          <div className="flex flex-wrap items-center justify-end gap-1.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
                             {status?.approvedVoid && <DashedPill tone="danger">Voided</DashedPill>}
                             {status?.approvedReturn && <DashedPill tone="warning">Returned</DashedPill>}
                             {(status?.pendingVoid || status?.pendingReturn) && (
                               <DashedPill tone="accent">Pending Approval</DashedPill>
                             )}
                             {!status && <DashedPill tone="neutral">Completed</DashedPill>}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void openReceipt(sale.id)}
+                              aria-label={`View receipt ${sale.receiptNumber ?? ""}`}
+                              title="View Receipt"
+                              className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-ink cursor-pointer"
+                            >
+                              <Eye className="size-3.5" aria-hidden="true" />
+                            </button>
+                            {sale.hasDeliveryNote && (
+                              <button
+                                type="button"
+                                onClick={() => void openDeliveryNote(sale)}
+                                aria-label={`View delivery note for ${sale.receiptNumber ?? ""}`}
+                                title="View Delivery Note"
+                                className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-primary cursor-pointer"
+                              >
+                                <Package className="size-3.5" aria-hidden="true" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -412,6 +515,28 @@ export function ReceiptsRoute(): React.JSX.Element {
               </div>
             )}
           </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={viewingDelivery !== null || deliveryLoading}
+        onClose={() => setViewingDelivery(null)}
+        title={viewingDelivery?.delivery.deliveryNoteNumber ?? "Delivery Note"}
+        description="Print, download, share, or mark this delivery as delivered."
+        widthClassName="max-w-lg"
+      >
+        {deliveryLoading ? (
+          <div className="flex min-h-[160px] items-center justify-center text-muted">
+            <Loader2 className="size-6 animate-spin" aria-hidden="true" />
+          </div>
+        ) : viewingDelivery && tenantContext ? (
+          <DeliveryNotePreview
+            delivery={viewingDelivery.delivery}
+            tenant={tenantContext}
+            sourceDocumentLabel="Receipt"
+            sourceDocumentNumber={viewingDelivery.sourceNumber}
+            onDeliveredChange={(next) => setViewingDelivery((prev) => (prev ? { ...prev, delivery: next } : prev))}
+          />
         ) : null}
       </Modal>
 

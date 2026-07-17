@@ -1,9 +1,19 @@
+import { useEffect, useState } from "react";
 import { format } from "date-fns";
-import { History } from "lucide-react";
+import { History, Loader2 } from "lucide-react";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { Modal } from "@renderer/shared/components/Modal";
+import { cn } from "@renderer/shared/lib/cn";
+import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import { CUSTOMER_TYPE_OPTIONS, type Customer } from "@shared/types/customer";
+import type { CustomerPurchaseHistoryEntry } from "@shared/types/customer-report";
+
+const KIND_LABEL: Record<string, string> = {
+  retail_sale: "Retail Sale",
+  wholesale_sale: "Wholesale Sale",
+  invoice: "Invoice"
+};
 
 function formatDate(value: string | null, pattern = "MMM d, yyyy · HH:mm"): string {
   if (!value) return "—";
@@ -43,6 +53,24 @@ export function CustomerDetailModal({
   customer: Customer;
   onClose: () => void;
 }): React.JSX.Element {
+  const [history, setHistory] = useState<CustomerPurchaseHistoryEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await window.blueLedger.report.customerPurchaseHistory({ customerId: customer.id });
+        if (!cancelled) setHistory(result);
+      } catch (err) {
+        if (!cancelled) setError(getErrorMessage(err, "Failed to load purchase history"));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [customer.id]);
+
   return (
     <Modal
       open
@@ -75,15 +103,59 @@ export function CustomerDetailModal({
           <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
             Purchase History
           </p>
-          <div className="mt-2 flex flex-col items-center justify-center rounded-lg border border-dashed border-line bg-soft/60 px-4 py-8 text-center">
-            <div className="grid size-11 place-items-center rounded-2xl bg-soft text-primary">
-              <History className="size-5" aria-hidden="true" />
+          {error ? (
+            <div className="mt-2 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
+              {error}
             </div>
-            <p className="mt-3 text-sm font-bold text-ink">No purchase history yet</p>
-            <p className="mt-1 max-w-xs text-xs font-semibold text-muted">
-              Transactions will appear here once this customer starts making purchases through Sales.
-            </p>
-          </div>
+          ) : history === null ? (
+            <div className="mt-2 flex min-h-[100px] items-center justify-center text-muted">
+              <Loader2 className="size-5 animate-spin" aria-hidden="true" />
+            </div>
+          ) : history.length === 0 ? (
+            <div className="mt-2 flex flex-col items-center justify-center rounded-lg border border-dashed border-line bg-soft/60 px-4 py-8 text-center">
+              <div className="grid size-11 place-items-center rounded-2xl bg-soft text-primary">
+                <History className="size-5" aria-hidden="true" />
+              </div>
+              <p className="mt-3 text-sm font-bold text-ink">No purchase history yet</p>
+              <p className="mt-1 max-w-xs text-xs font-semibold text-muted">
+                Transactions will appear here once this customer starts making purchases through Sales.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-2 max-h-[280px] overflow-y-auto rounded-lg border border-line">
+              <table className="w-full min-w-[560px] table-fixed border-collapse text-sm">
+                <thead className="sticky top-0 z-10">
+                  <tr className="bg-primary text-white">
+                    <th className="px-3 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider">Date</th>
+                    <th className="px-3 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider">Document</th>
+                    <th className="px-3 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider">Type</th>
+                    <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Total</th>
+                    <th className="px-3 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map((entry) => (
+                    <tr key={entry.saleId} className="border-t border-line odd:bg-white even:bg-soft/50">
+                      <td className="px-3 py-2 text-xs font-semibold text-muted">{formatDate(entry.occurredAt, "MMM d, yyyy")}</td>
+                      <td className="truncate px-3 py-2 font-bold text-ink">{entry.documentNumber ?? "—"}</td>
+                      <td className="px-3 py-2 text-xs font-semibold text-muted">{KIND_LABEL[entry.kind] ?? entry.kind}</td>
+                      <td className="px-3 py-2 text-right font-bold tabular-nums text-ink">{formatCents(entry.grandTotalCents)}</td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={cn(
+                            "inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                            entry.amountPaidCents >= entry.grandTotalCents ? "bg-success/10 text-success" : "bg-warning/10 text-warning"
+                          )}
+                        >
+                          {entry.amountPaidCents >= entry.grandTotalCents ? "Paid" : "Partially Paid"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         <Section title="Record Info">

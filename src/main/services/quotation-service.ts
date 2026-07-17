@@ -1,16 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { runInTransaction } from "@main/database/connection";
 import * as customerRepository from "@main/database/repositories/customer-repository";
+import * as deliveryNoteRepository from "@main/database/repositories/delivery-note-repository";
 import * as inventoryRepository from "@main/database/repositories/inventory-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
 import type { ProductRow } from "@main/database/repositories/product-repository";
 import * as quotationRepository from "@main/database/repositories/quotation-repository";
 import type { QuotationItemDetailRow } from "@main/database/repositories/quotation-repository";
+import * as serviceChargeRepository from "@main/database/repositories/service-charge-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
 import { insertInvoiceFromCart } from "@main/services/invoice-service";
 import {
   getSaleDetail,
   insertCompletedSaleFromCart,
+  persistCartExtras,
   prepareCart,
   requireActiveSession,
   type PreparedCart,
@@ -56,7 +59,12 @@ function getQuotationDetail(id: string): Quotation {
     throw new Error("Quotation not found");
   }
   const items = quotationRepository.findQuotationItemDetailRows(id).map(quotationRepository.mapQuotationItemDetailRow);
-  return quotationRepository.mapQuotationDetailRow(row, items);
+  const serviceCharges = serviceChargeRepository
+    .findServiceChargeRowsForQuotation(id)
+    .map(serviceChargeRepository.mapServiceChargeRow);
+  const deliveryRow = deliveryNoteRepository.findDeliveryNoteRowByQuotationId(id);
+  const delivery = deliveryRow ? deliveryNoteRepository.mapDeliveryNoteRow(deliveryRow) : null;
+  return quotationRepository.mapQuotationDetailRow(row, items, serviceCharges, delivery);
 }
 
 export function listQuotations(): QuotationListItem[] {
@@ -109,7 +117,10 @@ export function createQuotation(input: unknown): Quotation {
   const { tenantId, employeeId, locationId } = requireActiveSession();
 
   assertCustomerExists(tenantId, parsed.customerId);
-  const cart = prepareCart(tenantId, parsed.items);
+  const cart = prepareCart(tenantId, parsed.items, {
+    serviceCharges: parsed.serviceCharges,
+    delivery: parsed.delivery
+  });
   const quotationId = `quotation_${randomUUID()}`;
 
   return runInTransaction(() => {
@@ -141,6 +152,8 @@ export function createQuotation(input: unknown): Quotation {
       });
     }
 
+    persistCartExtras(tenantId, { quotationId }, cart);
+
     return getQuotationDetail(quotationId);
   });
 }
@@ -163,7 +176,10 @@ export function updateQuotation(id: string, input: unknown): Quotation {
   const { tenantId } = getCurrentTenant();
   requireEditableDraft(id, tenantId);
   assertCustomerExists(tenantId, parsed.customerId);
-  const cart = prepareCart(tenantId, parsed.items);
+  const cart = prepareCart(tenantId, parsed.items, {
+    serviceCharges: parsed.serviceCharges,
+    delivery: parsed.delivery
+  });
 
   return runInTransaction(() => {
     quotationRepository.updateQuotationRow(id, {
@@ -190,6 +206,10 @@ export function updateQuotation(id: string, input: unknown): Quotation {
       });
     }
 
+    serviceChargeRepository.deleteServiceChargesForQuotationRow(id);
+    deliveryNoteRepository.deleteDeliveryNoteForQuotationRow(id);
+    persistCartExtras(tenantId, { quotationId: id }, cart);
+
     return getQuotationDetail(id);
   });
 }
@@ -200,6 +220,8 @@ export function deleteQuotation(id: string): { id: string } {
   requireEditableDraft(id, tenantId);
 
   runInTransaction(() => {
+    serviceChargeRepository.deleteServiceChargesForQuotationRow(id);
+    deliveryNoteRepository.deleteDeliveryNoteForQuotationRow(id);
     quotationRepository.deleteQuotationItemsForQuotationRow(id);
     quotationRepository.deleteQuotationRow(id);
   });
@@ -311,12 +333,25 @@ function buildConversionCart(
     taxAmountCents += item.taxAmountCents;
   }
 
+  // The quotation's own service charges/delivery carry straight into the resulting sale/invoice —
+  // this IS the entire conversion carry-over mechanism. persistCartExtras() (called by
+  // insertCompletedSaleFromCart/insertInvoiceFromCart below) inserts fresh rows against the new
+  // sale_id from whatever this cart carries, generating a new delivery note number in the process.
+  const serviceCharges = serviceChargeRepository
+    .findServiceChargeRowsForQuotation(quotationId)
+    .map(serviceChargeRepository.mapServiceChargeRow);
+  const deliveryRow = deliveryNoteRepository.findDeliveryNoteRowByQuotationId(quotationId);
+  const delivery = deliveryRow ? deliveryNoteRepository.mapDeliveryNoteRow(deliveryRow) : null;
+  const extraFeesCents = serviceCharges.reduce((sum, charge) => sum + charge.feeCents, 0) + (delivery?.feeCents ?? 0);
+
   return {
     items: preparedItems,
     subtotalCents,
     discountAmountCents,
     taxAmountCents,
-    grandTotalCents: subtotalCents - discountAmountCents + taxAmountCents
+    grandTotalCents: subtotalCents - discountAmountCents + taxAmountCents + extraFeesCents,
+    serviceCharges,
+    delivery
   };
 }
 

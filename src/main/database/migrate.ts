@@ -950,6 +950,85 @@ const migrations = [
       ALTER TABLE salaries ADD COLUMN allowances_json TEXT NOT NULL DEFAULT '[]';
       ALTER TABLE salaries ADD COLUMN deductions_json TEXT NOT NULL DEFAULT '[]';
     `
+  },
+  {
+    version: 26,
+    name: "backfill_retail_sale_amount_paid",
+    sql: `
+      UPDATE sales
+      SET amount_paid_cents = grand_total_cents, balance_due_cents = 0
+      WHERE sale_status = 'completed' AND payment_status = 'paid' AND amount_paid_cents != grand_total_cents;
+    `
+  },
+  {
+    version: 27,
+    name: "riders_service_charges_delivery_notes",
+    sql: `
+      CREATE TABLE riders (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        alt_phone TEXT,
+        company TEXT,
+        vehicle_description TEXT,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id)
+      );
+      CREATE INDEX idx_riders_tenant_status ON riders(tenant_id, status);
+
+      CREATE TABLE sale_service_charges (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        sale_id TEXT,
+        quotation_id TEXT,
+        name TEXT NOT NULL,
+        fee_cents INTEGER NOT NULL,
+        cost_cents INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        CHECK ((sale_id IS NOT NULL AND quotation_id IS NULL) OR (sale_id IS NULL AND quotation_id IS NOT NULL)),
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (sale_id) REFERENCES sales(id),
+        FOREIGN KEY (quotation_id) REFERENCES quotations(id)
+      );
+      CREATE INDEX idx_service_charges_sale ON sale_service_charges(sale_id);
+      CREATE INDEX idx_service_charges_quotation ON sale_service_charges(quotation_id);
+
+      CREATE TABLE delivery_notes (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        delivery_note_number TEXT NOT NULL,
+        sale_id TEXT,
+        quotation_id TEXT,
+        rider_id TEXT,
+        recipient_name TEXT NOT NULL,
+        country TEXT,
+        town TEXT,
+        physical_address TEXT NOT NULL,
+        notes TEXT,
+        fee_cents INTEGER NOT NULL,
+        cost_cents INTEGER NOT NULL DEFAULT 0,
+        is_delivered INTEGER NOT NULL DEFAULT 0,
+        delivered_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        CHECK ((sale_id IS NOT NULL AND quotation_id IS NULL) OR (sale_id IS NULL AND quotation_id IS NOT NULL)),
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (sale_id) REFERENCES sales(id),
+        FOREIGN KEY (quotation_id) REFERENCES quotations(id),
+        FOREIGN KEY (rider_id) REFERENCES riders(id)
+      );
+      CREATE UNIQUE INDEX idx_delivery_notes_sale ON delivery_notes(sale_id) WHERE sale_id IS NOT NULL;
+      CREATE UNIQUE INDEX idx_delivery_notes_quotation ON delivery_notes(quotation_id) WHERE quotation_id IS NOT NULL;
+      CREATE UNIQUE INDEX idx_delivery_notes_tenant_number ON delivery_notes(tenant_id, delivery_note_number);
+    `
   }
 ] as const;
 

@@ -1,3 +1,5 @@
+import type { SaleDelivery, SaleServiceCharge } from "./sale";
+
 export type QuotationId = string;
 export type QuotationItemId = string;
 
@@ -54,6 +56,8 @@ export type Quotation = {
   syncStatus: QuotationSyncStatus;
   lastSyncedAt: string | null;
   items: QuotationItem[];
+  serviceCharges: SaleServiceCharge[];
+  delivery: SaleDelivery | null;
 };
 
 /** Lightweight row for the Quotations list — no line items, just enough to identify and act on it. */

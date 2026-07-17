@@ -1,6 +1,8 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  ArrowLeftRight,
   BarChart3,
+  Bike,
   Boxes,
   Building2,
   ClipboardCheck,
@@ -92,6 +94,13 @@ export const navGroups: NavGroup[] = [
         icon: Users,
         permissionModule: "customers"
       },
+      {
+        key: "riders",
+        label: "Riders",
+        description: "Delivery couriers",
+        icon: Bike,
+        permissionModule: "riders"
+      },
             {
         key: "payment-methods",
         label: "Payment Methods",
@@ -105,6 +114,13 @@ export const navGroups: NavGroup[] = [
         description: "Returns & voids awaiting sign-off",
         icon: ClipboardCheck,
         permissionModule: "approvals"
+      },
+      {
+        key: "transactions",
+        label: "Transactions",
+        description: "Every payment, in one place",
+        icon: ArrowLeftRight,
+        permissionModule: "sales"
       }
     ]
   },
@@ -171,10 +187,38 @@ export const navGroups: NavGroup[] = [
     title: "Insights",
     items: [
       {
-        key: "reports",
-        label: "Reports",
-        description: "Sales & performance",
+        key: "reports-sales",
+        label: "Sales Report",
+        description: "Daily summary, trends & breakdowns",
         icon: BarChart3,
+        permissionModule: "reports"
+      },
+      {
+        key: "reports-inventory",
+        label: "Inventory Report",
+        description: "Stock levels & movement",
+        icon: Boxes,
+        permissionModule: "reports"
+      },
+      {
+        key: "reports-products",
+        label: "Products Report",
+        description: "Performance by product",
+        icon: Package,
+        permissionModule: "reports"
+      },
+      {
+        key: "reports-customers",
+        label: "Customers Report",
+        description: "Buying behavior & balances",
+        icon: Users,
+        permissionModule: "reports"
+      },
+      {
+        key: "reports-suppliers",
+        label: "Suppliers Report",
+        description: "Purchasing & spend by supplier",
+        icon: Truck,
         permissionModule: "reports"
       }
     ]

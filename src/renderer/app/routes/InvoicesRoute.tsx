@@ -8,6 +8,7 @@ import {
   Eye,
   FileText,
   Loader2,
+  Package,
   Plus,
   Printer,
   Search,
@@ -16,6 +17,12 @@ import {
 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { DeliveryNotePreview } from "@renderer/shared/components/DeliveryNotePreview";
+import {
+  ExtraChargesSection,
+  type DeliveryDraft,
+  type ServiceChargeDraft
+} from "@renderer/shared/components/ExtraChargesSection";
 import { Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { StatTile } from "@renderer/shared/components/StatTile";
@@ -34,14 +41,16 @@ import {
   TRANSACTION_TYPE_OPTIONS,
   type PaymentStatus,
   type Sale,
+  type SaleDelivery,
   type TransactionType
 } from "@shared/types/sale";
 
-type FilterTab = "all" | "outstanding" | "overdue" | "paid" | "cancelled" | "recent";
+type FilterTab = "all" | "outstanding" | "partially_paid" | "overdue" | "paid" | "cancelled" | "recent";
 
 const FILTER_TABS: Array<{ value: FilterTab; label: string }> = [
   { value: "all", label: "All" },
   { value: "outstanding", label: "Outstanding" },
+  { value: "partially_paid", label: "Partially Paid" },
   { value: "overdue", label: "Overdue" },
   { value: "paid", label: "Paid" },
   { value: "cancelled", label: "Cancelled" },
@@ -126,6 +135,7 @@ function Th({
 
 export function InvoicesRoute(): React.JSX.Element {
   const currency = useAppStore((state) => state.context?.tenant.currency ?? "");
+  const tenantContext = useAppStore((state) => state.context?.tenant ?? null);
   const { can } = usePermissions();
   const canCreate = can("sales", "create");
   const canEdit = can("sales", "edit");
@@ -145,6 +155,12 @@ export function InvoicesRoute(): React.JSX.Element {
 
   const [viewingSale, setViewingSale] = useState<Sale | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
+
+  const [viewingDelivery, setViewingDelivery] = useState<{
+    delivery: SaleDelivery;
+    sourceNumber: string | null;
+  } | null>(null);
+  const [deliveryLoading, setDeliveryLoading] = useState(false);
 
   const [recordPaymentOpen, setRecordPaymentOpen] = useState(false);
   const [paymentMethodId, setPaymentMethodId] = useState("");
@@ -167,6 +183,8 @@ export function InvoicesRoute(): React.JSX.Element {
   const [createDueDate, setCreateDueDate] = useState(todayIsoDate());
   const [createNotes, setCreateNotes] = useState("");
   const [createItems, setCreateItems] = useState<CartLine[]>([]);
+  const [createServiceCharges, setCreateServiceCharges] = useState<ServiceChargeDraft[]>([]);
+  const [createDelivery, setCreateDelivery] = useState<DeliveryDraft | null>(null);
   const [productSearch, setProductSearch] = useState("");
   const [includeInitialPayment, setIncludeInitialPayment] = useState(false);
   const [initialPaymentMethodId, setInitialPaymentMethodId] = useState("");
@@ -213,6 +231,8 @@ export function InvoicesRoute(): React.JSX.Element {
 
     if (activeTab === "outstanding") {
       list = list.filter((invoice) => ["unpaid", "partially_paid", "overdue"].includes(invoice.paymentStatus));
+    } else if (activeTab === "partially_paid") {
+      list = list.filter((invoice) => invoice.paymentStatus === "partially_paid");
     } else if (activeTab === "overdue") {
       list = list.filter((invoice) => invoice.paymentStatus === "overdue");
     } else if (activeTab === "paid") {
@@ -272,6 +292,19 @@ export function InvoicesRoute(): React.JSX.Element {
 
   function closeView(): void {
     setViewingSale(null);
+  }
+
+  async function openDeliveryNote(invoice: InvoiceListItem): Promise<void> {
+    setDeliveryLoading(true);
+    setActionError(null);
+    try {
+      const delivery = await window.blueLedger.deliveryNote.getForSale(invoice.id);
+      if (delivery) setViewingDelivery({ delivery, sourceNumber: invoice.invoiceNumber });
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to load delivery note"));
+    } finally {
+      setDeliveryLoading(false);
+    }
   }
 
   async function refreshViewing(saleId: string): Promise<void> {
@@ -431,13 +464,18 @@ export function InvoicesRoute(): React.JSX.Element {
       discountAmountCents += entry.pricing.discountAmountCents;
       taxAmountCents += entry.pricing.taxCents;
     }
+    const serviceChargesFeeCents = createServiceCharges.reduce((sum, charge) => sum + toCents(charge.fee), 0);
+    const deliveryFeeCents = createDelivery ? toCents(createDelivery.fee) : 0;
     return {
       subtotalCents,
       discountAmountCents,
       taxAmountCents,
-      grandTotalCents: subtotalCents - discountAmountCents + taxAmountCents
+      serviceChargesFeeCents,
+      deliveryFeeCents,
+      grandTotalCents:
+        subtotalCents - discountAmountCents + taxAmountCents + serviceChargesFeeCents + deliveryFeeCents
     };
-  }, [createLinePricing]);
+  }, [createLinePricing, createServiceCharges, createDelivery]);
 
   const initialPaymentCents = includeInitialPayment && initialPaymentAmount.trim() !== "" ? toCents(initialPaymentAmount) : 0;
 
@@ -448,6 +486,8 @@ export function InvoicesRoute(): React.JSX.Element {
     setCreateDueDate(todayIsoDate());
     setCreateNotes("");
     setCreateItems([]);
+    setCreateServiceCharges([]);
+    setCreateDelivery(null);
     setProductSearch("");
     setIncludeInitialPayment(false);
     setInitialPaymentMethodId("");
@@ -511,6 +551,23 @@ export function InvoicesRoute(): React.JSX.Element {
           quantity: line.quantity,
           discountAmountCents: line.discountAmountCents
         })),
+        serviceCharges: createServiceCharges.map((charge) => ({
+          name: charge.name,
+          feeCents: toCents(charge.fee),
+          costCents: toCents(charge.cost)
+        })),
+        delivery: createDelivery
+          ? {
+              riderId: createDelivery.riderId,
+              recipientName: createDelivery.recipientName,
+              country: createDelivery.country,
+              town: createDelivery.town,
+              physicalAddress: createDelivery.physicalAddress,
+              notes: createDelivery.notes,
+              feeCents: toCents(createDelivery.fee),
+              costCents: toCents(createDelivery.cost)
+            }
+          : null,
         initialPayment:
           includeInitialPayment && initialPaymentMethodId && initialPaymentCents > 0
             ? {
@@ -700,11 +757,8 @@ export function InvoicesRoute(): React.JSX.Element {
                 </thead>
                 <tbody>
                   {(filteredInvoices ?? []).map((invoice) => (
-                    <tr
-                      key={invoice.id}
-                      onClick={() => void openView(invoice.id)}
-                      className="cursor-pointer border-t border-line odd:bg-white even:bg-soft/50 hover:bg-soft"
-                    >
+                    <tr key={invoice.id} className="border-t border-line odd:bg-white even:bg-soft/50">
+
                       <td className="truncate px-3 py-2.5 text-xs font-bold tabular-nums text-ink">
                         {invoice.invoiceNumber}
                       </td>
@@ -733,18 +787,27 @@ export function InvoicesRoute(): React.JSX.Element {
                         </DashedPill>
                       </td>
                       <td className="px-3 py-2.5">
-                        <div className="flex items-center justify-end">
+                        <div className="flex items-center justify-end gap-2">
                           <button
                             type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void openView(invoice.id);
-                            }}
+                            onClick={() => void openView(invoice.id)}
                             aria-label="View invoice"
+                            title="View Invoice"
                             className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-ink cursor-pointer"
                           >
                             <Eye className="size-3.5" aria-hidden="true" />
                           </button>
+                          {invoice.hasDeliveryNote && (
+                            <button
+                              type="button"
+                              onClick={() => void openDeliveryNote(invoice)}
+                              aria-label="View delivery note"
+                              title="View Delivery Note"
+                              className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-primary cursor-pointer"
+                            >
+                              <Package className="size-3.5" aria-hidden="true" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -814,6 +877,60 @@ export function InvoicesRoute(): React.JSX.Element {
               </div>
             </div>
 
+            {viewingSale.serviceCharges.length > 0 && (
+              <div className="mt-4">
+                <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Service Charges</p>
+                <div className="mt-2 space-y-1.5">
+                  {viewingSale.serviceCharges.map((charge) => (
+                    <div
+                      key={charge.id}
+                      className="flex items-center justify-between rounded-lg border border-dashed border-line px-3 py-2"
+                    >
+                      <p className="text-sm font-bold text-ink">{charge.name}</p>
+                      <p className="text-sm font-extrabold text-ink">{formatCents(charge.feeCents)}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {viewingSale.delivery && (
+              <div className="mt-4 rounded-lg border border-dashed border-line bg-soft/50 p-3">
+                <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Delivery</p>
+                <div className="mt-2 grid grid-cols-2 gap-2.5 text-sm">
+                  <div>
+                    <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Recipient</p>
+                    <p className="font-bold text-ink">{viewingSale.delivery.recipientName}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Fee</p>
+                    <p className="font-bold text-ink">{formatCents(viewingSale.delivery.feeCents)}</p>
+                  </div>
+                  <div className="col-span-2">
+                    <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Address</p>
+                    <p className="font-semibold text-ink">
+                      {[viewingSale.delivery.physicalAddress, viewingSale.delivery.town, viewingSale.delivery.country]
+                        .filter(Boolean)
+                        .join(", ")}
+                    </p>
+                  </div>
+                  {viewingSale.delivery.riderName && (
+                    <div className="col-span-2">
+                      <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Rider</p>
+                      <p className="font-semibold text-ink">
+                        {viewingSale.delivery.riderName}
+                        {viewingSale.delivery.riderPhone ? ` · ${viewingSale.delivery.riderPhone}` : ""}
+                      </p>
+                    </div>
+                  )}
+                </div>
+                <p className="mt-2 text-[10px] font-semibold text-muted">
+                  {viewingSale.delivery.isDelivered ? "Delivered" : "Not yet delivered"} — use the delivery note
+                  button in the table to print, download, share, or update this.
+                </p>
+              </div>
+            )}
+
             {viewingSale.invoiceNotes && (
               <div className="mt-4 rounded-lg border border-line bg-soft px-3.5 py-2.5">
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Invoice Notes</p>
@@ -834,6 +951,20 @@ export function InvoicesRoute(): React.JSX.Element {
                 <span className="font-semibold">Tax</span>
                 <span className="font-bold tabular-nums">{formatCents(viewingSale.taxAmountCents)}</span>
               </div>
+              {viewingSale.serviceCharges.length > 0 && (
+                <div className="flex justify-between text-muted">
+                  <span className="font-semibold">Service Charges</span>
+                  <span className="font-bold tabular-nums">
+                    {formatCents(viewingSale.serviceCharges.reduce((sum, charge) => sum + charge.feeCents, 0))}
+                  </span>
+                </div>
+              )}
+              {viewingSale.delivery && (
+                <div className="flex justify-between text-muted">
+                  <span className="font-semibold">Delivery Fee</span>
+                  <span className="font-bold tabular-nums">{formatCents(viewingSale.delivery.feeCents)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-base font-extrabold text-ink">
                 <span>Total</span>
                 <span>{formatCents(viewingSale.grandTotalCents)}</span>
@@ -934,6 +1065,28 @@ export function InvoicesRoute(): React.JSX.Element {
               </div>
             )}
           </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={viewingDelivery !== null || deliveryLoading}
+        onClose={() => setViewingDelivery(null)}
+        title={viewingDelivery?.delivery.deliveryNoteNumber ?? "Delivery Note"}
+        description="Print, download, share, or mark this delivery as delivered."
+        widthClassName="max-w-lg"
+      >
+        {deliveryLoading ? (
+          <div className="flex min-h-[160px] items-center justify-center text-muted">
+            <Loader2 className="size-6 animate-spin" aria-hidden="true" />
+          </div>
+        ) : viewingDelivery && tenantContext ? (
+          <DeliveryNotePreview
+            delivery={viewingDelivery.delivery}
+            tenant={tenantContext}
+            sourceDocumentLabel="Invoice"
+            sourceDocumentNumber={viewingDelivery.sourceNumber}
+            onDeliveredChange={(next) => setViewingDelivery((prev) => (prev ? { ...prev, delivery: next } : prev))}
+          />
         ) : null}
       </Modal>
 
@@ -1207,6 +1360,14 @@ export function InvoicesRoute(): React.JSX.Element {
 
           <TextAreaField label="Invoice Notes" value={createNotes} onChange={setCreateNotes} className="mt-4" rows={2} />
 
+          <ExtraChargesSection
+            serviceCharges={createServiceCharges}
+            onServiceChargesChange={setCreateServiceCharges}
+            delivery={createDelivery}
+            onDeliveryChange={setCreateDelivery}
+            customerName={selectedCreateCustomer?.name ?? ""}
+          />
+
           <div className="mt-4">
             <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-line bg-soft px-3.5 py-2.5">
               <input
@@ -1256,6 +1417,18 @@ export function InvoicesRoute(): React.JSX.Element {
               <span className="font-semibold">Tax</span>
               <span className="font-bold tabular-nums">{formatCents(createTotals.taxAmountCents)}</span>
             </div>
+            {createTotals.serviceChargesFeeCents > 0 && (
+              <div className="flex justify-between text-muted">
+                <span className="font-semibold">Service Charges</span>
+                <span className="font-bold tabular-nums">{formatCents(createTotals.serviceChargesFeeCents)}</span>
+              </div>
+            )}
+            {createTotals.deliveryFeeCents > 0 && (
+              <div className="flex justify-between text-muted">
+                <span className="font-semibold">Delivery Fee</span>
+                <span className="font-bold tabular-nums">{formatCents(createTotals.deliveryFeeCents)}</span>
+              </div>
+            )}
             <div className="flex justify-between text-base font-extrabold text-ink">
               <span>Total</span>
               <span>{formatCents(createTotals.grandTotalCents)}</span>

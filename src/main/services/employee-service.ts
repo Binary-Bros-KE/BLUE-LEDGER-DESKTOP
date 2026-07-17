@@ -70,7 +70,7 @@ function createEmployeeInternal(
 }
 
 /**
- * Seeds a single "System" employee (Owner role, PIN 000000) the first time this tenant has no
+ * Seeds a single "System" employee (Super Admin role, PIN 000000) the first time this tenant has no
  * employees at all, so there's always a known way to sign in once the login flow exists. Called
  * once from app bootstrap, before anyone is signed in — it must not go through the permission-gated
  * createEmployee(), since nobody can hold a permission before an employee (and a session) exists.
@@ -79,9 +79,9 @@ export function ensureDefaultSystemEmployee(tenantId: string): void {
   const hasAnyEmployee = employeeRepository.findAllEmployeeRows(tenantId, null).length > 0;
   if (hasAnyEmployee) return;
 
-  const ownerRoleRow = roleRepository
+  const superAdminRoleRow = roleRepository
     .findAllRoleRows(tenantId)
-    .find((role) => role.role_name === "Owner");
+    .find((role) => role.role_name === "Super Admin");
 
   const parsed = employeeCreateSchema.parse({
     employeeCode: DEFAULT_SYSTEM_EMPLOYEE_CODE,
@@ -97,7 +97,7 @@ export function ensureDefaultSystemEmployee(tenantId: string): void {
     department: null,
     jobTitle: "System Administrator",
     hireDate: null,
-    roleId: ownerRoleRow?.id ?? null,
+    roleId: superAdminRoleRow?.id ?? null,
     username: "system",
     status: "active",
     pin: DEFAULT_SYSTEM_PIN,

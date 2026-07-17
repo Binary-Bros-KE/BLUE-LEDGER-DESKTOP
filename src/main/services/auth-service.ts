@@ -93,6 +93,27 @@ export function logout(): void {
   currentSession = null;
 }
 
+/**
+ * Sets the active session for a known employee id, bypassing the PIN check entirely — never wired
+ * to any IPC channel, callable only from trusted in-process dev tooling (the demo-data seed script,
+ * gated behind BLUE_LEDGER_SEED_DEMO). Lets the seed script attribute sales/purchases/etc. to the
+ * correct real employee (and therefore the correct branch, via that employee's own assignment)
+ * without needing to know anyone's PIN.
+ */
+export function setSessionForSeeding(employeeId: string): AuthSession {
+  const row = employeeRepository.findEmployeeRowById(employeeId);
+  if (!row) {
+    throw new Error(`Seed: employee ${employeeId} not found`);
+  }
+  const tenantRow = tenantRepository.findTenantRow();
+  if (!tenantRow) {
+    throw new Error("Tenant has not been initialized yet");
+  }
+  const session = buildSession(row, tenantRow.id);
+  currentSession = session;
+  return session;
+}
+
 export function getSession(): AuthSession | null {
   return currentSession;
 }
@@ -110,6 +131,24 @@ export function requirePermission(module: PermissionModuleKey, action: Permissio
   if (!hasPermission(module, action)) {
     throw new Error(`Your role doesn't have permission to ${action} ${module.replace(/_/g, " ")}`);
   }
+}
+
+/**
+ * Throws unless AT LEAST ONE of the given (module, action) pairs passes. Used by a handful of
+ * report-service reads that a dashboard widget needs even for a role that shouldn't see the full
+ * Reports nav section (which is gated on "reports" alone) — e.g. a Cashier can read their own sales
+ * financial data via "sales:view" without being granted "reports:view" (and the Reports tabs that
+ * comes with).
+ */
+export function requirePermissionAnyOf(checks: Array<[PermissionModuleKey, PermissionAction]>): void {
+  if (!currentSession) {
+    throw new Error("You must be signed in to do that");
+  }
+  if (checks.some(([module, action]) => hasPermission(module, action))) {
+    return;
+  }
+  const described = checks.map(([module, action]) => `${action} ${module.replace(/_/g, " ")}`).join(" or ");
+  throw new Error(`Your role doesn't have permission to ${described}`);
 }
 
 /**

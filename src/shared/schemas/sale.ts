@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { deliveryFieldSchema, serviceChargesFieldSchema } from "@shared/schemas/charges";
 import { optionalText } from "@shared/schemas/common";
 
 const saleCartItemSchema = z.object({
@@ -7,12 +8,16 @@ const saleCartItemSchema = z.object({
   discountAmountCents: z.coerce.number().int().min(0).max(100_000_000).optional().default(0)
 });
 
-/** Shared by suspend (hold the cart) and checkout (hold + pay) — a resumed sale carries its id along. */
+/** Shared by suspend (hold the cart) and checkout (hold + pay) — a resumed sale carries its id along.
+ * serviceCharges/delivery round-trip through suspend too, since a held sale is rehydrated entirely
+ * from the database on resume (see CheckoutRoute's OpenSaleDraft). */
 export const saleCartInputSchema = z.object({
   resumeSaleId: optionalText(64),
   customerId: optionalText(64),
   notes: optionalText(500),
-  items: z.array(saleCartItemSchema).min(1, "Add at least one product to the cart")
+  items: z.array(saleCartItemSchema).min(1, "Add at least one product to the cart"),
+  serviceCharges: serviceChargesFieldSchema,
+  delivery: deliveryFieldSchema
 });
 
 export type SaleCartInput = z.infer<typeof saleCartInputSchema>;

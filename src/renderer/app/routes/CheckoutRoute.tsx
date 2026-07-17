@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import {
   CheckCircle2,
   ChevronDown,
+  Info,
   Loader2,
   Minus,
   Package,
@@ -16,8 +17,15 @@ import {
 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { DeliveryNotePreview } from "@renderer/shared/components/DeliveryNotePreview";
+import {
+  ExtraChargesSection,
+  type DeliveryDraft,
+  type ServiceChargeDraft
+} from "@renderer/shared/components/ExtraChargesSection";
 import { Field, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
+import { ProductInfoModal } from "@renderer/shared/components/ProductInfoModal";
 import { ReceiptPreview } from "@renderer/shared/components/ReceiptPreview";
 import { StampBadge } from "@renderer/shared/components/StampBadge";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
@@ -50,6 +58,8 @@ type OpenSaleDraft = {
   customerId: string | null;
   notes: string;
   items: CartLine[];
+  serviceCharges: ServiceChargeDraft[];
+  delivery: DeliveryDraft | null;
   createdAt: number;
 };
 
@@ -88,6 +98,7 @@ export function CheckoutRoute(): React.JSX.Element {
   const [customerSearch, setCustomerSearch] = useState("");
 
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
+  const [showDeliveryNote, setShowDeliveryNote] = useState(false);
 
   const branchId = session?.branch?.id ?? null;
 
@@ -122,6 +133,24 @@ export function CheckoutRoute(): React.JSX.Element {
                 quantity: item.quantity,
                 discountAmountCents: item.discountAmountCents
               })),
+              serviceCharges: full.serviceCharges.map((charge) => ({
+                key: charge.id,
+                name: charge.name,
+                fee: fromCents(charge.feeCents),
+                cost: fromCents(charge.costCents)
+              })),
+              delivery: full.delivery
+                ? {
+                    riderId: full.delivery.riderId,
+                    recipientName: full.delivery.recipientName,
+                    country: full.delivery.country ?? "",
+                    town: full.delivery.town ?? "",
+                    physicalAddress: full.delivery.physicalAddress,
+                    notes: full.delivery.notes ?? "",
+                    fee: fromCents(full.delivery.feeCents),
+                    cost: fromCents(full.delivery.costCents)
+                  }
+                : null,
               createdAt: new Date(full.createdAt).getTime()
             };
             return draft;
@@ -171,11 +200,17 @@ export function CheckoutRoute(): React.JSX.Element {
     });
   }, [products, searchTerm]);
 
-  function computeDraftTotals(items: CartLine[]): {
+  function computeDraftTotals(
+    items: CartLine[],
+    serviceCharges: ServiceChargeDraft[],
+    delivery: DeliveryDraft | null
+  ): {
     lines: Array<{ line: CartLine; product: ProductListItem; pricing: LinePricing }>;
     subtotalCents: number;
     discountAmountCents: number;
     taxAmountCents: number;
+    serviceChargesFeeCents: number;
+    deliveryFeeCents: number;
     grandTotalCents: number;
   } {
     let subtotalCents = 0;
@@ -193,18 +228,25 @@ export function CheckoutRoute(): React.JSX.Element {
       lines.push({ line, product, pricing });
     }
 
+    const serviceChargesFeeCents = serviceCharges.reduce((sum, charge) => sum + toCents(charge.fee), 0);
+    const deliveryFeeCents = delivery ? toCents(delivery.fee) : 0;
+
     return {
       lines,
       subtotalCents,
       discountAmountCents,
       taxAmountCents,
-      grandTotalCents: subtotalCents - discountAmountCents + taxAmountCents
+      serviceChargesFeeCents,
+      deliveryFeeCents,
+      grandTotalCents: subtotalCents - discountAmountCents + taxAmountCents + serviceChargesFeeCents + deliveryFeeCents
     };
   }
 
   const sortedOpenSales = useMemo(() => [...openSales].sort((a, b) => b.createdAt - a.createdAt), [openSales]);
   const activeDraft = openSales.find((draft) => draft.key === activeKey) ?? null;
-  const activeTotals = activeDraft ? computeDraftTotals(activeDraft.items) : null;
+  const activeTotals = activeDraft
+    ? computeDraftTotals(activeDraft.items, activeDraft.serviceCharges, activeDraft.delivery)
+    : null;
 
   const activePaymentMethods = useMemo(
     () => paymentMethods.filter((method) => method.isActive).sort((a, b) => a.sortOrder - b.sortOrder),
@@ -237,6 +279,8 @@ export function CheckoutRoute(): React.JSX.Element {
       customerId: null,
       notes: "",
       items: [],
+      serviceCharges: [],
+      delivery: null,
       createdAt: Date.now()
     };
   }
@@ -297,11 +341,57 @@ export function CheckoutRoute(): React.JSX.Element {
     setOpenSales((prev) => prev.map((draft) => (draft.key === activeKey ? { ...draft, notes: value } : draft)));
   }
 
+  function updateActiveServiceCharges(next: ServiceChargeDraft[]): void {
+    if (!activeKey) return;
+    setOpenSales((prev) =>
+      prev.map((draft) => (draft.key === activeKey ? { ...draft, serviceCharges: next } : draft))
+    );
+  }
+
+  function updateActiveDelivery(next: DeliveryDraft | null): void {
+    if (!activeKey) return;
+    setOpenSales((prev) => prev.map((draft) => (draft.key === activeKey ? { ...draft, delivery: next } : draft)));
+  }
+
   function selectCustomerForActiveDraft(customerId: string | null): void {
     if (!activeKey) return;
     setOpenSales((prev) => prev.map((draft) => (draft.key === activeKey ? { ...draft, customerId } : draft)));
     setCustomerPickerOpen(false);
     setCustomerSearch("");
+  }
+
+  function buildExtrasPayload(draft: OpenSaleDraft): {
+    serviceCharges: Array<{ name: string; feeCents: number; costCents: number }>;
+    delivery: {
+      riderId: string | null;
+      recipientName: string;
+      country: string;
+      town: string;
+      physicalAddress: string;
+      notes: string;
+      feeCents: number;
+      costCents: number;
+    } | null;
+  } {
+    return {
+      serviceCharges: draft.serviceCharges.map((charge) => ({
+        name: charge.name,
+        feeCents: toCents(charge.fee),
+        costCents: toCents(charge.cost)
+      })),
+      delivery: draft.delivery
+        ? {
+            riderId: draft.delivery.riderId,
+            recipientName: draft.delivery.recipientName,
+            country: draft.delivery.country,
+            town: draft.delivery.town,
+            physicalAddress: draft.delivery.physicalAddress,
+            notes: draft.delivery.notes,
+            feeCents: toCents(draft.delivery.fee),
+            costCents: toCents(draft.delivery.cost)
+          }
+        : null
+    };
   }
 
   function handleNewSale(): void {
@@ -337,7 +427,8 @@ export function CheckoutRoute(): React.JSX.Element {
           productId: line.productId,
           quantity: line.quantity,
           discountAmountCents: line.discountAmountCents
-        }))
+        })),
+        ...buildExtrasPayload(activeDraft)
       });
       const suspendedKey = activeDraft.key;
       setOpenSales((prev) =>
@@ -368,6 +459,7 @@ export function CheckoutRoute(): React.JSX.Element {
           quantity: line.quantity,
           discountAmountCents: line.discountAmountCents
         })),
+        ...buildExtrasPayload(activeDraft),
         paymentMethodId,
         paymentReference,
         amountReceivedCents: amountReceived.trim() === "" ? null : toCents(amountReceived)
@@ -376,6 +468,7 @@ export function CheckoutRoute(): React.JSX.Element {
       setOpenSales((prev) => prev.filter((draft) => draft.key !== completedKey));
       setActiveKey(null);
       setCompletedSale(sale);
+      setShowDeliveryNote(false);
       if (branchId) void window.blueLedger.inventory.listForLocation(branchId).then(setStockLevels);
     } catch (err) {
       setActionError(getErrorMessage(err, "Failed to complete sale"));
@@ -511,7 +604,9 @@ export function CheckoutRoute(): React.JSX.Element {
           ) : (
             sortedOpenSales.map((draft) => {
               const isActive = draft.key === activeKey;
-              const totals = isActive ? activeTotals! : computeDraftTotals(draft.items);
+              const totals = isActive
+                ? activeTotals!
+                : computeDraftTotals(draft.items, draft.serviceCharges, draft.delivery);
               const canRemove = draft.status === "draft" || canDeletePending;
 
               if (!isActive) {
@@ -575,12 +670,24 @@ export function CheckoutRoute(): React.JSX.Element {
                         <ChevronDown className="size-3.5 text-muted" aria-hidden="true" />
                       </button>
                     </div>
-                    <StampBadge
-                      label={draft.status === "suspended" ? "Held" : "Open"}
-                      sublabel="Sale"
-                      tone={draft.status === "suspended" ? "warning" : "success"}
-                      className="w-16"
-                    />
+                    <div className="flex flex-none items-center gap-2">
+                      <StampBadge
+                        label={draft.status === "suspended" ? "Held" : "Open"}
+                        sublabel="Sale"
+                        tone={draft.status === "suspended" ? "warning" : "success"}
+                        className="w-16"
+                      />
+                      {canRemove && (
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteDraft(draft)}
+                          aria-label="Delete sale"
+                          className="grid size-7 place-items-center rounded-md text-muted transition hover:bg-danger-soft hover:text-danger cursor-pointer"
+                        >
+                          <Trash2 className="size-3.5" aria-hidden="true" />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <div className="mt-3 max-h-[260px] space-y-2 overflow-y-auto pr-1">
@@ -671,6 +778,16 @@ export function CheckoutRoute(): React.JSX.Element {
                     className="mt-3"
                   />
 
+                  {isActive && (
+                    <ExtraChargesSection
+                      serviceCharges={draft.serviceCharges}
+                      onServiceChargesChange={updateActiveServiceCharges}
+                      delivery={draft.delivery}
+                      onDeliveryChange={updateActiveDelivery}
+                      customerName={draft.customerId ? customerLabel(draft.customerId) : ""}
+                    />
+                  )}
+
                   <div className="mt-3 space-y-1 border-t border-line pt-3 text-sm">
                     <div className="flex items-center justify-between text-muted">
                       <span className="font-semibold">Subtotal</span>
@@ -684,6 +801,18 @@ export function CheckoutRoute(): React.JSX.Element {
                       <span className="font-semibold">Tax</span>
                       <span className="font-bold tabular-nums">{formatCents(totals.taxAmountCents)}</span>
                     </div>
+                    {totals.serviceChargesFeeCents > 0 && (
+                      <div className="flex items-center justify-between text-muted">
+                        <span className="font-semibold">Service Charges</span>
+                        <span className="font-bold tabular-nums">{formatCents(totals.serviceChargesFeeCents)}</span>
+                      </div>
+                    )}
+                    {totals.deliveryFeeCents > 0 && (
+                      <div className="flex items-center justify-between text-muted">
+                        <span className="font-semibold">Delivery Fee</span>
+                        <span className="font-bold tabular-nums">{formatCents(totals.deliveryFeeCents)}</span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="mt-3">
@@ -857,10 +986,40 @@ export function CheckoutRoute(): React.JSX.Element {
                 <ReceiptPreview sale={completedSale} tenant={tenantContext} />
               </div>
             )}
-            <Button type="button" onClick={() => setCompletedSale(null)} className="mt-4 h-9 w-full text-xs">
+            {completedSale.delivery && (
+              <Button
+                type="button"
+                onClick={() => setShowDeliveryNote(true)}
+                className="mt-3 h-9 w-full border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+              >
+                <Package className="mr-1.5 size-3.5" aria-hidden="true" />
+                View Delivery Note
+              </Button>
+            )}
+            <Button type="button" onClick={() => setCompletedSale(null)} className="mt-2 h-9 w-full text-xs">
               Done
             </Button>
           </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={showDeliveryNote && completedSale?.delivery !== null && completedSale?.delivery !== undefined}
+        onClose={() => setShowDeliveryNote(false)}
+        title={completedSale?.delivery?.deliveryNoteNumber ?? "Delivery Note"}
+        description="Print, download, share, or mark this delivery as delivered."
+        widthClassName="max-w-lg"
+      >
+        {completedSale?.delivery && tenantContext && (
+          <DeliveryNotePreview
+            delivery={completedSale.delivery}
+            tenant={tenantContext}
+            sourceDocumentLabel="Receipt"
+            sourceDocumentNumber={completedSale.receiptNumber}
+            onDeliveredChange={(next) =>
+              setCompletedSale((prev) => (prev ? { ...prev, delivery: next } : prev))
+            }
+          />
         )}
       </Modal>
     </motion.div>
@@ -879,6 +1038,7 @@ function ProductCard({
   onAdd: () => void;
 }): React.JSX.Element {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [showInfo, setShowInfo] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -899,6 +1059,14 @@ function ProductCard({
   return (
     <div className="flex flex-col rounded-xl border border-line bg-white p-3 shadow-soft transition hover:shadow-md">
       <div className="flex items-start justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setShowInfo(true)}
+          aria-label={`View details for ${product.name}`}
+          className="grid size-6 flex-none place-items-center rounded-md text-muted transition hover:bg-soft hover:text-primary cursor-pointer"
+        >
+          <Info className="size-3.5" aria-hidden="true" />
+        </button>
         <div className="h-4 flex-1 rounded-sm opacity-70" style={BARCODE_STYLE} aria-hidden="true" />
         <div
           className="grid size-9 flex-none place-items-center overflow-hidden rounded-lg"
@@ -911,6 +1079,8 @@ function ProductCard({
           )}
         </div>
       </div>
+
+      {showInfo && <ProductInfoModal product={product} onClose={() => setShowInfo(false)} />}
 
       <p className="mt-2.5 line-clamp-2 text-sm font-extrabold leading-snug text-ink">{product.name}</p>
       <p className="mt-1 text-lg font-extrabold tabular-nums text-ink">

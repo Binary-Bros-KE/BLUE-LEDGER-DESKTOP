@@ -4,14 +4,17 @@ import { join } from "node:path";
 import electron from "electron";
 import { ThermalPrinter, PrinterTypes } from "node-thermal-printer";
 import { getDatabase } from "@main/database/connection";
+import * as deliveryNoteRepository from "@main/database/repositories/delivery-note-repository";
 import * as locationRepository from "@main/database/repositories/location-repository";
 import * as quotationRepository from "@main/database/repositories/quotation-repository";
 import * as saleRepository from "@main/database/repositories/sale-repository";
+import * as serviceChargeRepository from "@main/database/repositories/service-charge-repository";
 import * as tenantRepository from "@main/database/repositories/tenant-repository";
 import { requirePermission } from "@main/services/auth-service";
 import { readManagedBusinessLogoPreview, readManagedLocationLogoPreview } from "@main/services/image-service";
 import { getSalary } from "@main/services/salary-service";
 import { PRINTER_SETTINGS_STORAGE_KEY } from "@shared/constants/app";
+import { buildDeliveryNoteViewModel, type DeliveryNoteViewModel } from "@shared/lib/delivery-note";
 import { buildReceiptViewModel, formatReceiptCents, type ReceiptViewModel } from "@shared/lib/receipt";
 import { printerSettingsSchema } from "@shared/schemas/printer";
 import type { LogoRatio } from "@shared/types/logo";
@@ -22,7 +25,13 @@ import {
   type PrinterType
 } from "@shared/types/printer";
 import { QUOTATION_STATUS_OPTIONS, type Quotation } from "@shared/types/quotation";
-import { PAYMENT_STATUS_OPTIONS, TRANSACTION_TYPE_OPTIONS, type Sale } from "@shared/types/sale";
+import {
+  PAYMENT_STATUS_OPTIONS,
+  TRANSACTION_TYPE_OPTIONS,
+  type Sale,
+  type SaleDelivery,
+  type SaleServiceCharge
+} from "@shared/types/sale";
 import type { Salary } from "@shared/types/salary";
 
 const { app, BrowserWindow, dialog, shell } = electron;
@@ -101,7 +110,12 @@ function loadReceiptData(saleId: string): { sale: Sale; business: Parameters<typ
     throw new Error("Sale not found");
   }
   const items = saleRepository.findSaleItemDetailRows(saleId).map(saleRepository.mapSaleItemDetailRow);
-  const sale = saleRepository.mapSaleDetailRow(saleRow, items);
+  const serviceCharges = serviceChargeRepository
+    .findServiceChargeRowsForSale(saleId)
+    .map(serviceChargeRepository.mapServiceChargeRow);
+  const deliveryRow = deliveryNoteRepository.findDeliveryNoteRowBySaleId(saleId);
+  const delivery = deliveryRow ? deliveryNoteRepository.mapDeliveryNoteRow(deliveryRow) : null;
+  const sale = saleRepository.mapSaleDetailRow(saleRow, items, serviceCharges, delivery);
 
   const tenantRow = tenantRepository.findTenantRow();
   if (!tenantRow) {
@@ -141,7 +155,7 @@ function writeReceiptToPrinter(printerInstance: ThermalPrinter, vm: ReceiptViewM
   if (vm.customerName) printerInstance.println(`Customer: ${vm.customerName}`);
   printerInstance.drawLine();
 
-  for (const item of vm.items) {
+  for (const item of [...vm.items, ...vm.extraLines]) {
     printerInstance.println(item.name);
     printerInstance.leftRight(`${item.quantity} x ${money(item.unitPriceCents)}`, money(item.lineTotalCents));
   }
@@ -220,7 +234,7 @@ function escapeHtml(value: string): string {
 function buildReceiptHtml(vm: ReceiptViewModel): string {
   const money = (cents: number | null): string => `${vm.currency} ${formatReceiptCents(cents)}`;
 
-  const itemRows = vm.items
+  const itemRows = [...vm.items, ...vm.extraLines]
     .map(
       (item) => `
       <tr>
@@ -285,11 +299,11 @@ function buildReceiptHtml(vm: ReceiptViewModel): string {
 </html>`;
 }
 
-async function renderHtmlToPdfBuffer(html: string): Promise<Buffer> {
+async function renderHtmlToPdfBuffer(html: string, options?: { landscape?: boolean }): Promise<Buffer> {
   const win = new BrowserWindow({ show: false });
   try {
     await win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(html).toString("base64")}`);
-    return await win.webContents.printToPDF({ printBackground: true });
+    return await win.webContents.printToPDF({ printBackground: true, landscape: options?.landscape ?? false });
   } finally {
     win.destroy();
   }
@@ -356,6 +370,49 @@ async function resolveDocumentLogo(locationId: string, tenantRow: tenantReposito
   return { logoDataUrl: null, logoRatio: null };
 }
 
+/** Renders service charges + delivery fee as ordinary rows appended to an invoice/quotation's item
+ * table — Discount/Tax show as "-" since these aren't product lines, and the hidden cost never
+ * appears here (only the customer-facing fee). Shared by buildInvoiceHtml and buildQuotationHtml. */
+function buildExtraChargeRows(
+  startIndex: number,
+  serviceCharges: SaleServiceCharge[],
+  delivery: SaleDelivery | null,
+  money: (cents: number | null) => string
+): string {
+  const rows: string[] = [];
+  let index = startIndex;
+
+  for (const charge of serviceCharges) {
+    index += 1;
+    rows.push(`
+      <tr>
+        <td>${index}</td>
+        <td>${escapeHtml(charge.name)}</td>
+        <td class="center">1</td>
+        <td class="right">${money(charge.feeCents)}</td>
+        <td class="right">-</td>
+        <td class="right">-</td>
+        <td class="right">${money(charge.feeCents)}</td>
+      </tr>`);
+  }
+
+  if (delivery) {
+    index += 1;
+    rows.push(`
+      <tr>
+        <td>${index}</td>
+        <td>Delivery Fee</td>
+        <td class="center">1</td>
+        <td class="right">${money(delivery.feeCents)}</td>
+        <td class="right">-</td>
+        <td class="right">-</td>
+        <td class="right">${money(delivery.feeCents)}</td>
+      </tr>`);
+  }
+
+  return rows.join("");
+}
+
 /** Builds a professional, letterhead-style A4 invoice document — a distinct template from the
  * narrow thermal receipt, reused for both print and PDF download. */
 function buildInvoiceHtml(
@@ -379,7 +436,7 @@ function buildInvoiceHtml(
         <td class="right">${money(item.lineTotalCents)}</td>
       </tr>`
     )
-    .join("");
+    .join("") + buildExtraChargeRows(sale.items.length, sale.serviceCharges, sale.delivery, money);
 
   const paymentRows = sale.payments
     .map(
@@ -566,7 +623,12 @@ function loadQuotationData(
     throw new Error("Quotation not found");
   }
   const items = quotationRepository.findQuotationItemDetailRows(quotationId).map(quotationRepository.mapQuotationItemDetailRow);
-  const quotation = quotationRepository.mapQuotationDetailRow(row, items);
+  const serviceCharges = serviceChargeRepository
+    .findServiceChargeRowsForQuotation(quotationId)
+    .map(serviceChargeRepository.mapServiceChargeRow);
+  const deliveryRow = deliveryNoteRepository.findDeliveryNoteRowByQuotationId(quotationId);
+  const delivery = deliveryRow ? deliveryNoteRepository.mapDeliveryNoteRow(deliveryRow) : null;
+  const quotation = quotationRepository.mapQuotationDetailRow(row, items, serviceCharges, delivery);
 
   const tenantRow = tenantRepository.findTenantRow();
   if (!tenantRow) {
@@ -611,7 +673,7 @@ function buildQuotationHtml(
         <td class="right">${money(item.lineTotalCents)}</td>
       </tr>`
     )
-    .join("");
+    .join("") + buildExtraChargeRows(quotation.items.length, quotation.serviceCharges, quotation.delivery, money);
 
   return `<!doctype html>
 <html>
@@ -949,5 +1011,209 @@ export async function shareSalaryPayslip(salaryId: string): Promise<PrinterActio
     return { success: true, message: "Payslip ready — attach it from the file that just opened." };
   } catch (err) {
     return { success: false, message: err instanceof Error ? err.message : "Failed to prepare payslip for sharing" };
+  }
+}
+
+/** Resolves a delivery note's business + source-document (sale/invoice/quotation) context — a
+ * delivery note always belongs to exactly one of those, matching the DB's CHECK constraint. */
+function loadDeliveryNoteData(deliveryNoteId: string): { vm: DeliveryNoteViewModel; locationId: string } {
+  const row = deliveryNoteRepository.findDeliveryNoteRowById(deliveryNoteId);
+  if (!row) {
+    throw new Error("Delivery note not found");
+  }
+  const delivery = deliveryNoteRepository.mapDeliveryNoteRow(row);
+
+  const tenantRow = tenantRepository.findTenantRow();
+  if (!tenantRow) {
+    throw new Error("Business profile not found");
+  }
+
+  let locationId: string;
+  let sourceLabel: string;
+  let sourceNumber: string | null;
+  let sourceCreatedAt: string;
+
+  if (row.sale_id) {
+    const saleRow = saleRepository.findSaleRowById(row.sale_id);
+    if (!saleRow) {
+      throw new Error("Source sale not found");
+    }
+    locationId = saleRow.location_id;
+    sourceLabel = saleRow.invoice_number ? "Invoice" : "Receipt";
+    sourceNumber = saleRow.invoice_number ?? saleRow.receipt_number;
+    sourceCreatedAt = saleRow.created_at;
+  } else if (row.quotation_id) {
+    const quotationRow = quotationRepository.findQuotationRowById(row.quotation_id);
+    if (!quotationRow) {
+      throw new Error("Source quotation not found");
+    }
+    locationId = quotationRow.location_id;
+    sourceLabel = "Quotation";
+    sourceNumber = quotationRow.quotation_number;
+    sourceCreatedAt = quotationRow.created_at;
+  } else {
+    throw new Error("Delivery note has no source document");
+  }
+
+  const vm = buildDeliveryNoteViewModel(
+    delivery,
+    {
+      businessName: tenantRow.business_name,
+      physicalAddress: tenantRow.physical_address,
+      primaryPhone: tenantRow.primary_phone
+    },
+    { label: sourceLabel, number: sourceNumber, createdAt: sourceCreatedAt }
+  );
+
+  return { vm, locationId };
+}
+
+/** Wide/landscape, large-font layout meant to be printed and stuck onto a package with adhesive —
+ * deliberately excludes every fee/cost figure (the view-model itself has no such fields). */
+function buildDeliveryNoteHtml(vm: DeliveryNoteViewModel, logo: DocumentLogo): string {
+  const addressLine = [vm.town, vm.country].filter(Boolean).join(", ");
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  * { box-sizing: border-box; }
+  @page { size: A5 landscape; margin: 10mm; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #1c1710; margin: 0; padding: 16px; }
+  .sheet { display: flex; flex-direction: column; height: 100%; min-height: 480px; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 4px solid #061e64; padding-bottom: 12px; }
+  .logo { display: block; height: auto; max-height: 60px; width: auto; max-width: 200px; object-fit: contain; margin-bottom: 6px; }
+  .business-name { font-size: 20px; font-weight: bold; color: #061e64; margin: 0; }
+  .muted { color: #666; font-size: 13px; }
+  .doc-title { font-size: 30px; font-weight: bold; text-align: right; color: #061e64; margin: 0; letter-spacing: 2px; }
+  .doc-number { font-size: 16px; font-weight: bold; text-align: right; margin-top: 4px; }
+  .badge { display: inline-block; margin-top: 8px; padding: 4px 14px; border-radius: 999px; font-size: 13px; font-weight: bold; text-transform: uppercase; background: #1f9d55; color: #fff; }
+  .body { flex: 1; display: flex; gap: 24px; margin-top: 20px; }
+  .recipient { flex: 1.4; }
+  .label { font-size: 13px; text-transform: uppercase; color: #83795f; font-weight: bold; letter-spacing: 1px; }
+  .recipient-name { font-size: 38px; font-weight: bold; color: #1c1710; margin: 4px 0 10px; line-height: 1.1; }
+  .address { font-size: 22px; font-weight: 600; line-height: 1.4; }
+  .notes { margin-top: 14px; font-size: 15px; color: #444; }
+  .rider { flex: 1; border-left: 3px dashed #ddd5c2; padding-left: 24px; }
+  .rider-name { font-size: 24px; font-weight: bold; margin: 4px 0 2px; }
+  .rider-field { font-size: 16px; margin-top: 6px; }
+  .footer { margin-top: 20px; padding-top: 12px; border-top: 2px solid #ddd5c2; display: flex; justify-content: space-between; font-size: 12px; color: #83795f; }
+</style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="header">
+      <div>
+        ${logo.logoDataUrl ? `<img src="${logo.logoDataUrl}" class="logo" alt="" />` : ""}
+        <p class="business-name">${escapeHtml(vm.businessName)}</p>
+        ${vm.businessAddress ? `<p class="muted">${escapeHtml(vm.businessAddress)}</p>` : ""}
+        ${vm.businessPhone ? `<p class="muted">${escapeHtml(vm.businessPhone)}</p>` : ""}
+      </div>
+      <div>
+        <p class="doc-title">DELIVERY NOTE</p>
+        <p class="doc-number">${escapeHtml(vm.deliveryNoteNumber)}</p>
+        ${vm.isDelivered ? `<div style="text-align:right;"><span class="badge">Delivered</span></div>` : ""}
+      </div>
+    </div>
+
+    <div class="body">
+      <div class="recipient">
+        <p class="label">Deliver To</p>
+        <p class="recipient-name">${escapeHtml(vm.recipientName)}</p>
+        <p class="address">${escapeHtml(vm.deliveryAddress)}</p>
+        ${addressLine ? `<p class="address">${escapeHtml(addressLine)}</p>` : ""}
+        ${vm.deliveryNotes ? `<p class="notes"><strong>Notes:</strong> ${escapeHtml(vm.deliveryNotes)}</p>` : ""}
+      </div>
+      <div class="rider">
+        <p class="label">Rider</p>
+        <p class="rider-name">${escapeHtml(vm.riderName ?? "Not assigned")}</p>
+        ${vm.riderPhone ? `<p class="rider-field">${escapeHtml(vm.riderPhone)}</p>` : ""}
+        ${vm.riderCompany ? `<p class="rider-field">${escapeHtml(vm.riderCompany)}</p>` : ""}
+        ${vm.riderVehicleDescription ? `<p class="rider-field">${escapeHtml(vm.riderVehicleDescription)}</p>` : ""}
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>${escapeHtml(vm.sourceDocumentLabel)}: ${escapeHtml(vm.sourceDocumentNumber ?? "-")}</span>
+      <span>${escapeHtml(vm.dateLabel)}</span>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+/** Opens the native print dialog for the delivery note — landscape, large font, meant to be printed
+ * and stuck onto a package. Uses the same HTML->native-print pipeline as invoices/quotations, not the
+ * ESC/POS thermal receipt path (which has no orientation concept at all). */
+export async function printDeliveryNote(deliveryNoteId: string): Promise<PrinterActionResult> {
+  requirePermission("sales", "view");
+  const { vm, locationId } = loadDeliveryNoteData(deliveryNoteId);
+  const tenantRow = tenantRepository.findTenantRow();
+  const logo = tenantRow ? await resolveDocumentLogo(locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
+  const html = buildDeliveryNoteHtml(vm, logo);
+  const win = new BrowserWindow({ show: false });
+
+  try {
+    await win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(html).toString("base64")}`);
+    await new Promise<void>((resolve, reject) => {
+      win.webContents.print({ silent: false, printBackground: true, landscape: true }, (success, errorType) => {
+        if (success) resolve();
+        else reject(new Error(errorType || "Print was cancelled"));
+      });
+    });
+    return { success: true, message: "Print dialog opened" };
+  } catch (err) {
+    return { success: false, message: err instanceof Error ? err.message : "Failed to print delivery note" };
+  } finally {
+    win.destroy();
+  }
+}
+
+/** Renders the delivery note to PDF and prompts the user for a save location. Returns the saved
+ * path, or null if cancelled. */
+export async function generateDeliveryNotePdf(deliveryNoteId: string): Promise<string | null> {
+  requirePermission("sales", "view");
+  const { vm, locationId } = loadDeliveryNoteData(deliveryNoteId);
+  const tenantRow = tenantRepository.findTenantRow();
+  const logo = tenantRow ? await resolveDocumentLogo(locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
+  const html = buildDeliveryNoteHtml(vm, logo);
+  const buffer = await renderHtmlToPdfBuffer(html, { landscape: true });
+
+  const result = await dialog.showSaveDialog({
+    title: "Save Delivery Note",
+    defaultPath: `${vm.deliveryNoteNumber}.pdf`,
+    filters: [{ name: "PDF", extensions: ["pdf"] }]
+  });
+  if (result.canceled || !result.filePath) {
+    return null;
+  }
+
+  await writeFile(result.filePath, buffer);
+  return result.filePath;
+}
+
+/** Mirrors shareSalaryPayslip — the one working "share" implementation in the app: render to a temp
+ * PDF, then reveal it in the file explorer so the user can manually attach it to WhatsApp, email, etc. */
+export async function shareDeliveryNote(deliveryNoteId: string): Promise<PrinterActionResult> {
+  try {
+    const { vm, locationId } = loadDeliveryNoteData(deliveryNoteId);
+    const tenantRow = tenantRepository.findTenantRow();
+    const logo = tenantRow ? await resolveDocumentLogo(locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
+    const html = buildDeliveryNoteHtml(vm, logo);
+    const buffer = await renderHtmlToPdfBuffer(html, { landscape: true });
+
+    const shareDir = join(app.getPath("temp"), "BlueLedger", "delivery-notes");
+    mkdirSync(shareDir, { recursive: true });
+    const filePath = join(shareDir, `${vm.deliveryNoteNumber}.pdf`);
+    await writeFile(filePath, buffer);
+
+    shell.showItemInFolder(filePath);
+    return { success: true, message: "Delivery note ready — attach it from the file that just opened." };
+  } catch (err) {
+    return {
+      success: false,
+      message: err instanceof Error ? err.message : "Failed to prepare delivery note for sharing"
+    };
   }
 }

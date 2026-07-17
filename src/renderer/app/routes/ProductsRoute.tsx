@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Boxes, Loader2, Package, Pencil, Power, PowerOff, Search } from "lucide-react";
+import { Boxes, Info, Loader2, Package, Pencil, Power, PowerOff, Search } from "lucide-react";
 import { ProductDetailModal } from "@renderer/app/routes/products/ProductDetailModal";
 import { ProductEditModal } from "@renderer/app/routes/products/ProductEditModal";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { SelectField } from "@renderer/shared/components/form-fields";
+import { ProductInfoModal } from "@renderer/shared/components/ProductInfoModal";
 import { ProductThumbnail } from "@renderer/shared/components/ProductThumbnail";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { useAppStore } from "@renderer/shared/stores/app-store";
@@ -51,6 +52,7 @@ export function ProductsRoute(): React.JSX.Element {
   const [notice, setNotice] = useState<string | null>(null);
 
   const [detailProduct, setDetailProduct] = useState<ProductListItem | null>(null);
+  const [infoProduct, setInfoProduct] = useState<ProductListItem | null>(null);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
@@ -250,15 +252,17 @@ export function ProductsRoute(): React.JSX.Element {
             <div className="overflow-x-auto rounded-lg border border-line">
               <table className="w-full min-w-[900px] table-fixed border-collapse text-sm">
                 <colgroup>
-                  <col className="w-[34%]" />
-                  <col className="w-[18%]" />
-                  <col className="w-[12%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[16%]" />
+                  <col className="w-12" />
+                  <col className="w-[31%]" />
+                  <col className="w-[17%]" />
+                  <col className="w-[11%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[15%]" />
                 </colgroup>
                 <thead>
                   <tr className="bg-primary text-white">
+                    <Th>{null}</Th>
                     <Th>Product</Th>
                     <Th>Category</Th>
                     <Th className="text-right">Price</Th>
@@ -270,6 +274,17 @@ export function ProductsRoute(): React.JSX.Element {
                 <tbody>
                   {(filteredProducts ?? []).map((product) => (
                     <tr key={product.id} className="border-t border-line odd:bg-white even:bg-soft/50">
+                      <td className="px-2 py-3 text-center">
+                        <button
+                          type="button"
+                          onClick={() => setInfoProduct(product)}
+                          aria-label={`View details for ${product.name}`}
+                          title="Product details"
+                          className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-primary cursor-pointer"
+                        >
+                          <Info className="size-3.5" aria-hidden="true" />
+                        </button>
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
                           <ProductThumbnail imagePath={product.imagePath} />
@@ -377,6 +392,7 @@ export function ProductsRoute(): React.JSX.Element {
           onClose={() => setDetailProduct(null)}
         />
       )}
+      {infoProduct && <ProductInfoModal product={infoProduct} onClose={() => setInfoProduct(null)} />}
     </motion.div>
   );
 }

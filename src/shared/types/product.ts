@@ -49,3 +49,14 @@ export type ProductListItem = Product & {
   categoryColor: string | null;
   totalStock: number;
 };
+
+/** A narrow, read-only stock summary for one product — deliberately not a per-storefront
+ * breakdown, so any role that can see the product catalog can check "do we have this, is there
+ * more at Main Store, and how much of that is still unallocated" without exposing other
+ * storefronts' own stock levels. */
+export type ProductStockSummary = {
+  ownLocationName: string | null;
+  ownLocationQuantity: number | null;
+  mainStoreQuantity: number;
+  mainStoreUnallocatedQuantity: number;
+};

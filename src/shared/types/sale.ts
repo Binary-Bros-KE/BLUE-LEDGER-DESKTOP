@@ -44,6 +44,38 @@ export type SalePayment = {
   notes: string | null;
 };
 
+/** A named custom fee (e.g. "Labour", "Installation") — unlimited per document, no separate document
+ * of its own, just an extra line item on the receipt/invoice/quotation. */
+export type SaleServiceCharge = {
+  id: string;
+  name: string;
+  feeCents: number;
+  /** Internal-only, never printed — used to compute the actual margin the charge earned. */
+  costCents: number;
+};
+
+/** The one optional delivery a sale/invoice/quotation can carry — mirrors a standalone delivery note
+ * document (see DeliveryNotePreview) that excludes all money figures. */
+export type SaleDelivery = {
+  id: string;
+  deliveryNoteNumber: string;
+  riderId: string | null;
+  riderName: string | null;
+  riderPhone: string | null;
+  riderCompany: string | null;
+  riderVehicleDescription: string | null;
+  recipientName: string;
+  country: string | null;
+  town: string | null;
+  physicalAddress: string;
+  notes: string | null;
+  feeCents: number;
+  /** Internal-only, never printed — used to tell whether delivery is actually profitable. */
+  costCents: number;
+  isDelivered: boolean;
+  deliveredAt: string | null;
+};
+
 export type SaleItem = {
   id: SaleItemId;
   saleId: string;
@@ -95,6 +127,8 @@ export type Sale = {
   syncStatus: SaleSyncStatus;
   lastSyncedAt: string | null;
   items: SaleItem[];
+  serviceCharges: SaleServiceCharge[];
+  delivery: SaleDelivery | null;
 };
 
 /** Lightweight row for the "Resume Sale" picker — no line items, just enough to identify the held sale. */
@@ -122,4 +156,5 @@ export type SaleListItem = {
   saleStatus: SaleStatus;
   completedAt: string | null;
   createdAt: string;
+  hasDeliveryNote: boolean;
 };

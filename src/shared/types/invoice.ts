@@ -15,6 +15,7 @@ export type InvoiceListItem = {
   balanceDueCents: number;
   paymentStatus: PaymentStatus;
   createdAt: string;
+  hasDeliveryNote: boolean;
 };
 
 /** Aggregate figures for the Invoices dashboard's summary cards. */

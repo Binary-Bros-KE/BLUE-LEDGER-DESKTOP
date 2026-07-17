@@ -56,16 +56,6 @@ const DEFAULT_SYSTEM_ROLES: Array<{
     permissions: fullAccess(ALL_MODULE_KEYS)
   },
   {
-    roleName: "Owner",
-    description: "Full, unrestricted access to every area of the business account.",
-    permissions: fullAccess(ALL_MODULE_KEYS)
-  },
-  {
-    roleName: "Administrator",
-    description: "Full operational access to day-to-day business management.",
-    permissions: fullAccess(ALL_MODULE_KEYS)
-  },
-  {
     roleName: "Manager",
     description: "Runs daily operations across sales, inventory, and staff.",
     permissions: fullAccess([
@@ -79,6 +69,7 @@ const DEFAULT_SYSTEM_ROLES: Array<{
       "purchases",
       "customers",
       "suppliers",
+      "riders",
       "expenses",
       "expense_categories",
       "salaries",
@@ -93,10 +84,10 @@ const DEFAULT_SYSTEM_ROLES: Array<{
     permissions: {
       dashboard: ["view"],
       products: ["view"],
-      inventory: ["view"],
       sales: ["view", "create", "edit", "delete"],
       quotations: ["view", "create", "edit"],
       customers: ["view", "create"],
+      riders: ["view", "create"],
       payment_methods: ["view"],
       salaries: ["view"]
     }
@@ -107,28 +98,12 @@ const DEFAULT_SYSTEM_ROLES: Array<{
     permissions: {
       dashboard: ["view"],
       products: ["view", "create", "edit"],
+      categories: ["view"],
       inventory: ["view", "create", "edit"],
       stock_transfers: ["view", "create", "approve"],
       purchases: ["view", "create"],
       suppliers: ["view", "create"],
       salaries: ["view"]
-    }
-  },
-  {
-    roleName: "Accountant",
-    description: "Reviews financial activity and generates reports.",
-    permissions: {
-      dashboard: ["view"],
-      sales: ["view", "export"],
-      purchases: ["view", "export"],
-      expenses: ["view", "create", "edit", "export"],
-      expense_categories: ["view"],
-      salaries: ["view", "export"],
-      reports: ["view", "export"],
-      customers: ["view"],
-      suppliers: ["view"],
-      business_profile: ["view"],
-      payment_methods: ["view"]
     }
   }
 ];
@@ -174,6 +149,30 @@ export function ensureSuperAdminRole(tenantId: string): void {
     isSystemRole: true,
     createdBy: null
   });
+}
+
+/**
+ * "Owner", "Administrator", and "Accountant" were dropped from the default role set to keep the
+ * system down to 4 sharp, distinct roles (Super Admin, Manager, Cashier, Storekeeper) — Owner and
+ * Administrator were exact permission duplicates of Super Admin anyway. For tenants that already
+ * seeded the old 7-role set, this reassigns any employee still on one of the 3 removed roles to
+ * Super Admin (their permissions were identical or a subset), then deletes the now-empty role rows.
+ * Only ever touches rows still named exactly "Owner"/"Administrator"/"Accountant" AND still flagged
+ * `is_system_role` — a tenant that renamed one of them into a genuinely custom role is left alone.
+ * Safe every boot: a no-op once those 3 role rows are gone.
+ */
+export function consolidateToFourCoreRoles(tenantId: string): void {
+  const REMOVED_ROLE_NAMES = ["Owner", "Administrator", "Accountant"];
+  const superAdmin = roleRepository.findRoleByNameRow(tenantId, "Super Admin");
+  if (!superAdmin) return;
+
+  for (const roleName of REMOVED_ROLE_NAMES) {
+    const row = roleRepository.findRoleByNameRow(tenantId, roleName);
+    if (!row || !row.is_system_role) continue;
+
+    employeeRepository.reassignEmployeeRoleRow(tenantId, row.id, superAdmin.id);
+    roleRepository.deleteRoleRow(row.id);
+  }
 }
 
 /**
@@ -292,6 +291,115 @@ export function ensureSalariesPermission(tenantId: string): void {
       roleName: role.roleName,
       description: role.description,
       permissions: { ...role.permissions, salaries: grant },
+      updatedBy: null
+    });
+  }
+}
+
+/**
+ * Reports tabs must stay Super Admin/Manager only — Cashier and Storekeeper briefly had "reports"
+ * granted (so their dashboard widgets could read sales/inventory report data), but that also put
+ * the full "Insights" nav section (all 5 Report tabs) in front of them, which was never the intent.
+ * The dashboard widgets themselves were switched to `requirePermissionAnyOf` so they still work off
+ * "sales"/"inventory"/"purchases" permission instead — this retroactively strips "reports" back out
+ * of any existing Cashier/Storekeeper role row for tenants that picked it up in the meantime. Safe
+ * every boot: a no-op once neither role has it.
+ */
+export function restrictReportsToAdminRoles(tenantId: string): void {
+  const RESTRICTED_ROLE_NAMES = new Set(["Cashier", "Storekeeper"]);
+
+  for (const row of roleRepository.findAllRoleRows(tenantId)) {
+    if (!row.is_system_role || !RESTRICTED_ROLE_NAMES.has(row.role_name)) continue;
+
+    const role = roleRepository.mapRoleRow(row);
+    if (!role.permissions.reports) continue;
+
+    const { reports: _removed, ...rest } = role.permissions;
+    roleRepository.updateRoleRow(row.id, {
+      roleName: role.roleName,
+      description: role.description,
+      permissions: rest,
+      updatedBy: null
+    });
+  }
+}
+
+/**
+ * Cashier's permission set drifted from DEFAULT_SYSTEM_ROLES via manual edits in the Roles screen
+ * (losing "sales:edit"/"sales:delete" along the way, which silently broke invoice payment
+ * processing and held-sale deletion — both squarely a cashier's job) and picked up "inventory" and
+ * "locations" (which put the Main Store/Stock Ledger/Storefronts tabs in front of them, never the
+ * intent — those are Super Admin/Manager/Storekeeper only). This corrects exactly those three
+ * things and nothing else, leaving any other manual customization (e.g. "categories",
+ * "stock_transfers") untouched. Safe every boot: a no-op once already correct.
+ */
+export function fixCashierPermissionDrift(tenantId: string): void {
+  for (const row of roleRepository.findAllRoleRows(tenantId)) {
+    if (!row.is_system_role || row.role_name !== "Cashier") continue;
+
+    const role = roleRepository.mapRoleRow(row);
+    const currentSales = role.permissions.sales ?? [];
+    const needsSalesFix = !currentSales.includes("edit") || !currentSales.includes("delete");
+    const needsInventoryRemoval = Boolean(role.permissions.inventory);
+    const needsLocationsRemoval = Boolean(role.permissions.locations);
+    if (!needsSalesFix && !needsInventoryRemoval && !needsLocationsRemoval) continue;
+
+    const { inventory: _inv, locations: _loc, ...rest } = role.permissions;
+    const nextSales = Array.from(new Set([...currentSales, "edit", "delete"])) as PermissionAction[];
+
+    roleRepository.updateRoleRow(row.id, {
+      roleName: role.roleName,
+      description: role.description,
+      permissions: { ...rest, sales: nextSales },
+      updatedBy: null
+    });
+  }
+}
+
+/**
+ * Storekeeper's default permissions never included "categories" — an oversight from the start, not
+ * a drift — which throws "doesn't have permission to view categories" the moment ProductsRoute's
+ * loadAll() Promise.all touches category.list(), blocking the Products screen entirely for a role
+ * that explicitly needs to manage products. Grants "categories: ['view']" retroactively. Safe every
+ * boot: a no-op once already present.
+ */
+export function ensureStorekeeperCategoriesPermission(tenantId: string): void {
+  for (const row of roleRepository.findAllRoleRows(tenantId)) {
+    if (!row.is_system_role || row.role_name !== "Storekeeper") continue;
+
+    const role = roleRepository.mapRoleRow(row);
+    if (role.permissions.categories) continue;
+
+    roleRepository.updateRoleRow(row.id, {
+      roleName: role.roleName,
+      description: role.description,
+      permissions: { ...role.permissions, categories: ["view"] },
+      updatedBy: null
+    });
+  }
+}
+
+/**
+ * Retroactively grants "riders" permissions (Manager: full CRUD, Cashier: view+create) to system
+ * roles seeded before delivery riders existed — new installs get it for free via
+ * DEFAULT_SYSTEM_ROLES. Safe every boot: a no-op once a role's stored permissions already include
+ * riders.
+ */
+export function ensureRidersPermission(tenantId: string): void {
+  const defaultsByName = new Map(DEFAULT_SYSTEM_ROLES.map((role) => [role.roleName, role.permissions.riders]));
+
+  for (const row of roleRepository.findAllRoleRows(tenantId)) {
+    if (!row.is_system_role) continue;
+    const grant = defaultsByName.get(row.role_name);
+    if (!grant || grant.length === 0) continue;
+
+    const role = roleRepository.mapRoleRow(row);
+    if (role.permissions.riders) continue;
+
+    roleRepository.updateRoleRow(row.id, {
+      roleName: role.roleName,
+      description: role.description,
+      permissions: { ...role.permissions, riders: grant },
       updatedBy: null
     });
   }

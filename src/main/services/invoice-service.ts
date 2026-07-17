@@ -14,6 +14,7 @@ import {
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
 import {
   getSaleDetail,
+  persistCartExtras,
   prepareCart,
   requireActiveSession,
   type PreparedCart
@@ -243,6 +244,8 @@ export function insertInvoiceFromCart(input: {
         );
       }
     }
+
+    persistCartExtras(tenantId, { saleId }, input.cart);
   });
 
   return saleId;
@@ -273,7 +276,10 @@ export function createInvoice(input: unknown): Sale {
     throw new Error("Customer not found");
   }
 
-  const cart = prepareCart(tenantId, parsed.items);
+  const cart = prepareCart(tenantId, parsed.items, {
+    serviceCharges: parsed.serviceCharges,
+    delivery: parsed.delivery
+  });
 
   const saleId = insertInvoiceFromCart({
     tenantId,
@@ -349,7 +355,8 @@ export function duplicateInvoice(saleId: string): Sale {
       productId: item.productId,
       quantity: item.quantity,
       discountAmountCents: item.discountAmountCents
-    }))
+    })),
+    { serviceCharges: original.serviceCharges, delivery: original.delivery }
   );
 
   const saleId2 = insertInvoiceFromCart({
