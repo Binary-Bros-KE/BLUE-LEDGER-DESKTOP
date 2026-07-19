@@ -30,6 +30,7 @@ import { RolesRoute } from "@renderer/app/routes/RolesRoute";
 import { SalariesRoute } from "@renderer/app/routes/SalariesRoute";
 import { SettingsRoute } from "@renderer/app/routes/SettingsRoute";
 import { StockLedgerRoute } from "@renderer/app/routes/StockLedgerRoute";
+import { StockRequestsRoute } from "@renderer/app/routes/StockRequestsRoute";
 import { StorefrontsRoute } from "@renderer/app/routes/StorefrontsRoute";
 import { SuppliersRoute } from "@renderer/app/routes/SuppliersRoute";
 import { TransactionsRoute } from "@renderer/app/routes/TransactionsRoute";
@@ -84,6 +85,8 @@ export function App(): React.JSX.Element {
         <MainStoreRoute />
       ) : activeNavKey === "stock" ? (
         <StockLedgerRoute />
+      ) : activeNavKey === "stock-requests" ? (
+        <StockRequestsRoute />
       ) : activeNavKey === "employees" ? (
         <EmployeesRoute />
       ) : activeNavKey === "roles" ? (

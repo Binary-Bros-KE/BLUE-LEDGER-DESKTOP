@@ -16,6 +16,7 @@ import type { CustomerPurchaseHistoryEntry, OutstandingInvoicesSummary, TopCusto
 import type { OutstandingPurchasesSummary, SupplierPurchaseHistoryEntry } from "./supplier-report";
 import type { PrinterActionResult, PrinterSettings } from "./printer";
 import type { Expense, ExpenseSummary } from "./expense";
+import type { ExportListRequest } from "./export";
 import type { ExpenseCategory, ExpenseCategoryStatus } from "./expense-category";
 import type { Purchase, PurchaseListItem, PurchaseSummary } from "./purchase";
 import type { Salary } from "./salary";
@@ -39,6 +40,7 @@ import type { PendingSaleListItem, Sale, SaleDelivery, SaleListItem } from "./sa
 import type { SaleReturn } from "./sale-return";
 import type { SaleVoid } from "./sale-void";
 import type { StockMovement, StockMovementFeedItem, StockTransferResult } from "./stock-movement";
+import type { StockRequest, StockRequestListItem } from "./stock-request";
 import type { SyncQueueItem, SyncSnapshot } from "./sync";
 
 export type IpcInvokeMap = {
@@ -690,6 +692,38 @@ export type IpcInvokeMap = {
     args: [string, boolean];
     result: SaleDelivery;
   };
+  "export:to-pdf": {
+    args: [ExportListRequest];
+    result: string | null;
+  };
+  "export:to-csv": {
+    args: [ExportListRequest];
+    result: string | null;
+  };
+  "export:to-excel": {
+    args: [ExportListRequest];
+    result: string | null;
+  };
+  "stock-request:list": {
+    args: [];
+    result: StockRequestListItem[];
+  };
+  "stock-request:get": {
+    args: [string];
+    result: StockRequest;
+  };
+  "stock-request:create": {
+    args: [Record<string, unknown>];
+    result: StockRequest;
+  };
+  "stock-request:approve": {
+    args: [string];
+    result: StockRequest;
+  };
+  "stock-request:reject": {
+    args: [string, Record<string, unknown>];
+    result: StockRequest;
+  };
   "sync:get-snapshot": {
     args: [];
     result: SyncSnapshot;
@@ -1116,6 +1150,21 @@ export type BlueLedgerApi = {
       id: string,
       delivered: boolean
     ) => Promise<IpcInvokeMap["delivery-note:set-delivered"]["result"]>;
+  };
+  export: {
+    toPdf: (request: ExportListRequest) => Promise<IpcInvokeMap["export:to-pdf"]["result"]>;
+    toCsv: (request: ExportListRequest) => Promise<IpcInvokeMap["export:to-csv"]["result"]>;
+    toExcel: (request: ExportListRequest) => Promise<IpcInvokeMap["export:to-excel"]["result"]>;
+  };
+  stockRequest: {
+    list: () => Promise<IpcInvokeMap["stock-request:list"]["result"]>;
+    get: (id: string) => Promise<IpcInvokeMap["stock-request:get"]["result"]>;
+    create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["stock-request:create"]["result"]>;
+    approve: (id: string) => Promise<IpcInvokeMap["stock-request:approve"]["result"]>;
+    reject: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["stock-request:reject"]["result"]>;
   };
   sync: {
     getSnapshot: () => Promise<IpcInvokeMap["sync:get-snapshot"]["result"]>;

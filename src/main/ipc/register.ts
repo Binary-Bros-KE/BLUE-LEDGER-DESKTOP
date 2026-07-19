@@ -91,6 +91,14 @@ import {
   getDeliveryNoteForSale,
   setDeliveryNoteDelivered
 } from "@main/services/delivery-note-service";
+import { exportListToCsv, exportListToExcel, exportListToPdf } from "@main/services/export-service";
+import {
+  approveStockRequest,
+  createStockRequest,
+  getStockRequest,
+  listStockRequests,
+  rejectStockRequest
+} from "@main/services/stock-request-service";
 import {
   createSalary,
   getSalary,
@@ -217,13 +225,51 @@ import type { CustomerStatus } from "@shared/types/customer";
 import type { ExpenseCategoryStatus } from "@shared/types/expense-category";
 import type { SupplierStatus } from "@shared/types/supplier";
 import type { RiderStatus } from "@shared/types/rider";
+import type { ExportListRequest } from "@shared/types/export";
 import type { EmployeeStatus } from "@shared/types/employee";
 import type { LocationStatus } from "@shared/types/location";
 import type { ProductStatus } from "@shared/types/product";
 import type { QuotationStatus } from "@shared/types/quotation";
+import { ZodError } from "zod";
 import { ipcChannels } from "./channels";
 
-const { ipcMain } = electron;
+const { ipcMain: electronIpcMain } = electron;
+
+/** A ZodError's own .message is a raw JSON blob of every issue (Zod v4 default) — never fit for
+ * display. Reduces it to the actual human-readable issue message(s), e.g. "PIN must contain only
+ * digits" instead of `[{ "origin": "string", "code": "invalid_format", ... }]`. */
+function formatThrownError(err: unknown): Error {
+  if (err instanceof ZodError) {
+    const messages = err.issues.map((issue) => issue.message).filter(Boolean);
+    return new Error(messages.length > 0 ? messages.join("; ") : "Invalid input");
+  }
+  if (err instanceof Error) {
+    return err;
+  }
+  return new Error("An unexpected error occurred");
+}
+
+/**
+ * Every service function validates its input via schema.parse(input), and a failure there is the
+ * single most common error path in the whole app — this wraps every ipcMain.handle callback so that
+ * failure (and any other thrown error) always crosses the IPC boundary as a clean, single-sentence
+ * message instead of whatever an error's raw .message happens to contain. Shadows the destructured
+ * `ipcMain` below so none of this file's ~180 existing `ipcMain.handle(...)` call sites need to change.
+ */
+const ipcMain = {
+  handle(
+    channel: string,
+    listener: (event: Electron.IpcMainInvokeEvent, ...args: any[]) => Promise<unknown> | unknown
+  ): void {
+    electronIpcMain.handle(channel, async (event, ...args) => {
+      try {
+        return await listener(event, ...args);
+      } catch (err) {
+        throw formatThrownError(err);
+      }
+    });
+  }
+};
 
 export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.appGetContext, () => getAppContext());
@@ -501,6 +547,14 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.deliveryNoteSetDelivered, (_event, id: string, delivered: boolean) =>
     setDeliveryNoteDelivered(id, delivered)
   );
+  ipcMain.handle(ipcChannels.exportToPdf, (_event, request: ExportListRequest) => exportListToPdf(request));
+  ipcMain.handle(ipcChannels.exportToCsv, (_event, request: ExportListRequest) => exportListToCsv(request));
+  ipcMain.handle(ipcChannels.exportToExcel, (_event, request: ExportListRequest) => exportListToExcel(request));
+  ipcMain.handle(ipcChannels.stockRequestList, () => listStockRequests());
+  ipcMain.handle(ipcChannels.stockRequestGet, (_event, id: string) => getStockRequest(id));
+  ipcMain.handle(ipcChannels.stockRequestCreate, (_event, input: unknown) => createStockRequest(input));
+  ipcMain.handle(ipcChannels.stockRequestApprove, (_event, id: string) => approveStockRequest(id));
+  ipcMain.handle(ipcChannels.stockRequestReject, (_event, id: string, input: unknown) => rejectStockRequest(id, input));
   ipcMain.handle(ipcChannels.syncGetSnapshot, () => getSyncSnapshot());
   ipcMain.handle(ipcChannels.syncListQueue, (_event, input?: { limit?: number }) =>
     listSyncQueue(input?.limit)

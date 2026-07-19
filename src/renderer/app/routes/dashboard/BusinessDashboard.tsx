@@ -95,7 +95,6 @@ export function BusinessDashboard({ isBusinessWide }: { isBusinessWide: boolean 
   }, []);
 
   const heldSalesValueCents = useMemo(() => (data?.heldSales ?? []).reduce((sum, s) => sum + s.grandTotalCents, 0), [data]);
-  const subtotalCents = data ? data.overview.grossSalesCents + data.overview.discountGivenCents - data.overview.taxCollectedCents : 0;
 
   const employeeBars = useMemo(
     () => (data?.byEmployee ?? []).map((row) => ({ key: row.employeeId, label: row.employeeName, value: row.revenueCents })),
@@ -118,18 +117,8 @@ export function BusinessDashboard({ isBusinessWide }: { isBusinessWide: boolean 
     <DashboardShell
       main={
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <OverviewCard tone="primary" label="Total Revenue" valueCents={data.overview.totalRevenueCents} formula="Cash received today" footnote="So far today" />
-            <OverviewCard
-              tone="warning"
-              label="Held Sales"
-              displayValue={String(data.heldSales.length)}
-              formula="Carts waiting to be completed"
-              footnote={`${money(heldSalesValueCents)} tied up`}
-            />
-            <OverviewCard tone="teal" label="Subtotal" valueCents={subtotalCents} formula="Before discounts and tax" footnote="So far today" />
-            <OverviewCard tone="teal" label="Taxes" valueCents={data.overview.taxCollectedCents} formula="Tax collected today" footnote="So far today" />
-            <OverviewCard tone="danger" label="Discounts" valueCents={data.overview.discountGivenCents} formula="Given to customers today" footnote="So far today" />
             <OverviewCard tone="teal" label="Transactions" displayValue={String(data.overview.transactionCount)} formula="Completed sales today" footnote="So far today" />
             <OverviewCard
               tone={data.overview.netProfitCents >= 0 ? "success" : "danger"}
@@ -181,6 +170,22 @@ export function BusinessDashboard({ isBusinessWide }: { isBusinessWide: boolean 
                 </table>
               </div>
             )}
+            <div className="grid grid-cols-3 divide-x divide-line border-t border-line bg-soft/60">
+              <div className="px-4 py-2.5">
+                <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted">Held Sales</p>
+                <p className="mt-0.5 text-sm font-extrabold text-muted">
+                  {data.heldSales.length} <span className="font-semibold">· {money(heldSalesValueCents)}</span>
+                </p>
+              </div>
+              <div className="px-4 py-2.5">
+                <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted">Taxes</p>
+                <p className="mt-0.5 text-sm font-extrabold text-muted">{money(data.overview.taxCollectedCents)}</p>
+              </div>
+              <div className="px-4 py-2.5">
+                <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted">Discounts</p>
+                <p className="mt-0.5 text-sm font-extrabold text-muted">{money(data.overview.discountGivenCents)}</p>
+              </div>
+            </div>
           </div>
 
           {isBusinessWide && (

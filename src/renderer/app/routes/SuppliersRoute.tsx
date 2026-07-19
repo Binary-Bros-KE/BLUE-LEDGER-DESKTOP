@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import { Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { StatTile } from "@renderer/shared/components/StatTile";
@@ -21,6 +22,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
+import type { ExportListRequest } from "@shared/types/export";
 import {
   SUPPLIER_PAYMENT_OPTION_OPTIONS,
   type Supplier,
@@ -108,6 +110,7 @@ export function SuppliersRoute(): React.JSX.Element {
   const { can } = usePermissions();
   const canCreate = can("suppliers", "create");
   const canEdit = can("suppliers", "edit");
+  const canExport = can("suppliers", "export");
 
   const [suppliers, setSuppliers] = useState<Supplier[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -170,6 +173,44 @@ export function SuppliersRoute(): React.JSX.Element {
     }
     return list;
   }, [suppliers, statusFilter, paymentOptionFilter, searchTerm]);
+
+  const exportRequest = useMemo<ExportListRequest | null>(() => {
+    if (!filteredSuppliers) return null;
+    const filterParts: string[] = [];
+    if (statusFilter !== "all") filterParts.push(`Status: ${statusFilter}`);
+    if (paymentOptionFilter) filterParts.push(`Payment Option: ${paymentOptionLabel(paymentOptionFilter)}`);
+    if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
+
+    return {
+      module: "suppliers",
+      title: "Suppliers",
+      subtitle: filterParts.length > 0 ? filterParts.join(" · ") : "Full supplier directory",
+      columns: [
+        { key: "code", header: "Code" },
+        { key: "businessName", header: "Business Name" },
+        { key: "contactPerson", header: "Contact Person" },
+        { key: "phone", header: "Phone" },
+        { key: "paymentOption", header: "Payment Option" },
+        { key: "creditLimit", header: "Credit Limit", align: "right" },
+        { key: "status", header: "Status" }
+      ],
+      rows: filteredSuppliers.map((supplier) => ({
+        code: supplier.supplierCode,
+        businessName: supplier.businessName,
+        contactPerson: supplier.contactPerson ?? "—",
+        phone: supplier.phone1,
+        paymentOption: paymentOptionLabel(supplier.paymentOption),
+        creditLimit: supplier.creditLimitCents !== null ? formatCents(supplier.creditLimitCents) : "—",
+        status: supplier.status === "active" ? "Active" : "Inactive"
+      })),
+      stats: [
+        { label: "Total Suppliers", value: String(stats.total) },
+        { label: "Active", value: String(stats.active) },
+        { label: "Inactive", value: String(stats.inactive) }
+      ],
+      fileBaseName: `Suppliers_${new Date().toISOString().slice(0, 10)}`
+    };
+  }, [filteredSuppliers, stats, statusFilter, paymentOptionFilter, searchTerm]);
 
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]): void {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -285,12 +326,15 @@ export function SuppliersRoute(): React.JSX.Element {
               The master list of businesses you purchase from — used throughout Purchases and inventory.
             </p>
           </div>
-          {canCreate && (
-            <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
-              <Plus className="mr-1.5 size-4" aria-hidden="true" />
-              New Supplier
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {canExport && exportRequest && <ExportMenu request={exportRequest} />}
+            {canCreate && (
+              <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
+                <Plus className="mr-1.5 size-4" aria-hidden="true" />
+                New Supplier
+              </Button>
+            )}
+          </div>
         </div>
 
         {actionError && (

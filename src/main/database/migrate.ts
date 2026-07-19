@@ -1029,6 +1029,47 @@ const migrations = [
       CREATE UNIQUE INDEX idx_delivery_notes_quotation ON delivery_notes(quotation_id) WHERE quotation_id IS NOT NULL;
       CREATE UNIQUE INDEX idx_delivery_notes_tenant_number ON delivery_notes(tenant_id, delivery_note_number);
     `
+  },
+  {
+    version: 28,
+    name: "stock_requests",
+    sql: `
+      CREATE TABLE stock_requests (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        request_number TEXT NOT NULL,
+        storefront_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+        notes TEXT,
+        rejection_reason TEXT,
+        requested_by TEXT NOT NULL,
+        requested_at TEXT NOT NULL,
+        reviewed_by TEXT,
+        reviewed_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (storefront_id) REFERENCES locations(id),
+        FOREIGN KEY (requested_by) REFERENCES employees(id),
+        FOREIGN KEY (reviewed_by) REFERENCES employees(id)
+      );
+      CREATE INDEX idx_stock_requests_tenant_status ON stock_requests(tenant_id, status);
+      CREATE INDEX idx_stock_requests_storefront ON stock_requests(storefront_id);
+      CREATE UNIQUE INDEX idx_stock_requests_tenant_number ON stock_requests(tenant_id, request_number);
+
+      CREATE TABLE stock_request_items (
+        id TEXT PRIMARY KEY,
+        stock_request_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        quantity_requested INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (stock_request_id) REFERENCES stock_requests(id),
+        FOREIGN KEY (product_id) REFERENCES products(id)
+      );
+      CREATE INDEX idx_stock_request_items_request ON stock_request_items(stock_request_id);
+    `
   }
 ] as const;
 

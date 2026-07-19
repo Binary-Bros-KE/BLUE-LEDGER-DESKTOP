@@ -3,10 +3,13 @@ import { motion } from "framer-motion";
 import { BarChart3 } from "lucide-react";
 import { HorizontalBarList } from "@renderer/shared/components/charts/HorizontalBarList";
 import { TrendAreaChart } from "@renderer/shared/components/charts/TrendAreaChart";
+import { ExportMenu } from "@renderer/shared/components/ExportMenu";
+import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import { useUiStore } from "@renderer/shared/stores/ui-store";
+import type { ExportListRequest } from "@shared/types/export";
 import type {
   DateRangeInput,
   SalesByEmployeeRow,
@@ -14,6 +17,7 @@ import type {
   SalesByStorefrontRow,
   SalesFinancialOverview,
   SalesReportMode,
+  SalesTransactionKind,
   SalesTransactionRow,
   SalesTrendWindowResult,
 } from "@shared/types/report";
@@ -64,6 +68,16 @@ function GrossVsNetFootnote({ overview }: { overview: SalesFinancialOverview }):
   );
 }
 
+const TRANSACTION_KIND_LABEL: Record<SalesTransactionKind, string> = {
+  retail_sale: "Retail Sale",
+  wholesale_sale: "Wholesale Sale",
+  invoice: "Invoice",
+};
+
+function transactionStatusLabel(row: Pick<SalesTransactionRow, "amountCents" | "amountPaidCents">): string {
+  return row.amountPaidCents >= row.amountCents ? "Paid" : "Partially Paid";
+}
+
 const TREND_TITLE: Record<SalesReportMode, string> = {
   daily: "Total Revenue Trend — 5 days before and after the selected day",
   weekly: "Total Revenue Trend — nearby weeks",
@@ -74,6 +88,8 @@ const TREND_TITLE: Record<SalesReportMode, string> = {
 
 export function SalesReportRoute(): React.JSX.Element {
   const setActiveNavKey = useUiStore((state) => state.setActiveNavKey);
+  const { can } = usePermissions();
+  const canExport = can("reports", "export");
 
   const [mode, setMode] = useState<SalesReportMode>("daily");
   const [anchor, setAnchor] = useState<string>(() => defaultAnchorForMode("daily"));
@@ -161,6 +177,47 @@ export function SalesReportRoute(): React.JSX.Element {
     [byPaymentMethod]
   );
 
+  const exportRequest = useMemo<ExportListRequest | null>(() => {
+    return {
+      module: "reports",
+      title: "Sales Report — Transactions",
+      subtitle: `${resolvedRange.startDate} to ${resolvedRange.endDate}`,
+      columns: [
+        { key: "occurredAt", header: "Date & Time" },
+        { key: "document", header: "Document" },
+        { key: "type", header: "Type" },
+        { key: "location", header: "Location" },
+        { key: "employee", header: "Employee" },
+        { key: "customer", header: "Customer" },
+        { key: "method", header: "Method" },
+        { key: "amount", header: "Amount", align: "right" },
+        { key: "paid", header: "Paid", align: "right" },
+        { key: "status", header: "Status" }
+      ],
+      rows: transactions.map((row) => ({
+        occurredAt: new Date(row.occurredAt).toLocaleString(),
+        document: row.documentNumber ?? "—",
+        type: TRANSACTION_KIND_LABEL[row.kind],
+        location: row.locationName,
+        employee: row.employeeName,
+        customer: row.customerName ?? "—",
+        method: row.paymentMethodName ?? "Other",
+        amount: money(row.amountCents),
+        paid: money(row.amountPaidCents),
+        status: transactionStatusLabel(row)
+      })),
+      stats: overview
+        ? [
+            { label: "Total Revenue", value: money(overview.totalRevenueCents) },
+            { label: "Transactions", value: String(overview.transactionCount) },
+            { label: "Average Sale", value: money(overview.averageSaleCents) },
+            { label: "Items Sold", value: String(overview.itemsSold) }
+          ]
+        : [],
+      fileBaseName: `SalesReport_${resolvedRange.startDate}_to_${resolvedRange.endDate}`
+    };
+  }, [transactions, overview, resolvedRange]);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -182,15 +239,18 @@ export function SalesReportRoute(): React.JSX.Element {
       />
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
-        <div>
-          <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Insights</p>
-          <h2 className="mt-1 flex items-center gap-2 text-xl font-extrabold">
-            <BarChart3 className="size-5 text-primary" aria-hidden="true" />
-            Sales Report
-          </h2>
-          <p className="mt-1 text-xs font-semibold text-muted">
-            Pick a period — every figure below, from the financial overview to the transaction list, resolves to it.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Insights</p>
+            <h2 className="mt-1 flex items-center gap-2 text-xl font-extrabold">
+              <BarChart3 className="size-5 text-primary" aria-hidden="true" />
+              Sales Report
+            </h2>
+            <p className="mt-1 text-xs font-semibold text-muted">
+              Pick a period — every figure below, from the financial overview to the transaction list, resolves to it.
+            </p>
+          </div>
+          {canExport && exportRequest && <ExportMenu request={exportRequest} />}
         </div>
 
         <div className="mt-5">

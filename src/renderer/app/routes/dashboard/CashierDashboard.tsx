@@ -180,7 +180,7 @@ export function CashierDashboard(): React.JSX.Element {
       aside={
         <>
           <DashboardActionCard
-            tone="warning"
+            tone="danger"
             label="Waiting Approval"
             value={String(data.myPendingCount)}
             sublabel="Void & return requests you raised"

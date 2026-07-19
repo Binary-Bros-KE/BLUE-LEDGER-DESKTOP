@@ -16,8 +16,10 @@ import {
   X
 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
+import { useConfirm } from "@renderer/shared/components/ConfirmModal";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { DeliveryNotePreview } from "@renderer/shared/components/DeliveryNotePreview";
+import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import {
   ExtraChargesSection,
   type DeliveryDraft,
@@ -31,8 +33,10 @@ import { computeLinePricing } from "@renderer/shared/lib/cart-pricing";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import type { Customer } from "@shared/types/customer";
+import type { ExportListRequest } from "@shared/types/export";
 import type { InvoiceListItem, InvoiceSummary } from "@shared/types/invoice";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import type { ProductListItem } from "@shared/types/product";
@@ -139,6 +143,8 @@ export function InvoicesRoute(): React.JSX.Element {
   const { can } = usePermissions();
   const canCreate = can("sales", "create");
   const canEdit = can("sales", "edit");
+  const canExport = can("sales", "export");
+  const confirm = useConfirm();
 
   const [summary, setSummary] = useState<InvoiceSummary | null>(null);
   const [invoices, setInvoices] = useState<InvoiceListItem[] | null>(null);
@@ -268,6 +274,51 @@ export function InvoicesRoute(): React.JSX.Element {
     return sorted;
   }, [invoices, activeTab, searchTerm, sortKey, sortDir]);
 
+  const exportRequest = useMemo<ExportListRequest | null>(() => {
+    if (!filteredInvoices) return null;
+    const filterParts: string[] = [];
+    if (activeTab !== "all") filterParts.push(`Filter: ${FILTER_TABS.find((tab) => tab.value === activeTab)?.label}`);
+    if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
+
+    return {
+      module: "sales",
+      title: "Invoices",
+      subtitle: filterParts.length > 0 ? filterParts.join(" · ") : "All invoices",
+      columns: [
+        { key: "invoiceNumber", header: "Invoice #" },
+        { key: "customer", header: "Customer" },
+        { key: "type", header: "Type" },
+        { key: "issued", header: "Issued" },
+        { key: "due", header: "Due" },
+        { key: "amount", header: "Amount", align: "right" },
+        { key: "paid", header: "Paid", align: "right" },
+        { key: "balance", header: "Balance", align: "right" },
+        { key: "status", header: "Status" }
+      ],
+      rows: filteredInvoices.map((invoice) => ({
+        invoiceNumber: invoice.invoiceNumber ?? "—",
+        customer: invoice.customerName ?? "Walk-in",
+        type: transactionTypeLabel(invoice.transactionType),
+        issued: formatDate(invoice.invoiceDate),
+        due: formatDate(invoice.dueDate),
+        amount: `${currency} ${formatCents(invoice.grandTotalCents)}`,
+        paid: `${currency} ${formatCents(invoice.amountPaidCents)}`,
+        balance: `${currency} ${formatCents(invoice.balanceDueCents)}`,
+        status: statusLabel(invoice.paymentStatus)
+      })),
+      stats: summary
+        ? [
+            { label: "Total Outstanding", value: `${currency} ${formatCents(summary.totalOutstandingCents)}` },
+            { label: "Total Overdue", value: `${currency} ${formatCents(summary.totalOverdueCents)}` },
+            { label: "Total Paid", value: `${currency} ${formatCents(summary.totalPaidCents)}` },
+            { label: "Total Invoices", value: String(summary.totalInvoices) },
+            { label: "Total Invoice Value", value: `${currency} ${formatCents(summary.totalInvoiceValueCents)}` }
+          ]
+        : [],
+      fileBaseName: `Invoices_${new Date().toISOString().slice(0, 10)}`
+    };
+  }, [filteredInvoices, summary, activeTab, searchTerm, currency]);
+
   function toggleSort(key: SortKey): void {
     if (sortKey === key) {
       setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
@@ -336,8 +387,11 @@ export function InvoicesRoute(): React.JSX.Element {
       setRecordPaymentOpen(false);
       await refreshViewing(viewingSale.id);
       await loadAll();
+      showSuccessToast("Payment recorded");
     } catch (err) {
-      setPaymentError(getErrorMessage(err, "Failed to record payment"));
+      const message = getErrorMessage(err, "Failed to record payment");
+      setPaymentError(message);
+      showErrorToast(message);
     } finally {
       setPaymentSaving(false);
     }
@@ -364,8 +418,11 @@ export function InvoicesRoute(): React.JSX.Element {
       setMarkPaidOpen(false);
       await refreshViewing(viewingSale.id);
       await loadAll();
+      showSuccessToast("Invoice marked as paid");
     } catch (err) {
-      setMarkPaidError(getErrorMessage(err, "Failed to mark invoice as paid"));
+      const message = getErrorMessage(err, "Failed to mark invoice as paid");
+      setMarkPaidError(message);
+      showErrorToast(message);
     } finally {
       setMarkPaidSaving(false);
     }
@@ -373,14 +430,23 @@ export function InvoicesRoute(): React.JSX.Element {
 
   async function handleCancelInvoice(): Promise<void> {
     if (!viewingSale) return;
-    if (!window.confirm(`Cancel invoice ${viewingSale.invoiceNumber}? This can't be undone.`)) return;
+    const confirmed = await confirm({
+      title: "Cancel this invoice?",
+      message: `Cancel invoice ${viewingSale.invoiceNumber}? This can't be undone.`,
+      tone: "danger",
+      confirmLabel: "Cancel Invoice"
+    });
+    if (!confirmed) return;
     setActionError(null);
     try {
       await window.blueLedger.invoice.cancel(viewingSale.id);
       await refreshViewing(viewingSale.id);
       await loadAll();
+      showSuccessToast("Invoice cancelled");
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to cancel invoice"));
+      const message = getErrorMessage(err, "Failed to cancel invoice");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 
@@ -391,8 +457,11 @@ export function InvoicesRoute(): React.JSX.Element {
       const duplicate = await window.blueLedger.invoice.duplicate(viewingSale.id);
       await loadAll();
       setViewingSale(duplicate);
+      showSuccessToast(`Invoice duplicated — ${duplicate.invoiceNumber ?? ""}`);
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to duplicate invoice"));
+      const message = getErrorMessage(err, "Failed to duplicate invoice");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 
@@ -579,8 +648,11 @@ export function InvoicesRoute(): React.JSX.Element {
       });
       setCreateOpen(false);
       await loadAll();
+      showSuccessToast("Invoice created");
     } catch (err) {
-      setCreateError(getErrorMessage(err, "Failed to create invoice"));
+      const message = getErrorMessage(err, "Failed to create invoice");
+      setCreateError(message);
+      showErrorToast(message);
     } finally {
       setCreateSaving(false);
     }
@@ -618,12 +690,15 @@ export function InvoicesRoute(): React.JSX.Element {
               Wholesale invoices and credit sales — track balances and collect payments over time.
             </p>
           </div>
-          {canCreate && (
-            <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
-              <Plus className="mr-1.5 size-4" aria-hidden="true" />
-              New Invoice
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {canExport && exportRequest && <ExportMenu request={exportRequest} />}
+            {canCreate && (
+              <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
+                <Plus className="mr-1.5 size-4" aria-hidden="true" />
+                New Invoice
+              </Button>
+            )}
+          </div>
         </div>
 
         {(loadError ?? actionError) && (

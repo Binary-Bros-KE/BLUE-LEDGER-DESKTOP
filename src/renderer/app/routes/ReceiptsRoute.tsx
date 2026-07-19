@@ -4,6 +4,7 @@ import { Ban, Eye, Layers, Loader2, Package, ReceiptText, Search, Undo2, Wallet 
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { DeliveryNotePreview } from "@renderer/shared/components/DeliveryNotePreview";
+import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import { Field, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { ReceiptPreview } from "@renderer/shared/components/ReceiptPreview";
@@ -12,7 +13,9 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { cn } from "@renderer/shared/lib/cn";
 import { formatCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useAppStore } from "@renderer/shared/stores/app-store";
+import type { ExportListRequest } from "@shared/types/export";
 import type { Sale, SaleDelivery, SaleListItem } from "@shared/types/sale";
 import type { SaleReturn } from "@shared/types/sale-return";
 import type { SaleVoid } from "@shared/types/sale-void";
@@ -34,10 +37,51 @@ function formatDate(value: string | null): string {
   }
 }
 
+function statusLabel(status: SaleStatusEntry | undefined): string {
+  if (!status) return "Completed";
+  const labels: string[] = [];
+  if (status.approvedVoid) labels.push("Voided");
+  if (status.approvedReturn) labels.push("Returned");
+  if (status.pendingVoid || status.pendingReturn) labels.push("Pending Approval");
+  if (!status.approvedVoid && !status.approvedReturn && !status.pendingVoid && !status.pendingReturn) {
+    labels.push("Completed");
+  }
+  if (status.rejectedVoid) labels.push("Void Rejected");
+  if (status.rejectedReturn) labels.push("Return Rejected");
+  return labels.join(", ");
+}
+
+type SaleStatusEntry = {
+  approvedVoid: boolean;
+  pendingVoid: boolean;
+  rejectedVoid: boolean;
+  approvedReturn: boolean;
+  pendingReturn: boolean;
+  rejectedReturn: boolean;
+};
+
+type DeliveryFilter = "all" | "with_delivery" | "pending_delivery";
+
+const DELIVERY_FILTER_TABS: Array<{ value: DeliveryFilter; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "with_delivery", label: "With Delivery" },
+  { value: "pending_delivery", label: "Pending Delivery" }
+];
+
+type ReturnsFilter = "all" | "pending" | "approved" | "rejected";
+
+const RETURNS_FILTER_TABS: Array<{ value: ReturnsFilter; label: string }> = [
+  { value: "all", label: "All Returns" },
+  { value: "pending", label: "Pending" },
+  { value: "approved", label: "Approved" },
+  { value: "rejected", label: "Rejected" }
+];
+
 export function ReceiptsRoute(): React.JSX.Element {
   const tenantContext = useAppStore((state) => state.context?.tenant ?? null);
   const { can } = usePermissions();
   const canRequest = can("sales", "edit");
+  const canExport = can("sales", "export");
 
   const [sales, setSales] = useState<SaleListItem[] | null>(null);
   const [returns, setReturns] = useState<SaleReturn[]>([]);
@@ -47,6 +91,8 @@ export function ReceiptsRoute(): React.JSX.Element {
   const [searchTerm, setSearchTerm] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [deliveryFilter, setDeliveryFilter] = useState<DeliveryFilter>("all");
+  const [returnsFilter, setReturnsFilter] = useState<ReturnsFilter>("all");
 
   const [viewingSale, setViewingSale] = useState<Sale | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
@@ -91,31 +137,59 @@ export function ReceiptsRoute(): React.JSX.Element {
   }, [loadAll]);
 
   const saleStatusInfo = useMemo(() => {
-    const map = new Map<string, { approvedVoid: boolean; pendingVoid: boolean; approvedReturn: boolean; pendingReturn: boolean }>();
+    const map = new Map<
+      string,
+      {
+        approvedVoid: boolean;
+        pendingVoid: boolean;
+        rejectedVoid: boolean;
+        approvedReturn: boolean;
+        pendingReturn: boolean;
+        rejectedReturn: boolean;
+      }
+    >();
+    const emptyEntry = () => ({
+      approvedVoid: false,
+      pendingVoid: false,
+      rejectedVoid: false,
+      approvedReturn: false,
+      pendingReturn: false,
+      rejectedReturn: false
+    });
     for (const voidRequest of voids) {
-      const entry = map.get(voidRequest.saleId) ?? {
-        approvedVoid: false,
-        pendingVoid: false,
-        approvedReturn: false,
-        pendingReturn: false
-      };
+      const entry = map.get(voidRequest.saleId) ?? emptyEntry();
       if (voidRequest.status === "approved") entry.approvedVoid = true;
       if (voidRequest.status === "pending_approval") entry.pendingVoid = true;
+      if (voidRequest.status === "rejected") entry.rejectedVoid = true;
       map.set(voidRequest.saleId, entry);
     }
     for (const returnRequest of returns) {
-      const entry = map.get(returnRequest.saleId) ?? {
-        approvedVoid: false,
-        pendingVoid: false,
-        approvedReturn: false,
-        pendingReturn: false
-      };
+      const entry = map.get(returnRequest.saleId) ?? emptyEntry();
       if (returnRequest.status === "approved") entry.approvedReturn = true;
       if (returnRequest.status === "pending_approval") entry.pendingReturn = true;
+      if (returnRequest.status === "rejected") entry.rejectedReturn = true;
       map.set(returnRequest.saleId, entry);
     }
     return map;
   }, [voids, returns]);
+
+  const deliveryCounts = useMemo(() => {
+    const withDelivery = sales?.filter((sale) => sale.hasDeliveryNote).length ?? 0;
+    const pendingDelivery = sales?.filter((sale) => sale.deliveryIsDelivered === false).length ?? 0;
+    return { withDelivery, pendingDelivery };
+  }, [sales]);
+
+  const returnsCounts = useMemo(() => {
+    let pending = 0;
+    let approved = 0;
+    let rejected = 0;
+    for (const status of saleStatusInfo.values()) {
+      if (status.pendingVoid || status.pendingReturn) pending++;
+      if (status.approvedVoid || status.approvedReturn) approved++;
+      if (status.rejectedVoid || status.rejectedReturn) rejected++;
+    }
+    return { pending, approved, rejected };
+  }, [saleStatusInfo]);
 
   const filteredSales = useMemo(() => {
     if (!sales) return null;
@@ -130,9 +204,17 @@ export function ReceiptsRoute(): React.JSX.Element {
         if (dateFrom && saleDate < dateFrom) return false;
         if (dateTo && saleDate > dateTo) return false;
       }
+      if (deliveryFilter === "with_delivery" && !sale.hasDeliveryNote) return false;
+      if (deliveryFilter === "pending_delivery" && sale.deliveryIsDelivered !== false) return false;
+      if (returnsFilter !== "all") {
+        const status = saleStatusInfo.get(sale.id);
+        if (returnsFilter === "pending" && !(status?.pendingVoid || status?.pendingReturn)) return false;
+        if (returnsFilter === "approved" && !(status?.approvedVoid || status?.approvedReturn)) return false;
+        if (returnsFilter === "rejected" && !(status?.rejectedVoid || status?.rejectedReturn)) return false;
+      }
       return true;
     });
-  }, [sales, searchTerm, dateFrom, dateTo]);
+  }, [sales, searchTerm, dateFrom, dateTo, deliveryFilter, returnsFilter, saleStatusInfo]);
 
   const summary = useMemo(() => {
     if (!filteredSales) return null;
@@ -145,6 +227,54 @@ export function ReceiptsRoute(): React.JSX.Element {
       averageCents: filteredSales.length > 0 ? Math.round(totalRevenueCents / filteredSales.length) : 0
     };
   }, [filteredSales]);
+
+  const exportRequest = useMemo<ExportListRequest | null>(() => {
+    if (!filteredSales) return null;
+    const filterParts: string[] = [];
+    if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
+    if (dateFrom || dateTo) filterParts.push(`Date: ${dateFrom || "…"} to ${dateTo || "…"}`);
+    if (deliveryFilter !== "all") {
+      filterParts.push(`Delivery: ${DELIVERY_FILTER_TABS.find((tab) => tab.value === deliveryFilter)?.label}`);
+    }
+    if (returnsFilter !== "all") {
+      filterParts.push(`Returns: ${RETURNS_FILTER_TABS.find((tab) => tab.value === returnsFilter)?.label}`);
+    }
+
+    return {
+      module: "sales",
+      title: "Receipts",
+      subtitle: filterParts.length > 0 ? filterParts.join(" · ") : "All receipts",
+      columns: [
+        { key: "receipt", header: "Receipt" },
+        { key: "date", header: "Date" },
+        { key: "customer", header: "Customer" },
+        { key: "cashier", header: "Cashier" },
+        { key: "items", header: "Items", align: "right" },
+        { key: "total", header: "Total", align: "right" },
+        { key: "status", header: "Status" },
+        { key: "delivery", header: "Delivery" }
+      ],
+      rows: filteredSales.map((sale) => ({
+        receipt: sale.receiptNumber ?? "—",
+        date: formatDate(sale.completedAt),
+        customer: sale.customerName ?? "Walk-in",
+        cashier: sale.employeeName,
+        items: String(sale.itemCount),
+        total: formatCents(sale.grandTotalCents),
+        status: statusLabel(saleStatusInfo.get(sale.id)),
+        delivery: sale.hasDeliveryNote ? (sale.deliveryIsDelivered ? "Delivered" : "Pending Delivery") : "—"
+      })),
+      stats: summary
+        ? [
+            { label: "Total Receipts", value: String(summary.count) },
+            { label: "Total Revenue", value: formatCents(summary.totalRevenueCents) },
+            { label: "Items Sold", value: String(summary.totalItems) },
+            { label: "Average Sale", value: formatCents(summary.averageCents) }
+          ]
+        : [],
+      fileBaseName: `Receipts_${new Date().toISOString().slice(0, 10)}`
+    };
+  }, [filteredSales, summary, searchTerm, dateFrom, dateTo, deliveryFilter, returnsFilter, saleStatusInfo]);
 
   async function openReceipt(saleId: string): Promise<void> {
     setViewLoading(true);
@@ -223,8 +353,11 @@ export function ReceiptsRoute(): React.JSX.Element {
       });
       setReturnModalSale(null);
       await loadAll();
+      showSuccessToast("Return request submitted");
     } catch (err) {
-      setReturnError(getErrorMessage(err, "Failed to submit return request"));
+      const message = getErrorMessage(err, "Failed to submit return request");
+      setReturnError(message);
+      showErrorToast(message);
     } finally {
       setReturnSaving(false);
     }
@@ -244,8 +377,11 @@ export function ReceiptsRoute(): React.JSX.Element {
       });
       setVoidModalSale(null);
       await loadAll();
+      showSuccessToast("Void request submitted");
     } catch (err) {
-      setVoidError(getErrorMessage(err, "Failed to submit void request"));
+      const message = getErrorMessage(err, "Failed to submit void request");
+      setVoidError(message);
+      showErrorToast(message);
     } finally {
       setVoidSaving(false);
     }
@@ -283,6 +419,7 @@ export function ReceiptsRoute(): React.JSX.Element {
               Every completed sale, latest first — reprint, download, or process a return or void.
             </p>
           </div>
+          {canExport && exportRequest && <ExportMenu request={exportRequest} />}
         </div>
 
         {(loadError ?? actionError) && (
@@ -348,6 +485,45 @@ export function ReceiptsRoute(): React.JSX.Element {
                 </Button>
               )}
             </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap gap-1.5 rounded-lg border border-line bg-soft px-1 py-0.5">
+                {DELIVERY_FILTER_TABS.map((tab) => (
+                  <button
+                    key={tab.value}
+                    type="button"
+                    onClick={() => setDeliveryFilter(tab.value)}
+                    className={cn(
+                      "rounded-md px-3 py-1.5 text-[11px] font-extrabold transition cursor-pointer",
+                      deliveryFilter === tab.value ? "bg-primary text-white" : "text-muted hover:bg-white"
+                    )}
+                  >
+                    {tab.label}
+                    {tab.value === "with_delivery" && ` (${deliveryCounts.withDelivery})`}
+                    {tab.value === "pending_delivery" && ` (${deliveryCounts.pendingDelivery})`}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 rounded-lg border border-line bg-soft px-1 py-0.5">
+                {RETURNS_FILTER_TABS.map((tab) => (
+                  <button
+                    key={tab.value}
+                    type="button"
+                    onClick={() => setReturnsFilter(tab.value)}
+                    className={cn(
+                      "rounded-md px-3 py-1.5 text-[11px] font-extrabold transition cursor-pointer",
+                      returnsFilter === tab.value ? "bg-primary text-white" : "text-muted hover:bg-white"
+                    )}
+                  >
+                    {tab.label}
+                    {tab.value === "pending" && ` (${returnsCounts.pending})`}
+                    {tab.value === "approved" && ` (${returnsCounts.approved})`}
+                    {tab.value === "rejected" && ` (${returnsCounts.rejected})`}
+                  </button>
+                ))}
+              </div>
+            </div>
           </>
         )}
 
@@ -375,9 +551,19 @@ export function ReceiptsRoute(): React.JSX.Element {
           ) : filteredSales && filteredSales.length === 0 ? (
             <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-line bg-soft/60 p-10 text-center">
               <Search className="size-7 text-muted" aria-hidden="true" />
-              <h3 className="mt-4 text-lg font-extrabold">No receipts match your search</h3>
-              <Button type="button" onClick={() => setSearchTerm("")} className="mt-5 h-9 text-xs">
-                Clear search
+              <h3 className="mt-4 text-lg font-extrabold">No receipts match your filters</h3>
+              <Button
+                type="button"
+                onClick={() => {
+                  setSearchTerm("");
+                  setDateFrom("");
+                  setDateTo("");
+                  setDeliveryFilter("all");
+                  setReturnsFilter("all");
+                }}
+                className="mt-5 h-9 text-xs"
+              >
+                Clear filters
               </Button>
             </div>
           ) : (
@@ -429,7 +615,17 @@ export function ReceiptsRoute(): React.JSX.Element {
                             {(status?.pendingVoid || status?.pendingReturn) && (
                               <DashedPill tone="accent">Pending Approval</DashedPill>
                             )}
-                            {!status && <DashedPill tone="neutral">Completed</DashedPill>}
+                            {!status?.approvedVoid &&
+                              !status?.approvedReturn &&
+                              !status?.pendingVoid &&
+                              !status?.pendingReturn && <DashedPill tone="neutral">Completed</DashedPill>}
+                            {status?.rejectedVoid && <DashedPill tone="neutral">Void Rejected</DashedPill>}
+                            {status?.rejectedReturn && <DashedPill tone="neutral">Return Rejected</DashedPill>}
+                            {sale.hasDeliveryNote && (
+                              <DashedPill tone={sale.deliveryIsDelivered ? "success" : "warning"}>
+                                {sale.deliveryIsDelivered ? "Delivered" : "Pending Delivery"}
+                              </DashedPill>
+                            )}
                           </div>
                         </td>
                         <td className="px-4 py-3">

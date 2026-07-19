@@ -3,11 +3,14 @@ import { format } from "date-fns";
 import { motion } from "framer-motion";
 import { ArrowDownCircle, ArrowUpCircle, Loader2, Search, Warehouse } from "lucide-react";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import { StatTile } from "@renderer/shared/components/StatTile";
+import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import { useAppStore } from "@renderer/shared/stores/app-store";
+import type { ExportListRequest } from "@shared/types/export";
 import { STOCK_MOVEMENT_TYPE_OPTIONS, type StockMovementFeedItem, type StockMovementType } from "@shared/types/stock-movement";
 
 const INCREASING_TYPES = new Set<StockMovementType>(["purchase", "transfer_in", "return", "opening_stock"]);
@@ -32,6 +35,8 @@ function Th({ children, className }: { children: React.ReactNode; className?: st
 
 export function StockLedgerRoute(): React.JSX.Element {
   const currency = useAppStore((state) => state.context?.tenant.currency ?? "");
+  const { can } = usePermissions();
+  const canExport = can("inventory", "export");
 
   const [movements, setMovements] = useState<StockMovementFeedItem[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -81,6 +86,47 @@ export function StockLedgerRoute(): React.JSX.Element {
     return { totalMovements: movements.length, stockInValueCents, stockOutValueCents };
   }, [movements]);
 
+  const exportRequest = useMemo<ExportListRequest | null>(() => {
+    if (!filteredMovements) return null;
+    const filterParts: string[] = [];
+    if (typeFilter !== "all") filterParts.push(`Type: ${movementTypeLabel(typeFilter)}`);
+    if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
+
+    return {
+      module: "inventory",
+      title: "Stock Ledger",
+      subtitle: filterParts.length > 0 ? filterParts.join(" · ") : "Every stock movement",
+      columns: [
+        { key: "date", header: "Date" },
+        { key: "product", header: "Product" },
+        { key: "sku", header: "SKU" },
+        { key: "storefront", header: "Storefront" },
+        { key: "type", header: "Type" },
+        { key: "change", header: "Change", align: "right" },
+        { key: "value", header: "Value", align: "right" },
+        { key: "notes", header: "Notes" }
+      ],
+      rows: filteredMovements.map((movement) => ({
+        date: format(new Date(movement.createdAt), "MMM d, yyyy · HH:mm"),
+        product: movement.productName,
+        sku: movement.sku,
+        storefront: movement.locationName,
+        type: movementTypeLabel(movement.movementType),
+        change: `${movement.quantityChange > 0 ? "+" : ""}${movement.quantityChange}`,
+        value: `${currency} ${formatCents(movement.valueCents)}`,
+        notes: movement.notes ?? "—"
+      })),
+      stats: summary
+        ? [
+            { label: "Total Movements", value: String(summary.totalMovements) },
+            { label: "Stock In Value", value: `${currency} ${formatCents(summary.stockInValueCents)}` },
+            { label: "Stock Out Value", value: `${currency} ${formatCents(summary.stockOutValueCents)}` }
+          ]
+        : [],
+      fileBaseName: `StockLedger_${new Date().toISOString().slice(0, 10)}`
+    };
+  }, [filteredMovements, summary, typeFilter, searchTerm, currency]);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -102,15 +148,18 @@ export function StockLedgerRoute(): React.JSX.Element {
       />
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
-        <div>
-          <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Inventory</p>
-          <h2 className="mt-1 flex items-center gap-2 text-xl font-extrabold">
-            <Warehouse className="size-5 text-primary" aria-hidden="true" />
-            Stock Ledger
-          </h2>
-          <p className="mt-1 text-xs font-semibold text-muted">
-            Every stock movement across every product — transfers, purchases, sales, damage, and adjustments.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Inventory</p>
+            <h2 className="mt-1 flex items-center gap-2 text-xl font-extrabold">
+              <Warehouse className="size-5 text-primary" aria-hidden="true" />
+              Stock Ledger
+            </h2>
+            <p className="mt-1 text-xs font-semibold text-muted">
+              Every stock movement across every product — transfers, purchases, sales, damage, and adjustments.
+            </p>
+          </div>
+          {canExport && exportRequest && <ExportMenu request={exportRequest} />}
         </div>
 
         {loadError && (

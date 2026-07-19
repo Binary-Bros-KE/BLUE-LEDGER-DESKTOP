@@ -3,11 +3,16 @@ import { motion } from "framer-motion";
 import { Loader2, Plus, Search, Wallet } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { ExportMenu } from "@renderer/shared/components/ExportMenu";
+import { SelectField } from "@renderer/shared/components/form-fields";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
+import { getDashboardVariant } from "@renderer/shared/lib/dashboard-role";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import type { EmployeeListItem } from "@shared/types/employee";
+import type { ExportListRequest } from "@shared/types/export";
+import { isStorefrontType, type Location } from "@shared/types/location";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import type { Salary } from "@shared/types/salary";
 import { PayslipModal } from "./salaries/PayslipModal";
@@ -34,50 +39,150 @@ function Th({ children, className }: { children: React.ReactNode; className?: st
 }
 
 export function SalariesRoute(): React.JSX.Element {
-  const { can } = usePermissions();
+  const { can, session } = usePermissions();
   const canProcess = can("salaries", "create");
   const canViewAll = can("salaries", "edit") || can("salaries", "export");
   const canVoid = can("salaries", "delete");
   const canRestore = can("salaries", "edit");
+  const canExport = can("salaries", "export");
+  const isSuperAdmin = getDashboardVariant(session) === "superAdmin";
 
   const [salaries, setSalaries] = useState<Salary[] | null>(null);
   const [employees, setEmployees] = useState<EmployeeListItem[]>([]);
+  const [locations, setLocations] = useState<Location[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [searchTerm, setSearchTerm] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [employeeFilter, setEmployeeFilter] = useState("");
+  const [storefrontFilter, setStorefrontFilter] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [viewingSalary, setViewingSalary] = useState<Salary | null>(null);
 
   const loadAll = useCallback(async () => {
     setLoadError(null);
     try {
-      const [salaryList, methodList, employeeList] = await Promise.all([
+      const [salaryList, methodList, locationList] = await Promise.all([
         window.blueLedger.salary.list(),
         window.blueLedger.paymentMethod.list(),
-        canProcess ? window.blueLedger.employee.listForSalaryPicker() : Promise.resolve([])
+        window.blueLedger.location.list()
       ]);
       setSalaries(salaryList);
       setPaymentMethods(methodList);
-      setEmployees(employeeList);
+      setLocations(locationList);
     } catch (err) {
       setLoadError(getErrorMessage(err, "Failed to load salaries"));
     }
-  }, [canProcess]);
+    // Requires "salaries:create" server-side — kept separate so a viewer-only role (canViewAll but
+    // not canProcess) doesn't fail the whole page load just because this narrower list is off-limits.
+    try {
+      const employeeList = await window.blueLedger.employee.listForSalaryPicker();
+      setEmployees(employeeList);
+    } catch {
+      setEmployees([]);
+    }
+  }, []);
 
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
 
+  const storefronts = useMemo(
+    () => locations.filter((location) => isStorefrontType(location.locationType)),
+    [locations]
+  );
+
+  const employeeBranchById = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const employee of employees) {
+      map.set(employee.id, employee.branchId);
+    }
+    return map;
+  }, [employees]);
+
   const filteredSalaries = useMemo(() => {
     if (!salaries) return null;
+    let list = salaries;
+
+    if (dateFrom) {
+      const fromTime = new Date(dateFrom).getTime();
+      list = list.filter((salary) => new Date(salary.createdAt).getTime() >= fromTime);
+    }
+    if (dateTo) {
+      const toTime = new Date(dateTo).getTime() + 24 * 60 * 60 * 1000 - 1;
+      list = list.filter((salary) => new Date(salary.createdAt).getTime() <= toTime);
+    }
+    if (employeeFilter) {
+      list = list.filter((salary) => salary.employeeId === employeeFilter);
+    }
+    if (isSuperAdmin && storefrontFilter) {
+      list = list.filter((salary) => employeeBranchById.get(salary.employeeId) === storefrontFilter);
+    }
+
     const term = searchTerm.trim().toLowerCase();
-    if (!term) return salaries;
-    return salaries.filter((salary) => {
+    if (!term) return list;
+    return list.filter((salary) => {
       const haystack = `${salary.payslipNumber} ${salary.employeeName} ${salary.payPeriod}`.toLowerCase();
       return haystack.includes(term);
     });
-  }, [salaries, searchTerm]);
+  }, [salaries, searchTerm, dateFrom, dateTo, employeeFilter, storefrontFilter, isSuperAdmin, employeeBranchById]);
+
+  const exportRequest = useMemo<ExportListRequest | null>(() => {
+    if (!filteredSalaries) return null;
+    const filterParts: string[] = [];
+    if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
+    if (dateFrom || dateTo) filterParts.push(`Date: ${dateFrom || "…"} to ${dateTo || "…"}`);
+    if (employeeFilter) {
+      filterParts.push(`Employee: ${employees.find((e) => e.id === employeeFilter)?.firstName ?? employeeFilter}`);
+    }
+    if (isSuperAdmin && storefrontFilter) {
+      filterParts.push(`Storefront: ${storefronts.find((s) => s.id === storefrontFilter)?.locationName ?? storefrontFilter}`);
+    }
+
+    return {
+      module: "salaries",
+      title: "Employee Salaries",
+      subtitle: filterParts.length > 0 ? filterParts.join(" · ") : "Every processed payroll record",
+      columns: canViewAll
+        ? [
+            { key: "payslipNumber", header: "Payslip #" },
+            { key: "employee", header: "Employee" },
+            { key: "payPeriod", header: "Pay Period" },
+            { key: "netPay", header: "Net Pay", align: "right" },
+            { key: "paymentMethod", header: "Payment Method" },
+            { key: "status", header: "Status" }
+          ]
+        : [
+            { key: "payslipNumber", header: "Payslip #" },
+            { key: "payPeriod", header: "Pay Period" },
+            { key: "netPay", header: "Net Pay", align: "right" },
+            { key: "paymentMethod", header: "Payment Method" },
+            { key: "status", header: "Status" }
+          ],
+      rows: filteredSalaries.map((salary) => ({
+        payslipNumber: salary.payslipNumber,
+        employee: salary.employeeName,
+        payPeriod: formatPayPeriodLabel(salary.payPeriod),
+        netPay: formatCents(salary.netPayCents),
+        paymentMethod: salary.paymentMethodName,
+        status: salary.status === "active" ? "Active" : "Voided"
+      })),
+      fileBaseName: `Salaries_${new Date().toISOString().slice(0, 10)}`
+    };
+  }, [
+    filteredSalaries,
+    canViewAll,
+    searchTerm,
+    dateFrom,
+    dateTo,
+    employeeFilter,
+    storefrontFilter,
+    isSuperAdmin,
+    employees,
+    storefronts
+  ]);
 
   async function refreshViewing(): Promise<void> {
     await loadAll();
@@ -126,12 +231,15 @@ export function SalariesRoute(): React.JSX.Element {
                 : "Your own payslips — you can view and download these, but not anyone else's."}
             </p>
           </div>
-          {canProcess && (
-            <Button type="button" onClick={() => setFormOpen(true)} className="h-9 text-xs">
-              <Plus className="mr-1.5 size-4" aria-hidden="true" />
-              Process Salary
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {canExport && exportRequest && <ExportMenu request={exportRequest} />}
+            {canProcess && (
+              <Button type="button" onClick={() => setFormOpen(true)} className="h-9 text-xs">
+                <Plus className="mr-1.5 size-4" aria-hidden="true" />
+                Process Salary
+              </Button>
+            )}
+          </div>
         </div>
 
         {loadError && (
@@ -141,8 +249,8 @@ export function SalariesRoute(): React.JSX.Element {
         )}
 
         {salaries !== null && salaries.length > 0 && (
-          <div className="mt-4">
-            <label className="block sm:max-w-xs">
+          <div className="mt-4 flex flex-wrap items-end gap-3">
+            <label className="block sm:max-w-xs sm:flex-1">
               <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Search</span>
               <div className="relative mt-1.5">
                 <Search
@@ -158,6 +266,51 @@ export function SalariesRoute(): React.JSX.Element {
                 />
               </div>
             </label>
+            <label className="block">
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">From</span>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(event) => setDateFrom(event.target.value)}
+                className="mt-1.5 h-10 rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+              />
+            </label>
+            <label className="block">
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">To</span>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(event) => setDateTo(event.target.value)}
+                className="mt-1.5 h-10 rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+              />
+            </label>
+            {canViewAll && employees.length > 0 && (
+              <SelectField
+                label="Employee"
+                value={employeeFilter}
+                onChange={setEmployeeFilter}
+                options={[
+                  { value: "", label: "All Employees" },
+                  ...employees.map((employee) => ({
+                    value: employee.id,
+                    label: `${employee.firstName} ${employee.lastName}`
+                  }))
+                ]}
+                className="w-48"
+              />
+            )}
+            {isSuperAdmin && storefronts.length > 0 && (
+              <SelectField
+                label="Storefront"
+                value={storefrontFilter}
+                onChange={setStorefrontFilter}
+                options={[
+                  { value: "", label: "All Storefronts" },
+                  ...storefronts.map((location) => ({ value: location.id, label: location.locationName }))
+                ]}
+                className="w-48"
+              />
+            )}
           </div>
         )}
 

@@ -3,12 +3,15 @@ import { motion } from "framer-motion";
 import { Bike, CheckCircle2, Loader2, Pencil, Plus, Power, PowerOff, Search, XCircle } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import { Field } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { StatTile } from "@renderer/shared/components/StatTile";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
+import type { ExportListRequest } from "@shared/types/export";
 import type { Rider } from "@shared/types/rider";
 
 type StatusFilter = "all" | "active" | "inactive";
@@ -39,6 +42,7 @@ export function RidersRoute(): React.JSX.Element {
   const { can } = usePermissions();
   const canCreate = can("riders", "create");
   const canEdit = can("riders", "edit");
+  const canExport = can("riders", "export");
 
   const [riders, setRiders] = useState<Rider[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -97,6 +101,41 @@ export function RidersRoute(): React.JSX.Element {
     return list;
   }, [riders, statusFilter, searchTerm]);
 
+  const exportRequest = useMemo<ExportListRequest | null>(() => {
+    if (!filteredRiders) return null;
+    const filterParts: string[] = [];
+    if (statusFilter !== "all") filterParts.push(`Status: ${statusFilter}`);
+    if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
+
+    return {
+      module: "riders",
+      title: "Riders",
+      subtitle: filterParts.length > 0 ? filterParts.join(" · ") : "Full rider directory",
+      columns: [
+        { key: "name", header: "Name" },
+        { key: "phone", header: "Phone" },
+        { key: "altPhone", header: "Alt Phone" },
+        { key: "company", header: "Company" },
+        { key: "vehicle", header: "Vehicle" },
+        { key: "status", header: "Status" }
+      ],
+      rows: filteredRiders.map((rider) => ({
+        name: rider.name,
+        phone: rider.phone,
+        altPhone: rider.altPhone ?? "—",
+        company: rider.company ?? "—",
+        vehicle: rider.vehicleDescription ?? "—",
+        status: rider.status === "active" ? "Active" : "Inactive"
+      })),
+      stats: [
+        { label: "Total Riders", value: String(stats.total) },
+        { label: "Active", value: String(stats.active) },
+        { label: "Inactive", value: String(stats.inactive) }
+      ],
+      fileBaseName: `Riders_${new Date().toISOString().slice(0, 10)}`
+    };
+  }, [filteredRiders, stats, statusFilter, searchTerm]);
+
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]): void {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
@@ -136,8 +175,11 @@ export function RidersRoute(): React.JSX.Element {
       }
       await loadRiders();
       setModalOpen(false);
+      showSuccessToast(editingRider ? "Rider updated" : "Rider created");
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to save rider"));
+      const message = getErrorMessage(err, "Failed to save rider");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }
@@ -146,10 +188,14 @@ export function RidersRoute(): React.JSX.Element {
   async function handleToggleStatus(rider: Rider): Promise<void> {
     setActionError(null);
     try {
-      await window.blueLedger.rider.setStatus(rider.id, rider.status === "active" ? "inactive" : "active");
+      const nextStatus = rider.status === "active" ? "inactive" : "active";
+      await window.blueLedger.rider.setStatus(rider.id, nextStatus);
       await loadRiders();
+      showSuccessToast(nextStatus === "active" ? "Rider activated" : "Rider deactivated");
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to update status"));
+      const message = getErrorMessage(err, "Failed to update status");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 
@@ -191,12 +237,15 @@ export function RidersRoute(): React.JSX.Element {
               Couriers who can be assigned to a sale, invoice, or quotation's delivery.
             </p>
           </div>
-          {canCreate && (
-            <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
-              <Plus className="mr-1.5 size-4" aria-hidden="true" />
-              New Rider
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {canExport && exportRequest && <ExportMenu request={exportRequest} />}
+            {canCreate && (
+              <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
+                <Plus className="mr-1.5 size-4" aria-hidden="true" />
+                New Rider
+              </Button>
+            )}
+          </div>
         </div>
 
         {actionError && (

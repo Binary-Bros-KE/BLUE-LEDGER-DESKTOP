@@ -4,6 +4,7 @@ import { Button } from "@renderer/shared/components/Button";
 import { CheckboxField, Field, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { Rider } from "@shared/types/rider";
 
 /** fee/cost are kept as the raw text the user typed (currency units, e.g. "250.00"), not cents —
@@ -297,8 +298,11 @@ function QuickCreateRiderModal({
         vehicleDescription
       });
       onCreated(rider);
+      showSuccessToast("Rider created");
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to create rider"));
+      const message = getErrorMessage(err, "Failed to create rider");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }

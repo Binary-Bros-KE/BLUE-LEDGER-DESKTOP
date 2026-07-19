@@ -5,6 +5,7 @@ import { Eye, ImagePlus, KeyRound, Loader2, Pencil, Plus, Search, Trash2, UserCo
 import { EmployeeDetailModal } from "@renderer/app/routes/employees/EmployeeDetailModal";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import { Field, SelectField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
@@ -16,6 +17,7 @@ import {
   type EmployeeListItem,
   type EmployeeStatus
 } from "@shared/types/employee";
+import type { ExportListRequest } from "@shared/types/export";
 import type { Location } from "@shared/types/location";
 import type { RoleListItem } from "@shared/types/role";
 
@@ -99,6 +101,7 @@ function statusTone(status: EmployeeStatus): "success" | "warning" | "danger" {
 export function EmployeesRoute(): React.JSX.Element {
   const { can } = usePermissions();
   const canCreate = can("employees", "create");
+  const canExport = can("employees", "export");
   const canEdit = can("employees", "edit");
   const canDelete = can("employees", "delete");
 
@@ -180,6 +183,42 @@ export function EmployeesRoute(): React.JSX.Element {
       return true;
     });
   }, [employees, searchTerm, roleFilter, branchFilter, statusFilter]);
+
+  const exportRequest = useMemo<ExportListRequest | null>(() => {
+    if (!filteredEmployees) return null;
+    const filterParts: string[] = [];
+    if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
+    if (roleFilter) filterParts.push(`Role: ${roleOptions.find((r) => r.value === roleFilter)?.label ?? roleFilter}`);
+    if (branchFilter) {
+      filterParts.push(`Branch: ${branchOptions.find((b) => b.value === branchFilter)?.label ?? branchFilter}`);
+    }
+    if (statusFilter) filterParts.push(`Status: ${statusFilter}`);
+
+    return {
+      module: "employees",
+      title: "Employees",
+      subtitle: filterParts.length > 0 ? filterParts.join(" · ") : "Every staff account",
+      columns: [
+        { key: "code", header: "Code" },
+        { key: "name", header: "Name" },
+        { key: "role", header: "Role" },
+        { key: "branch", header: "Branch" },
+        { key: "phone", header: "Phone" },
+        { key: "status", header: "Status" },
+        { key: "lastLogin", header: "Last Login" }
+      ],
+      rows: filteredEmployees.map((employee) => ({
+        code: employee.employeeCode,
+        name: `${employee.firstName} ${employee.lastName}`,
+        role: employee.roleName ?? "Unassigned",
+        branch: employee.branchName ?? "All storefronts",
+        phone: employee.phone ?? "—",
+        status: EMPLOYEE_STATUS_OPTIONS.find((option) => option.value === employee.status)?.label ?? employee.status,
+        lastLogin: employee.lastLogin ? format(new Date(employee.lastLogin), "MMM d, yyyy") : "Never"
+      })),
+      fileBaseName: `Employees_${new Date().toISOString().slice(0, 10)}`
+    };
+  }, [filteredEmployees, searchTerm, roleFilter, branchFilter, statusFilter, roleOptions, branchOptions]);
 
   const hasActiveFilters = Boolean(searchTerm || roleFilter || branchFilter || statusFilter);
 
@@ -326,12 +365,15 @@ export function EmployeesRoute(): React.JSX.Element {
               Every person who can access this installation, and the role that governs their permissions.
             </p>
           </div>
-          {canCreate && (
-            <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
-              <Plus className="mr-1.5 size-4" aria-hidden="true" />
-              New Employee
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {canExport && exportRequest && <ExportMenu request={exportRequest} />}
+            {canCreate && (
+              <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
+                <Plus className="mr-1.5 size-4" aria-hidden="true" />
+                New Employee
+              </Button>
+            )}
+          </div>
         </div>
 
         {actionError && (

@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Loader2, Users } from "lucide-react";
+import { ExportMenu } from "@renderer/shared/components/ExportMenu";
+import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { formatCents } from "@renderer/shared/lib/money";
+import type { ExportListRequest } from "@shared/types/export";
 import type { DateRangeInput, SalesReportMode } from "@shared/types/report";
 import type { OutstandingInvoicesSummary, TopCustomerRow } from "@shared/types/customer-report";
 import { CustomerPurchaseHistorySection } from "./reports/CustomerPurchaseHistorySection";
@@ -12,6 +16,8 @@ import { SalesModeSelector } from "./reports/SalesModeSelector";
 import { TopCustomersTable } from "./reports/TopCustomersTable";
 
 export function CustomersReportRoute(): React.JSX.Element {
+  const { can } = usePermissions();
+  const canExport = can("reports", "export");
   const [mode, setMode] = useState<SalesReportMode>("monthly");
   const [anchor, setAnchor] = useState<string>(() => defaultAnchorForMode("monthly"));
   const [customRange, setCustomRange] = useState<DateRangeInput>(() => ({
@@ -55,18 +61,45 @@ export function CustomersReportRoute(): React.JSX.Element {
     void load(resolvedRange);
   }, [resolvedRange.startDate, resolvedRange.endDate, load]);
 
+  const exportRequest = useMemo<ExportListRequest | null>(() => {
+    if (!topCustomers) return null;
+    return {
+      module: "reports",
+      title: "Customers Report — Top Customers",
+      subtitle: `${resolvedRange.startDate} to ${resolvedRange.endDate}`,
+      columns: [
+        { key: "customer", header: "Customer" },
+        { key: "phone", header: "Phone" },
+        { key: "transactions", header: "Transactions", align: "right" },
+        { key: "revenue", header: "Revenue", align: "right" },
+        { key: "avgSale", header: "Avg Sale", align: "right" }
+      ],
+      rows: topCustomers.map((row) => ({
+        customer: row.customerName,
+        phone: row.phone,
+        transactions: String(row.transactionCount),
+        revenue: formatCents(row.revenueCents),
+        avgSale: formatCents(row.averageSaleCents)
+      })),
+      fileBaseName: `CustomersReport_${resolvedRange.startDate}_to_${resolvedRange.endDate}`
+    };
+  }, [topCustomers, resolvedRange]);
+
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }} className="mt-6 space-y-5 pb-10">
-      <div>
-        <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Insights</p>
-        <h2 className="mt-1 flex items-center gap-2 text-xl font-extrabold">
-          <Users className="size-5 text-primary" aria-hidden="true" />
-          Customers Report
-        </h2>
-        <p className="mt-1 text-xs font-semibold text-muted">
-          Top customers for a period you pick, every outstanding invoice right now, and a full purchase history for
-          any single customer.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Insights</p>
+          <h2 className="mt-1 flex items-center gap-2 text-xl font-extrabold">
+            <Users className="size-5 text-primary" aria-hidden="true" />
+            Customers Report
+          </h2>
+          <p className="mt-1 text-xs font-semibold text-muted">
+            Top customers for a period you pick, every outstanding invoice right now, and a full purchase history for
+            any single customer.
+          </p>
+        </div>
+        {canExport && exportRequest && <ExportMenu request={exportRequest} />}
       </div>
 
       <div className="rounded-lg border border-line bg-white p-5 shadow-soft">

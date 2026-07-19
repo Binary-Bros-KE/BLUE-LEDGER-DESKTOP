@@ -157,4 +157,6 @@ export type SaleListItem = {
   completedAt: string | null;
   createdAt: string;
   hasDeliveryNote: boolean;
+  /** null when there's no delivery attached at all; otherwise whether it's been marked delivered. */
+  deliveryIsDelivered: boolean | null;
 };

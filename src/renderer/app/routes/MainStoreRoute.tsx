@@ -7,6 +7,7 @@ import {
   ImagePlus,
   Loader2,
   Package,
+  PackageX,
   Pencil,
   Plus,
   Power,
@@ -21,6 +22,7 @@ import { ProductHistoryModal } from "@renderer/app/routes/main-store/ProductHist
 import { ProductEditModal } from "@renderer/app/routes/products/ProductEditModal";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import { CheckboxField, Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { ProductThumbnail } from "@renderer/shared/components/ProductThumbnail";
@@ -30,6 +32,7 @@ import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { toCents } from "@renderer/shared/lib/money";
 import type { Category } from "@shared/types/category";
+import type { ExportListRequest } from "@shared/types/export";
 import { isStorefrontType, type Location } from "@shared/types/location";
 import type { MainStoreProductRow } from "@shared/types/main-store";
 import type { Product } from "@shared/types/product";
@@ -109,11 +112,27 @@ function LowStockBadge(): React.JSX.Element {
   );
 }
 
+/** A storefront is "out" once its own shelf stock hits zero (or below, if negative stock is
+ * allowed) — distinct from "low", which is relative to that product's configurable reorder level. */
+function rowHasOutOfStock(row: MainStoreProductRow): boolean {
+  return row.storefronts.some((entry) => entry.onHandQuantity <= 0);
+}
+
+function OutOfStockBadge(): React.JSX.Element {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-danger px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-white">
+      <PackageX className="size-3" aria-hidden="true" />
+      Out of Stock
+    </span>
+  );
+}
+
 export function MainStoreRoute(): React.JSX.Element {
   const { can } = usePermissions();
   const canCreate = can("products", "create");
   const canEdit = can("products", "edit");
   const canManageStock = can("inventory", "edit") || can("stock_transfers", "create");
+  const canExport = can("inventory", "export");
 
   const [locations, setLocations] = useState<Location[] | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -122,6 +141,7 @@ export function MainStoreRoute(): React.JSX.Element {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [lowStockOnly, setLowStockOnly] = useState(false);
+  const [outOfStockOnly, setOutOfStockOnly] = useState(false);
 
   const [stockModalProduct, setStockModalProduct] = useState<MainStoreProductRow | null>(null);
   const [historyProduct, setHistoryProduct] = useState<MainStoreProductRow | null>(null);
@@ -215,12 +235,15 @@ export function MainStoreRoute(): React.JSX.Element {
     if (lowStockOnly) {
       list = list.filter((row) => row.hasLowStock);
     }
+    if (outOfStockOnly) {
+      list = list.filter((row) => rowHasOutOfStock(row));
+    }
     const term = searchTerm.trim().toLowerCase();
     if (term) {
       list = list.filter((row) => `${row.productName} ${row.sku}`.toLowerCase().includes(term));
     }
     return list;
-  }, [rows, statusFilter, lowStockOnly, searchTerm]);
+  }, [rows, statusFilter, lowStockOnly, outOfStockOnly, searchTerm]);
 
   const summary = useMemo(() => {
     if (!rows) return null;
@@ -228,8 +251,65 @@ export function MainStoreRoute(): React.JSX.Element {
     const totalAtMainStore = rows.reduce((sum, row) => sum + row.totalAtMainStore, 0);
     const unallocatedUnits = rows.reduce((sum, row) => sum + row.unallocatedQuantity, 0);
     const lowStockAlerts = rows.filter((row) => row.hasLowStock).length;
-    return { totalProducts, totalAtMainStore, unallocatedUnits, lowStockAlerts };
+    const outOfStockAlerts = rows.filter((row) => rowHasOutOfStock(row)).length;
+    return { totalProducts, totalAtMainStore, unallocatedUnits, lowStockAlerts, outOfStockAlerts };
   }, [rows]);
+
+  const exportRequest = useMemo<ExportListRequest | null>(() => {
+    if (!filteredRows) return null;
+    const filterParts: string[] = [`Status: ${statusFilter}`];
+    if (lowStockOnly) filterParts.push("Low Stock Only");
+    if (outOfStockOnly) filterParts.push("Out of Stock Only");
+    if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
+
+    const rowsOut = filteredRows.flatMap((row) => {
+      const base = {
+        product: row.productName,
+        sku: row.sku,
+        category: row.categoryName ?? "Uncategorized",
+        status: row.status
+      };
+      const unallocatedRow = {
+        ...base,
+        storefront: "Unallocated",
+        allocated: String(row.unallocatedQuantity),
+        onHand: "—"
+      };
+      const storefrontRows = row.storefronts.map((entry) => ({
+        ...base,
+        storefront: entry.storefrontName,
+        allocated: String(entry.allocatedQuantity),
+        onHand: `${entry.onHandQuantity}${entry.onHandQuantity <= 0 ? " (Out of Stock)" : entry.isLow ? " (Low)" : ""}`
+      }));
+      return [unallocatedRow, ...storefrontRows];
+    });
+
+    return {
+      module: "inventory",
+      title: "Main Store",
+      subtitle: filterParts.join(" · "),
+      columns: [
+        { key: "product", header: "Product" },
+        { key: "sku", header: "SKU" },
+        { key: "category", header: "Category" },
+        { key: "storefront", header: "Storefront" },
+        { key: "allocated", header: "Allocated at Main Store", align: "right" },
+        { key: "onHand", header: "On Hand at Shop", align: "right" },
+        { key: "status", header: "Status" }
+      ],
+      rows: rowsOut,
+      stats: summary
+        ? [
+            { label: "Total Products", value: String(summary.totalProducts) },
+            { label: "Total Units at Main Store", value: String(summary.totalAtMainStore) },
+            { label: "Unallocated Units", value: String(summary.unallocatedUnits) },
+            { label: "Low Stock Alerts", value: String(summary.lowStockAlerts) },
+            { label: "Out of Stock Alerts", value: String(summary.outOfStockAlerts) }
+          ]
+        : [],
+      fileBaseName: `MainStore_${new Date().toISOString().slice(0, 10)}`
+    };
+  }, [filteredRows, summary, statusFilter, lowStockOnly, outOfStockOnly, searchTerm]);
 
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]): void {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -344,11 +424,12 @@ export function MainStoreRoute(): React.JSX.Element {
       />
 
       {summary && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
           <StatTile icon={Package} label="Total Products" value={String(summary.totalProducts)} tone="primary" />
           <StatTile icon={Boxes} label="Total Units at Main Store" value={String(summary.totalAtMainStore)} tone="accent" />
           <StatTile icon={Boxes} label="Unallocated Units" value={String(summary.unallocatedUnits)} tone="warning" />
           <StatTile icon={AlertTriangle} label="Low Stock Alerts" value={String(summary.lowStockAlerts)} tone="danger" />
+          <StatTile icon={PackageX} label="Out of Stock Alerts" value={String(summary.outOfStockAlerts)} tone="danger" />
         </div>
       )}
 
@@ -364,12 +445,15 @@ export function MainStoreRoute(): React.JSX.Element {
               Every product's Main Store holding and each storefront's own shelf stock, at a glance.
             </p>
           </div>
-          {canCreate && (
-            <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
-              <Plus className="mr-1.5 size-4" aria-hidden="true" />
-              New Product
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {canExport && exportRequest && <ExportMenu request={exportRequest} />}
+            {canCreate && (
+              <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
+                <Plus className="mr-1.5 size-4" aria-hidden="true" />
+                New Product
+              </Button>
+            )}
+          </div>
         </div>
 
         {notice && (
@@ -430,6 +514,20 @@ export function MainStoreRoute(): React.JSX.Element {
             <TrendingDown className="size-3.5" aria-hidden="true" />
             Low Stock Only
           </button>
+
+          <button
+            type="button"
+            onClick={() => setOutOfStockOnly((prev) => !prev)}
+            className={cn(
+              "flex h-[38px] items-center gap-1.5 rounded-lg border px-3 text-[11px] font-extrabold uppercase tracking-wide transition cursor-pointer",
+              outOfStockOnly
+                ? "border-danger bg-danger text-white"
+                : "border-line text-muted hover:bg-soft"
+            )}
+          >
+            <PackageX className="size-3.5" aria-hidden="true" />
+            Out of Stock Only
+          </button>
         </div>
 
         <div className="mt-5">
@@ -459,6 +557,7 @@ export function MainStoreRoute(): React.JSX.Element {
                           <p className="truncate text-sm font-extrabold text-ink">{row.productName}</p>
                           {row.status === "inactive" && <DashedPill tone="neutral">Inactive</DashedPill>}
                           {row.hasLowStock && <LowStockBadge />}
+                          {rowHasOutOfStock(row) && <OutOfStockBadge />}
                         </div>
                         <p className="text-[11px] font-semibold text-muted">
                           {row.sku} · {row.categoryName ?? "Uncategorized"}
@@ -552,7 +651,11 @@ export function MainStoreRoute(): React.JSX.Element {
                             <td className="px-4 py-2 text-right">
                               <span className="inline-flex items-center gap-1.5 font-extrabold tabular-nums">
                                 {entry.onHandQuantity}
-                                {entry.isLow && <LowStockBadge />}
+                                {entry.onHandQuantity <= 0 ? (
+                                  <OutOfStockBadge />
+                                ) : (
+                                  entry.isLow && <LowStockBadge />
+                                )}
                               </span>
                             </td>
                           </tr>

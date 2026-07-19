@@ -8,6 +8,7 @@ import { Modal } from "@renderer/shared/components/Modal";
 import { ReceiptPreview } from "@renderer/shared/components/ReceiptPreview";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import type { Sale } from "@shared/types/sale";
 import type { SaleReturn } from "@shared/types/sale-return";
@@ -123,8 +124,12 @@ export function ApprovalsRoute(): React.JSX.Element {
       setDecisionEntry(null);
       closeView();
       await loadAll();
+      const kindLabel = entry.kind === "return" ? "Return" : "Void";
+      showSuccessToast(`${kindLabel} ${action === "approve" ? "approved" : "rejected"}`);
     } catch (err) {
-      setDecisionError(getErrorMessage(err, "Failed to record decision"));
+      const message = getErrorMessage(err, "Failed to record decision");
+      setDecisionError(message);
+      showErrorToast(message);
     } finally {
       setDeciding(false);
     }
@@ -414,7 +419,7 @@ export function ApprovalsRoute(): React.JSX.Element {
               {decisionEntry.action === "approve"
                 ? decisionEntry.entry.kind === "void"
                   ? "This will void the sale and restock every item."
-                  : "This will restock the selected items. Approving assumes the customer has already been refunded in cash — the reports will reduce this sale's revenue accordingly, whether or not a refund actually happened."
+                  : "This will restock the selected items. Approving assumes the customer has already been refunded in cash — the reports will reduce this sale's revenue accordingly."
                 : "This request will be marked rejected — nothing changes."}
             </p>
             <TextAreaField

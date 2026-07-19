@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import { SelectField } from "@renderer/shared/components/form-fields";
 import { StatTile } from "@renderer/shared/components/StatTile";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
@@ -24,6 +25,7 @@ import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import type { Expense, ExpenseStatus, ExpenseSummary } from "@shared/types/expense";
 import type { ExpenseCategory } from "@shared/types/expense-category";
+import type { ExportListRequest } from "@shared/types/export";
 import type { Location } from "@shared/types/location";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import { ExpenseCategoriesManagerModal } from "./expenses/ExpenseCategoriesManagerModal";
@@ -53,6 +55,7 @@ export function ExpensesRoute(): React.JSX.Element {
   const canEdit = can("expenses", "edit");
   const canDelete = can("expenses", "delete");
   const canManageCategories = can("expense_categories", "create") || can("expense_categories", "edit");
+  const canExport = can("expenses", "export");
 
   const [summary, setSummary] = useState<ExpenseSummary | null>(null);
   const [expenses, setExpenses] = useState<Expense[] | null>(null);
@@ -140,6 +143,72 @@ export function ExpensesRoute(): React.JSX.Element {
 
     return list;
   }, [expenses, statusFilter, categoryFilter, storefrontFilter, paymentMethodFilter, dateFrom, dateTo, searchTerm]);
+
+  const exportRequest = useMemo<ExportListRequest | null>(() => {
+    if (!filteredExpenses) return null;
+    const filterParts: string[] = [];
+    if (statusFilter !== "all") filterParts.push(`Status: ${statusFilter}`);
+    if (categoryFilter) {
+      filterParts.push(`Category: ${categories.find((c) => c.id === categoryFilter)?.name ?? categoryFilter}`);
+    }
+    if (storefrontFilter) {
+      filterParts.push(`Storefront: ${locations.find((l) => l.id === storefrontFilter)?.locationName ?? storefrontFilter}`);
+    }
+    if (paymentMethodFilter) {
+      filterParts.push(
+        `Payment Method: ${paymentMethods.find((m) => m.id === paymentMethodFilter)?.name ?? paymentMethodFilter}`
+      );
+    }
+    if (dateFrom || dateTo) filterParts.push(`Date: ${dateFrom || "…"} to ${dateTo || "…"}`);
+    if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
+
+    return {
+      module: "expenses",
+      title: "Expenses",
+      subtitle: filterParts.length > 0 ? filterParts.join(" · ") : "All expenses",
+      columns: [
+        { key: "expenseNumber", header: "Expense #" },
+        { key: "date", header: "Date" },
+        { key: "category", header: "Category" },
+        { key: "storefront", header: "Storefront" },
+        { key: "amount", header: "Amount", align: "right" },
+        { key: "paymentMethod", header: "Payment Method" },
+        { key: "paidBy", header: "Paid By" },
+        { key: "createdBy", header: "Created By" }
+      ],
+      rows: filteredExpenses.map((expense) => ({
+        expenseNumber: expense.expenseNumber,
+        date: formatDate(expense.expenseDate),
+        category: expense.categoryName,
+        storefront: expense.storefrontName ?? "General",
+        amount: formatCents(expense.amountCents),
+        paymentMethod: expense.paymentMethodName,
+        paidBy: expense.paidBy ?? "—",
+        createdBy: expense.createdByName ?? "—"
+      })),
+      stats: summary
+        ? [
+            { label: "Today's Expenses", value: formatCents(summary.todayCents) },
+            { label: "This Month's Expenses", value: formatCents(summary.thisMonthCents) },
+            { label: "Total Expenses", value: formatCents(summary.totalCents) }
+          ]
+        : [],
+      fileBaseName: `Expenses_${new Date().toISOString().slice(0, 10)}`
+    };
+  }, [
+    filteredExpenses,
+    summary,
+    statusFilter,
+    categoryFilter,
+    storefrontFilter,
+    paymentMethodFilter,
+    dateFrom,
+    dateTo,
+    searchTerm,
+    categories,
+    locations,
+    paymentMethods
+  ]);
 
   function clearFilters(): void {
     setSearchTerm("");
@@ -263,6 +332,7 @@ export function ExpensesRoute(): React.JSX.Element {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            {canExport && exportRequest && <ExportMenu request={exportRequest} />}
             {canManageCategories && (
               <Button
                 type="button"

@@ -95,7 +95,8 @@ export type SaleSummaryRow = {
   sale_status: string;
   completed_at: string | null;
   created_at: string;
-  has_delivery_note: number;
+  /** NULL when the sale has no delivery attached at all; 0/1 (delivery_notes.is_delivered) otherwise. */
+  delivery_is_delivered: number | null;
 };
 
 /** Pass null for locationId to see every branch's receipts (e.g. a super-admin with no assigned branch). */
@@ -115,7 +116,7 @@ export function findAllSaleSummaryRows(tenantId: string, locationId: string | nu
         s.sale_status,
         s.completed_at,
         s.created_at,
-        EXISTS(SELECT 1 FROM delivery_notes dn WHERE dn.sale_id = s.id) AS has_delivery_note
+        (SELECT dn.is_delivered FROM delivery_notes dn WHERE dn.sale_id = s.id) AS delivery_is_delivered
       FROM sales s
       JOIN employees e ON e.id = s.employee_id
       JOIN locations l ON l.id = s.location_id
@@ -142,7 +143,8 @@ export function mapSaleSummaryRow(row: SaleSummaryRow): SaleListItem {
     saleStatus: row.sale_status as SaleStatus,
     completedAt: row.completed_at,
     createdAt: row.created_at,
-    hasDeliveryNote: row.has_delivery_note === 1
+    hasDeliveryNote: row.delivery_is_delivered !== null,
+    deliveryIsDelivered: row.delivery_is_delivered === null ? null : row.delivery_is_delivered === 1
   };
 }
 

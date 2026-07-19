@@ -1,21 +1,54 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Boxes, Info, Loader2, Package, Pencil, Power, PowerOff, Search } from "lucide-react";
+import {
+  AlertTriangle,
+  Boxes,
+  Info,
+  Loader2,
+  Package,
+  PackageX,
+  Pencil,
+  Power,
+  PowerOff,
+  Search,
+  TrendingDown
+} from "lucide-react";
 import { ProductDetailModal } from "@renderer/app/routes/products/ProductDetailModal";
 import { ProductEditModal } from "@renderer/app/routes/products/ProductEditModal";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import { SelectField } from "@renderer/shared/components/form-fields";
 import { ProductInfoModal } from "@renderer/shared/components/ProductInfoModal";
 import { ProductThumbnail } from "@renderer/shared/components/ProductThumbnail";
+import { StatTile } from "@renderer/shared/components/StatTile";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import type { Category } from "@shared/types/category";
+import type { ExportListRequest } from "@shared/types/export";
 import { isStorefrontType, type Location } from "@shared/types/location";
 import type { ProductListItem } from "@shared/types/product";
+
+function LowStockBadge(): React.JSX.Element {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-danger-soft px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-danger">
+      <TrendingDown className="size-3" aria-hidden="true" />
+      Low
+    </span>
+  );
+}
+
+function OutOfStockBadge(): React.JSX.Element {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-danger px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-white">
+      <PackageX className="size-3" aria-hidden="true" />
+      Out of Stock
+    </span>
+  );
+}
 
 function buildCategoryOptions(categories: Category[]): { value: string; label: string }[] {
   const byId = new Map(categories.map((category) => [category.id, category]));
@@ -42,6 +75,7 @@ export function ProductsRoute(): React.JSX.Element {
   const { can } = usePermissions();
   const canEdit = can("products", "edit");
   const canViewInventory = can("inventory", "view");
+  const canExport = can("products", "export");
 
   const [products, setProducts] = useState<ProductListItem[] | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -57,6 +91,8 @@ export function ProductsRoute(): React.JSX.Element {
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [lowStockOnly, setLowStockOnly] = useState(false);
+  const [outOfStockOnly, setOutOfStockOnly] = useState(false);
 
   const loadAll = useCallback(async () => {
     setLoadError(null);
@@ -98,16 +134,70 @@ export function ProductsRoute(): React.JSX.Element {
       }
       if (categoryFilter && product.categoryId !== categoryFilter) return false;
       if (statusFilter && product.status !== statusFilter) return false;
+      if (lowStockOnly && product.totalStock > product.reorderLevel) return false;
+      if (outOfStockOnly && product.totalStock > 0) return false;
       return true;
     });
-  }, [products, searchTerm, categoryFilter, statusFilter]);
+  }, [products, searchTerm, categoryFilter, statusFilter, lowStockOnly, outOfStockOnly]);
 
-  const hasActiveFilters = Boolean(searchTerm || categoryFilter || statusFilter);
+  const stockAlerts = useMemo(() => {
+    if (!products) return { lowStockCount: 0, outOfStockCount: 0 };
+    return {
+      lowStockCount: products.filter((product) => product.totalStock <= product.reorderLevel).length,
+      outOfStockCount: products.filter((product) => product.totalStock <= 0).length
+    };
+  }, [products]);
+
+  const hasActiveFilters = Boolean(
+    searchTerm || categoryFilter || statusFilter || lowStockOnly || outOfStockOnly
+  );
+
+  const exportRequest = useMemo<ExportListRequest | null>(() => {
+    if (!filteredProducts) return null;
+    const filterParts: string[] = [];
+    if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
+    if (categoryFilter) {
+      filterParts.push(`Category: ${categoryOptions.find((c) => c.value === categoryFilter)?.label ?? categoryFilter}`);
+    }
+    if (statusFilter) filterParts.push(`Status: ${statusFilter}`);
+    if (lowStockOnly) filterParts.push("Low Stock Only");
+    if (outOfStockOnly) filterParts.push("Out of Stock Only");
+
+    return {
+      module: "products",
+      title: "Products",
+      subtitle: filterParts.length > 0 ? filterParts.join(" · ") : "Full product catalog",
+      columns: [
+        { key: "name", header: "Product" },
+        { key: "sku", header: "SKU" },
+        { key: "category", header: "Category" },
+        { key: "price", header: "Price", align: "right" },
+        { key: "stock", header: "Stock", align: "right" },
+        { key: "status", header: "Status" }
+      ],
+      rows: filteredProducts.map((product) => ({
+        name: product.name,
+        sku: product.sku,
+        category: product.categoryName ?? "Uncategorized",
+        price: `${currency} ${formatCents(product.sellingPriceCents)}`,
+        stock: String(product.totalStock),
+        status: product.status
+      })),
+      stats: [
+        { label: "Total Products", value: String(filteredProducts.length) },
+        { label: "Low Stock Alerts", value: String(stockAlerts.lowStockCount) },
+        { label: "Out of Stock Alerts", value: String(stockAlerts.outOfStockCount) }
+      ],
+      fileBaseName: `Products_${new Date().toISOString().slice(0, 10)}`
+    };
+  }, [filteredProducts, stockAlerts, searchTerm, categoryFilter, statusFilter, lowStockOnly, outOfStockOnly, categoryOptions, currency]);
 
   function clearFilters(): void {
     setSearchTerm("");
     setCategoryFilter("");
     setStatusFilter("");
+    setLowStockOnly(false);
+    setOutOfStockOnly(false);
   }
 
   function openEditModal(product: ProductListItem): void {
@@ -157,11 +247,30 @@ export function ProductsRoute(): React.JSX.Element {
               stock receiving happen in Main Store.
             </p>
           </div>
+          {canExport && exportRequest && <ExportMenu request={exportRequest} />}
         </div>
 
         {notice && (
           <div className="mt-4 rounded-lg border border-success/30 bg-success/10 px-4 py-3 text-sm font-bold text-success">
             {notice}
+          </div>
+        )}
+
+        {products !== null && products.length > 0 && (
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <StatTile icon={Package} label="Total Products" value={String(products.length)} tone="primary" />
+            <StatTile
+              icon={AlertTriangle}
+              label="Low Stock Alerts"
+              value={String(stockAlerts.lowStockCount)}
+              tone="danger"
+            />
+            <StatTile
+              icon={PackageX}
+              label="Out of Stock Alerts"
+              value={String(stockAlerts.outOfStockCount)}
+              tone="danger"
+            />
           </div>
         )}
 
@@ -201,15 +310,40 @@ export function ProductsRoute(): React.JSX.Element {
                 { value: "inactive", label: "Inactive" }
               ]}
             />
-            {hasActiveFilters && (
+
+            <div className="flex flex-wrap items-center gap-2 sm:col-span-4">
               <button
                 type="button"
-                onClick={clearFilters}
-                className="justify-self-start text-[11px] font-extrabold uppercase tracking-wider text-accent hover:underline sm:col-span-4"
+                onClick={() => setLowStockOnly((prev) => !prev)}
+                className={cn(
+                  "flex h-[38px] items-center gap-1.5 rounded-lg border px-3 text-[11px] font-extrabold uppercase tracking-wide transition cursor-pointer",
+                  lowStockOnly ? "border-danger bg-danger-soft text-danger" : "border-line text-muted hover:bg-soft"
+                )}
               >
-                Clear filters
+                <TrendingDown className="size-3.5" aria-hidden="true" />
+                Low Stock Only
               </button>
-            )}
+              <button
+                type="button"
+                onClick={() => setOutOfStockOnly((prev) => !prev)}
+                className={cn(
+                  "flex h-[38px] items-center gap-1.5 rounded-lg border px-3 text-[11px] font-extrabold uppercase tracking-wide transition cursor-pointer",
+                  outOfStockOnly ? "border-danger bg-danger text-white" : "border-line text-muted hover:bg-soft"
+                )}
+              >
+                <PackageX className="size-3.5" aria-hidden="true" />
+                Out of Stock Only
+              </button>
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="text-[11px] font-extrabold uppercase tracking-wider text-accent hover:underline"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
           </div>
         )}
 
@@ -303,13 +437,20 @@ export function ProductsRoute(): React.JSX.Element {
                         {currency} {formatCents(product.sellingPriceCents)}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <span
-                          className={cn(
-                            "font-extrabold tabular-nums",
-                            product.totalStock <= product.reorderLevel && "text-warning"
+                        <span className="inline-flex items-center justify-end gap-1.5">
+                          <span
+                            className={cn(
+                              "font-extrabold tabular-nums",
+                              product.totalStock <= product.reorderLevel && "text-warning"
+                            )}
+                          >
+                            {product.totalStock}
+                          </span>
+                          {product.totalStock <= 0 ? (
+                            <OutOfStockBadge />
+                          ) : (
+                            product.totalStock <= product.reorderLevel && <LowStockBadge />
                           )}
-                        >
-                          {product.totalStock}
                         </span>
                       </td>
                       <td className="px-4 py-3">

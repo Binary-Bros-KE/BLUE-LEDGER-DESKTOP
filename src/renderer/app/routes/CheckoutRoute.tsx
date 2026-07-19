@@ -16,6 +16,7 @@ import {
   UserRound
 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
+import { useConfirm } from "@renderer/shared/components/ConfirmModal";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { DeliveryNotePreview } from "@renderer/shared/components/DeliveryNotePreview";
 import {
@@ -33,6 +34,7 @@ import { computeLinePricing, type LinePricing } from "@renderer/shared/lib/cart-
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import type { Customer } from "@shared/types/customer";
 import type { LocationStockLevel } from "@shared/types/inventory";
@@ -73,6 +75,7 @@ export function CheckoutRoute(): React.JSX.Element {
   const tenantContext = useAppStore((state) => state.context?.tenant ?? null);
   const { can, session } = usePermissions();
   const canDeletePending = can("sales", "delete");
+  const confirm = useConfirm();
 
   const [products, setProducts] = useState<ProductListItem[] | null>(null);
   const [stockLevels, setStockLevels] = useState<LocationStockLevel[]>([]);
@@ -401,7 +404,13 @@ export function CheckoutRoute(): React.JSX.Element {
   }
 
   async function handleDeleteDraft(draft: OpenSaleDraft): Promise<void> {
-    if (!window.confirm("Delete this sale? This can't be undone.")) return;
+    const confirmed = await confirm({
+      title: "Delete this sale?",
+      message: "This can't be undone.",
+      tone: "danger",
+      confirmLabel: "Delete"
+    });
+    if (!confirmed) return;
     setActionError(null);
     try {
       if (draft.dbSaleId) {
@@ -409,8 +418,11 @@ export function CheckoutRoute(): React.JSX.Element {
       }
       setOpenSales((prev) => prev.filter((entry) => entry.key !== draft.key));
       if (activeKey === draft.key) setActiveKey(null);
+      showSuccessToast("Sale deleted");
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to delete sale"));
+      const message = getErrorMessage(err, "Failed to delete sale");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 
@@ -437,8 +449,11 @@ export function CheckoutRoute(): React.JSX.Element {
         )
       );
       setActiveKey(null);
+      showSuccessToast("Sale held");
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to suspend sale"));
+      const message = getErrorMessage(err, "Failed to suspend sale");
+      setActionError(message);
+      showErrorToast(message);
     } finally {
       setSuspending(false);
     }
@@ -470,8 +485,11 @@ export function CheckoutRoute(): React.JSX.Element {
       setCompletedSale(sale);
       setShowDeliveryNote(false);
       if (branchId) void window.blueLedger.inventory.listForLocation(branchId).then(setStockLevels);
+      showSuccessToast(`Sale completed — ${sale.receiptNumber ?? formatCents(sale.grandTotalCents)}`);
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to complete sale"));
+      const message = getErrorMessage(err, "Failed to complete sale");
+      setActionError(message);
+      showErrorToast(message);
     } finally {
       setCompleting(false);
     }

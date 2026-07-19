@@ -58,25 +58,29 @@ const DEFAULT_SYSTEM_ROLES: Array<{
   {
     roleName: "Manager",
     description: "Runs daily operations across sales, inventory, and staff.",
-    permissions: fullAccess([
-      "dashboard",
-      "products",
-      "categories",
-      "inventory",
-      "stock_transfers",
-      "sales",
-      "quotations",
-      "purchases",
-      "customers",
-      "suppliers",
-      "riders",
-      "expenses",
-      "expense_categories",
-      "salaries",
-      "reports",
-      "locations",
-      "approvals"
-    ])
+    permissions: {
+      ...fullAccess([
+        "dashboard",
+        "products",
+        "categories",
+        "inventory",
+        "stock_transfers",
+        "sales",
+        "quotations",
+        "purchases",
+        "customers",
+        "suppliers",
+        "riders",
+        "expenses",
+        "expense_categories",
+        "salaries",
+        "reports",
+        "locations",
+        "approvals"
+      ]),
+      // Manager requests stock like a Cashier does — approving a request is Storekeeper/Super Admin only.
+      stock_requests: ["view", "create"]
+    }
   },
   {
     roleName: "Cashier",
@@ -89,7 +93,8 @@ const DEFAULT_SYSTEM_ROLES: Array<{
       customers: ["view", "create"],
       riders: ["view", "create"],
       payment_methods: ["view"],
-      salaries: ["view"]
+      salaries: ["view"],
+      stock_requests: ["view", "create"]
     }
   },
   {
@@ -103,7 +108,8 @@ const DEFAULT_SYSTEM_ROLES: Array<{
       stock_transfers: ["view", "create", "approve"],
       purchases: ["view", "create"],
       suppliers: ["view", "create"],
-      salaries: ["view"]
+      salaries: ["view"],
+      stock_requests: ["view", "approve"]
     }
   }
 ];
@@ -400,6 +406,34 @@ export function ensureRidersPermission(tenantId: string): void {
       roleName: role.roleName,
       description: role.description,
       permissions: { ...role.permissions, riders: grant },
+      updatedBy: null
+    });
+  }
+}
+
+/**
+ * Retroactively grants "stock_requests" permissions (Cashier/Manager: view+create, Storekeeper:
+ * view+approve) to system roles seeded before the Stock Requests feature existed — new installs get
+ * it for free via DEFAULT_SYSTEM_ROLES. Safe every boot: a no-op once a role's stored permissions
+ * already include stock_requests.
+ */
+export function ensureStockRequestsPermission(tenantId: string): void {
+  const defaultsByName = new Map(
+    DEFAULT_SYSTEM_ROLES.map((role) => [role.roleName, role.permissions.stock_requests])
+  );
+
+  for (const row of roleRepository.findAllRoleRows(tenantId)) {
+    if (!row.is_system_role) continue;
+    const grant = defaultsByName.get(row.role_name);
+    if (!grant || grant.length === 0) continue;
+
+    const role = roleRepository.mapRoleRow(row);
+    if (role.permissions.stock_requests) continue;
+
+    roleRepository.updateRoleRow(row.id, {
+      roleName: role.roleName,
+      description: role.description,
+      permissions: { ...role.permissions, stock_requests: grant },
       updatedBy: null
     });
   }

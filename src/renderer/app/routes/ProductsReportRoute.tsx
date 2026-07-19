@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Loader2, Package } from "lucide-react";
+import { ExportMenu } from "@renderer/shared/components/ExportMenu";
+import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { formatCents } from "@renderer/shared/lib/money";
+import type { ExportListRequest } from "@shared/types/export";
 import type { DateRangeInput, SalesReportMode } from "@shared/types/report";
 import type { ProductsPerformanceReport } from "@shared/types/product-report";
 import { BestSellingProductsTable } from "./reports/BestSellingProductsTable";
@@ -12,6 +16,8 @@ import { SalesModeSelector } from "./reports/SalesModeSelector";
 import { SlowMovingProductsTable } from "./reports/SlowMovingProductsTable";
 
 export function ProductsReportRoute(): React.JSX.Element {
+  const { can } = usePermissions();
+  const canExport = can("reports", "export");
   const [mode, setMode] = useState<SalesReportMode>("monthly");
   const [anchor, setAnchor] = useState<string>(() => defaultAnchorForMode("monthly"));
   const [customRange, setCustomRange] = useState<DateRangeInput>(() => ({
@@ -50,17 +56,48 @@ export function ProductsReportRoute(): React.JSX.Element {
     void load(resolvedRange);
   }, [resolvedRange.startDate, resolvedRange.endDate, load]);
 
+  const exportRequest = useMemo<ExportListRequest | null>(() => {
+    if (!data) return null;
+    return {
+      module: "reports",
+      title: "Products Report — Best Selling",
+      subtitle: `${resolvedRange.startDate} to ${resolvedRange.endDate}`,
+      columns: [
+        { key: "product", header: "Product" },
+        { key: "sku", header: "SKU" },
+        { key: "category", header: "Category" },
+        { key: "qtySold", header: "Qty Sold", align: "right" },
+        { key: "revenue", header: "Revenue", align: "right" },
+        { key: "profit", header: "Profit", align: "right" },
+        { key: "margin", header: "Margin", align: "right" }
+      ],
+      rows: data.bestSelling.map((row) => ({
+        product: row.productName,
+        sku: row.sku,
+        category: row.categoryName ?? "—",
+        qtySold: String(row.quantitySold),
+        revenue: formatCents(row.revenueCents),
+        profit: formatCents(row.profitCents),
+        margin: row.revenueCents > 0 ? `${((row.profitCents / row.revenueCents) * 100).toFixed(1)}%` : "—"
+      })),
+      fileBaseName: `ProductsReport_${resolvedRange.startDate}_to_${resolvedRange.endDate}`
+    };
+  }, [data, resolvedRange]);
+
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }} className="mt-6 space-y-5 pb-10">
-      <div>
-        <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Insights</p>
-        <h2 className="mt-1 flex items-center gap-2 text-xl font-extrabold">
-          <Package className="size-5 text-primary" aria-hidden="true" />
-          Products Report
-        </h2>
-        <p className="mt-1 text-xs font-semibold text-muted">
-          Best sellers and slow movers for a period you pick, plus a full sales history for any single product.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Insights</p>
+          <h2 className="mt-1 flex items-center gap-2 text-xl font-extrabold">
+            <Package className="size-5 text-primary" aria-hidden="true" />
+            Products Report
+          </h2>
+          <p className="mt-1 text-xs font-semibold text-muted">
+            Best sellers and slow movers for a period you pick, plus a full sales history for any single product.
+          </p>
+        </div>
+        {canExport && exportRequest && <ExportMenu request={exportRequest} />}
       </div>
 
       <div className="rounded-lg border border-line bg-white p-5 shadow-soft">

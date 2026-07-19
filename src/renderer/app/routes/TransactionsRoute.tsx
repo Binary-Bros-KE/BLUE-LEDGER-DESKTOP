@@ -2,11 +2,17 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowLeftRight, Loader2, Search } from "lucide-react";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import { StatTile } from "@renderer/shared/components/StatTile";
+import { usePermissions } from "@renderer/shared/hooks/use-permissions";
+import { getDashboardVariant } from "@renderer/shared/lib/dashboard-role";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import { todayIso } from "@renderer/app/routes/reports/salesReportDate";
+import type { ExportListRequest } from "@shared/types/export";
 import type { PaymentTransactionRow } from "@shared/types/report";
+
+const ALL_VALUE = "__all__";
 
 function monthStartIso(): string {
   return `${todayIso().slice(0, 7)}-01`;
@@ -26,11 +32,18 @@ function formatDateTime(iso: string): string {
  * on "sales", same as Checkout/Receipts) and always branch-scoped like everything else in this app
  * — a Cashier only ever sees their own storefront's payments here. */
 export function TransactionsRoute(): React.JSX.Element {
+  const { can, session } = usePermissions();
+  const isSuperAdmin = getDashboardVariant(session) === "superAdmin";
+  const canExport = can("sales", "export");
+
   const [dateFrom, setDateFrom] = useState(monthStartIso());
   const [dateTo, setDateTo] = useState(todayIso());
   const [transactions, setTransactions] = useState<PaymentTransactionRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState(ALL_VALUE);
+  const [cashierFilter, setCashierFilter] = useState(ALL_VALUE);
+  const [locationFilter, setLocationFilter] = useState(ALL_VALUE);
 
   const load = useCallback(async (from: string, to: string) => {
     setLoadError(null);
@@ -46,15 +59,42 @@ export function TransactionsRoute(): React.JSX.Element {
     void load(dateFrom, dateTo);
   }, [load, dateFrom, dateTo]);
 
+  const paymentMethodOptions = useMemo(() => {
+    if (!transactions) return [];
+    return Array.from(new Set(transactions.map((row) => row.paymentMethodName).filter((name): name is string => Boolean(name)))).sort();
+  }, [transactions]);
+
+  const cashierOptions = useMemo(() => {
+    if (!transactions) return [];
+    return Array.from(new Set(transactions.map((row) => row.processedByName))).sort();
+  }, [transactions]);
+
+  const locationOptions = useMemo(() => {
+    if (!transactions) return [];
+    return Array.from(new Set(transactions.map((row) => row.locationName))).sort();
+  }, [transactions]);
+
   const filtered = useMemo(() => {
     if (!transactions) return null;
+    let list = transactions;
+
+    if (paymentMethodFilter !== ALL_VALUE) {
+      list = list.filter((row) => row.paymentMethodName === paymentMethodFilter);
+    }
+    if (cashierFilter !== ALL_VALUE) {
+      list = list.filter((row) => row.processedByName === cashierFilter);
+    }
+    if (isSuperAdmin && locationFilter !== ALL_VALUE) {
+      list = list.filter((row) => row.locationName === locationFilter);
+    }
+
     const term = searchTerm.trim().toLowerCase();
-    if (!term) return transactions;
-    return transactions.filter((row) => {
+    if (!term) return list;
+    return list.filter((row) => {
       const haystack = `${row.transactionCode} ${row.paymentMethodName ?? ""} ${row.processedByName} ${row.locationName}`.toLowerCase();
       return haystack.includes(term);
     });
-  }, [transactions, searchTerm]);
+  }, [transactions, searchTerm, paymentMethodFilter, cashierFilter, locationFilter, isSuperAdmin]);
 
   const summary = useMemo(() => {
     if (!filtered) return null;
@@ -66,6 +106,48 @@ export function TransactionsRoute(): React.JSX.Element {
       totalCents: complete.reduce((sum, row) => sum + row.amountCents, 0)
     };
   }, [filtered]);
+
+  const exportRequest = useMemo<ExportListRequest | null>(() => {
+    if (!filtered) return null;
+    const filterParts: string[] = [`Date: ${dateFrom} to ${dateTo}`];
+    if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
+    if (paymentMethodFilter !== ALL_VALUE) filterParts.push(`Payment Method: ${paymentMethodFilter}`);
+    if (cashierFilter !== ALL_VALUE) filterParts.push(`Cashier: ${cashierFilter}`);
+    if (isSuperAdmin && locationFilter !== ALL_VALUE) filterParts.push(`Storefront: ${locationFilter}`);
+
+    return {
+      module: "sales",
+      title: "Transactions",
+      subtitle: filterParts.join(" · "),
+      columns: [
+        { key: "time", header: "Time" },
+        { key: "code", header: "Transaction Code" },
+        { key: "storefront", header: "Storefront" },
+        { key: "paymentMethod", header: "Payment Method" },
+        { key: "processedBy", header: "Processed By" },
+        { key: "amount", header: "Amount", align: "right" },
+        { key: "status", header: "Status" }
+      ],
+      rows: filtered.map((row) => ({
+        time: formatDateTime(row.occurredAt),
+        code: row.transactionCode,
+        storefront: row.locationName,
+        paymentMethod: row.paymentMethodName ?? "—",
+        processedBy: row.processedByName,
+        amount: formatCents(row.amountCents),
+        status: row.status
+      })),
+      stats: summary
+        ? [
+            { label: "Transactions", value: String(summary.count) },
+            { label: "Complete", value: String(summary.completeCount) },
+            { label: "Failed", value: String(summary.failedCount) },
+            { label: "Total Collected", value: formatCents(summary.totalCents) }
+          ]
+        : [],
+      fileBaseName: `Transactions_${dateFrom}_to_${dateTo}`
+    };
+  }, [filtered, summary, dateFrom, dateTo, searchTerm, paymentMethodFilter, cashierFilter, locationFilter, isSuperAdmin]);
 
   return (
     <motion.div
@@ -88,15 +170,18 @@ export function TransactionsRoute(): React.JSX.Element {
       />
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
-        <div>
-          <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Transactions</p>
-          <h2 className="mt-1 flex items-center gap-2 text-xl font-extrabold">
-            <ArrowLeftRight className="size-5 text-primary" aria-hidden="true" />
-            Every Payment, In One Place
-          </h2>
-          <p className="mt-1 text-xs font-semibold text-muted">
-            Search by transaction code to confirm whether — and when — a payment actually went through.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Transactions</p>
+            <h2 className="mt-1 flex items-center gap-2 text-xl font-extrabold">
+              <ArrowLeftRight className="size-5 text-primary" aria-hidden="true" />
+              Every Payment, In One Place
+            </h2>
+            <p className="mt-1 text-xs font-semibold text-muted">
+              Search by transaction code to confirm whether — and when — a payment actually went through.
+            </p>
+          </div>
+          {canExport && exportRequest && <ExportMenu request={exportRequest} />}
         </div>
 
         {loadError && (
@@ -147,6 +232,69 @@ export function TransactionsRoute(): React.JSX.Element {
               className="mt-1.5 h-10 rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
             />
           </label>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-end gap-3">
+          <label className="block">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Payment Method</span>
+            <select
+              value={paymentMethodFilter}
+              onChange={(event) => setPaymentMethodFilter(event.target.value)}
+              className="mt-1.5 h-10 min-w-[160px] rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+            >
+              <option value={ALL_VALUE}>All Payment Methods</option>
+              {paymentMethodOptions.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Cashier</span>
+            <select
+              value={cashierFilter}
+              onChange={(event) => setCashierFilter(event.target.value)}
+              className="mt-1.5 h-10 min-w-[160px] rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+            >
+              <option value={ALL_VALUE}>All Cashiers</option>
+              {cashierOptions.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {isSuperAdmin && (
+            <label className="block">
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Storefront</span>
+              <select
+                value={locationFilter}
+                onChange={(event) => setLocationFilter(event.target.value)}
+                className="mt-1.5 h-10 min-w-[160px] rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+              >
+                <option value={ALL_VALUE}>All Storefronts</option>
+                {locationOptions.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {(paymentMethodFilter !== ALL_VALUE || cashierFilter !== ALL_VALUE || locationFilter !== ALL_VALUE) && (
+            <button
+              type="button"
+              onClick={() => {
+                setPaymentMethodFilter(ALL_VALUE);
+                setCashierFilter(ALL_VALUE);
+                setLocationFilter(ALL_VALUE);
+              }}
+              className="h-10 rounded-lg border border-line bg-white px-3 text-xs font-bold text-ink shadow-none transition hover:bg-soft cursor-pointer"
+            >
+              Clear filters
+            </button>
+          )}
         </div>
 
         <div className="mt-5">

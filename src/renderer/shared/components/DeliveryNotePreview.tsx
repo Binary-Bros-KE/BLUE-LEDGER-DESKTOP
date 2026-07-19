@@ -4,6 +4,7 @@ import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { SaleDelivery } from "@shared/types/sale";
 import type { TenantContext } from "@shared/types/tenant";
 
@@ -82,8 +83,11 @@ export function DeliveryNotePreview({
     try {
       const updated = await window.blueLedger.deliveryNote.setDelivered(delivery.id, !delivery.isDelivered);
       onDeliveredChange?.(updated);
+      showSuccessToast(updated.isDelivered ? "Marked as delivered" : "Marked as not delivered");
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to update delivery status"));
+      const message = getErrorMessage(err, "Failed to update delivery status");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setTogglingDelivered(false);
     }

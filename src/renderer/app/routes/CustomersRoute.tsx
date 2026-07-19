@@ -3,13 +3,16 @@ import { motion } from "framer-motion";
 import { Eye, Loader2, Pencil, Plus, Power, PowerOff, Search, Users } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import { Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { CUSTOMER_TYPE_OPTIONS, type Customer, type CustomerType } from "@shared/types/customer";
+import type { ExportListRequest } from "@shared/types/export";
 import { CustomerDetailModal } from "./customers/CustomerDetailModal";
 
 type FormState = {
@@ -52,6 +55,7 @@ export function CustomersRoute(): React.JSX.Element {
   const { can } = usePermissions();
   const canCreate = can("customers", "create");
   const canEdit = can("customers", "edit");
+  const canExport = can("customers", "export");
 
   const [customers, setCustomers] = useState<Customer[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -89,6 +93,36 @@ export function CustomersRoute(): React.JSX.Element {
       return haystack.includes(term);
     });
   }, [customers, searchTerm]);
+
+  const exportRequest = useMemo<ExportListRequest | null>(() => {
+    if (!filteredCustomers) return null;
+    return {
+      module: "customers",
+      title: "Customers",
+      subtitle: searchTerm.trim() ? `Search: "${searchTerm.trim()}"` : "Full customer directory",
+      columns: [
+        { key: "code", header: "Code" },
+        { key: "name", header: "Name" },
+        { key: "phone", header: "Phone" },
+        { key: "type", header: "Type" },
+        { key: "balance", header: "Balance", align: "right" },
+        { key: "status", header: "Status" }
+      ],
+      rows: filteredCustomers.map((customer) => ({
+        code: customer.customerCode,
+        name: customer.name,
+        phone: customer.phone,
+        type: customerTypeLabel(customer.customerType),
+        balance: formatCents(customer.currentBalanceCents),
+        status: customer.status === "active" ? "Active" : "Inactive"
+      })),
+      stats: [
+        { label: "Total Customers", value: String(filteredCustomers.length) },
+        { label: "Active", value: String(filteredCustomers.filter((c) => c.status === "active").length) }
+      ],
+      fileBaseName: `Customers_${new Date().toISOString().slice(0, 10)}`
+    };
+  }, [filteredCustomers, searchTerm]);
 
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]): void {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -131,8 +165,11 @@ export function CustomersRoute(): React.JSX.Element {
       }
       await loadCustomers();
       setModalOpen(false);
+      showSuccessToast(editingCustomer ? "Customer updated" : "Customer created");
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to save customer"));
+      const message = getErrorMessage(err, "Failed to save customer");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }
@@ -141,13 +178,14 @@ export function CustomersRoute(): React.JSX.Element {
   async function handleToggleStatus(customer: Customer): Promise<void> {
     setActionError(null);
     try {
-      await window.blueLedger.customer.setStatus(
-        customer.id,
-        customer.status === "active" ? "inactive" : "active"
-      );
+      const nextStatus = customer.status === "active" ? "inactive" : "active";
+      await window.blueLedger.customer.setStatus(customer.id, nextStatus);
       await loadCustomers();
+      showSuccessToast(nextStatus === "active" ? "Customer activated" : "Customer deactivated");
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to update status"));
+      const message = getErrorMessage(err, "Failed to update status");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 
@@ -183,12 +221,15 @@ export function CustomersRoute(): React.JSX.Element {
               Save returning customers for faster checkout, or leave sales anonymous for walk-ins.
             </p>
           </div>
-          {canCreate && (
-            <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
-              <Plus className="mr-1.5 size-4" aria-hidden="true" />
-              New Customer
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {canExport && exportRequest && <ExportMenu request={exportRequest} />}
+            {canCreate && (
+              <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
+                <Plus className="mr-1.5 size-4" aria-hidden="true" />
+                New Customer
+              </Button>
+            )}
+          </div>
         </div>
 
         {actionError && (

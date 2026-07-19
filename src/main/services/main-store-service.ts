@@ -192,6 +192,72 @@ export function receiveMainStoreStock(input: unknown): MainStoreProductDetail {
 }
 
 /**
+ * Core of shipping stock from Main Store to a storefront — draws from that storefront's own earmarked
+ * allocation first; only dips into the unallocated bucket if the storefront doesn't have enough already
+ * earmarked (never from a DIFFERENT storefront's allocation). Deliberately NOT wrapped in its own
+ * transaction and NOT permission-checked, so callers that need to fulfil several products atomically
+ * under one already-checked permission (e.g. approving a multi-item stock request) can loop this inside
+ * a single `runInTransaction`. `distributeFromMainStore` below is the normal single-product, permission
+ * checked, self-transacted entry point most callers should use instead.
+ */
+export function distributeMainStoreStockCore(params: {
+  tenantId: string;
+  employeeId: string | null;
+  productId: string;
+  storefrontId: string;
+  quantity: number;
+  notes: string | null;
+  referenceType: string;
+  referenceId: string;
+}): void {
+  const mainStore = requireMainStoreLocation(params.tenantId);
+  requireStorefront(params.storefrontId, params.tenantId);
+
+  const allocatedQuantity =
+    mainStoreAllocationRepository.findAllocationRow(params.productId, params.storefrontId)?.quantity ?? 0;
+  const unallocatedQuantity = mainStoreAllocationRepository.findAllocationRow(params.productId, null)?.quantity ?? 0;
+
+  let sourceBucket: string | null;
+  if (allocatedQuantity >= params.quantity) {
+    sourceBucket = params.storefrontId;
+  } else if (unallocatedQuantity >= params.quantity) {
+    sourceBucket = null;
+  } else {
+    throw new Error(
+      `Not enough stock to distribute ${params.quantity}. Earmarked for this storefront: ${allocatedQuantity}, unallocated: ${unallocatedQuantity}.`
+    );
+  }
+
+  applyValidatedStockMovement(
+    {
+      productId: params.productId,
+      locationId: mainStore.id,
+      movementType: "transfer_out",
+      quantityChange: -params.quantity,
+      referenceType: params.referenceType,
+      referenceId: params.referenceId,
+      performedBy: params.employeeId,
+      notes: params.notes,
+      allocationStorefrontId: sourceBucket
+    },
+    params.tenantId
+  );
+  applyValidatedStockMovement(
+    {
+      productId: params.productId,
+      locationId: params.storefrontId,
+      movementType: "transfer_in",
+      quantityChange: params.quantity,
+      referenceType: params.referenceType,
+      referenceId: params.referenceId,
+      performedBy: params.employeeId,
+      notes: params.notes
+    },
+    params.tenantId
+  );
+}
+
+/**
  * Ships stock from Main Store to a storefront. Draws from that storefront's own earmarked allocation
  * first; only dips into the unallocated bucket if the storefront doesn't have enough already earmarked
  * — it never draws from a DIFFERENT storefront's allocation, so one branch's incoming stock can never
@@ -202,54 +268,19 @@ export function distributeFromMainStore(input: unknown): MainStoreProductDetail 
   const parsed: MainStoreTransferInput = mainStoreTransferSchema.parse(input);
   const { tenantId } = getCurrentTenant();
   const employeeId = getCurrentEmployeeId();
-  const mainStore = requireMainStoreLocation(tenantId);
-  requireStorefront(parsed.storefrontId, tenantId);
-
-  const allocatedQuantity =
-    mainStoreAllocationRepository.findAllocationRow(parsed.productId, parsed.storefrontId)?.quantity ?? 0;
-  const unallocatedQuantity = mainStoreAllocationRepository.findAllocationRow(parsed.productId, null)?.quantity ?? 0;
-
-  let sourceBucket: string | null;
-  if (allocatedQuantity >= parsed.quantity) {
-    sourceBucket = parsed.storefrontId;
-  } else if (unallocatedQuantity >= parsed.quantity) {
-    sourceBucket = null;
-  } else {
-    throw new Error(
-      `Not enough stock to distribute ${parsed.quantity}. Earmarked for this storefront: ${allocatedQuantity}, unallocated: ${unallocatedQuantity}.`
-    );
-  }
-
   const transferId = `transfer_${randomUUID()}`;
 
   runInTransaction(() => {
-    applyValidatedStockMovement(
-      {
-        productId: parsed.productId,
-        locationId: mainStore.id,
-        movementType: "transfer_out",
-        quantityChange: -parsed.quantity,
-        referenceType: "main_store_distribution",
-        referenceId: transferId,
-        performedBy: employeeId,
-        notes: parsed.notes,
-        allocationStorefrontId: sourceBucket
-      },
-      tenantId
-    );
-    applyValidatedStockMovement(
-      {
-        productId: parsed.productId,
-        locationId: parsed.storefrontId,
-        movementType: "transfer_in",
-        quantityChange: parsed.quantity,
-        referenceType: "main_store_distribution",
-        referenceId: transferId,
-        performedBy: employeeId,
-        notes: parsed.notes
-      },
-      tenantId
-    );
+    distributeMainStoreStockCore({
+      tenantId,
+      employeeId,
+      productId: parsed.productId,
+      storefrontId: parsed.storefrontId,
+      quantity: parsed.quantity,
+      notes: parsed.notes,
+      referenceType: "main_store_distribution",
+      referenceId: transferId
+    });
   });
 
   return buildProductDetail(tenantId, parsed.productId);

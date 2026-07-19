@@ -17,7 +17,9 @@ import {
   XCircle
 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
+import { useConfirm } from "@renderer/shared/components/ConfirmModal";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import {
   ExtraChargesSection,
   type DeliveryDraft,
@@ -31,8 +33,10 @@ import { computeLinePricing } from "@renderer/shared/lib/cart-pricing";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import type { Customer } from "@shared/types/customer";
+import type { ExportListRequest } from "@shared/types/export";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import type { ProductListItem } from "@shared/types/product";
 import {
@@ -108,6 +112,8 @@ export function QuotationsRoute(): React.JSX.Element {
   const canCreate = can("quotations", "create");
   const canEdit = can("quotations", "edit");
   const canDelete = can("quotations", "delete");
+  const canExport = can("quotations", "export");
+  const confirm = useConfirm();
 
   const [summary, setSummary] = useState<QuotationSummary | null>(null);
   const [quotations, setQuotations] = useState<QuotationListItem[] | null>(null);
@@ -209,6 +215,51 @@ export function QuotationsRoute(): React.JSX.Element {
     return [...list].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [quotations, activeTab, searchTerm, dateFrom, dateTo]);
 
+  const exportRequest = useMemo<ExportListRequest | null>(() => {
+    if (!filteredQuotations) return null;
+    const filterParts: string[] = [];
+    if (activeTab !== "all") filterParts.push(`Filter: ${FILTER_TABS.find((tab) => tab.value === activeTab)?.label}`);
+    if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
+    if (dateFrom || dateTo) filterParts.push(`Date: ${dateFrom || "…"} to ${dateTo || "…"}`);
+
+    return {
+      module: "quotations",
+      title: "Quotations",
+      subtitle: filterParts.length > 0 ? filterParts.join(" · ") : "All quotations",
+      columns: [
+        { key: "quotationNumber", header: "Quotation #" },
+        { key: "customer", header: "Customer" },
+        { key: "storefront", header: "Storefront" },
+        { key: "salesperson", header: "Salesperson" },
+        { key: "created", header: "Created" },
+        { key: "validUntil", header: "Valid Until" },
+        { key: "total", header: "Total Amount", align: "right" },
+        { key: "status", header: "Status" }
+      ],
+      rows: filteredQuotations.map((quotation) => ({
+        quotationNumber: quotation.quotationNumber,
+        customer: quotation.customerName,
+        storefront: quotation.locationName,
+        salesperson: quotation.employeeName,
+        created: formatDate(quotation.createdAt),
+        validUntil: formatDate(quotation.validUntil),
+        total: `${currency} ${formatCents(quotation.grandTotalCents)}`,
+        status: statusLabel(quotation.status)
+      })),
+      stats: summary
+        ? [
+            { label: "Total Quotations", value: String(summary.totalQuotations) },
+            { label: "Draft", value: String(summary.draftCount) },
+            { label: "Sent", value: String(summary.sentCount) },
+            { label: "Accepted", value: String(summary.acceptedCount) },
+            { label: "Expired", value: String(summary.expiredCount) },
+            { label: "Converted", value: String(summary.convertedCount) }
+          ]
+        : [],
+      fileBaseName: `Quotations_${new Date().toISOString().slice(0, 10)}`
+    };
+  }, [filteredQuotations, summary, activeTab, searchTerm, dateFrom, dateTo, currency]);
+
   async function openView(id: string): Promise<void> {
     setViewLoading(true);
     setActionError(null);
@@ -239,21 +290,33 @@ export function QuotationsRoute(): React.JSX.Element {
       await window.blueLedger.quotation.setStatus(viewingQuotation.id, status);
       await refreshViewing(viewingQuotation.id);
       await loadAll();
+      showSuccessToast(`Quotation marked as ${status}`);
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to update status"));
+      const message = getErrorMessage(err, "Failed to update status");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 
   async function handleDelete(): Promise<void> {
     if (!viewingQuotation) return;
-    if (!window.confirm(`Delete draft quotation ${viewingQuotation.quotationNumber}? This can't be undone.`)) return;
+    const confirmed = await confirm({
+      title: "Delete this draft?",
+      message: `Delete draft quotation ${viewingQuotation.quotationNumber}? This can't be undone.`,
+      tone: "danger",
+      confirmLabel: "Delete"
+    });
+    if (!confirmed) return;
     setActionError(null);
     try {
       await window.blueLedger.quotation.delete(viewingQuotation.id);
       closeView();
       await loadAll();
+      showSuccessToast("Draft quotation deleted");
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to delete quotation"));
+      const message = getErrorMessage(err, "Failed to delete quotation");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 
@@ -339,9 +402,13 @@ export function QuotationsRoute(): React.JSX.Element {
       closeConvert();
       await refreshViewing(viewingQuotation.id);
       await loadAll();
-      setNotice(`Converted to Sale — receipt ${sale.receiptNumber ?? sale.id}`);
+      const message = `Converted to Sale — receipt ${sale.receiptNumber ?? sale.id}`;
+      setNotice(message);
+      showSuccessToast(message);
     } catch (err) {
-      setConvertError(getErrorMessage(err, "Failed to convert to sale"));
+      const message = getErrorMessage(err, "Failed to convert to sale");
+      setConvertError(message);
+      showErrorToast(message);
     } finally {
       setConvertSaving(false);
     }
@@ -360,9 +427,13 @@ export function QuotationsRoute(): React.JSX.Element {
       closeConvert();
       await refreshViewing(viewingQuotation.id);
       await loadAll();
-      setNotice(`Converted to Invoice ${sale.invoiceNumber ?? ""}`);
+      const message = `Converted to Invoice ${sale.invoiceNumber ?? ""}`;
+      setNotice(message);
+      showSuccessToast(message);
     } catch (err) {
-      setConvertError(getErrorMessage(err, "Failed to convert to invoice"));
+      const message = getErrorMessage(err, "Failed to convert to invoice");
+      setConvertError(message);
+      showErrorToast(message);
     } finally {
       setConvertSaving(false);
     }
@@ -514,8 +585,11 @@ export function QuotationsRoute(): React.JSX.Element {
       });
       setCreateOpen(false);
       await loadAll();
+      showSuccessToast("Quotation created");
     } catch (err) {
-      setCreateError(getErrorMessage(err, "Failed to create quotation"));
+      const message = getErrorMessage(err, "Failed to create quotation");
+      setCreateError(message);
+      showErrorToast(message);
     } finally {
       setCreateSaving(false);
     }
@@ -555,12 +629,15 @@ export function QuotationsRoute(): React.JSX.Element {
               Prepare quotes for customers, then convert accepted ones straight into a sale or invoice.
             </p>
           </div>
-          {canCreate && (
-            <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
-              <Plus className="mr-1.5 size-4" aria-hidden="true" />
-              New Quotation
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {canExport && exportRequest && <ExportMenu request={exportRequest} />}
+            {canCreate && (
+              <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
+                <Plus className="mr-1.5 size-4" aria-hidden="true" />
+                New Quotation
+              </Button>
+            )}
+          </div>
         </div>
 
         {(loadError ?? actionError) && (

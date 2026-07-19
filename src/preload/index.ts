@@ -225,6 +225,18 @@ const api: BlueLedgerApi = {
     getForQuotation: (quotationId) => invoke("delivery-note:get-for-quotation", quotationId),
     setDelivered: (id, delivered) => invoke("delivery-note:set-delivered", id, delivered)
   },
+  export: {
+    toPdf: (request) => invoke("export:to-pdf", request),
+    toCsv: (request) => invoke("export:to-csv", request),
+    toExcel: (request) => invoke("export:to-excel", request)
+  },
+  stockRequest: {
+    list: () => invoke("stock-request:list"),
+    get: (id) => invoke("stock-request:get", id),
+    create: (input) => invoke("stock-request:create", input),
+    approve: (id) => invoke("stock-request:approve", id),
+    reject: (id, input) => invoke("stock-request:reject", id, input)
+  },
   sync: {
     getSnapshot: () => invoke("sync:get-snapshot"),
     listQueue: (input) => invoke("sync:list-queue", input ?? {})

@@ -15,12 +15,14 @@ import {
 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import { SelectField } from "@renderer/shared/components/form-fields";
 import { StatTile } from "@renderer/shared/components/StatTile";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import type { ExportListRequest } from "@shared/types/export";
 import type { Location } from "@shared/types/location";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import type { Product, ProductListItem } from "@shared/types/product";
@@ -82,6 +84,7 @@ export function PurchasesRoute(): React.JSX.Element {
   const { can } = usePermissions();
   const canCreate = can("purchases", "create");
   const canEdit = can("purchases", "edit");
+  const canExport = can("purchases", "export");
 
   const [summary, setSummary] = useState<PurchaseSummary | null>(null);
   const [purchases, setPurchases] = useState<PurchaseListItem[] | null>(null);
@@ -178,6 +181,74 @@ export function PurchasesRoute(): React.JSX.Element {
 
     return list;
   }, [purchases, statusFilter, supplierFilter, locationFilter, paymentStatusFilter, taxTypeFilter, dateFrom, dateTo, searchTerm]);
+
+  const exportRequest = useMemo<ExportListRequest | null>(() => {
+    if (!filteredPurchases) return null;
+    const filterParts: string[] = [];
+    if (statusFilter !== "all") filterParts.push(`Status: ${statusLabel(statusFilter)}`);
+    if (paymentStatusFilter !== "all") filterParts.push(`Payment Status: ${paymentStatusFilter}`);
+    if (taxTypeFilter !== "all") filterParts.push(`Tax Type: ${taxTypeFilter}`);
+    if (supplierFilter) {
+      filterParts.push(`Supplier: ${suppliers.find((s) => s.id === supplierFilter)?.businessName ?? supplierFilter}`);
+    }
+    if (locationFilter) {
+      filterParts.push(`Destination: ${locations.find((l) => l.id === locationFilter)?.locationName ?? locationFilter}`);
+    }
+    if (dateFrom || dateTo) filterParts.push(`Date: ${dateFrom || "…"} to ${dateTo || "…"}`);
+    if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
+
+    return {
+      module: "purchases",
+      title: "Purchases",
+      subtitle: filterParts.length > 0 ? filterParts.join(" · ") : "All purchase orders",
+      columns: [
+        { key: "poNumber", header: "PO #" },
+        { key: "supplier", header: "Supplier" },
+        { key: "supplierInvoice", header: "Supplier Invoice #" },
+        { key: "destination", header: "Destination" },
+        { key: "status", header: "Status" },
+        { key: "total", header: "Total Amount", align: "right" },
+        { key: "paymentStatus", header: "Payment Status" },
+        { key: "ordered", header: "Ordered" },
+        { key: "received", header: "Received" }
+      ],
+      rows: filteredPurchases.map((purchase) => ({
+        poNumber: purchase.purchaseNumber,
+        supplier: purchase.supplierName,
+        supplierInvoice: purchase.supplierInvoiceNumber ?? "—",
+        destination: purchase.locationName,
+        status: statusLabel(purchase.status),
+        total: formatCents(purchase.grandTotalCents),
+        paymentStatus: purchase.paymentStatus === "partially_paid" ? "Partially Paid" : purchase.paymentStatus,
+        ordered: formatDate(purchase.orderedAt),
+        received: formatDate(purchase.receivedAt)
+      })),
+      stats: summary
+        ? [
+            { label: "Total Purchases", value: String(summary.totalPurchases) },
+            { label: "Draft", value: String(summary.draftCount) },
+            { label: "Ordered", value: String(summary.orderedCount) },
+            { label: "Partially Received", value: String(summary.partiallyReceivedCount) },
+            { label: "Received", value: String(summary.receivedCount) },
+            { label: "Outstanding Payments", value: formatCents(summary.outstandingSupplierPaymentsCents ?? 0) }
+          ]
+        : [],
+      fileBaseName: `Purchases_${new Date().toISOString().slice(0, 10)}`
+    };
+  }, [
+    filteredPurchases,
+    summary,
+    statusFilter,
+    paymentStatusFilter,
+    taxTypeFilter,
+    supplierFilter,
+    locationFilter,
+    dateFrom,
+    dateTo,
+    searchTerm,
+    suppliers,
+    locations
+  ]);
 
   function clearFilters(): void {
     setSearchTerm("");
@@ -284,12 +355,15 @@ export function PurchasesRoute(): React.JSX.Element {
               Order stock from suppliers, then receive it in to update inventory automatically.
             </p>
           </div>
-          {canCreate && (
-            <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
-              <Plus className="mr-1.5 size-4" aria-hidden="true" />
-              New Purchase
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {canExport && exportRequest && <ExportMenu request={exportRequest} />}
+            {canCreate && (
+              <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
+                <Plus className="mr-1.5 size-4" aria-hidden="true" />
+                New Purchase
+              </Button>
+            )}
+          </div>
         </div>
 
         {(loadError ?? actionError) && (
