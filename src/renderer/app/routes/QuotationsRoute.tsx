@@ -34,6 +34,13 @@ import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
+import {
+  ALL_YEARS_VALUE,
+  buildAvailableYears,
+  currentYear,
+  matchesYearFilter,
+  yearFilterOptions
+} from "@renderer/shared/lib/year-filter";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import type { Customer } from "@shared/types/customer";
 import type { ExportListRequest } from "@shared/types/export";
@@ -126,6 +133,7 @@ export function QuotationsRoute(): React.JSX.Element {
 
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
   const [searchTerm, setSearchTerm] = useState("");
+  const [yearFilter, setYearFilter] = useState<string>(String(currentYear()));
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
@@ -186,6 +194,11 @@ export function QuotationsRoute(): React.JSX.Element {
   );
   const selectedConvertMethod = activePaymentMethods.find((method) => method.id === convertPaymentMethodId) ?? null;
 
+  const availableYears = useMemo(
+    () => buildAvailableYears((quotations ?? []).map((quotation) => quotation.createdAt)),
+    [quotations]
+  );
+
   const filteredQuotations = useMemo(() => {
     if (!quotations) return null;
     let list = quotations;
@@ -212,14 +225,17 @@ export function QuotationsRoute(): React.JSX.Element {
       });
     }
 
+    list = list.filter((quotation) => matchesYearFilter(quotation.createdAt, yearFilter));
+
     return [...list].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [quotations, activeTab, searchTerm, dateFrom, dateTo]);
+  }, [quotations, activeTab, searchTerm, dateFrom, dateTo, yearFilter]);
 
   const exportRequest = useMemo<ExportListRequest | null>(() => {
     if (!filteredQuotations) return null;
     const filterParts: string[] = [];
     if (activeTab !== "all") filterParts.push(`Filter: ${FILTER_TABS.find((tab) => tab.value === activeTab)?.label}`);
     if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
+    if (yearFilter !== ALL_YEARS_VALUE) filterParts.push(`Year: ${yearFilter}`);
     if (dateFrom || dateTo) filterParts.push(`Date: ${dateFrom || "…"} to ${dateTo || "…"}`);
 
     return {
@@ -258,7 +274,7 @@ export function QuotationsRoute(): React.JSX.Element {
         : [],
       fileBaseName: `Quotations_${new Date().toISOString().slice(0, 10)}`
     };
-  }, [filteredQuotations, summary, activeTab, searchTerm, dateFrom, dateTo, currency]);
+  }, [filteredQuotations, summary, activeTab, searchTerm, yearFilter, dateFrom, dateTo, currency]);
 
   async function openView(id: string): Promise<void> {
     setViewLoading(true);
@@ -690,6 +706,13 @@ export function QuotationsRoute(): React.JSX.Element {
               />
             </div>
           </label>
+          <SelectField
+            label="Year"
+            value={yearFilter}
+            onChange={setYearFilter}
+            options={yearFilterOptions(availableYears)}
+            className="w-32"
+          />
           <label className="block">
             <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">From</span>
             <input

@@ -48,6 +48,8 @@ type FormState = {
   openingTime: string;
   closingTime: string;
   description: string;
+  receiptHeader: string;
+  receiptFooter: string;
   canReceiveStock: boolean;
   canSellStock: boolean;
   canTransferStock: boolean;
@@ -72,6 +74,8 @@ const emptyForm: FormState = {
   openingTime: "",
   closingTime: "",
   description: "",
+  receiptHeader: "",
+  receiptFooter: "",
   canReceiveStock: true,
   canSellStock: true,
   canTransferStock: true
@@ -97,6 +101,8 @@ function toFormState(location: Location): FormState {
     openingTime: location.openingTime ?? "",
     closingTime: location.closingTime ?? "",
     description: location.description ?? "",
+    receiptHeader: location.receiptHeader ?? "",
+    receiptFooter: location.receiptFooter ?? "",
     canReceiveStock: location.canReceiveStock,
     canSellStock: location.canSellStock,
     canTransferStock: location.canTransferStock
@@ -423,7 +429,7 @@ export function StorefrontsRoute(): React.JSX.Element {
                 )}
               </div>
               <p className="mt-1.5 text-[11px] font-semibold text-muted">
-                JPG, PNG, or WEBP · max 5MB. Optional — falls back to the business logo on documents.
+                JPG, PNG, or WEBP · max 10MB. Optional — falls back to the business logo on documents.
               </p>
             </div>
           </div>
@@ -543,6 +549,31 @@ export function StorefrontsRoute(): React.JSX.Element {
               placeholder="e.g. Main branch serving Nairobi CBD walk-in customers"
               className="sm:col-span-2"
             />
+          </div>
+
+          <div className="mt-5 border-t border-line pt-5">
+            <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
+              Receipt &amp; Document Branding
+            </p>
+            <p className="mt-1 text-xs font-semibold text-muted">
+              This storefront's own name, address, and phone (above) are what print on its receipts,
+              invoices, and quotations — never another storefront's. Add a header/footer specific to this
+              branch below.
+            </p>
+            <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <TextAreaField
+                label="Receipt Header"
+                value={form.receiptHeader}
+                onChange={(value) => updateField("receiptHeader", value)}
+                placeholder="e.g. Thank you for shopping with us!"
+              />
+              <TextAreaField
+                label="Receipt Footer"
+                value={form.receiptFooter}
+                onChange={(value) => updateField("receiptFooter", value)}
+                placeholder="e.g. Goods sold are non-refundable. Visit again!"
+              />
+            </div>
           </div>
 
           <div className="mt-5 border-t border-line pt-5">

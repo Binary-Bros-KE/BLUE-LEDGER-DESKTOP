@@ -9,7 +9,7 @@ import type { EmployeeRow } from "@main/database/repositories/employee-repositor
 import type { LogoRatio } from "@shared/types/logo";
 import type { PermissionAction, PermissionModuleKey } from "@shared/types/role";
 
-const MAX_FAILED_ATTEMPTS = 5;
+const MAX_FAILED_ATTEMPTS = 10;
 const LOCKOUT_MINUTES = 15;
 
 /** Held in main-process memory only — cleared on logout or app restart. Never persisted. */
@@ -166,6 +166,13 @@ export function requireSignedIn(): void {
 /** The signed-in employee's id, for stamping created_by/updated_by/performed_by columns. Null when signed out. */
 export function getCurrentEmployeeId(): string | null {
   return currentSession?.employee.id ?? null;
+}
+
+/** The signed-in employee's display name, for auto-filling "who handled this" fields (e.g. an
+ * Expense's paidBy) that are otherwise free text. Null when signed out. */
+export function getCurrentEmployeeName(): string | null {
+  if (!currentSession) return null;
+  return `${currentSession.employee.firstName} ${currentSession.employee.lastName}`.trim();
 }
 
 /**

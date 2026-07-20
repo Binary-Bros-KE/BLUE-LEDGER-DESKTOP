@@ -3,11 +3,13 @@ import { Loader2, Paperclip, Plus, X } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
+import { usePermissions } from "@renderer/shared/hooks/use-permissions";
+import { getDashboardVariant } from "@renderer/shared/lib/dashboard-role";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { fromCents, toCents } from "@renderer/shared/lib/money";
 import type { Expense } from "@shared/types/expense";
 import type { ExpenseCategory } from "@shared/types/expense-category";
-import type { Location } from "@shared/types/location";
+import { isStorefrontType, type Location } from "@shared/types/location";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import { QuickCreateExpenseCategoryModal } from "./QuickCreateExpenseCategoryModal";
 
@@ -76,6 +78,9 @@ export function ExpenseFormModal({
   onCategoryCreated: (category: ExpenseCategory) => void;
   onSaved: () => Promise<void>;
 }): React.JSX.Element {
+  const { session } = usePermissions();
+  const isSuperAdmin = getDashboardVariant(session) === "superAdmin";
+
   const [form, setForm] = useState<FormState>(() => emptyForm());
   const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [quickCreateCategoryOpen, setQuickCreateCategoryOpen] = useState(false);
@@ -83,17 +88,31 @@ export function ExpenseFormModal({
   const [error, setError] = useState<string | null>(null);
 
   const readOnly = editingExpense !== null && (!canEdit || editingExpense.status === "archived");
+  // A branch-scoped Manager can only ever record/see an expense against THEIR OWN storefront — the
+  // field is locked (never a blank/other-branch pick) whether creating new or editing an existing one.
+  const storefrontLocked = !isSuperAdmin;
 
   useEffect(() => {
     if (!open) return;
-    setForm(editingExpense ? toFormState(editingExpense) : emptyForm());
+    if (editingExpense) {
+      setForm(toFormState(editingExpense));
+    } else {
+      setForm({ ...emptyForm(), storefrontId: isSuperAdmin ? "" : (session?.branch?.id ?? "") });
+    }
     setError(null);
-  }, [open, editingExpense]);
+  }, [open, editingExpense, isSuperAdmin, session?.branch?.id]);
 
   const activeCategories = useMemo(() => categories.filter((category) => category.status === "active"), [categories]);
   const activePaymentMethods = useMemo(
     () => paymentMethods.filter((method) => method.isActive).sort((a, b) => a.sortOrder - b.sortOrder),
     [paymentMethods]
+  );
+  // Main Store isn't a selling till — an expense belongs to a real storefront, never a "General"
+  // catch-all or the warehouse.
+  const storefronts = useMemo(() => locations.filter((location) => isStorefrontType(location.locationType)), [locations]);
+  const formStorefrontOptions = useMemo(
+    () => (isSuperAdmin ? storefronts : storefronts.filter((location) => location.id === session?.branch?.id)),
+    [storefronts, isSuperAdmin, session?.branch?.id]
   );
   const selectedPaymentMethod = activePaymentMethods.find((method) => method.id === form.paymentMethodId) ?? null;
 
@@ -164,7 +183,7 @@ export function ExpenseFormModal({
         description={
           readOnly
             ? "This expense can't be edited."
-            : "Category, payment method, and amount are required — everything else can be filled in as needed."
+            : "Category, storefront, payment method, and amount are required — everything else can be filled in as needed."
         }
         widthClassName="max-w-lg"
       >
@@ -236,14 +255,15 @@ export function ExpenseFormModal({
               className={readOnly ? "pointer-events-none opacity-60" : ""}
             />
             <SelectField
-              label="Storefront (optional)"
+              label="Storefront"
               value={form.storefrontId}
               onChange={(value) => updateField("storefrontId", value)}
               options={[
-                { value: "", label: "General / Head Office" },
-                ...locations.map((location) => ({ value: location.id, label: location.locationName }))
+                { value: "", label: "Select storefront" },
+                ...formStorefrontOptions.map((location) => ({ value: location.id, label: location.locationName }))
               ]}
               className={readOnly ? "pointer-events-none opacity-60" : ""}
+              disabled={readOnly || storefrontLocked}
             />
           </div>
 

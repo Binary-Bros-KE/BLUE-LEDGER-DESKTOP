@@ -13,14 +13,16 @@ import type { MainStoreAllocationSummary, MainStoreProductDetail, MainStoreProdu
 import type { Product, ProductListItem, ProductStatus, ProductStockSummary } from "./product";
 import type { ProductSalesHistoryEntry, ProductsPerformanceReport } from "./product-report";
 import type { CustomerPurchaseHistoryEntry, OutstandingInvoicesSummary, TopCustomerRow } from "./customer-report";
-import type { OutstandingPurchasesSummary, SupplierPurchaseHistoryEntry } from "./supplier-report";
+import type { OutstandingPurchasesSummary, SupplierPurchaseHistoryEntry, SupplierSpendRow } from "./supplier-report";
 import type { PrinterActionResult, PrinterSettings } from "./printer";
 import type { Expense, ExpenseSummary } from "./expense";
 import type { ExportListRequest } from "./export";
+import type { ReportExportRequest } from "./report-export";
 import type { ExpenseCategory, ExpenseCategoryStatus } from "./expense-category";
 import type { Purchase, PurchaseListItem, PurchaseSummary } from "./purchase";
 import type { Salary } from "./salary";
 import type {
+  CancelledPurchasesReport,
   DateRangeInput,
   MySaleEntry,
   PaymentTransactionRow,
@@ -33,12 +35,13 @@ import type {
   SalesTrendWindowResult,
 } from "./report";
 import type { Quotation, QuotationListItem, QuotationStatus, QuotationStockCheckItem, QuotationSummary } from "./quotation";
-import type { Role, RoleListItem } from "./role";
+import type { Role, RoleListItem, RolePickerItem } from "./role";
 import type { Supplier, SupplierStatus } from "./supplier";
 import type { Rider, RiderStatus } from "./rider";
 import type { PendingSaleListItem, Sale, SaleDelivery, SaleListItem } from "./sale";
 import type { SaleReturn } from "./sale-return";
 import type { SaleVoid } from "./sale-void";
+import type { RecurringBill } from "./recurring-bill";
 import type { StockMovement, StockMovementFeedItem, StockTransferResult } from "./stock-movement";
 import type { StockRequest, StockRequestListItem } from "./stock-request";
 import type { SyncQueueItem, SyncSnapshot } from "./sync";
@@ -136,6 +139,10 @@ export type IpcInvokeMap = {
     args: [];
     result: ProductListItem[];
   };
+  "product:next-sku": {
+    args: [];
+    result: string;
+  };
   "product:stock-summary": {
     args: [string];
     result: ProductStockSummary;
@@ -227,6 +234,10 @@ export type IpcInvokeMap = {
   "role:list": {
     args: [];
     result: RoleListItem[];
+  };
+  "role:list-for-picker": {
+    args: [];
+    result: RolePickerItem[];
   };
   "role:get": {
     args: [string];
@@ -480,6 +491,18 @@ export type IpcInvokeMap = {
     args: [Record<string, unknown>];
     result: Salary;
   };
+  "salary:create-advance": {
+    args: [Record<string, unknown>];
+    result: Salary;
+  };
+  "salary:complete": {
+    args: [string, Record<string, unknown>];
+    result: Salary;
+  };
+  "salary:delete-advance": {
+    args: [string];
+    result: void;
+  };
   "salary:void": {
     args: [string];
     result: Salary;
@@ -668,6 +691,10 @@ export type IpcInvokeMap = {
     args: [string];
     result: PrinterActionResult;
   };
+  "printer:print-delivery-note-thermal": {
+    args: [string];
+    result: PrinterActionResult;
+  };
   "printer:generate-delivery-note-pdf": {
     args: [string];
     result: string | null;
@@ -704,6 +731,14 @@ export type IpcInvokeMap = {
     args: [ExportListRequest];
     result: string | null;
   };
+  "report-export:to-pdf": {
+    args: [ReportExportRequest];
+    result: string | null;
+  };
+  "report-export:to-excel": {
+    args: [ReportExportRequest];
+    result: string | null;
+  };
   "stock-request:list": {
     args: [];
     result: StockRequestListItem[];
@@ -724,6 +759,38 @@ export type IpcInvokeMap = {
     args: [string, Record<string, unknown>];
     result: StockRequest;
   };
+  "recurring-bill:list": {
+    args: [];
+    result: RecurringBill[];
+  };
+  "recurring-bill:get": {
+    args: [string];
+    result: RecurringBill;
+  };
+  "recurring-bill:create": {
+    args: [Record<string, unknown>];
+    result: RecurringBill;
+  };
+  "recurring-bill:update": {
+    args: [string, Record<string, unknown>];
+    result: RecurringBill;
+  };
+  "recurring-bill:set-status": {
+    args: [string, "active" | "paused"];
+    result: RecurringBill;
+  };
+  "recurring-bill:advance": {
+    args: [string];
+    result: RecurringBill;
+  };
+  "recurring-bill:mark-paid": {
+    args: [string, Record<string, unknown>];
+    result: { bill: RecurringBill; expense: Expense };
+  };
+  "recurring-bill:delete": {
+    args: [string];
+    result: void;
+  };
   "sync:get-snapshot": {
     args: [];
     result: SyncSnapshot;
@@ -743,6 +810,10 @@ export type IpcInvokeMap = {
   "report:sales-transactions": {
     args: [DateRangeInput];
     result: SalesTransactionRow[];
+  };
+  "report:cancelled-purchases": {
+    args: [DateRangeInput];
+    result: CancelledPurchasesReport;
   };
   "report:payment-transactions": {
     args: [DateRangeInput];
@@ -773,7 +844,7 @@ export type IpcInvokeMap = {
     result: InventoryReportData;
   };
   "report:products-performance": {
-    args: [DateRangeInput];
+    args: [DateRangeInput & { slowMovingLimit?: number }];
     result: ProductsPerformanceReport;
   };
   "report:product-sales-history": {
@@ -799,6 +870,10 @@ export type IpcInvokeMap = {
   "report:supplier-purchase-history": {
     args: [{ supplierId: string }];
     result: SupplierPurchaseHistoryEntry[];
+  };
+  "report:supplier-spend-breakdown": {
+    args: [DateRangeInput];
+    result: SupplierSpendRow[];
   };
 };
 
@@ -855,6 +930,7 @@ export type BlueLedgerApi = {
   };
   product: {
     list: () => Promise<IpcInvokeMap["product:list"]["result"]>;
+    nextSku: () => Promise<IpcInvokeMap["product:next-sku"]["result"]>;
     stockSummary: (id: string) => Promise<IpcInvokeMap["product:stock-summary"]["result"]>;
     get: (id: string) => Promise<IpcInvokeMap["product:get"]["result"]>;
     create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["product:create"]["result"]>;
@@ -903,6 +979,7 @@ export type BlueLedgerApi = {
   };
   role: {
     list: () => Promise<IpcInvokeMap["role:list"]["result"]>;
+    listForPicker: () => Promise<IpcInvokeMap["role:list-for-picker"]["result"]>;
     get: (id: string) => Promise<IpcInvokeMap["role:get"]["result"]>;
     create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["role:create"]["result"]>;
     update: (id: string, input: Record<string, unknown>) => Promise<IpcInvokeMap["role:update"]["result"]>;
@@ -1036,6 +1113,12 @@ export type BlueLedgerApi = {
     list: () => Promise<IpcInvokeMap["salary:list"]["result"]>;
     get: (id: string) => Promise<IpcInvokeMap["salary:get"]["result"]>;
     create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["salary:create"]["result"]>;
+    createAdvance: (input: Record<string, unknown>) => Promise<IpcInvokeMap["salary:create-advance"]["result"]>;
+    complete: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["salary:complete"]["result"]>;
+    deleteAdvance: (id: string) => Promise<IpcInvokeMap["salary:delete-advance"]["result"]>;
     void: (id: string) => Promise<IpcInvokeMap["salary:void"]["result"]>;
     restore: (id: string) => Promise<IpcInvokeMap["salary:restore"]["result"]>;
   };
@@ -1133,6 +1216,9 @@ export type BlueLedgerApi = {
     printDeliveryNote: (
       deliveryNoteId: string
     ) => Promise<IpcInvokeMap["printer:print-delivery-note"]["result"]>;
+    printDeliveryNoteThermal: (
+      deliveryNoteId: string
+    ) => Promise<IpcInvokeMap["printer:print-delivery-note-thermal"]["result"]>;
     generateDeliveryNotePdf: (
       deliveryNoteId: string
     ) => Promise<IpcInvokeMap["printer:generate-delivery-note-pdf"]["result"]>;
@@ -1156,6 +1242,10 @@ export type BlueLedgerApi = {
     toCsv: (request: ExportListRequest) => Promise<IpcInvokeMap["export:to-csv"]["result"]>;
     toExcel: (request: ExportListRequest) => Promise<IpcInvokeMap["export:to-excel"]["result"]>;
   };
+  reportExport: {
+    toPdf: (request: ReportExportRequest) => Promise<IpcInvokeMap["report-export:to-pdf"]["result"]>;
+    toExcel: (request: ReportExportRequest) => Promise<IpcInvokeMap["report-export:to-excel"]["result"]>;
+  };
   stockRequest: {
     list: () => Promise<IpcInvokeMap["stock-request:list"]["result"]>;
     get: (id: string) => Promise<IpcInvokeMap["stock-request:get"]["result"]>;
@@ -1165,6 +1255,25 @@ export type BlueLedgerApi = {
       id: string,
       input: Record<string, unknown>
     ) => Promise<IpcInvokeMap["stock-request:reject"]["result"]>;
+  };
+  recurringBill: {
+    list: () => Promise<IpcInvokeMap["recurring-bill:list"]["result"]>;
+    get: (id: string) => Promise<IpcInvokeMap["recurring-bill:get"]["result"]>;
+    create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["recurring-bill:create"]["result"]>;
+    update: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["recurring-bill:update"]["result"]>;
+    setStatus: (
+      id: string,
+      status: "active" | "paused"
+    ) => Promise<IpcInvokeMap["recurring-bill:set-status"]["result"]>;
+    advance: (id: string) => Promise<IpcInvokeMap["recurring-bill:advance"]["result"]>;
+    markPaid: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["recurring-bill:mark-paid"]["result"]>;
+    delete: (id: string) => Promise<IpcInvokeMap["recurring-bill:delete"]["result"]>;
   };
   sync: {
     getSnapshot: () => Promise<IpcInvokeMap["sync:get-snapshot"]["result"]>;
@@ -1176,6 +1285,7 @@ export type BlueLedgerApi = {
   report: {
     salesFinancialOverview: (range: DateRangeInput) => Promise<SalesFinancialOverview>;
     salesTransactions: (range: DateRangeInput) => Promise<SalesTransactionRow[]>;
+    cancelledPurchases: (range: DateRangeInput) => Promise<CancelledPurchasesReport>;
     paymentTransactions: (range: DateRangeInput) => Promise<PaymentTransactionRow[]>;
     mySales: (range: DateRangeInput) => Promise<MySaleEntry[]>;
     salesTrendWindow: (input: SalesTrendWindowInput) => Promise<SalesTrendWindowResult>;
@@ -1183,12 +1293,15 @@ export type BlueLedgerApi = {
     salesByEmployee: (range: DateRangeInput) => Promise<SalesByEmployeeRow[]>;
     salesByPaymentMethod: (range: DateRangeInput) => Promise<SalesByPaymentMethodRow[]>;
     inventoryData: () => Promise<InventoryReportData>;
-    productsPerformance: (range: DateRangeInput) => Promise<ProductsPerformanceReport>;
+    productsPerformance: (
+      range: DateRangeInput & { slowMovingLimit?: number }
+    ) => Promise<ProductsPerformanceReport>;
     productSalesHistory: (input: { productId: string }) => Promise<ProductSalesHistoryEntry[]>;
     topCustomers: (range: DateRangeInput) => Promise<TopCustomerRow[]>;
     customerPurchaseHistory: (input: { customerId: string }) => Promise<CustomerPurchaseHistoryEntry[]>;
     outstandingInvoices: () => Promise<OutstandingInvoicesSummary>;
     outstandingPurchases: () => Promise<OutstandingPurchasesSummary>;
     supplierPurchaseHistory: (input: { supplierId: string }) => Promise<SupplierPurchaseHistoryEntry[]>;
+    supplierSpendBreakdown: (input: DateRangeInput) => Promise<SupplierSpendRow[]>;
   };
 };

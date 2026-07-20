@@ -49,6 +49,10 @@ export type LocationInputFields = {
   openingTime: string | null;
   closingTime: string | null;
   description: string | null;
+  /** Shown on this storefront's own receipts/invoices/quotations instead of the tenant-wide default —
+   * each storefront is its own point of sale with its own identity on customer-facing documents. */
+  receiptHeader: string | null;
+  receiptFooter: string | null;
   canReceiveStock: boolean;
   canSellStock: boolean;
   canTransferStock: boolean;

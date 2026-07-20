@@ -92,6 +92,16 @@ export function findProductBySkuRow(
     .get(...params) as ProductRow | undefined;
 }
 
+/** For auto-generating the next "PROD-000001"-style SKU — only considers SKUs following that exact
+ * pattern, so a tenant's pre-existing manually-entered SKUs (whatever scheme they used) are simply
+ * ignored rather than confusing the counter. */
+export function findMaxProductSkuNumberRow(tenantId: string): string | null {
+  const row = getDatabase()
+    .prepare("SELECT MAX(sku) as maxSku FROM products WHERE tenant_id = ? AND sku LIKE 'PROD-%'")
+    .get(tenantId) as { maxSku: string | null };
+  return row.maxSku;
+}
+
 export function findProductByBarcodeRow(
   tenantId: string,
   barcode: string,

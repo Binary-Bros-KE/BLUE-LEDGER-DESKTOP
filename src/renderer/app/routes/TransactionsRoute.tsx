@@ -9,13 +9,21 @@ import { getDashboardVariant } from "@renderer/shared/lib/dashboard-role";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import { todayIso } from "@renderer/app/routes/reports/salesReportDate";
+import { ALL_YEARS_VALUE, currentYear, yearFilterOptions } from "@renderer/shared/lib/year-filter";
 import type { ExportListRequest } from "@shared/types/export";
 import type { PaymentTransactionRow } from "@shared/types/report";
 
 const ALL_VALUE = "__all__";
+const EARLIEST_DATE = "2000-01-01";
+const YEAR_LOOKBACK = 5;
 
-function monthStartIso(): string {
-  return `${todayIso().slice(0, 7)}-01`;
+/** Transactions already fetches server-side by date range, so the Year filter drives dateFrom/dateTo
+ * directly instead of filtering an already-loaded list — the same lever the From/To inputs use, just
+ * a one-click preset for the common case. */
+function boundsForYear(value: string): { from: string; to: string } {
+  if (value === ALL_YEARS_VALUE) return { from: EARLIEST_DATE, to: todayIso() };
+  const year = Number(value);
+  return { from: `${year}-01-01`, to: year === currentYear() ? todayIso() : `${year}-12-31` };
 }
 
 function formatDateTime(iso: string): string {
@@ -36,14 +44,27 @@ export function TransactionsRoute(): React.JSX.Element {
   const isSuperAdmin = getDashboardVariant(session) === "superAdmin";
   const canExport = can("sales", "export");
 
-  const [dateFrom, setDateFrom] = useState(monthStartIso());
-  const [dateTo, setDateTo] = useState(todayIso());
+  const [yearFilter, setYearFilter] = useState<string>(String(currentYear()));
+  const [dateFrom, setDateFrom] = useState(() => boundsForYear(String(currentYear())).from);
+  const [dateTo, setDateTo] = useState(() => boundsForYear(String(currentYear())).to);
   const [transactions, setTransactions] = useState<PaymentTransactionRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [paymentMethodFilter, setPaymentMethodFilter] = useState(ALL_VALUE);
   const [cashierFilter, setCashierFilter] = useState(ALL_VALUE);
   const [locationFilter, setLocationFilter] = useState(ALL_VALUE);
+
+  const yearOptions = useMemo(
+    () => yearFilterOptions(Array.from({ length: YEAR_LOOKBACK + 1 }, (_, index) => currentYear() - index)),
+    []
+  );
+
+  function handleYearFilterChange(value: string): void {
+    setYearFilter(value);
+    const bounds = boundsForYear(value);
+    setDateFrom(bounds.from);
+    setDateTo(bounds.to);
+  }
 
   const load = useCallback(async (from: string, to: string) => {
     setLoadError(null);
@@ -213,6 +234,20 @@ export function TransactionsRoute(): React.JSX.Element {
                 className="h-10 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm font-semibold text-ink outline-none transition placeholder:font-normal placeholder:text-muted/60 focus:border-accent focus:ring-4 focus:ring-accent/15"
               />
             </div>
+          </label>
+          <label className="block">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Year</span>
+            <select
+              value={yearFilter}
+              onChange={(event) => handleYearFilterChange(event.target.value)}
+              className="mt-1.5 h-10 w-32 rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+            >
+              {yearOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="block">
             <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">From</span>

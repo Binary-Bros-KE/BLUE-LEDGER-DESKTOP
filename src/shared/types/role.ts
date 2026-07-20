@@ -19,6 +19,11 @@ export const PERMISSION_MODULES = [
   { key: "products", label: "Products", actions: ["view", "create", "edit", "delete", "export"] },
   { key: "categories", label: "Categories", actions: ["view", "create", "edit", "delete"] },
   { key: "inventory", label: "Inventory", actions: ["view", "create", "edit", "export"] },
+  {
+    key: "main_store",
+    label: "Main Store",
+    actions: ["view", "create", "edit", "export"]
+  },
   { key: "stock_transfers", label: "Stock Transfers", actions: ["view", "create", "approve", "export"] },
   {
     key: "sales",
@@ -94,4 +99,13 @@ export type Role = RoleInputFields & {
 /** Role row enriched with the employee count for the role list, computed via a join. */
 export type RoleListItem = Role & {
   employeeCount: number;
+};
+
+/** Just enough to populate a role picker/label elsewhere (e.g. Employees) — deliberately not the
+ * full Role shape, since a role's permission breakdown is what "roles:view" actually guards; a role's
+ * bare name isn't sensitive and is needed by anyone managing employees, whether or not they're also
+ * allowed into Roles & Permissions. */
+export type RolePickerItem = {
+  id: RoleId;
+  roleName: string;
 };

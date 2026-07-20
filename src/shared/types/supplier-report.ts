@@ -22,6 +22,17 @@ export type OutstandingPurchasesSummary = {
   purchases: OutstandingPurchaseRow[];
 };
 
+/** One supplier's total purchase activity in a period, ranked by value — "who we bought from the
+ * most," not just who's been paid so far (that's Outstanding Purchases). */
+export type SupplierSpendRow = {
+  supplierId: string;
+  supplierName: string;
+  phone: string;
+  purchaseCount: number;
+  totalSpentCents: number;
+  percentOfTotal: number;
+};
+
 export type SupplierPurchaseHistoryEntry = {
   purchaseId: string;
   purchaseNumber: string;

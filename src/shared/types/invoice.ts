@@ -16,6 +16,7 @@ export type InvoiceListItem = {
   paymentStatus: PaymentStatus;
   createdAt: string;
   hasDeliveryNote: boolean;
+  locationId: string;
 };
 
 /** Aggregate figures for the Invoices dashboard's summary cards. */

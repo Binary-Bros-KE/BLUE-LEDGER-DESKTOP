@@ -62,7 +62,7 @@ function buildProductDetail(tenantId: string, productId: string): MainStoreProdu
 }
 
 export function getMainStoreProductDetail(productId: string): MainStoreProductDetail {
-  requirePermission("inventory", "view");
+  requirePermission("main_store", "view");
   const { tenantId } = getCurrentTenant();
   return buildProductDetail(tenantId, productId);
 }
@@ -73,7 +73,7 @@ export function getMainStoreProductDetail(productId: string): MainStoreProductDe
  * handful of bulk queries (not one per product) so the whole catalog loads in a single round trip.
  */
 export function listMainStoreProductRows(): MainStoreProductRow[] {
-  requirePermission("inventory", "view");
+  requirePermission("main_store", "view");
   const { tenantId } = getCurrentTenant();
 
   const products = productRepository.findAllProductRows(tenantId, null).map(productRepository.mapProductListRow);
@@ -140,7 +140,7 @@ export function listMainStoreProductRows(): MainStoreProductRow[] {
 /** Every product's allocation breakdown at once — powers the Main Store list's columns without a
  * round-trip per row. */
 export function getMainStoreAllocationSummary(): MainStoreAllocationSummary[] {
-  requirePermission("inventory", "view");
+  requirePermission("main_store", "view");
   const { tenantId } = getCurrentTenant();
   const rows = mainStoreAllocationRepository.findAllAllocationRows(tenantId);
 
@@ -164,7 +164,7 @@ export function getMainStoreAllocationSummary(): MainStoreAllocationSummary[] {
 
 /** Records new physical stock arriving at Main Store, earmarked for a storefront (or left unallocated). */
 export function receiveMainStoreStock(input: unknown): MainStoreProductDetail {
-  requirePermission("inventory", "edit");
+  requirePermission("main_store", "edit");
   const parsed: MainStoreReceiveInput = mainStoreReceiveSchema.parse(input);
   const { tenantId } = getCurrentTenant();
   const employeeId = getCurrentEmployeeId();
@@ -335,7 +335,7 @@ export function returnToMainStore(input: unknown): MainStoreProductDetail {
  * own earmarked allocation) rather than the general total, so a loss earmarked for one storefront is
  * never silently absorbed from another's. */
 export function recordMainStoreDamage(input: unknown): MainStoreProductDetail {
-  requirePermission("inventory", "edit");
+  requirePermission("main_store", "edit");
   const parsed: MainStoreDamageInput = mainStoreDamageSchema.parse(input);
   const { tenantId } = getCurrentTenant();
   const employeeId = getCurrentEmployeeId();
@@ -365,7 +365,7 @@ export function recordMainStoreDamage(input: unknown): MainStoreProductDetail {
 /** Bookkeeping-only move between two Main Store buckets — nothing physically relocates, so no stock
  * movement is recorded and the plain inventory total at Main Store is untouched. */
 export function reallocateMainStoreStock(input: unknown): MainStoreProductDetail {
-  requirePermission("inventory", "edit");
+  requirePermission("main_store", "edit");
   const parsed: MainStoreReallocateInput = mainStoreReallocateSchema.parse(input);
   const { tenantId } = getCurrentTenant();
   requireMainStoreLocation(tenantId);

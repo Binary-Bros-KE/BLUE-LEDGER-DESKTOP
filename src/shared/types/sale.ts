@@ -159,4 +159,5 @@ export type SaleListItem = {
   hasDeliveryNote: boolean;
   /** null when there's no delivery attached at all; otherwise whether it's been marked delivered. */
   deliveryIsDelivered: boolean | null;
+  locationId: string;
 };

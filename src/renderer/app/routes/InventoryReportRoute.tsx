@@ -1,16 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Boxes, Loader2 } from "lucide-react";
-import { ExportMenu } from "@renderer/shared/components/ExportMenu";
+import { ReportExportMenu } from "@renderer/shared/components/ReportExportMenu";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
-import type { ExportListRequest } from "@shared/types/export";
-import type { InventoryReportData } from "@shared/types/inventory-report";
+import type { InventoryReportData, LocationProductRow } from "@shared/types/inventory-report";
+import type { ReportExportRequest, ReportExportSection } from "@shared/types/report-export";
 import { OverviewCard } from "./reports/FinancialOverviewCards";
 import { InventoryStockValueSection } from "./reports/InventoryStockValueSection";
 import { LocationInventorySection } from "./reports/LocationInventorySection";
 import { ProductDetailModal } from "./reports/ProductDetailModal";
+
+function money(cents: number): string {
+  return formatCents(cents);
+}
 
 export function InventoryReportRoute(): React.JSX.Element {
   const { can } = usePermissions();
@@ -39,29 +43,127 @@ export function InventoryReportRoute(): React.JSX.Element {
     };
   }, []);
 
-  const exportRequest = useMemo<ExportListRequest | null>(() => {
+  const reportExportRequest = useMemo<ReportExportRequest | null>(() => {
     if (!data) return null;
+
+    function productRowTone(row: LocationProductRow, isMainStore: boolean): "danger" | "warning" | undefined {
+      if (isMainStore) {
+        if (row.storefrontIsOutOfStock) return "danger";
+        if (row.storefrontIsLow || row.isLow || row.isOutOfStock) return "warning";
+        return undefined;
+      }
+      if (row.isOutOfStock) return "danger";
+      if (row.isLow) return "warning";
+      return undefined;
+    }
+
+    const locationSections: ReportExportSection[] = data.sections.flatMap((section) => {
+      const showMainStoreReference = !section.isMainStore && section.products.some((p) => p.mainStoreQuantity !== null);
+
+      const columns = [
+        { key: "product", header: "Product" },
+        { key: "sku", header: "SKU" },
+        { key: "category", header: "Category" },
+        ...(showMainStoreReference
+          ? [
+              { key: "mainStoreQty", header: "Qty in Main Store", align: "right" as const },
+              { key: "allocated", header: "Allocated to This Shop", align: "right" as const }
+            ]
+          : []),
+        { key: "qty", header: section.isMainStore ? "Qty in Store" : "Qty Available Here", align: "right" as const },
+        ...(section.isMainStore ? [{ key: "storefrontQty", header: "Qty in Storefronts", align: "right" as const }] : []),
+        { key: "unitCost", header: "Unit Cost", align: "right" as const },
+        { key: "value", header: "Value", align: "right" as const },
+        { key: "percent", header: "%", align: "right" as const }
+      ];
+
+      const rawLocationSections: Array<ReportExportSection | false> = [
+        {
+          type: "tiles",
+          title: `${section.locationName}${section.isMainStore ? " (Main Store)" : ""}`,
+          tiles: [
+            { label: "Products", value: String(section.productCount) },
+            { label: "Low Stock", value: String(section.lowStockCount) },
+            { label: "Out of Stock", value: String(section.outOfStockCount) },
+            { label: "Stock Value", value: money(section.stockValueCents) }
+          ]
+        },
+        section.products.length > 0 && {
+          type: "table",
+          title: `${section.locationName} — Products`,
+          columns,
+          rows: section.products.map((row) => {
+            const tone = productRowTone(row, section.isMainStore);
+            return {
+              product: row.productName,
+              sku: row.sku,
+              category: row.categoryName ?? "—",
+              mainStoreQty: row.mainStoreQuantity !== null ? String(row.mainStoreQuantity) : "—",
+              allocated: row.allocatedToThisStorefront !== null ? String(row.allocatedToThisStorefront) : "—",
+              qty: String(row.quantity),
+              storefrontQty: row.storefrontTotalQuantity !== null ? String(row.storefrontTotalQuantity) : "—",
+              unitCost: money(row.buyingPriceCents),
+              value: money(row.valueCents),
+              percent: `${row.percentOfLocationValue.toFixed(1)}%`,
+              ...(tone ? { _tone: tone } : {})
+            };
+          })
+        }
+      ];
+      return rawLocationSections.filter((entry): entry is ReportExportSection => Boolean(entry));
+    });
+
+    const rawSections: Array<ReportExportSection | false> = [
+      {
+        type: "cards",
+        title: "Inventory Overview",
+        cards: [
+          {
+            tone: "primary",
+            label: "Total Products",
+            value: String(data.overview.distinctProductCount),
+            caption: "Distinct products, across Main Store and every storefront"
+          },
+          { tone: "teal", label: "Total Units On Hand", value: String(data.overview.totalUnits), caption: "Every unit, everywhere it's held" },
+          {
+            tone: "warning",
+            label: "Low Stock",
+            value: String(data.overview.lowStockProductCount),
+            caption: "Distinct products low anywhere — store or storefront"
+          },
+          {
+            tone: "danger",
+            label: "Out of Stock",
+            value: String(data.overview.outOfStockProductCount),
+            caption: "Distinct products at zero anywhere — store or storefront"
+          },
+          { tone: "success", label: "Total Stock Value", value: money(data.overview.totalStockValueCents), caption: "Every unit, at buying price" }
+        ]
+      },
+      data.categoryValueBreakdown.length > 0 && {
+        type: "table",
+        title: "Stock Value by Category",
+        columns: [
+          { key: "category", header: "Category" },
+          { key: "units", header: "Units", align: "right" },
+          { key: "value", header: "Value", align: "right" },
+          { key: "percent", header: "% of Total", align: "right" }
+        ],
+        rows: data.categoryValueBreakdown.map((entry) => ({
+          category: entry.name,
+          units: String(entry.quantity),
+          value: money(entry.valueCents),
+          percent: `${entry.percentOfTotal.toFixed(1)}%`
+        }))
+      },
+      ...locationSections
+    ];
+    const sections = rawSections.filter((section): section is ReportExportSection => Boolean(section));
+
     return {
       module: "reports",
-      title: "Inventory Report — Stock Value by Category",
-      columns: [
-        { key: "category", header: "Category" },
-        { key: "units", header: "Units", align: "right" },
-        { key: "value", header: "Value", align: "right" },
-        { key: "percentOfTotal", header: "% of Total", align: "right" }
-      ],
-      rows: data.categoryValueBreakdown.map((entry) => ({
-        category: entry.name,
-        units: String(entry.quantity),
-        value: formatCents(entry.valueCents),
-        percentOfTotal: `${entry.percentOfTotal.toFixed(1)}%`
-      })),
-      stats: [
-        { label: "Total Products", value: String(data.overview.distinctProductCount) },
-        { label: "Total Units On Hand", value: String(data.overview.totalUnits) },
-        { label: "Low Stock", value: String(data.overview.lowStockProductCount) },
-        { label: "Out of Stock", value: String(data.overview.outOfStockProductCount) }
-      ],
+      title: "Inventory Report",
+      sections,
       fileBaseName: `InventoryReport_${new Date().toISOString().slice(0, 10)}`
     };
   }, [data]);
@@ -80,7 +182,7 @@ export function InventoryReportRoute(): React.JSX.Element {
             storefront, however your stock is organized.
           </p>
         </div>
-        {canExport && exportRequest && <ExportMenu request={exportRequest} />}
+        {canExport && reportExportRequest && <ReportExportMenu request={reportExportRequest} />}
       </div>
 
       {error && (

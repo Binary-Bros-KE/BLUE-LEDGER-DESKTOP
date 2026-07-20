@@ -5,7 +5,7 @@ import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { DeliveryNotePreview } from "@renderer/shared/components/DeliveryNotePreview";
 import { ExportMenu } from "@renderer/shared/components/ExportMenu";
-import { Field, TextAreaField } from "@renderer/shared/components/form-fields";
+import { Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { ReceiptPreview } from "@renderer/shared/components/ReceiptPreview";
 import { StatTile } from "@renderer/shared/components/StatTile";
@@ -14,6 +14,13 @@ import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { cn } from "@renderer/shared/lib/cn";
 import { formatCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
+import {
+  ALL_YEARS_VALUE,
+  buildAvailableYears,
+  currentYear,
+  matchesYearFilter,
+  yearFilterOptions
+} from "@renderer/shared/lib/year-filter";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import type { ExportListRequest } from "@shared/types/export";
 import type { Sale, SaleDelivery, SaleListItem } from "@shared/types/sale";
@@ -93,6 +100,7 @@ export function ReceiptsRoute(): React.JSX.Element {
   const [dateTo, setDateTo] = useState("");
   const [deliveryFilter, setDeliveryFilter] = useState<DeliveryFilter>("all");
   const [returnsFilter, setReturnsFilter] = useState<ReturnsFilter>("all");
+  const [yearFilter, setYearFilter] = useState<string>(String(currentYear()));
 
   const [viewingSale, setViewingSale] = useState<Sale | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
@@ -100,6 +108,7 @@ export function ReceiptsRoute(): React.JSX.Element {
   const [viewingDelivery, setViewingDelivery] = useState<{
     delivery: SaleDelivery;
     sourceNumber: string | null;
+    locationId: string;
   } | null>(null);
   const [deliveryLoading, setDeliveryLoading] = useState(false);
 
@@ -191,6 +200,8 @@ export function ReceiptsRoute(): React.JSX.Element {
     return { pending, approved, rejected };
   }, [saleStatusInfo]);
 
+  const availableYears = useMemo(() => buildAvailableYears((sales ?? []).map((sale) => sale.completedAt)), [sales]);
+
   const filteredSales = useMemo(() => {
     if (!sales) return null;
     const term = searchTerm.trim().toLowerCase();
@@ -199,6 +210,7 @@ export function ReceiptsRoute(): React.JSX.Element {
         const haystack = `${sale.receiptNumber ?? ""} ${sale.customerName ?? ""} ${sale.employeeName}`.toLowerCase();
         if (!haystack.includes(term)) return false;
       }
+      if (!matchesYearFilter(sale.completedAt, yearFilter)) return false;
       if (sale.completedAt) {
         const saleDate = sale.completedAt.slice(0, 10);
         if (dateFrom && saleDate < dateFrom) return false;
@@ -214,7 +226,7 @@ export function ReceiptsRoute(): React.JSX.Element {
       }
       return true;
     });
-  }, [sales, searchTerm, dateFrom, dateTo, deliveryFilter, returnsFilter, saleStatusInfo]);
+  }, [sales, searchTerm, yearFilter, dateFrom, dateTo, deliveryFilter, returnsFilter, saleStatusInfo]);
 
   const summary = useMemo(() => {
     if (!filteredSales) return null;
@@ -232,6 +244,7 @@ export function ReceiptsRoute(): React.JSX.Element {
     if (!filteredSales) return null;
     const filterParts: string[] = [];
     if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
+    if (yearFilter !== ALL_YEARS_VALUE) filterParts.push(`Year: ${yearFilter}`);
     if (dateFrom || dateTo) filterParts.push(`Date: ${dateFrom || "…"} to ${dateTo || "…"}`);
     if (deliveryFilter !== "all") {
       filterParts.push(`Delivery: ${DELIVERY_FILTER_TABS.find((tab) => tab.value === deliveryFilter)?.label}`);
@@ -274,7 +287,7 @@ export function ReceiptsRoute(): React.JSX.Element {
         : [],
       fileBaseName: `Receipts_${new Date().toISOString().slice(0, 10)}`
     };
-  }, [filteredSales, summary, searchTerm, dateFrom, dateTo, deliveryFilter, returnsFilter, saleStatusInfo]);
+  }, [filteredSales, summary, searchTerm, yearFilter, dateFrom, dateTo, deliveryFilter, returnsFilter, saleStatusInfo]);
 
   async function openReceipt(saleId: string): Promise<void> {
     setViewLoading(true);
@@ -294,7 +307,7 @@ export function ReceiptsRoute(): React.JSX.Element {
     setActionError(null);
     try {
       const delivery = await window.blueLedger.deliveryNote.getForSale(sale.id);
-      if (delivery) setViewingDelivery({ delivery, sourceNumber: sale.receiptNumber });
+      if (delivery) setViewingDelivery({ delivery, sourceNumber: sale.receiptNumber, locationId: sale.locationId });
     } catch (err) {
       setActionError(getErrorMessage(err, "Failed to load delivery note"));
     } finally {
@@ -454,6 +467,13 @@ export function ReceiptsRoute(): React.JSX.Element {
                   />
                 </div>
               </label>
+              <SelectField
+                label="Year"
+                value={yearFilter}
+                onChange={setYearFilter}
+                options={yearFilterOptions(availableYears)}
+                className="w-32"
+              />
               <label className="block">
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">From</span>
                 <input
@@ -729,6 +749,7 @@ export function ReceiptsRoute(): React.JSX.Element {
           <DeliveryNotePreview
             delivery={viewingDelivery.delivery}
             tenant={tenantContext}
+            locationId={viewingDelivery.locationId}
             sourceDocumentLabel="Receipt"
             sourceDocumentNumber={viewingDelivery.sourceNumber}
             onDeliveredChange={(next) => setViewingDelivery((prev) => (prev ? { ...prev, delivery: next } : prev))}

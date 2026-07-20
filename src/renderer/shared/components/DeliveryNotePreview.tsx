@@ -1,10 +1,11 @@
-import { useState } from "react";
-import { CheckCircle2, Download, Loader2, Printer, RotateCcw, Share2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { CheckCircle2, Download, Loader2, Printer, RotateCcw, RotateCw, Share2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
+import type { Location } from "@shared/types/location";
 import type { SaleDelivery } from "@shared/types/sale";
 import type { TenantContext } from "@shared/types/tenant";
 
@@ -13,25 +14,68 @@ import type { TenantContext } from "@shared/types/tenant";
  * payslip pattern), and it never shows a fee/cost figure since SaleDelivery/DeliveryNoteViewModel
  * carry none. Delivery status is fully independent of the sale's own revenue recognition.
  */
+function DeliveryField({
+  label,
+  value,
+  large = false
+}: {
+  label: string;
+  value: string | null;
+  large?: boolean;
+}): React.JSX.Element | null {
+  if (!value) return null;
+  return (
+    <div className="flex gap-2 border-b border-dotted border-line py-0.5">
+      <span className="w-16 flex-none text-[9px] font-extrabold uppercase tracking-wide text-muted">{label}</span>
+      <span className={cn("flex-1 font-bold text-ink", large ? "text-base" : "text-xs")}>{value}</span>
+    </div>
+  );
+}
+
 export function DeliveryNotePreview({
   delivery,
   tenant,
+  locationId,
   sourceDocumentLabel,
   sourceDocumentNumber,
   onDeliveredChange
 }: {
   delivery: SaleDelivery;
   tenant: TenantContext;
+  /** The source sale/quotation's own storefront — the delivery note must show THAT storefront's
+   * identity, never the tenant-wide Business Profile's (mirrors ReceiptPreview/resolveDocumentBusiness). */
+  locationId: string;
   sourceDocumentLabel: string;
   sourceDocumentNumber: string | null;
   onDeliveredChange?: (next: SaleDelivery) => void;
 }): React.JSX.Element {
   const [printing, setPrinting] = useState(false);
+  const [printingThermal, setPrintingThermal] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [togglingDelivered, setTogglingDelivered] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [location, setLocation] = useState<Location | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.blueLedger.location
+      .get(locationId)
+      .then((result) => {
+        if (!cancelled) setLocation(result);
+      })
+      .catch(() => {
+        if (!cancelled) setLocation(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [locationId]);
+
+  const businessName = location?.locationName ?? tenant.businessName;
+  const physicalAddress = location?.physicalAddress ?? tenant.physicalAddress;
+  const primaryPhone = location?.phone ?? tenant.primaryPhone;
 
   async function handlePrint(): Promise<void> {
     setPrinting(true);
@@ -45,6 +89,21 @@ export function DeliveryNotePreview({
       setError(getErrorMessage(err, "Failed to print delivery note"));
     } finally {
       setPrinting(false);
+    }
+  }
+
+  async function handlePrintThermal(): Promise<void> {
+    setPrintingThermal(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await window.blueLedger.printer.printDeliveryNoteThermal(delivery.id);
+      if (result.success) setNotice(result.message);
+      else setError(result.message);
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to print delivery note"));
+    } finally {
+      setPrintingThermal(false);
     }
   }
 
@@ -111,9 +170,9 @@ export function DeliveryNotePreview({
       <div className="rounded-lg border border-dashed border-line bg-soft/40 p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-sm font-extrabold text-ink">{tenant.businessName}</p>
-            {tenant.physicalAddress && <p className="text-[11px] text-muted">{tenant.physicalAddress}</p>}
-            {tenant.primaryPhone && <p className="text-[11px] text-muted">{tenant.primaryPhone}</p>}
+            <p className="text-sm font-extrabold text-ink">{businessName}</p>
+            {physicalAddress && <p className="text-[11px] text-muted">{physicalAddress}</p>}
+            {primaryPhone && <p className="text-[11px] text-muted">{primaryPhone}</p>}
           </div>
           <div className="text-right">
             <p className="text-xs font-extrabold uppercase tracking-wide text-primary">Delivery Note</p>
@@ -127,19 +186,21 @@ export function DeliveryNotePreview({
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted">Deliver To</p>
-            <p className="mt-1 text-lg font-extrabold text-ink">{delivery.recipientName}</p>
-            <p className="text-sm font-semibold text-ink">{delivery.physicalAddress}</p>
-            {addressLine && <p className="text-sm font-semibold text-ink">{addressLine}</p>}
-            {delivery.notes && <p className="mt-1 text-xs font-semibold text-muted">Notes: {delivery.notes}</p>}
+            <div className="mt-1.5 space-y-1">
+              <DeliveryField label="Recipient" value={delivery.recipientName} large />
+              <DeliveryField label="Address" value={delivery.physicalAddress} />
+              <DeliveryField label="Town" value={addressLine || null} />
+              <DeliveryField label="Notes" value={delivery.notes} />
+            </div>
           </div>
           <div className="border-t border-dashed border-line pt-3 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
             <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted">Rider</p>
-            <p className="mt-1 text-sm font-extrabold text-ink">{delivery.riderName ?? "Not assigned"}</p>
-            {delivery.riderPhone && <p className="text-xs font-semibold text-muted">{delivery.riderPhone}</p>}
-            {delivery.riderCompany && <p className="text-xs font-semibold text-muted">{delivery.riderCompany}</p>}
-            {delivery.riderVehicleDescription && (
-              <p className="text-xs font-semibold text-muted">{delivery.riderVehicleDescription}</p>
-            )}
+            <div className="mt-1.5 space-y-1">
+              <DeliveryField label="Name" value={delivery.riderName ?? "Not assigned"} />
+              <DeliveryField label="Phone" value={delivery.riderPhone} />
+              <DeliveryField label="Company" value={delivery.riderCompany} />
+              <DeliveryField label="Vehicle" value={delivery.riderVehicleDescription} />
+            </div>
           </div>
         </div>
 
@@ -210,6 +271,21 @@ export function DeliveryNotePreview({
           Share
         </Button>
       </div>
+
+      <Button
+        type="button"
+        onClick={() => void handlePrintThermal()}
+        disabled={printingThermal}
+        title="For shops with only a narrow thermal receipt printer — prints a rotated strip. Rotate the printed strip 90° once it's out, then tape it to the package."
+        className="mt-2 h-9 w-full border border-line bg-white text-[11px] text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {printingThermal ? (
+          <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+        ) : (
+          <RotateCw className="mr-1.5 size-3.5" aria-hidden="true" />
+        )}
+        Print via Receipt Printer
+      </Button>
     </div>
   );
 }

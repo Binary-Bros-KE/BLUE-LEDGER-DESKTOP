@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Loader2, Users } from "lucide-react";
-import { ExportMenu } from "@renderer/shared/components/ExportMenu";
+import { categoricalColor } from "@renderer/shared/components/charts/chartTokens";
+import { ReportExportMenu } from "@renderer/shared/components/ReportExportMenu";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
-import type { ExportListRequest } from "@shared/types/export";
 import type { DateRangeInput, SalesReportMode } from "@shared/types/report";
 import type { OutstandingInvoicesSummary, TopCustomerRow } from "@shared/types/customer-report";
+import type { ReportExportRequest, ReportExportSection } from "@shared/types/report-export";
 import { CustomerPurchaseHistorySection } from "./reports/CustomerPurchaseHistorySection";
 import { OutstandingInvoicesSection } from "./reports/OutstandingInvoicesSection";
 import { defaultAnchorForMode, rangeForAnchor, shiftAnchor, todayIso } from "./reports/salesReportDate";
@@ -61,29 +62,95 @@ export function CustomersReportRoute(): React.JSX.Element {
     void load(resolvedRange);
   }, [resolvedRange.startDate, resolvedRange.endDate, load]);
 
-  const exportRequest = useMemo<ExportListRequest | null>(() => {
+  const reportExportRequest = useMemo<ReportExportRequest | null>(() => {
     if (!topCustomers) return null;
+
+    function percentBars<T>(rowsIn: T[], getValue: (row: T) => number): number[] {
+      const max = Math.max(1, ...rowsIn.map(getValue));
+      return rowsIn.map((row) => Math.max(2, (getValue(row) / max) * 100));
+    }
+
+    const rawSections: Array<ReportExportSection | false | null> = [
+      outstanding && {
+        type: "cards",
+        title: "Outstanding Customer Invoices",
+        cards: [
+          {
+            tone: "primary",
+            label: "Total Outstanding",
+            value: formatCents(outstanding.totalOutstandingCents),
+            caption: "Sum of every unpaid invoice balance"
+          },
+          { tone: "teal", label: "Debtors", value: String(outstanding.debtorCount), caption: "Distinct customers who owe money" },
+          { tone: "danger", label: "Overdue Invoices", value: String(outstanding.overdueCount), caption: "Past their due date, still unpaid" }
+        ]
+      },
+      topCustomers.length > 0 && {
+        type: "bars",
+        title: "Top Customers by Revenue",
+        items: topCustomers.slice(0, 10).map((row, index) => ({
+          label: row.customerName,
+          value: formatCents(row.revenueCents),
+          percent: percentBars(topCustomers.slice(0, 10), (r) => r.revenueCents)[index] ?? 2,
+          color: categoricalColor(index)
+        }))
+      },
+      topCustomers.length > 0 && {
+        type: "table",
+        title: "Top Customers — Detail",
+        description: `${resolvedRange.startDate} to ${resolvedRange.endDate}`,
+        columns: [
+          { key: "customer", header: "Customer" },
+          { key: "phone", header: "Phone" },
+          { key: "transactions", header: "Transactions", align: "right" },
+          { key: "revenue", header: "Revenue", align: "right" },
+          { key: "avgSale", header: "Avg Sale", align: "right" },
+          { key: "percent", header: "% of Total", align: "right" }
+        ],
+        rows: topCustomers.map((row) => ({
+          customer: row.customerName,
+          phone: row.phone ?? "—",
+          transactions: String(row.transactionCount),
+          revenue: formatCents(row.revenueCents),
+          avgSale: formatCents(row.averageSaleCents),
+          percent: `${row.percentOfTotal.toFixed(1)}%`
+        }))
+      },
+      outstanding && outstanding.invoices.length > 0 && {
+        type: "table",
+        title: "Outstanding Invoices, Oldest First",
+        description: "A live snapshot as of today — not scoped to the period above.",
+        columns: [
+          { key: "customer", header: "Customer" },
+          { key: "document", header: "Document" },
+          { key: "issued", header: "Issued" },
+          { key: "due", header: "Due" },
+          { key: "total", header: "Total", align: "right" },
+          { key: "paid", header: "Paid", align: "right" },
+          { key: "balance", header: "Balance", align: "right" }
+        ],
+        rows: outstanding.invoices.map((invoice) => ({
+          customer: invoice.customerName,
+          document: invoice.documentNumber ?? "—",
+          issued: new Date(invoice.completedAt).toLocaleDateString(),
+          due: invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : "—",
+          total: formatCents(invoice.grandTotalCents),
+          paid: formatCents(invoice.amountPaidCents),
+          balance: formatCents(invoice.balanceCents),
+          ...(invoice.isOverdue ? { _tone: "danger" as const } : {})
+        }))
+      }
+    ];
+    const sections = rawSections.filter((section): section is ReportExportSection => Boolean(section));
+
     return {
       module: "reports",
-      title: "Customers Report — Top Customers",
+      title: "Customers Report",
       subtitle: `${resolvedRange.startDate} to ${resolvedRange.endDate}`,
-      columns: [
-        { key: "customer", header: "Customer" },
-        { key: "phone", header: "Phone" },
-        { key: "transactions", header: "Transactions", align: "right" },
-        { key: "revenue", header: "Revenue", align: "right" },
-        { key: "avgSale", header: "Avg Sale", align: "right" }
-      ],
-      rows: topCustomers.map((row) => ({
-        customer: row.customerName,
-        phone: row.phone,
-        transactions: String(row.transactionCount),
-        revenue: formatCents(row.revenueCents),
-        avgSale: formatCents(row.averageSaleCents)
-      })),
+      sections,
       fileBaseName: `CustomersReport_${resolvedRange.startDate}_to_${resolvedRange.endDate}`
     };
-  }, [topCustomers, resolvedRange]);
+  }, [topCustomers, outstanding, resolvedRange]);
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }} className="mt-6 space-y-5 pb-10">
@@ -99,7 +166,7 @@ export function CustomersReportRoute(): React.JSX.Element {
             any single customer.
           </p>
         </div>
-        {canExport && exportRequest && <ExportMenu request={exportRequest} />}
+        {canExport && reportExportRequest && <ReportExportMenu request={reportExportRequest} />}
       </div>
 
       <div className="rounded-lg border border-line bg-white p-5 shadow-soft">

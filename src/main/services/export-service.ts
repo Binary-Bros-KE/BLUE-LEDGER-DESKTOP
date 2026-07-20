@@ -2,44 +2,25 @@ import { writeFile } from "node:fs/promises";
 import electron from "electron";
 import ExcelJS from "exceljs";
 import { requirePermission } from "@main/services/auth-service";
+import {
+  BRAND_BORDER,
+  BRAND_GOLD,
+  BRAND_NAVY,
+  BRAND_SOFT,
+  escapeHtml,
+  generatedAtLabel,
+  INK,
+  timestampedFileName
+} from "@main/services/export-shared";
 import type { ExportListRequest } from "@shared/types/export";
 
 const { BrowserWindow, dialog } = electron;
-
-const BRAND_NAVY = "#061e64";
-const BRAND_GOLD = "#83795f";
-const BRAND_BORDER = "#ddd5c2";
-const BRAND_SOFT = "#f1ede1";
-const INK = "#1c1710";
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
 
 function escapeCsvCell(value: string): string {
   if (/[",\n]/.test(value)) {
     return `"${value.replace(/"/g, '""')}"`;
   }
   return value;
-}
-
-/** Appends a to-the-second timestamp so repeated exports (e.g. re-exporting after tweaking a
- * filter) never collide on the same default file name — without this, the save dialog reprompts
- * "file already exists" on every export in the same day. */
-function timestampedFileName(baseName: string, extension: string): string {
-  const now = new Date();
-  const pad = (value: number): string => String(value).padStart(2, "0");
-  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-  return `${baseName}_${stamp}.${extension}`;
-}
-
-function generatedAtLabel(): string {
-  return new Date().toLocaleString("en-KE", { dateStyle: "medium", timeStyle: "short" });
 }
 
 /** Renders the export to PDF and prompts the user for a save location. Returns the saved path, or null if cancelled. */

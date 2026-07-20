@@ -256,6 +256,18 @@ export function deleteExpenseRow(id: string): void {
   getDatabase().prepare("DELETE FROM expenses WHERE id = ?").run(id);
 }
 
+/** Ids of every expense left over from before "General/Head Office" (a null storefront) was removed. */
+export function findExpenseIdsWithoutStorefront(tenantId: string): string[] {
+  const rows = getDatabase()
+    .prepare("SELECT id FROM expenses WHERE tenant_id = ? AND storefront_id IS NULL")
+    .all(tenantId) as Array<{ id: string }>;
+  return rows.map((row) => row.id);
+}
+
+export function setExpenseStorefrontRow(id: string, storefrontId: string): void {
+  getDatabase().prepare("UPDATE expenses SET storefront_id = ? WHERE id = ?").run(storefrontId, id);
+}
+
 export function mapExpenseDetailRow(row: ExpenseDetailRow): Expense {
   return {
     id: row.id,
@@ -268,8 +280,11 @@ export function mapExpenseDetailRow(row: ExpenseDetailRow): Expense {
     paidBy: row.paid_by,
     paymentMethodId: row.payment_method_id,
     paymentMethodName: row.payment_method_name,
-    storefrontId: row.storefront_id,
-    storefrontName: row.storefront_name,
+    // The column stays nullable at the SQL level, but application code never writes a null anymore
+    // (expenseInputSchema requires it) and ensureExpensesHaveStorefront() backfilled every old row —
+    // so by the time anything reads an expense, this is always a real storefront.
+    storefrontId: row.storefront_id as string,
+    storefrontName: row.storefront_name as string,
     reference: row.reference,
     description: row.description,
     attachmentPath: row.attachment_path,

@@ -7,6 +7,7 @@ export function Field({
   label,
   value,
   onChange,
+  onKeyDown,
   type = "text",
   required = false,
   disabled = false,
@@ -17,6 +18,7 @@ export function Field({
   label: string;
   value: string;
   onChange: (value: string) => void;
+  onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
   type?: string;
   required?: boolean;
   disabled?: boolean;
@@ -38,6 +40,7 @@ export function Field({
         disabled={disabled}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
+        onKeyDown={onKeyDown}
         className={cn(fieldInputClass, disabled && "cursor-not-allowed bg-soft text-muted")}
       />
     </label>
@@ -78,12 +81,14 @@ export function SelectField({
   value,
   onChange,
   options,
+  disabled = false,
   className
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   options: ReadonlyArray<{ value: string; label: string }>;
+  disabled?: boolean;
   className?: string;
 }): React.JSX.Element {
   return (
@@ -92,7 +97,8 @@ export function SelectField({
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className={fieldInputClass}
+        disabled={disabled}
+        className={cn(fieldInputClass, disabled && "cursor-not-allowed bg-soft text-muted")}
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>

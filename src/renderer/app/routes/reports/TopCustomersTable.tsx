@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { HorizontalBarList, type HorizontalBarItem } from "@renderer/shared/components/charts/HorizontalBarList";
 import { cn } from "@renderer/shared/lib/cn";
 import { formatCents } from "@renderer/shared/lib/money";
 import type { TopCustomerRow } from "@shared/types/customer-report";
@@ -9,6 +10,7 @@ function money(cents: number): string {
 
 type SortKey = "revenueCents" | "transactionCount" | "averageSaleCents";
 const TOP_LIMIT = 20;
+const BAR_LIMIT = 10;
 
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "revenueCents", label: "By Revenue" },
@@ -16,12 +18,21 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "averageSaleCents", label: "By Average Sale" },
 ];
 
-/** The top 20 customers by whichever metric is selected — walk-in sales with
- * no customer attached are excluded entirely, since there's no one to rank. */
+/** The top 20 customers by whichever metric is selected — includes a synthetic "Walk-in Customer"
+ * row for every qualifying sale with no customer attached, since that's real revenue too. */
 export function TopCustomersTable({ rows }: { rows: TopCustomerRow[] }): React.JSX.Element {
   const [sortKey, setSortKey] = useState<SortKey>("revenueCents");
 
   const topRows = useMemo(() => [...rows].sort((a, b) => b[sortKey] - a[sortKey]).slice(0, TOP_LIMIT), [rows, sortKey]);
+  const barItems: HorizontalBarItem[] = useMemo(
+    () =>
+      topRows.slice(0, BAR_LIMIT).map((row) => ({
+        key: row.customerId ?? "walk-in",
+        label: row.customerName,
+        value: row[sortKey]
+      })),
+    [topRows, sortKey]
+  );
 
   return (
     <div className="rounded-lg border border-line bg-white p-4">
@@ -44,6 +55,16 @@ export function TopCustomersTable({ rows }: { rows: TopCustomerRow[] }): React.J
         </div>
       </div>
 
+      {topRows.length > 0 && (
+        <div className="mt-4">
+          <HorizontalBarList
+            items={barItems}
+            formatValue={sortKey === "transactionCount" ? (value) => String(value) : money}
+            categorical
+          />
+        </div>
+      )}
+
       {topRows.length === 0 ? (
         <p className="mt-4 text-sm font-semibold text-muted">No attributed customer sales in this period.</p>
       ) : (
@@ -57,17 +78,19 @@ export function TopCustomersTable({ rows }: { rows: TopCustomerRow[] }): React.J
                 <th className="px-3 py-2.5 text-right text-[10px] font-extrabold uppercase tracking-wider">Transactions</th>
                 <th className="px-3 py-2.5 text-right text-[10px] font-extrabold uppercase tracking-wider">Revenue</th>
                 <th className="px-3 py-2.5 text-right text-[10px] font-extrabold uppercase tracking-wider">Avg Sale</th>
+                <th className="px-3 py-2.5 text-right text-[10px] font-extrabold uppercase tracking-wider">% of Total</th>
               </tr>
             </thead>
             <tbody>
               {topRows.map((row, index) => (
-                <tr key={row.customerId} className="border-t border-line odd:bg-white even:bg-soft/50">
+                <tr key={row.customerId ?? "walk-in"} className="border-t border-line odd:bg-white even:bg-soft/50">
                   <td className="px-3 py-2 font-bold text-muted">{index + 1}</td>
                   <td className="line-clamp-2 px-3 py-2 font-bold leading-snug text-ink">{row.customerName}</td>
-                  <td className="truncate px-3 py-2 text-xs font-semibold text-muted">{row.phone}</td>
+                  <td className="truncate px-3 py-2 text-xs font-semibold text-muted">{row.phone ?? "—"}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-muted">{row.transactionCount}</td>
                   <td className="px-3 py-2 text-right font-bold tabular-nums text-ink">{money(row.revenueCents)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-muted">{money(row.averageSaleCents)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-muted">{row.percentOfTotal.toFixed(1)}%</td>
                 </tr>
               ))}
             </tbody>

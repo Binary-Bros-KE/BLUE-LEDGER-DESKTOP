@@ -33,6 +33,8 @@ type BusinessData = {
   totalCreditCents: number;
   creditorCount: number;
   pendingApprovalsCount: number;
+  dueRecurringBillsCount: number;
+  dueRecurringBillsTotalCents: number;
 };
 
 /** Shared by both the Super Admin and Manager dashboards — identical widgets,
@@ -55,18 +57,24 @@ export function BusinessDashboard({ isBusinessWide }: { isBusinessWide: boolean 
         const today = todayIso();
         const range = { startDate: today, endDate: today };
 
-        const [overview, transactions, heldSales, byStorefront, byEmployee, inventoryData, voids, returns] = await Promise.all([
-          window.blueLedger.report.salesFinancialOverview(range),
-          window.blueLedger.report.salesTransactions(range),
-          window.blueLedger.sale.listPending(),
-          window.blueLedger.report.salesByStorefront(range),
-          window.blueLedger.report.salesByEmployee(range),
-          window.blueLedger.report.inventoryData(),
-          window.blueLedger.saleVoid.list(),
-          window.blueLedger.saleReturn.list(),
-        ]);
+        const [overview, transactions, heldSales, byStorefront, byEmployee, inventoryData, voids, returns, recurringBills] =
+          await Promise.all([
+            window.blueLedger.report.salesFinancialOverview(range),
+            window.blueLedger.report.salesTransactions(range),
+            window.blueLedger.sale.listPending(),
+            window.blueLedger.report.salesByStorefront(range),
+            window.blueLedger.report.salesByEmployee(range),
+            window.blueLedger.report.inventoryData(),
+            window.blueLedger.saleVoid.list(),
+            window.blueLedger.saleReturn.list(),
+            window.blueLedger.recurringBill.list().catch(() => []),
+          ]);
 
         if (cancelled) return;
+
+        const dueRecurringBills = recurringBills.filter(
+          (bill) => bill.status === "active" && (bill.reminderStatus === "overdue" || bill.reminderStatus === "due_soon")
+        );
 
         setData({
           overview,
@@ -82,6 +90,8 @@ export function BusinessDashboard({ isBusinessWide }: { isBusinessWide: boolean 
           creditorCount: overview.creditors.length,
           pendingApprovalsCount:
             voids.filter((v) => v.status === "pending_approval").length + returns.filter((r) => r.status === "pending_approval").length,
+          dueRecurringBillsCount: dueRecurringBills.length,
+          dueRecurringBillsTotalCents: dueRecurringBills.reduce((sum, bill) => sum + bill.amountCents, 0),
         });
       } catch (err) {
         if (!cancelled) setError(getErrorMessage(err, "Failed to load the dashboard"));
@@ -284,6 +294,16 @@ export function BusinessDashboard({ isBusinessWide }: { isBusinessWide: boolean 
             actionLabel="Check inventory"
             onAction={() => setActiveNavKey("reports-inventory")}
           />
+          {data.dueRecurringBillsCount > 0 && (
+            <DashboardActionCard
+              tone="warning"
+              label="Recurring Bills Due"
+              value={String(data.dueRecurringBillsCount)}
+              sublabel={`${money(data.dueRecurringBillsTotalCents)} expected — reminder only, nothing auto-paid`}
+              actionLabel="Review bills"
+              onAction={() => setActiveNavKey("expenses")}
+            />
+          )}
           <SyncStatusCard />
         </>
       }

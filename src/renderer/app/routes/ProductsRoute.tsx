@@ -8,11 +8,13 @@ import {
   Package,
   PackageX,
   Pencil,
+  Plus,
   Power,
   PowerOff,
   Search,
   TrendingDown
 } from "lucide-react";
+import { ProductCreateModal } from "@renderer/app/routes/products/ProductCreateModal";
 import { ProductDetailModal } from "@renderer/app/routes/products/ProductDetailModal";
 import { ProductEditModal } from "@renderer/app/routes/products/ProductEditModal";
 import { Button } from "@renderer/shared/components/Button";
@@ -73,6 +75,7 @@ function buildCategoryOptions(categories: Category[]): { value: string; label: s
 export function ProductsRoute(): React.JSX.Element {
   const currency = useAppStore((state) => state.context?.tenant.currency ?? "");
   const { can } = usePermissions();
+  const canCreate = can("products", "create");
   const canEdit = can("products", "edit");
   const canViewInventory = can("inventory", "view");
   const canExport = can("products", "export");
@@ -82,6 +85,7 @@ export function ProductsRoute(): React.JSX.Element {
   const [locations, setLocations] = useState<Location[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  const [createOpen, setCreateOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<ProductListItem | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -210,6 +214,12 @@ export function ProductsRoute(): React.JSX.Element {
     setNotice("Product updated.");
   }
 
+  async function handleProductCreated(): Promise<void> {
+    setCreateOpen(false);
+    await loadAll();
+    setNotice("Product created.");
+  }
+
   async function handleToggleStatus(product: ProductListItem): Promise<void> {
     const nextStatus = product.status === "active" ? "inactive" : "active";
     await window.blueLedger.product.setStatus(product.id, nextStatus);
@@ -243,11 +253,18 @@ export function ProductsRoute(): React.JSX.Element {
             <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Products</p>
             <h2 className="mt-1 text-xl font-extrabold">Product catalog</h2>
             <p className="mt-1 text-xs font-semibold text-muted">
-              Master catalog — stock balances are tracked per location in Inventory. New products and
-              stock receiving happen in Main Store.
+              Master catalog — stock balances are tracked per location in Inventory.
             </p>
           </div>
-          {canExport && exportRequest && <ExportMenu request={exportRequest} />}
+          <div className="flex items-center gap-2">
+            {canExport && exportRequest && <ExportMenu request={exportRequest} />}
+            {canCreate && (
+              <Button type="button" onClick={() => setCreateOpen(true)} className="h-9 text-xs">
+                <Plus className="mr-1.5 size-4" aria-hidden="true" />
+                New Product
+              </Button>
+            )}
+          </div>
         </div>
 
         {notice && (
@@ -366,7 +383,9 @@ export function ProductsRoute(): React.JSX.Element {
               </div>
               <h3 className="mt-4 text-lg font-extrabold">No products yet</h3>
               <p className="mt-1 max-w-sm text-sm font-semibold text-muted">
-                Add your first product from Main Store to start tracking pricing and stock.
+                {canCreate
+                  ? 'Click "New Product" above to start tracking pricing and stock.'
+                  : "Ask an admin to add your first product."}
               </p>
             </div>
           ) : filteredProducts && filteredProducts.length === 0 ? (
@@ -514,6 +533,14 @@ export function ProductsRoute(): React.JSX.Element {
           )}
         </div>
       </section>
+
+      <ProductCreateModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        categories={categories}
+        locations={locations}
+        onCreated={() => void handleProductCreated()}
+      />
 
       {editingProduct && (
         <ProductEditModal

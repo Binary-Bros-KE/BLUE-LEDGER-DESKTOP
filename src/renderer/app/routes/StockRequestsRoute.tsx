@@ -22,6 +22,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
+import { buildAvailableYears, currentYear, matchesYearFilter, yearFilterOptions } from "@renderer/shared/lib/year-filter";
 import { isStorefrontType, type Location } from "@shared/types/location";
 import type { ProductListItem } from "@shared/types/product";
 import type { StockRequest, StockRequestListItem, StockRequestStatus } from "@shared/types/stock-request";
@@ -81,6 +82,7 @@ export function StockRequestsRoute(): React.JSX.Element {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<FilterTab>("all");
+  const [yearFilter, setYearFilter] = useState<string>(String(currentYear()));
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createStorefrontId, setCreateStorefrontId] = useState("");
@@ -140,12 +142,18 @@ export function StockRequestsRoute(): React.JSX.Element {
       .slice(0, 8);
   }, [products, productSearch]);
 
+  const availableYears = useMemo(
+    () => buildAvailableYears((requests ?? []).map((request) => request.requestedAt)),
+    [requests]
+  );
+
   const filteredRequests = useMemo(() => {
     if (!requests) return null;
     let list = requests;
     if (statusFilter !== "all") {
       list = list.filter((request) => request.status === statusFilter);
     }
+    list = list.filter((request) => matchesYearFilter(request.requestedAt, yearFilter));
     const term = searchTerm.trim().toLowerCase();
     if (term) {
       list = list.filter((request) =>
@@ -153,7 +161,7 @@ export function StockRequestsRoute(): React.JSX.Element {
       );
     }
     return list;
-  }, [requests, statusFilter, searchTerm]);
+  }, [requests, statusFilter, searchTerm, yearFilter]);
 
   const counts = useMemo(() => {
     const source = requests ?? [];
@@ -364,6 +372,14 @@ export function StockRequestsRoute(): React.JSX.Element {
                   />
                 </div>
               </label>
+
+              <SelectField
+                label="Year"
+                value={yearFilter}
+                onChange={setYearFilter}
+                options={yearFilterOptions(availableYears)}
+                className="w-32"
+              />
 
               <div className="flex flex-wrap gap-1.5 rounded-lg border border-line bg-soft px-1 py-0.5">
                 {FILTER_TABS.map((tab) => (

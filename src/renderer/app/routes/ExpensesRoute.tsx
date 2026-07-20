@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
+  AlertTriangle,
   Archive,
   CalendarDays,
   Eye,
@@ -8,6 +9,7 @@ import {
   Pencil,
   PieChart,
   Plus,
+  Repeat,
   RotateCcw,
   Search,
   Settings2,
@@ -28,8 +30,10 @@ import type { ExpenseCategory } from "@shared/types/expense-category";
 import type { ExportListRequest } from "@shared/types/export";
 import type { Location } from "@shared/types/location";
 import type { PaymentMethod } from "@shared/types/payment-method";
+import type { RecurringBill } from "@shared/types/recurring-bill";
 import { ExpenseCategoriesManagerModal } from "./expenses/ExpenseCategoriesManagerModal";
 import { ExpenseFormModal } from "./expenses/ExpenseFormModal";
+import { RecurringBillsModal } from "./expenses/RecurringBillsModal";
 
 type StatusFilter = "active" | "archived" | "all";
 
@@ -76,22 +80,26 @@ export function ExpensesRoute(): React.JSX.Element {
   const [formOpen, setFormOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [categoriesManagerOpen, setCategoriesManagerOpen] = useState(false);
+  const [recurringBillsModalOpen, setRecurringBillsModalOpen] = useState(false);
+  const [recurringBills, setRecurringBills] = useState<RecurringBill[]>([]);
 
   const loadAll = useCallback(async () => {
     setLoadError(null);
     try {
-      const [summaryResult, expenseList, categoryList, locationList, methodList] = await Promise.all([
+      const [summaryResult, expenseList, categoryList, locationList, methodList, recurringBillList] = await Promise.all([
         window.blueLedger.expense.summary(),
         window.blueLedger.expense.list(),
         window.blueLedger.expenseCategory.list(),
         window.blueLedger.location.list(),
-        window.blueLedger.paymentMethod.list()
+        window.blueLedger.paymentMethod.list(),
+        window.blueLedger.recurringBill.list().catch(() => [])
       ]);
       setSummary(summaryResult);
       setExpenses(expenseList);
       setCategories(categoryList);
       setLocations(locationList);
       setPaymentMethods(methodList);
+      setRecurringBills(recurringBillList);
     } catch (err) {
       setLoadError(getErrorMessage(err, "Failed to load expenses"));
     }
@@ -272,6 +280,9 @@ export function ExpensesRoute(): React.JSX.Element {
   }
 
   const topCategories = summary?.byCategory.slice(0, 5) ?? [];
+  const dueRecurringBills = recurringBills.filter(
+    (bill) => bill.status === "active" && (bill.reminderStatus === "overdue" || bill.reminderStatus === "due_soon")
+  );
 
   return (
     <motion.div
@@ -333,6 +344,19 @@ export function ExpensesRoute(): React.JSX.Element {
           </div>
           <div className="flex flex-wrap gap-2">
             {canExport && exportRequest && <ExportMenu request={exportRequest} />}
+            <Button
+              type="button"
+              onClick={() => setRecurringBillsModalOpen(true)}
+              className={cn(
+                "h-9 border text-xs shadow-none",
+                dueRecurringBills.length > 0
+                  ? "border-warning/40 bg-warning/10 text-warning hover:bg-warning/15"
+                  : "border-line bg-white text-ink hover:bg-soft"
+              )}
+            >
+              <Repeat className="mr-1.5 size-3.5" aria-hidden="true" />
+              Recurring Bills{dueRecurringBills.length > 0 ? ` (${dueRecurringBills.length})` : ""}
+            </Button>
             {canManageCategories && (
               <Button
                 type="button"
@@ -356,6 +380,21 @@ export function ExpensesRoute(): React.JSX.Element {
           <div className="mt-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
             {loadError ?? actionError}
           </div>
+        )}
+
+        {dueRecurringBills.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setRecurringBillsModalOpen(true)}
+            className="mt-4 flex w-full items-center gap-2.5 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-left transition hover:bg-warning/15 cursor-pointer"
+          >
+            <AlertTriangle className="size-4 flex-none text-warning" aria-hidden="true" />
+            <span className="text-xs font-bold text-ink">
+              {dueRecurringBills.length} recurring bill{dueRecurringBills.length === 1 ? "" : "s"} need
+              {dueRecurringBills.length === 1 ? "s" : ""} attention —{" "}
+              {dueRecurringBills.map((bill) => bill.name).join(", ")}
+            </span>
+          </button>
         )}
 
         <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -601,6 +640,18 @@ export function ExpensesRoute(): React.JSX.Element {
         categories={categories}
         canManage={canManageCategories}
         onChanged={loadAll}
+      />
+
+      <RecurringBillsModal
+        open={recurringBillsModalOpen}
+        onClose={() => {
+          setRecurringBillsModalOpen(false);
+          void loadAll();
+        }}
+        categories={categories}
+        storefronts={locations}
+        paymentMethods={paymentMethods}
+        canManage={canCreate || canEdit}
       />
     </motion.div>
   );

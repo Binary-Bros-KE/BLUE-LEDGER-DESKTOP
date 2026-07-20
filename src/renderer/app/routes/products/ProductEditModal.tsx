@@ -3,6 +3,8 @@ import { ImagePlus, Loader2, Package, X } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { CheckboxField, Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
+import { usePermissions } from "@renderer/shared/hooks/use-permissions";
+import { getDashboardVariant } from "@renderer/shared/lib/dashboard-role";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { fromCents, toCents } from "@renderer/shared/lib/money";
 import type { Category } from "@shared/types/category";
@@ -88,6 +90,9 @@ export function ProductEditModal({
   onClose: () => void;
   onSaved: () => void;
 }): React.JSX.Element {
+  const { session } = usePermissions();
+  const isSuperAdmin = getDashboardVariant(session) === "superAdmin";
+
   const [form, setForm] = useState<FormState>(() => toFormState(product));
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [imageBusy, setImageBusy] = useState(false);
@@ -205,7 +210,7 @@ export function ProductEditModal({
                 </Button>
               )}
             </div>
-            <p className="mt-1.5 text-[11px] font-semibold text-muted">JPG, PNG, or WEBP · max 5MB</p>
+            <p className="mt-1.5 text-[11px] font-semibold text-muted">JPG, PNG, or WEBP · max 10MB</p>
           </div>
         </div>
 
@@ -228,7 +233,12 @@ export function ProductEditModal({
             label="Barcode"
             value={form.barcode}
             onChange={(value) => updateField("barcode", value)}
-            placeholder="e.g. 5449000000996"
+            onKeyDown={(event) => {
+              // A scanner ends every scan with Enter — without this it would submit the whole form
+              // mid-edit instead of just filling this field.
+              if (event.key === "Enter") event.preventDefault();
+            }}
+            placeholder="Click here, then scan — or type e.g. 5449000000996"
           />
           <Field
             label="Short Name"
@@ -250,6 +260,7 @@ export function ProductEditModal({
               { value: "", label: "All Storefronts" },
               ...storefronts.map((location) => ({ value: location.id, label: location.locationName }))
             ]}
+            disabled={!isSuperAdmin}
           />
           <Field
             label="Supplier SKU"

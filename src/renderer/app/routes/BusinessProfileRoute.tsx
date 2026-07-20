@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
-import { Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
+import { Field, SelectField } from "@renderer/shared/components/form-fields";
 import { StampBadge } from "@renderer/shared/components/StampBadge";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
@@ -48,8 +48,6 @@ type FormState = {
   ownerName: string;
   ownerPhone: string;
   ownerEmail: string;
-  receiptHeader: string;
-  receiptFooter: string;
 };
 
 function toFormState(record: TenantRecord): FormState {
@@ -71,9 +69,7 @@ function toFormState(record: TenantRecord): FormState {
     currency: record.currency,
     ownerName: record.ownerName ?? "",
     ownerPhone: record.ownerPhone ?? "",
-    ownerEmail: record.ownerEmail ?? "",
-    receiptHeader: record.receiptHeader ?? "",
-    receiptFooter: record.receiptFooter ?? ""
+    ownerEmail: record.ownerEmail ?? ""
   };
 }
 
@@ -270,7 +266,7 @@ export function BusinessProfileRoute(): React.JSX.Element {
               </div>
             )}
             <p className="mt-2 text-xs font-semibold text-muted">
-              JPG, PNG, or WEBP · max 5MB. Copied into Blue Ledger's own storage, so it stays put even
+              JPG, PNG, or WEBP · max 10MB. Copied into Blue Ledger's own storage, so it stays put even
               if you move or delete the original file.
             </p>
           </div>
@@ -398,20 +394,11 @@ export function BusinessProfileRoute(): React.JSX.Element {
           />
         </FormSection>
 
-        <FormSection title="Receipt">
-          <TextAreaField
-            label="Receipt Header"
-            value={form.receiptHeader}
-            onChange={(value) => updateField("receiptHeader", value)}
-            placeholder="e.g. Thank you for shopping with us!"
-          />
-          <TextAreaField
-            label="Receipt Footer"
-            value={form.receiptFooter}
-            onChange={(value) => updateField("receiptFooter", value)}
-            placeholder="e.g. Goods sold are non-refundable. Visit again!"
-          />
-        </FormSection>
+        <div className="mt-4 rounded-lg border border-dashed border-line bg-soft/60 px-4 py-3 text-xs font-semibold text-muted">
+          Receipt, invoice, and quotation headers/footers now live on each storefront — open{" "}
+          <span className="font-bold text-ink">Storefronts</span> and edit the branch you want to
+          configure. This keeps every branch's documents showing that branch's own identity.
+        </div>
 
         <div className="mt-6 flex items-center justify-between gap-4 border-t border-line pt-5">
           <SaveStatus dirty={dirty} savedAt={savedAt} />

@@ -21,7 +21,11 @@ export function computeLinePricing(
     quantity >= product.wholesaleMinQuantity;
   const unitPriceCents = useWholesale ? (product.wholesalePriceCents as number) : product.sellingPriceCents;
   const lineSubtotalCents = unitPriceCents * quantity;
-  const clampedDiscountCents = Math.max(0, Math.min(discountAmountCents, lineSubtotalCents));
+  // A discount can never push the line below the product's own minimum price (if one is set) —
+  // the floor a discount is allowed to reach, in total across this line's quantity.
+  const floorCents = product.minimumPriceCents !== null ? product.minimumPriceCents * quantity : 0;
+  const maxDiscountCents = Math.max(0, lineSubtotalCents - floorCents);
+  const clampedDiscountCents = Math.max(0, Math.min(discountAmountCents, lineSubtotalCents, maxDiscountCents));
   const taxableCents = lineSubtotalCents - clampedDiscountCents;
   const taxCents = Math.round(taxableCents * (product.taxRate / 100));
   return {

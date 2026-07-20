@@ -1,10 +1,14 @@
+/** `customerId`/`phone` are null for the synthetic "Walk-in Customer" row, which aggregates every
+ * qualifying sale with no customer attached — included so it can be ranked and compared like anyone
+ * else, since it's real revenue and usually the single largest bucket. */
 export type TopCustomerRow = {
-  customerId: string;
+  customerId: string | null;
   customerName: string;
-  phone: string;
+  phone: string | null;
   transactionCount: number;
   revenueCents: number;
   averageSaleCents: number;
+  percentOfTotal: number;
 };
 
 export type CustomerPurchaseHistoryEntry = {

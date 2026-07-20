@@ -23,13 +23,37 @@ function formatLastSold(row: SlowMovingProductRow): React.JSX.Element {
   );
 }
 
-/** The 20 worst-moving products for the selected period — fewest units sold
- * first, with a "never sold" product sorting to the very top regardless of
- * period, since that's the most actionable signal here. */
-export function SlowMovingProductsTable({ rows }: { rows: SlowMovingProductRow[] }): React.JSX.Element {
+const MAX_LIMIT = 500;
+
+/** The N worst-moving products (user-adjustable, defaults to 20) for the selected period — fewest
+ * units sold first, with a "never sold" product sorting to the very top regardless of period, since
+ * that's the most actionable signal here. The count is server-side (not a client-side slice), since
+ * "slow moving" ranks across the whole catalog, not just whatever already loaded. */
+export function SlowMovingProductsTable({
+  rows,
+  limit,
+  onLimitChange
+}: {
+  rows: SlowMovingProductRow[];
+  limit: number;
+  onLimitChange: (limit: number) => void;
+}): React.JSX.Element {
   return (
     <div className="rounded-lg border border-line bg-white p-4">
-      <p className="text-[11px] font-bold uppercase tracking-wide text-muted">20 slowest moving products</p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-muted">Slowest moving products</p>
+        <label className="flex items-center gap-1.5">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Show</span>
+          <input
+            type="number"
+            min={1}
+            max={MAX_LIMIT}
+            value={limit}
+            onChange={(event) => onLimitChange(Math.max(1, Math.min(MAX_LIMIT, Number(event.target.value) || 1)))}
+            className="h-7 w-16 rounded-md border border-line bg-white px-2 text-xs font-bold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+          />
+        </label>
+      </div>
       <p className="mt-0.5 text-xs font-semibold text-muted">
         Fewest units sold in this period first — includes products with zero sales entirely.
       </p>

@@ -66,6 +66,25 @@ export type SalesProcessedReturn = {
   reason: string;
 };
 
+/** One purchase order cancelled within the reporting period, dated by when it was created (not
+ * received) — matching how every other Sales Report figure windows its period. Reports assume a
+ * cancelled purchase was never paid (or the money was returned), so this is informational context
+ * only; it never contributes to any revenue or expense total. */
+export type CancelledPurchaseEntry = {
+  purchaseId: string;
+  purchaseNumber: string;
+  supplierName: string;
+  locationName: string;
+  createdAt: string;
+  grandTotalCents: number;
+};
+
+export type CancelledPurchasesReport = {
+  count: number;
+  totalCents: number;
+  purchases: CancelledPurchaseEntry[];
+};
+
 /**
  * The financial story for one resolved date range: how much cash actually
  * came in (every source — full-paid sales plus whatever's been received

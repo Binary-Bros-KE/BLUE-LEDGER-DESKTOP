@@ -49,6 +49,33 @@ export function findTopCustomersInRange(
     .all(tenantId, locationId, locationId, startIso, endIsoExclusive) as TopCustomerRowRaw[];
 }
 
+export type WalkInRevenueRowRaw = {
+  transaction_count: number;
+  revenue_cents: number;
+};
+
+/** Aggregate of every qualifying sale with NO customer attached, in [startIso, endIsoExclusive) —
+ * bucketed as one "Walk-in" row rather than excluded, since it's real revenue and usually the single
+ * largest bucket. */
+export function findWalkInRevenueInRange(
+  tenantId: string,
+  locationId: string | null,
+  startIso: string,
+  endIsoExclusive: string
+): WalkInRevenueRowRaw | undefined {
+  return getDatabase()
+    .prepare(
+      `
+      SELECT COUNT(*) AS transaction_count, SUM(s.grand_total_cents) AS revenue_cents
+      FROM sales s
+      WHERE ${SALE_QUALIFYING_WHERE}
+        AND s.customer_id IS NULL
+        AND s.completed_at >= ? AND s.completed_at < ?
+    `
+    )
+    .get(tenantId, locationId, locationId, startIso, endIsoExclusive) as WalkInRevenueRowRaw | undefined;
+}
+
 export type CustomerPurchaseHistoryRowRaw = {
   sale_id: string;
   completed_at: string;

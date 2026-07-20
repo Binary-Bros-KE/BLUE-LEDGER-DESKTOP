@@ -23,8 +23,9 @@ function addDaysIso(dateStr: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-/** Every customer with an attributed sale in the period, ranked by revenue —
- * walk-in sales with no customer attached aren't rankable as "a customer". */
+/** Every customer with an attributed sale in the period, ranked by revenue, plus a synthetic
+ * "Walk-in Customer" row aggregating every sale with no customer attached — real revenue that
+ * shouldn't be silently dropped just because it's not tied to a customer record. */
 export function getTopCustomers(input: unknown): TopCustomerRow[] {
   requirePermission("reports", "view");
   const { startDate, endDate } = dateRangeInputSchema.parse(input);
@@ -35,15 +36,34 @@ export function getTopCustomers(input: unknown): TopCustomerRow[] {
   const endIsoExclusive = startOfDayIso(addDaysIso(endDate, 1));
 
   const rows = customerReportRepository.findTopCustomersInRange(tenantId, locationId, startIso, endIsoExclusive);
+  const walkIn = customerReportRepository.findWalkInRevenueInRange(tenantId, locationId, startIso, endIsoExclusive);
 
-  return rows
-    .map((row) => ({
+  const customers: Array<{ customerId: string | null; customerName: string; phone: string | null; transactionCount: number; revenueCents: number }> =
+    rows.map((row) => ({
       customerId: row.customer_id,
       customerName: row.customer_name,
       phone: row.phone,
       transactionCount: row.transaction_count,
       revenueCents: row.revenue_cents,
-      averageSaleCents: row.transaction_count > 0 ? Math.round(row.revenue_cents / row.transaction_count) : 0,
+    }));
+
+  if (walkIn && walkIn.transaction_count > 0) {
+    customers.push({
+      customerId: null,
+      customerName: "Walk-in Customer",
+      phone: null,
+      transactionCount: walkIn.transaction_count,
+      revenueCents: walkIn.revenue_cents,
+    });
+  }
+
+  const totalRevenueCents = customers.reduce((sum, customer) => sum + customer.revenueCents, 0);
+
+  return customers
+    .map((customer) => ({
+      ...customer,
+      averageSaleCents: customer.transactionCount > 0 ? Math.round(customer.revenueCents / customer.transactionCount) : 0,
+      percentOfTotal: totalRevenueCents > 0 ? Math.round((customer.revenueCents / totalRevenueCents) * 1000) / 10 : 0,
     }))
     .sort((a, b) => b.revenueCents - a.revenueCents);
 }

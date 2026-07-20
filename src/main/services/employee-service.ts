@@ -29,6 +29,15 @@ function assertBranchBelongsToTenant(branchId: string | null, tenantId: string):
   }
 }
 
+/** A branch-scoped caller (i.e. not Super Admin) can only ever assign an employee to their own
+ * branch — never a different one, and never "no branch" (which grants cross-storefront visibility). */
+function assertBranchAssignmentAllowed(branchId: string | null, branchScope: string | null): void {
+  if (!branchScope) return;
+  if (branchId !== branchScope) {
+    throw new Error("You can only assign employees to your own branch");
+  }
+}
+
 function assertUniqueFields(
   tenantId: string,
   fields: { employeeCode: string; username: string | null },
@@ -145,6 +154,7 @@ export function getEmployee(id: string): Employee {
 export function createEmployee(input: unknown): Employee {
   requirePermission("employees", "create");
   const parsed = employeeCreateSchema.parse(input);
+  assertBranchAssignmentAllowed(parsed.branchId, getCurrentBranchScope());
   const { tenantId } = getCurrentTenant();
   return createEmployeeInternal(parsed, tenantId, getCurrentEmployeeId());
 }
@@ -160,6 +170,7 @@ export function updateEmployee(id: string, input: unknown): Employee {
   const { tenantId } = getCurrentTenant();
   assertRoleBelongsToTenant(parsed.roleId, tenantId);
   assertBranchBelongsToTenant(parsed.branchId, tenantId);
+  assertBranchAssignmentAllowed(parsed.branchId, getCurrentBranchScope());
   assertUniqueFields(tenantId, parsed, id);
 
   const pinHash = parsed.pin ? hashSecret(parsed.pin) : existing.pin_hash;

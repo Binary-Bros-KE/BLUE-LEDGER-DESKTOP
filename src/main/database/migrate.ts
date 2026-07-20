@@ -1070,6 +1070,97 @@ const migrations = [
       );
       CREATE INDEX idx_stock_request_items_request ON stock_request_items(stock_request_id);
     `
+  },
+  {
+    version: 29,
+    name: "salary_draft_status",
+    sql: `
+      CREATE TABLE salaries_new (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        payslip_number TEXT NOT NULL,
+        employee_id TEXT NOT NULL,
+        pay_period TEXT NOT NULL,
+        basic_salary_cents INTEGER NOT NULL DEFAULT 0,
+        allowances_cents INTEGER NOT NULL DEFAULT 0,
+        deductions_cents INTEGER NOT NULL DEFAULT 0,
+        net_pay_cents INTEGER NOT NULL DEFAULT 0,
+        payment_method_id TEXT,
+        payment_reference TEXT,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('draft', 'active', 'voided')),
+        notes TEXT,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        allowances_json TEXT NOT NULL DEFAULT '[]',
+        deductions_json TEXT NOT NULL DEFAULT '[]',
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (employee_id) REFERENCES employees(id),
+        FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id),
+        FOREIGN KEY (created_by) REFERENCES employees(id)
+      );
+
+      INSERT INTO salaries_new (
+        id, tenant_id, payslip_number, employee_id, pay_period, basic_salary_cents, allowances_cents,
+        deductions_cents, net_pay_cents, payment_method_id, payment_reference, status, notes,
+        created_by, created_at, updated_at, sync_status, last_synced_at, allowances_json, deductions_json
+      )
+      SELECT
+        id, tenant_id, payslip_number, employee_id, pay_period, basic_salary_cents, allowances_cents,
+        deductions_cents, net_pay_cents, payment_method_id, payment_reference, status, notes,
+        created_by, created_at, updated_at, sync_status, last_synced_at, allowances_json, deductions_json
+      FROM salaries;
+
+      DROP TABLE salaries;
+      ALTER TABLE salaries_new RENAME TO salaries;
+
+      CREATE UNIQUE INDEX idx_salaries_tenant_payslip_number ON salaries(tenant_id, payslip_number);
+      CREATE UNIQUE INDEX idx_salaries_tenant_employee_period
+        ON salaries(tenant_id, employee_id, pay_period) WHERE status = 'active';
+      CREATE INDEX idx_salaries_tenant_employee ON salaries(tenant_id, employee_id);
+      CREATE INDEX idx_salaries_tenant_status ON salaries(tenant_id, status);
+      CREATE INDEX idx_salaries_tenant_created ON salaries(tenant_id, created_at);
+    `
+  },
+  {
+    version: 30,
+    name: "recurring_bills",
+    sql: `
+      CREATE TABLE recurring_bills (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        category_id TEXT,
+        storefront_id TEXT,
+        amount_cents INTEGER NOT NULL,
+        cycle TEXT NOT NULL CHECK (cycle IN ('daily', 'weekly', 'monthly', 'quarterly', 'yearly')),
+        start_date TEXT NOT NULL,
+        next_due_date TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused')),
+        notes TEXT,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (category_id) REFERENCES expense_categories(id),
+        FOREIGN KEY (storefront_id) REFERENCES locations(id),
+        FOREIGN KEY (created_by) REFERENCES employees(id)
+      );
+      CREATE INDEX idx_recurring_bills_tenant_status ON recurring_bills(tenant_id, status);
+      CREATE INDEX idx_recurring_bills_next_due ON recurring_bills(tenant_id, next_due_date);
+    `
+  },
+  {
+    version: 31,
+    name: "location_receipt_branding",
+    sql: `
+      ALTER TABLE locations ADD COLUMN receipt_header TEXT;
+      ALTER TABLE locations ADD COLUMN receipt_footer TEXT;
+    `
   }
 ] as const;
 

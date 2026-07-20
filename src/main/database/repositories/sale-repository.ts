@@ -97,6 +97,7 @@ export type SaleSummaryRow = {
   created_at: string;
   /** NULL when the sale has no delivery attached at all; 0/1 (delivery_notes.is_delivered) otherwise. */
   delivery_is_delivered: number | null;
+  location_id: string;
 };
 
 /** Pass null for locationId to see every branch's receipts (e.g. a super-admin with no assigned branch). */
@@ -116,7 +117,8 @@ export function findAllSaleSummaryRows(tenantId: string, locationId: string | nu
         s.sale_status,
         s.completed_at,
         s.created_at,
-        (SELECT dn.is_delivered FROM delivery_notes dn WHERE dn.sale_id = s.id) AS delivery_is_delivered
+        (SELECT dn.is_delivered FROM delivery_notes dn WHERE dn.sale_id = s.id) AS delivery_is_delivered,
+        s.location_id
       FROM sales s
       JOIN employees e ON e.id = s.employee_id
       JOIN locations l ON l.id = s.location_id
@@ -144,7 +146,8 @@ export function mapSaleSummaryRow(row: SaleSummaryRow): SaleListItem {
     completedAt: row.completed_at,
     createdAt: row.created_at,
     hasDeliveryNote: row.delivery_is_delivered !== null,
-    deliveryIsDelivered: row.delivery_is_delivered === null ? null : row.delivery_is_delivered === 1
+    deliveryIsDelivered: row.delivery_is_delivered === null ? null : row.delivery_is_delivered === 1,
+    locationId: row.location_id
   };
 }
 
@@ -181,6 +184,7 @@ export type InvoiceRow = {
   payment_status: string;
   created_at: string;
   has_delivery_note: number;
+  location_id: string;
 };
 
 /** Pass null for locationId to see every branch's invoices (e.g. a super-admin with no assigned branch). */
@@ -202,7 +206,8 @@ export function findAllInvoiceRows(tenantId: string, locationId: string | null):
         s.balance_due_cents,
         s.payment_status,
         s.created_at,
-        EXISTS(SELECT 1 FROM delivery_notes dn WHERE dn.sale_id = s.id) AS has_delivery_note
+        EXISTS(SELECT 1 FROM delivery_notes dn WHERE dn.sale_id = s.id) AS has_delivery_note,
+        s.location_id
       FROM sales s
       JOIN locations l ON l.id = s.location_id
       LEFT JOIN customers c ON c.id = s.customer_id
@@ -234,7 +239,8 @@ export function mapInvoiceListRow(row: InvoiceRow): InvoiceListItem {
       cancelled: row.payment_status === "cancelled"
     }),
     createdAt: row.created_at,
-    hasDeliveryNote: row.has_delivery_note === 1
+    hasDeliveryNote: row.has_delivery_note === 1,
+    locationId: row.location_id
   };
 }
 

@@ -1,11 +1,51 @@
 import * as supplierReportRepository from "@main/database/repositories/supplier-report-repository";
 import { getCurrentBranchScope, requirePermission, requirePermissionAnyOf } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
+import { dateRangeInputSchema } from "@shared/schemas/report";
 import { supplierPurchaseHistoryInputSchema } from "@shared/schemas/supplier-report";
-import type { OutstandingPurchaseRow, OutstandingPurchasesSummary, SupplierPurchaseHistoryEntry } from "@shared/types/supplier-report";
+import type {
+  OutstandingPurchaseRow,
+  OutstandingPurchasesSummary,
+  SupplierPurchaseHistoryEntry,
+  SupplierSpendRow,
+} from "@shared/types/supplier-report";
 
 const PURCHASE_HISTORY_LIMIT = 200;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+function startOfDayIso(dateStr: string): string {
+  return `${dateStr}T00:00:00.000Z`;
+}
+
+function addDaysIso(dateStr: string, days: number): string {
+  const date = new Date(`${dateStr}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+/** Every supplier with a qualifying purchase in the period, ranked by total purchase value — "who we
+ * bought from the most," not just who's been paid so far (see getOutstandingPurchases for that). */
+export function getSupplierSpendBreakdown(input: unknown): SupplierSpendRow[] {
+  requirePermission("reports", "view");
+  const { startDate, endDate } = dateRangeInputSchema.parse(input);
+  const { tenantId } = getCurrentTenant();
+  const locationId = getCurrentBranchScope();
+
+  const startIso = startOfDayIso(startDate);
+  const endIsoExclusive = startOfDayIso(addDaysIso(endDate, 1));
+
+  const rows = supplierReportRepository.findSupplierSpendInRange(tenantId, locationId, startIso, endIsoExclusive);
+  const totalCents = rows.reduce((sum, row) => sum + row.total_spent_cents, 0);
+
+  return rows.map((row) => ({
+    supplierId: row.supplier_id,
+    supplierName: row.supplier_name,
+    phone: row.phone,
+    purchaseCount: row.purchase_count,
+    totalSpentCents: row.total_spent_cents,
+    percentOfTotal: totalCents > 0 ? Math.round((row.total_spent_cents / totalCents) * 1000) / 10 : 0,
+  }));
+}
 
 /** Every currently-outstanding purchase — a live balance-sheet snapshot,
  * deliberately not scoped to any selected period (same reasoning as Sales

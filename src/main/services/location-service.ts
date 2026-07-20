@@ -89,6 +89,8 @@ export function ensureMainStoreLocation(tenantId: string): void {
     openingTime: null,
     closingTime: null,
     description: "Central stock — receives and distributes products to storefronts.",
+    receiptHeader: null,
+    receiptFooter: null,
     canReceiveStock: true,
     canSellStock: false,
     canTransferStock: true,

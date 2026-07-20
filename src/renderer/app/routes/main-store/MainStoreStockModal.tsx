@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertTriangle, ArrowLeftRight, Loader2, PackagePlus, Shuffle, Undo2 } from "lucide-react";
+import { AlertTriangle, ArrowLeftRight, Loader2, PackagePlus, Tag, Undo2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
@@ -13,7 +13,7 @@ const MODE_TABS: Array<{ value: Mode; label: string; icon: typeof PackagePlus }>
   { value: "receive", label: "Receive", icon: PackagePlus },
   { value: "distribute", label: "Distribute", icon: ArrowLeftRight },
   { value: "return", label: "Return", icon: Undo2 },
-  { value: "reallocate", label: "Reallocate", icon: Shuffle },
+  { value: "reallocate", label: "Allocate", icon: Tag },
   { value: "damage", label: "Damage", icon: AlertTriangle }
 ];
 
@@ -68,7 +68,7 @@ export function MainStoreStockModal({
     distribute: "Ships stock from Main Store to a storefront — draws from what's earmarked for them first.",
     return: "Returns stock from a storefront back to Main Store, staying earmarked for them.",
     reallocate:
-      "Bookkeeping only — moves earmarked stock between buckets without physically shipping anything.",
+      "Marks Main Store stock as belonging to a specific storefront (or moves it back to Unallocated) — pure bookkeeping, nothing physically ships. This is how stock gets earmarked for a store before Distribute actually sends it there.",
     damage: "Records damaged or lost stock, reducing a specific bucket at Main Store."
   };
 

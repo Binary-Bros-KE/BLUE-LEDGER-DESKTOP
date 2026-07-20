@@ -1,8 +1,7 @@
 import * as productReportRepository from "@main/database/repositories/product-report-repository";
 import { getCurrentBranchScope, requirePermission } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
-import { dateRangeInputSchema } from "@shared/schemas/report";
-import { productSalesHistoryInputSchema } from "@shared/schemas/product-report";
+import { productSalesHistoryInputSchema, productsPerformanceInputSchema } from "@shared/schemas/product-report";
 import type {
   ProductPerformanceRow,
   ProductSalesHistoryEntry,
@@ -30,7 +29,7 @@ function addDaysIso(dateStr: string, days: number): string {
  * zero sales in the period entirely) for one resolved date range. */
 export function getProductsPerformanceReport(input: unknown): ProductsPerformanceReport {
   requirePermission("reports", "view");
-  const { startDate, endDate } = dateRangeInputSchema.parse(input);
+  const { startDate, endDate, slowMovingLimit } = productsPerformanceInputSchema.parse(input);
   const { tenantId } = getCurrentTenant();
   const locationId = getCurrentBranchScope();
 
@@ -85,7 +84,7 @@ export function getProductsPerformanceReport(input: unknown): ProductsPerformanc
       if (a.quantitySoldInPeriod !== b.quantitySoldInPeriod) return a.quantitySoldInPeriod - b.quantitySoldInPeriod;
       return (b.daysSinceLastSale ?? Number.MAX_SAFE_INTEGER) - (a.daysSinceLastSale ?? Number.MAX_SAFE_INTEGER);
     })
-    .slice(0, SLOW_MOVING_LIMIT);
+    .slice(0, slowMovingLimit ?? SLOW_MOVING_LIMIT);
 
   return { bestSelling, slowMoving };
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { Field } from "@renderer/shared/components/form-fields";
@@ -19,6 +19,7 @@ export function QuickCreateProductModal({
   onCreated: (product: Product) => void;
 }): React.JSX.Element {
   const [sku, setSku] = useState("");
+  const [barcode, setBarcode] = useState("");
   const [name, setName] = useState("");
   const [buyingPrice, setBuyingPrice] = useState("");
   const [sellingPrice, setSellingPrice] = useState("");
@@ -27,11 +28,19 @@ export function QuickCreateProductModal({
 
   function reset(): void {
     setSku("");
+    setBarcode("");
     setName("");
     setBuyingPrice("");
     setSellingPrice("");
     setError(null);
   }
+
+  useEffect(() => {
+    if (!open) return;
+    // Prefills the next auto-generated SKU so nobody has to track the latest number by hand — still a
+    // normal editable field, so it can be overridden for a tenant with their own existing SKU scheme.
+    void window.blueLedger.product.nextSku().then(setSku).catch(() => {});
+  }, [open]);
 
   async function handleSubmit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
@@ -42,6 +51,7 @@ export function QuickCreateProductModal({
       const sellingPriceCents = sellingPrice.trim() === "" ? buyingPriceCents : toCents(sellingPrice);
       const product = await window.blueLedger.product.create({
         sku,
+        barcode: barcode.trim() ? barcode.trim() : null,
         name,
         buyingPriceCents,
         sellingPriceCents,
@@ -80,6 +90,15 @@ export function QuickCreateProductModal({
 
         <div className="space-y-4">
           <Field label="SKU" value={sku} onChange={setSku} placeholder="e.g. SKU-001" required />
+          <Field
+            label="Barcode (optional)"
+            value={barcode}
+            onChange={setBarcode}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.preventDefault();
+            }}
+            placeholder="Click here, then scan — or leave blank"
+          />
           <Field label="Product Name" value={name} onChange={setName} placeholder="e.g. 20L Cooking Oil" required />
           <Field
             label="Buying Price (Cost)"

@@ -10,6 +10,7 @@ import { Field, SelectField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
+import { getDashboardVariant } from "@renderer/shared/lib/dashboard-role";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import {
   EMPLOYEE_STATUS_OPTIONS,
@@ -19,7 +20,7 @@ import {
 } from "@shared/types/employee";
 import type { ExportListRequest } from "@shared/types/export";
 import type { Location } from "@shared/types/location";
-import type { RoleListItem } from "@shared/types/role";
+import type { RolePickerItem } from "@shared/types/role";
 
 type FormState = {
   employeeCode: string;
@@ -99,14 +100,15 @@ function statusTone(status: EmployeeStatus): "success" | "warning" | "danger" {
 }
 
 export function EmployeesRoute(): React.JSX.Element {
-  const { can } = usePermissions();
+  const { can, session } = usePermissions();
+  const isSuperAdmin = getDashboardVariant(session) === "superAdmin";
   const canCreate = can("employees", "create");
   const canExport = can("employees", "export");
   const canEdit = can("employees", "edit");
   const canDelete = can("employees", "delete");
 
   const [employees, setEmployees] = useState<EmployeeListItem[] | null>(null);
-  const [roles, setRoles] = useState<RoleListItem[]>([]);
+  const [roles, setRoles] = useState<RolePickerItem[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -130,7 +132,7 @@ export function EmployeesRoute(): React.JSX.Element {
     try {
       const [employeeList, roleList, locationList] = await Promise.all([
         window.blueLedger.employee.list(),
-        window.blueLedger.role.list(),
+        window.blueLedger.role.listForPicker(),
         window.blueLedger.location.list()
       ]);
       setEmployees(employeeList);
@@ -166,6 +168,13 @@ export function EmployeesRoute(): React.JSX.Element {
   const branchOptions = useMemo(
     () => locations.map((location) => ({ value: location.id, label: location.locationName })),
     [locations]
+  );
+  /** A branch-scoped Manager can only ever staff their own storefront — showing every branch (or the
+   * "no branch" cross-storefront option) here would let them create an employee outside their own
+   * scope. Super Admin still sees and picks freely from all of them. */
+  const formBranchOptions = useMemo(
+    () => (isSuperAdmin ? branchOptions : branchOptions.filter((option) => option.value === session?.branch?.id)),
+    [branchOptions, isSuperAdmin, session?.branch?.id]
   );
 
   const filteredEmployees = useMemo(() => {
@@ -249,7 +258,7 @@ export function EmployeesRoute(): React.JSX.Element {
 
   function openCreateModal(): void {
     setEditingId(null);
-    setForm(emptyForm);
+    setForm({ ...emptyForm, branchId: isSuperAdmin ? "" : (session?.branch?.id ?? "") });
     setError(null);
     setModalOpen(true);
   }
@@ -636,7 +645,7 @@ export function EmployeesRoute(): React.JSX.Element {
                   </Button>
                 )}
               </div>
-              <p className="mt-1.5 text-[11px] font-semibold text-muted">JPG, PNG, or WEBP · max 5MB</p>
+              <p className="mt-1.5 text-[11px] font-semibold text-muted">JPG, PNG, or WEBP · max 10MB</p>
             </div>
           </div>
 
@@ -717,7 +726,8 @@ export function EmployeesRoute(): React.JSX.Element {
                 label="Assigned Branch"
                 value={form.branchId}
                 onChange={(value) => updateField("branchId", value)}
-                options={[{ value: "", label: "No branch — sees every storefront" }, ...branchOptions]}
+                disabled={!isSuperAdmin}
+                options={isSuperAdmin ? [{ value: "", label: "No branch — sees every storefront" }, ...formBranchOptions] : formBranchOptions}
               />
               <Field
                 label="Job Title"

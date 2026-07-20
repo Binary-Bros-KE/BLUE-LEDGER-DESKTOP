@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Download, Loader2, Printer, Share2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { buildReceiptViewModel, formatReceiptCents } from "@shared/lib/receipt";
+import type { Location } from "@shared/types/location";
 import type { Sale } from "@shared/types/sale";
 import type { TenantContext } from "@shared/types/tenant";
 
@@ -11,13 +13,33 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
   const [downloading, setDownloading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The receipt must show THIS SALE's own storefront identity, never the tenant-wide Business
+  // Profile's — a storefront's name/address/phone/header/footer only fall back to the tenant default
+  // when the storefront hasn't set its own (see resolveDocumentBusiness in printer-service.ts, which
+  // this mirrors for the on-screen preview).
+  const [location, setLocation] = useState<Location | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.blueLedger.location
+      .get(sale.locationId)
+      .then((result) => {
+        if (!cancelled) setLocation(result);
+      })
+      .catch(() => {
+        if (!cancelled) setLocation(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sale.locationId]);
 
   const vm = buildReceiptViewModel(sale, {
-    businessName: tenant.businessName,
-    physicalAddress: tenant.physicalAddress,
-    primaryPhone: tenant.primaryPhone,
-    receiptHeader: tenant.receiptHeader,
-    receiptFooter: tenant.receiptFooter,
+    businessName: location?.locationName ?? tenant.businessName,
+    physicalAddress: location?.physicalAddress ?? tenant.physicalAddress,
+    primaryPhone: location?.phone ?? tenant.primaryPhone,
+    receiptHeader: location?.receiptHeader ?? tenant.receiptHeader,
+    receiptFooter: location?.receiptFooter ?? tenant.receiptFooter,
     currency: tenant.currency
   });
 
@@ -29,10 +51,17 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
     setNotice(null);
     try {
       const result = await window.blueLedger.printer.printReceipt(sale.id);
-      if (result.success) setNotice(result.message);
-      else setError(result.message);
+      if (result.success) {
+        setNotice(result.message);
+        showSuccessToast(result.message);
+      } else {
+        setError(result.message);
+        showErrorToast(result.message);
+      }
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to print receipt"));
+      const message = getErrorMessage(err, "Failed to print receipt");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setPrinting(false);
     }
@@ -44,9 +73,14 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
     setNotice(null);
     try {
       const savedPath = await window.blueLedger.printer.generateReceiptPdf(sale.id);
-      if (savedPath) setNotice(`Saved to ${savedPath}`);
+      if (savedPath) {
+        setNotice(`Saved to ${savedPath}`);
+        showSuccessToast(`Saved to ${savedPath}`);
+      }
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to generate PDF"));
+      const message = getErrorMessage(err, "Failed to generate PDF");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setDownloading(false);
     }

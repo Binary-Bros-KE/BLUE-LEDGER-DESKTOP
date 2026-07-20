@@ -10,13 +10,28 @@ import { getDashboardVariant } from "@renderer/shared/lib/dashboard-role";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import {
+  ALL_YEARS_VALUE,
+  buildAvailableYears,
+  currentYear,
+  matchesYearFilter,
+  yearFilterOptions
+} from "@renderer/shared/lib/year-filter";
 import type { EmployeeListItem } from "@shared/types/employee";
 import type { ExportListRequest } from "@shared/types/export";
 import { isStorefrontType, type Location } from "@shared/types/location";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import type { Salary } from "@shared/types/salary";
 import { PayslipModal } from "./salaries/PayslipModal";
+import { SalaryAdvanceModal } from "./salaries/SalaryAdvanceModal";
 import { SalaryFormModal } from "./salaries/SalaryFormModal";
+import { SalaryPaymentMatrix } from "./salaries/SalaryPaymentMatrix";
+
+function salaryStatusLabel(status: Salary["status"]): string {
+  if (status === "draft") return "Draft";
+  if (status === "active") return "Complete";
+  return "Voided";
+}
 
 function formatPayPeriodLabel(payPeriod: string): string {
   try {
@@ -44,6 +59,7 @@ export function SalariesRoute(): React.JSX.Element {
   const canViewAll = can("salaries", "edit") || can("salaries", "export");
   const canVoid = can("salaries", "delete");
   const canRestore = can("salaries", "edit");
+  const canComplete = can("salaries", "edit");
   const canExport = can("salaries", "export");
   const isSuperAdmin = getDashboardVariant(session) === "superAdmin";
 
@@ -58,7 +74,10 @@ export function SalariesRoute(): React.JSX.Element {
   const [dateTo, setDateTo] = useState("");
   const [employeeFilter, setEmployeeFilter] = useState("");
   const [storefrontFilter, setStorefrontFilter] = useState("");
+  const [yearFilter, setYearFilter] = useState<string>(String(currentYear()));
   const [formOpen, setFormOpen] = useState(false);
+  const [completingDraft, setCompletingDraft] = useState<Salary | null>(null);
+  const [advanceModalOpen, setAdvanceModalOpen] = useState(false);
   const [viewingSalary, setViewingSalary] = useState<Salary | null>(null);
 
   const loadAll = useCallback(async () => {
@@ -102,6 +121,11 @@ export function SalariesRoute(): React.JSX.Element {
     return map;
   }, [employees]);
 
+  const availableYears = useMemo(
+    () => buildAvailableYears((salaries ?? []).map((salary) => salary.payPeriod)),
+    [salaries]
+  );
+
   const filteredSalaries = useMemo(() => {
     if (!salaries) return null;
     let list = salaries;
@@ -120,6 +144,7 @@ export function SalariesRoute(): React.JSX.Element {
     if (isSuperAdmin && storefrontFilter) {
       list = list.filter((salary) => employeeBranchById.get(salary.employeeId) === storefrontFilter);
     }
+    list = list.filter((salary) => matchesYearFilter(salary.payPeriod, yearFilter));
 
     const term = searchTerm.trim().toLowerCase();
     if (!term) return list;
@@ -127,12 +152,13 @@ export function SalariesRoute(): React.JSX.Element {
       const haystack = `${salary.payslipNumber} ${salary.employeeName} ${salary.payPeriod}`.toLowerCase();
       return haystack.includes(term);
     });
-  }, [salaries, searchTerm, dateFrom, dateTo, employeeFilter, storefrontFilter, isSuperAdmin, employeeBranchById]);
+  }, [salaries, searchTerm, dateFrom, dateTo, employeeFilter, storefrontFilter, yearFilter, isSuperAdmin, employeeBranchById]);
 
   const exportRequest = useMemo<ExportListRequest | null>(() => {
     if (!filteredSalaries) return null;
     const filterParts: string[] = [];
     if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
+    if (yearFilter !== ALL_YEARS_VALUE) filterParts.push(`Year: ${yearFilter}`);
     if (dateFrom || dateTo) filterParts.push(`Date: ${dateFrom || "…"} to ${dateTo || "…"}`);
     if (employeeFilter) {
       filterParts.push(`Employee: ${employees.find((e) => e.id === employeeFilter)?.firstName ?? employeeFilter}`);
@@ -166,8 +192,8 @@ export function SalariesRoute(): React.JSX.Element {
         employee: salary.employeeName,
         payPeriod: formatPayPeriodLabel(salary.payPeriod),
         netPay: formatCents(salary.netPayCents),
-        paymentMethod: salary.paymentMethodName,
-        status: salary.status === "active" ? "Active" : "Voided"
+        paymentMethod: salary.paymentMethodName ?? "—",
+        status: salaryStatusLabel(salary.status)
       })),
       fileBaseName: `Salaries_${new Date().toISOString().slice(0, 10)}`
     };
@@ -181,7 +207,8 @@ export function SalariesRoute(): React.JSX.Element {
     storefrontFilter,
     isSuperAdmin,
     employees,
-    storefronts
+    storefronts,
+    yearFilter
   ]);
 
   async function refreshViewing(): Promise<void> {
@@ -234,6 +261,15 @@ export function SalariesRoute(): React.JSX.Element {
           <div className="flex items-center gap-2">
             {canExport && exportRequest && <ExportMenu request={exportRequest} />}
             {canProcess && (
+              <Button
+                type="button"
+                onClick={() => setAdvanceModalOpen(true)}
+                className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+              >
+                Record Advance
+              </Button>
+            )}
+            {canProcess && (
               <Button type="button" onClick={() => setFormOpen(true)} className="h-9 text-xs">
                 <Plus className="mr-1.5 size-4" aria-hidden="true" />
                 Process Salary
@@ -266,6 +302,13 @@ export function SalariesRoute(): React.JSX.Element {
                 />
               </div>
             </label>
+            <SelectField
+              label="Year"
+              value={yearFilter}
+              onChange={setYearFilter}
+              options={yearFilterOptions(availableYears)}
+              className="w-32"
+            />
             <label className="block">
               <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">From</span>
               <input
@@ -350,7 +393,7 @@ export function SalariesRoute(): React.JSX.Element {
               </Button>
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-line">
+            <div className="max-h-[480px] overflow-y-auto overflow-x-auto rounded-lg border border-line">
               <table className="w-full min-w-[900px] table-fixed border-collapse text-sm">
                 <colgroup>
                   <col className="w-[14%]" />
@@ -361,7 +404,7 @@ export function SalariesRoute(): React.JSX.Element {
                   <col className={canViewAll ? "w-[10%]" : "w-[14%]"} />
                   <col className={canViewAll ? "w-[10%]" : "w-[14%]"} />
                 </colgroup>
-                <thead>
+                <thead className="sticky top-0 z-10">
                   <tr className="bg-primary text-white">
                     <Th>Payslip #</Th>
                     {canViewAll && <Th>Employee</Th>}
@@ -392,11 +435,13 @@ export function SalariesRoute(): React.JSX.Element {
                         {formatCents(salary.netPayCents)}
                       </td>
                       <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">
-                        {salary.paymentMethodName}
+                        {salary.paymentMethodName ?? "—"}
                       </td>
                       <td className="px-3 py-2.5">
-                        <DashedPill tone={salary.status === "active" ? "success" : "neutral"}>
-                          {salary.status === "active" ? "Active" : "Voided"}
+                        <DashedPill
+                          tone={salary.status === "active" ? "success" : salary.status === "draft" ? "warning" : "neutral"}
+                        >
+                          {salaryStatusLabel(salary.status)}
                         </DashedPill>
                       </td>
                       <td className="px-3 py-2.5 text-right">
@@ -420,13 +465,30 @@ export function SalariesRoute(): React.JSX.Element {
         </div>
       </section>
 
+      {salaries && salaries.length > 0 && (
+        <SalaryPaymentMatrix salaries={salaries} onViewPayslip={setViewingSalary} />
+      )}
+
       {canProcess && (
         <SalaryFormModal
           open={formOpen}
-          onClose={() => setFormOpen(false)}
+          onClose={() => {
+            setFormOpen(false);
+            setCompletingDraft(null);
+          }}
           employees={employees}
           paymentMethods={paymentMethods}
           onProcessed={handleProcessed}
+          completingDraft={completingDraft}
+        />
+      )}
+
+      {canProcess && (
+        <SalaryAdvanceModal
+          open={advanceModalOpen}
+          onClose={() => setAdvanceModalOpen(false)}
+          employees={employees}
+          onRecorded={handleProcessed}
         />
       )}
 
@@ -435,8 +497,14 @@ export function SalariesRoute(): React.JSX.Element {
           salary={viewingSalary}
           canVoid={canVoid}
           canRestore={canRestore}
+          canComplete={canComplete}
           onClose={() => setViewingSalary(null)}
           onChanged={refreshViewing}
+          onCompleteRequested={(salary) => {
+            setViewingSalary(null);
+            setCompletingDraft(salary);
+            setFormOpen(true);
+          }}
         />
       )}
     </motion.div>

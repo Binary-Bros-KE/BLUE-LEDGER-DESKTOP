@@ -29,6 +29,31 @@ function assertStorefrontBelongsToTenant(storefrontId: string | null, tenantId: 
   }
 }
 
+/** A branch-scoped caller (a Manager) can only ever create a product for THEIR OWN storefront —
+ * never "All Storefronts" (null, which shows it to every other branch too) and never a different
+ * one. Only Super Admin (no branch assigned) can pick freely. */
+function assertProductStorefrontCreateAllowed(storefrontId: string | null, branchScope: string | null): void {
+  if (!branchScope) return;
+  if (storefrontId !== branchScope) {
+    throw new Error("You can only create products for your own storefront");
+  }
+}
+
+/** Same boundary for edits — a Manager can leave an existing product's storefront assignment
+ * exactly as-is (even "All Storefronts", if a Super Admin set it that way), but can't reassign it to
+ * anything other than their own branch. */
+function assertProductStorefrontUpdateAllowed(
+  nextStorefrontId: string | null,
+  existingStorefrontId: string | null,
+  branchScope: string | null
+): void {
+  if (!branchScope) return;
+  if (nextStorefrontId === existingStorefrontId) return;
+  if (nextStorefrontId !== branchScope) {
+    throw new Error("You can only assign products to your own storefront");
+  }
+}
+
 function assertUniqueFields(
   tenantId: string,
   fields: { name: string; sku: string; barcode: string | null },
@@ -112,15 +137,48 @@ export function getProduct(id: string): Product {
   return productRepository.mapProductRow(row);
 }
 
+/** A branch-scoped caller (i.e. not Super Admin) may only seed opening stock into their own
+ * storefront or the Main Store — never another storefront they don't manage. Unrestricted callers
+ * (null scope) can target anything, same as every other branch-scoped read/write in this app. */
+function assertOpeningStockLocationsAllowed(
+  entries: Array<{ locationId: string }>,
+  tenantId: string,
+  branchScope: string | null
+): void {
+  if (!branchScope || entries.length === 0) return;
+  const mainStore = locationRepository.findMainStoreLocationRow(tenantId);
+  for (const entry of entries) {
+    if (entry.locationId === branchScope) continue;
+    if (mainStore && entry.locationId === mainStore.id) continue;
+    throw new Error("You can only set opening stock for your own storefront or Main Store");
+  }
+}
+
+/** A peek at the next auto-generated SKU (e.g. "PROD-000042") — used to prefill the Create Product
+ * form so nobody has to track the latest number by hand as the catalog grows into the thousands. The
+ * form field stays a normal editable text input, so a tenant with their own existing SKU scheme can
+ * still override it. */
+export function nextProductSku(): string {
+  requirePermission("products", "create");
+  const { tenantId } = getCurrentTenant();
+  const maxSku = productRepository.findMaxProductSkuNumberRow(tenantId);
+  const currentNumber = maxSku ? Number(maxSku.slice("PROD-".length)) : 0;
+  const nextNumber = Number.isFinite(currentNumber) ? currentNumber + 1 : 1;
+  return `PROD-${String(nextNumber).padStart(6, "0")}`;
+}
+
 export function createProduct(input: unknown): Product {
   requirePermission("products", "create");
   const parsed = productCreateSchema.parse(input);
   const { tenantId } = getCurrentTenant();
   const performedBy = getCurrentEmployeeId();
+  const branchScope = getCurrentBranchScope();
 
   assertCategoryBelongsToTenant(parsed.categoryId, tenantId);
   assertStorefrontBelongsToTenant(parsed.storefrontId, tenantId);
+  assertProductStorefrontCreateAllowed(parsed.storefrontId, branchScope);
   assertUniqueFields(tenantId, parsed);
+  assertOpeningStockLocationsAllowed(parsed.openingStock, tenantId, branchScope);
 
   const productId = `product_${randomUUID()}`;
 
@@ -164,6 +222,7 @@ export function updateProduct(id: string, input: unknown): Product {
   const { tenantId } = getCurrentTenant();
   assertCategoryBelongsToTenant(parsed.categoryId, tenantId);
   assertStorefrontBelongsToTenant(parsed.storefrontId, tenantId);
+  assertProductStorefrontUpdateAllowed(parsed.storefrontId, existing.storefront_id, getCurrentBranchScope());
   assertUniqueFields(tenantId, parsed, id);
 
   const row = productRepository.updateProductRow(id, { ...parsed, updatedBy: getCurrentEmployeeId() });

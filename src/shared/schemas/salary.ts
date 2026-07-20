@@ -37,3 +37,19 @@ export const salaryInputSchema = z
   );
 
 export type SalaryInput = z.infer<typeof salaryInputSchema>;
+
+/** Opens a draft mid-month, before basic salary/payment method are known — e.g. to record a cash
+ * advance as a deduction against pay that hasn't been calculated yet. `completeSalary` later uses
+ * the full `salaryInputSchema` (net-pay-non-negative enforced then, not here — a draft's net pay is
+ * expected to be negative, that's the whole point). */
+export const salaryAdvanceInputSchema = z.object({
+  employeeId: z.string().trim().min(1, "Select an employee"),
+  payPeriod: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}$/, "Pay period must be in YYYY-MM format"),
+  deductions: z.array(salaryLineItemSchema).min(1, "Add at least one deduction (e.g. the advance amount)"),
+  notes: optionalText(1000)
+});
+
+export type SalaryAdvanceInput = z.infer<typeof salaryAdvanceInputSchema>;

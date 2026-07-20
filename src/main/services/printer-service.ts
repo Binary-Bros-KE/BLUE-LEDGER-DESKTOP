@@ -1,10 +1,13 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import electron from "electron";
 import { ThermalPrinter, PrinterTypes } from "node-thermal-printer";
+import { getPrinters as getSystemPrinters, print as printPdfToPrinter } from "pdf-to-printer";
 import { getDatabase } from "@main/database/connection";
 import * as deliveryNoteRepository from "@main/database/repositories/delivery-note-repository";
+import * as employeeRepository from "@main/database/repositories/employee-repository";
 import * as locationRepository from "@main/database/repositories/location-repository";
 import * as quotationRepository from "@main/database/repositories/quotation-repository";
 import * as saleRepository from "@main/database/repositories/sale-repository";
@@ -124,14 +127,7 @@ function loadReceiptData(saleId: string): { sale: Sale; business: Parameters<typ
 
   return {
     sale,
-    business: {
-      businessName: tenantRow.business_name,
-      physicalAddress: tenantRow.physical_address,
-      primaryPhone: tenantRow.primary_phone,
-      receiptHeader: tenantRow.receipt_header,
-      receiptFooter: tenantRow.receipt_footer,
-      currency: tenantRow.currency
-    }
+    business: resolveDocumentBusiness(saleRow.location_id, tenantRow)
   };
 }
 
@@ -185,11 +181,79 @@ function writeReceiptToPrinter(printerInstance: ThermalPrinter, vm: ReceiptViewM
   printerInstance.cut();
 }
 
+/** USB printers may legitimately leave the address blank (uses the system's default printer) —
+ * only network/serial connections require an explicit address. */
+function requiresExplicitAddress(settings: PrinterSettings): boolean {
+  return settings.connectionType !== "usb";
+}
+
+/** "USB (System Printer Name)" targets a printer installed as a normal Windows print queue (a real
+ * GDI driver, like most receipt printers ship with). Electron's own `webContents.print()` is
+ * unreliable for these — Chromium's print pipeline frequently rejects non-standard-page-size (roll)
+ * printer drivers with "Invalid printer settings" no matter what options are passed (a long-standing
+ * Electron limitation for POS/label printers). `pdf-to-printer` sidesteps it: render the receipt to
+ * PDF (the same `printToPDF` path the Download button already uses successfully) and hand it to a
+ * bundled lightweight viewer that prints silently through Windows' own spooler instead of Chromium's. */
+async function findSystemPrinterByName(deviceName: string): Promise<{ name: string } | undefined> {
+  const printers = await getSystemPrinters();
+  console.log(
+    "[printer] system printers seen by pdf-to-printer:",
+    printers.map((printer) => printer.name)
+  );
+  if (!deviceName) return printers[0];
+  return printers.find((printer) => printer.name === deviceName);
+}
+
+/** Renders a full-size A4 document to PDF and sends it straight to Windows' default printer via
+ * pdf-to-printer, sidestepping the same `webContents.print()` "Invalid printer settings" failure
+ * fixed for receipts above — it isn't specific to the receipt's narrow page size, it's Chromium's
+ * whole native print pipeline choking whenever a POS/label printer driver is involved at all. Used by
+ * every "Print" button for a real-page document (invoice, quotation, delivery note): no special page
+ * size needed here since these already render correctly as A4 for the Download PDF path. */
+async function printHtmlViaSystemPrinter(html: string, fileLabel: string): Promise<void> {
+  const buffer = await renderHtmlToPdfBuffer(html);
+  const tempPath = join(app.getPath("temp"), `blue-ledger-${fileLabel}-${randomUUID()}.pdf`);
+  await writeFile(tempPath, buffer);
+  try {
+    await printPdfToPrinter(tempPath, { silent: true });
+  } finally {
+    await unlink(tempPath).catch(() => {});
+  }
+}
+
+async function printReceiptToSystemPrinter(vm: ReceiptViewModel, deviceName: string): Promise<void> {
+  const html = buildReceiptHtml(vm, { compact: true });
+  // Matches the Aclas driver's own reported page size (80(72.1)x297mm) — without an explicit narrow
+  // pageSize, printToPDF defaults to a full Letter page, which the thermal driver can't reconcile
+  // with an 80mm roll and simply prints blank.
+  const buffer = await renderHtmlToPdfBuffer(html, {
+    pageSize: { width: 3.15, height: 11.69 },
+    margins: { marginType: "none" }
+  });
+  const tempPath = join(app.getPath("temp"), `blue-ledger-receipt-${randomUUID()}.pdf`);
+  await writeFile(tempPath, buffer);
+  try {
+    await printPdfToPrinter(tempPath, { silent: true, ...(deviceName ? { printer: deviceName } : {}) });
+  } finally {
+    await unlink(tempPath).catch(() => {});
+  }
+}
+
 export async function testPrinterConnection(): Promise<PrinterActionResult> {
   requirePermission("settings", "edit");
   const settings = loadPrinterSettings();
-  if (!settings.address) {
+  if (requiresExplicitAddress(settings) && !settings.address) {
     return { success: false, message: "Enter a printer address first" };
+  }
+
+  if (settings.connectionType === "usb") {
+    const found = await findSystemPrinterByName(settings.address);
+    if (!found) {
+      return settings.address
+        ? { success: false, message: `No printer named "${settings.address}" was found on this device.` }
+        : { success: false, message: "No printers are installed on this device." };
+    }
+    return { success: true, message: `Found printer: ${found.name}` };
   }
 
   try {
@@ -202,18 +266,29 @@ export async function testPrinterConnection(): Promise<PrinterActionResult> {
   }
 }
 
-/** Sends the receipt straight to the configured ESC/POS thermal printer. */
+/** Sends the receipt to the configured printer — a named Windows print queue for "usb" connections,
+ * or straight ESC/POS bytes for network/serial thermal printers. */
 export async function printReceipt(saleId: string): Promise<PrinterActionResult> {
   requirePermission("sales", "view");
   const settings = loadPrinterSettings();
-  if (!settings.enabled || !settings.address) {
+  if (!settings.enabled || (requiresExplicitAddress(settings) && !settings.address)) {
     return { success: false, message: "No printer is configured yet. Set one up in Settings." };
   }
 
   const { sale, business } = loadReceiptData(saleId);
   const viewModel = buildReceiptViewModel(sale, business);
-  const printerInstance = buildPrinter(settings);
 
+  if (settings.connectionType === "usb") {
+    try {
+      await printReceiptToSystemPrinter(viewModel, settings.address);
+      return { success: true, message: "Receipt sent to printer" };
+    } catch (err) {
+      console.error("[printer] printReceipt (usb) failed", err);
+      return { success: false, message: err instanceof Error ? err.message : "Failed to print receipt" };
+    }
+  }
+
+  const printerInstance = buildPrinter(settings);
   try {
     const connected = await printerInstance.isPrinterConnected();
     if (!connected) {
@@ -231,8 +306,12 @@ function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function buildReceiptHtml(vm: ReceiptViewModel): string {
+/** `compact` renders for an actual 80mm thermal roll (full-bleed width, tight padding, smaller type)
+ * — used only when printing straight to a system/USB printer. The default, roomier layout is for the
+ * Download PDF, which renders onto a normal Letter/A4 page and is meant to be viewed or emailed. */
+function buildReceiptHtml(vm: ReceiptViewModel, options?: { compact?: boolean }): string {
   const money = (cents: number | null): string => `${vm.currency} ${formatReceiptCents(cents)}`;
+  const compact = options?.compact ?? false;
 
   const itemRows = [...vm.items, ...vm.extraLines]
     .map(
@@ -244,23 +323,39 @@ function buildReceiptHtml(vm: ReceiptViewModel): string {
     )
     .join("");
 
+  const bodyPadding = compact ? "4px 8px" : "32px";
+  const receiptWidth = compact ? "100%" : "360px";
+  const baseFontSize = compact ? "12px" : "12px";
+  const headingSize = compact ? "14px" : "16px";
+  const mutedFontSize = compact ? "10.5px" : "11px";
+  const grandFontSize = compact ? "13px" : "14px";
+  // Thermal printheads burn regular-weight, anti-aliased PDF text very faintly — strokes need to be
+  // bold and pure black to register reliably, unlike on-screen/A4-PDF rendering where gray + regular
+  // weight read fine. The roomier non-compact layout (Download PDF) is unaffected.
+  const bodyWeight = compact ? "700" : "400";
+  const mutedColor = compact ? "#1c1710" : "#666";
+  // Courier New's serifs and fine curves (especially on digits) don't rasterize cleanly at 203dpi —
+  // they break apart into dot-like fragments. A plain sans-serif has simpler, more uniform strokes
+  // that reproduce far more cleanly on a thermal head, matching how the driver's own Test Page looks.
+  const fontFamily = compact ? "Arial, 'Segoe UI', Helvetica, sans-serif" : "'Courier New', monospace";
+
   return `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8" />
 <style>
   * { box-sizing: border-box; }
-  body { font-family: 'Courier New', monospace; color: #1c1710; margin: 0; padding: 32px; }
-  .receipt { max-width: 360px; margin: 0 auto; }
-  h1 { font-size: 16px; text-align: center; margin: 0 0 4px; }
+  body { font-family: ${fontFamily}; color: #1c1710; margin: 0; padding: ${bodyPadding}; font-size: ${baseFontSize}; font-weight: ${bodyWeight}; }
+  .receipt { max-width: ${receiptWidth}; margin: 0 auto; }
+  h1 { font-size: ${headingSize}; text-align: center; margin: 0 0 4px; }
   .center { text-align: center; }
-  .muted { color: #666; font-size: 11px; }
+  .muted { color: ${mutedColor}; font-size: ${mutedFontSize}; }
   hr { border: none; border-top: 1px dashed #999; margin: 10px 0; }
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: ${baseFontSize}; }
   td { padding: 4px 0; vertical-align: top; }
   .right { text-align: right; white-space: nowrap; }
   .totals td { padding: 2px 0; }
-  .grand { font-weight: bold; font-size: 14px; }
+  .grand { font-weight: bold; font-size: ${grandFontSize}; }
 </style>
 </head>
 <body>
@@ -299,11 +394,19 @@ function buildReceiptHtml(vm: ReceiptViewModel): string {
 </html>`;
 }
 
-async function renderHtmlToPdfBuffer(html: string, options?: { landscape?: boolean }): Promise<Buffer> {
+async function renderHtmlToPdfBuffer(
+  html: string,
+  options?: { landscape?: boolean; pageSize?: Electron.PrintToPDFOptions["pageSize"]; margins?: Electron.Margins }
+): Promise<Buffer> {
   const win = new BrowserWindow({ show: false });
   try {
     await win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(html).toString("base64")}`);
-    return await win.webContents.printToPDF({ printBackground: true, landscape: options?.landscape ?? false });
+    return await win.webContents.printToPDF({
+      printBackground: true,
+      landscape: options?.landscape ?? false,
+      ...(options?.pageSize ? { pageSize: options.pageSize } : {}),
+      ...(options?.margins ? { margins: options.margins } : {})
+    });
   } finally {
     win.destroy();
   }
@@ -349,10 +452,38 @@ function formatInvoiceDate(value: string | null): string {
 
 type DocumentLogo = { logoDataUrl: string | null; logoRatio: LogoRatio | null };
 
+type DocumentBusinessInfo = {
+  businessName: string;
+  physicalAddress: string | null;
+  primaryPhone: string | null;
+  receiptHeader: string | null;
+  receiptFooter: string | null;
+  currency: string;
+};
+
+/** Every customer-facing document belongs to a specific storefront, and must show THAT storefront's
+ * own identity — never the tenant-wide Business Profile's, which may be an unrelated holding/legal
+ * name. The storefront's name is always used (it's a required field); address/phone/header/footer
+ * fall back to the tenant-wide default only when the storefront hasn't set its own. Pass null when
+ * there's no specific storefront (e.g. the employee has no branch assigned) to go straight to the
+ * tenant defaults. Mirrors resolveDocumentLogo's per-location-first approach. */
+function resolveDocumentBusiness(locationId: string | null, tenantRow: tenantRepository.TenantRow): DocumentBusinessInfo {
+  const locationRow = locationId ? locationRepository.findLocationRowById(locationId) : undefined;
+  return {
+    businessName: locationRow?.location_name ?? tenantRow.business_name,
+    physicalAddress: locationRow?.physical_address ?? tenantRow.physical_address,
+    primaryPhone: locationRow?.phone ?? tenantRow.primary_phone,
+    receiptHeader: locationRow?.receipt_header ?? tenantRow.receipt_header,
+    receiptFooter: locationRow?.receipt_footer ?? tenantRow.receipt_footer,
+    currency: tenantRow.currency
+  };
+}
+
 /** Prefers the storefront's own logo (if set); falls back to the business logo otherwise. Shared by
- * the invoice and quotation document builders. */
-async function resolveDocumentLogo(locationId: string, tenantRow: tenantRepository.TenantRow): Promise<DocumentLogo> {
-  const locationRow = locationRepository.findLocationRowById(locationId);
+ * every document builder (invoice, quotation, payslip) — pass null when there's no specific
+ * storefront to check (e.g. the employee has no branch assigned) to go straight to the business logo. */
+async function resolveDocumentLogo(locationId: string | null, tenantRow: tenantRepository.TenantRow): Promise<DocumentLogo> {
+  const locationRow = locationId ? locationRepository.findLocationRowById(locationId) : undefined;
   if (locationRow?.logo_path) {
     const logoDataUrl = await readManagedLocationLogoPreview(locationRow.logo_path);
     if (logoDataUrl) {
@@ -417,7 +548,7 @@ function buildExtraChargeRows(
  * narrow thermal receipt, reused for both print and PDF download. */
 function buildInvoiceHtml(
   sale: Sale,
-  business: { businessName: string; physicalAddress: string | null; primaryPhone: string | null; receiptFooter: string | null; currency: string },
+  business: DocumentBusinessInfo,
   logo: DocumentLogo
 ): string {
   const money = (cents: number | null): string =>
@@ -586,7 +717,10 @@ export async function generateInvoicePdf(saleId: string): Promise<string | null>
   return result.filePath;
 }
 
-/** Opens the native print dialog for the invoice document — a regular A4 printer, not the ESC/POS thermal one. */
+/** Sends the invoice document straight to Windows' default printer — a regular A4 printer, not the
+ * ESC/POS thermal one. Uses pdf-to-printer (see printHtmlViaSystemPrinter), not webContents.print(),
+ * which fails with "Invalid printer settings" whenever a POS/label printer is among the installed
+ * devices — the same root cause already fixed for receipts. */
 export async function printInvoiceDocument(saleId: string): Promise<PrinterActionResult> {
   requirePermission("sales", "view");
   const { sale, business } = loadReceiptData(saleId);
@@ -597,27 +731,18 @@ export async function printInvoiceDocument(saleId: string): Promise<PrinterActio
   const tenantRow = tenantRepository.findTenantRow();
   const logo = tenantRow ? await resolveDocumentLogo(sale.locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
   const html = buildInvoiceHtml(sale, business, logo);
-  const win = new BrowserWindow({ show: false });
 
   try {
-    await win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(html).toString("base64")}`);
-    await new Promise<void>((resolve, reject) => {
-      win.webContents.print({ silent: false, printBackground: true }, (success, errorType) => {
-        if (success) resolve();
-        else reject(new Error(errorType || "Print was cancelled"));
-      });
-    });
-    return { success: true, message: "Print dialog opened" };
+    await printHtmlViaSystemPrinter(html, "invoice");
+    return { success: true, message: "Sent to printer" };
   } catch (err) {
     return { success: false, message: err instanceof Error ? err.message : "Failed to print invoice" };
-  } finally {
-    win.destroy();
   }
 }
 
 function loadQuotationData(
   quotationId: string
-): { quotation: Quotation; business: { businessName: string; physicalAddress: string | null; primaryPhone: string | null; receiptFooter: string | null; currency: string } } {
+): { quotation: Quotation; business: DocumentBusinessInfo } {
   const row = quotationRepository.findQuotationDetailRowById(quotationId);
   if (!row) {
     throw new Error("Quotation not found");
@@ -637,13 +762,7 @@ function loadQuotationData(
 
   return {
     quotation,
-    business: {
-      businessName: tenantRow.business_name,
-      physicalAddress: tenantRow.physical_address,
-      primaryPhone: tenantRow.primary_phone,
-      receiptFooter: tenantRow.receipt_footer,
-      currency: tenantRow.currency
-    }
+    business: resolveDocumentBusiness(row.location_id, tenantRow)
   };
 }
 
@@ -655,7 +774,7 @@ function quotationStatusLabel(status: Quotation["status"]): string {
  * download, and structured for later reuse by email/WhatsApp delivery. */
 function buildQuotationHtml(
   quotation: Quotation,
-  business: { businessName: string; physicalAddress: string | null; primaryPhone: string | null; receiptFooter: string | null; currency: string },
+  business: DocumentBusinessInfo,
   logo: DocumentLogo
 ): string {
   const money = (cents: number | null): string => `${business.currency} ${formatReceiptCents(cents)}`;
@@ -810,27 +929,19 @@ export async function generateQuotationPdf(quotationId: string): Promise<string 
 }
 
 /** Opens the native print dialog for the quotation document — a regular A4 printer, not the ESC/POS thermal one. */
+/** Same fix as printInvoiceDocument — pdf-to-printer instead of webContents.print(). */
 export async function printQuotationDocument(quotationId: string): Promise<PrinterActionResult> {
   requirePermission("quotations", "view");
   const { quotation, business } = loadQuotationData(quotationId);
   const tenantRow = tenantRepository.findTenantRow();
   const logo = tenantRow ? await resolveDocumentLogo(quotation.locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
   const html = buildQuotationHtml(quotation, business, logo);
-  const win = new BrowserWindow({ show: false });
 
   try {
-    await win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(html).toString("base64")}`);
-    await new Promise<void>((resolve, reject) => {
-      win.webContents.print({ silent: false, printBackground: true }, (success, errorType) => {
-        if (success) resolve();
-        else reject(new Error(errorType || "Print was cancelled"));
-      });
-    });
-    return { success: true, message: "Print dialog opened" };
+    await printHtmlViaSystemPrinter(html, "quotation");
+    return { success: true, message: "Sent to printer" };
   } catch (err) {
     return { success: false, message: err instanceof Error ? err.message : "Failed to print quotation" };
-  } finally {
-    win.destroy();
   }
 }
 
@@ -849,25 +960,27 @@ function formatPayPeriodLabel(payPeriod: string): string {
 /** getSalary() (not the raw repository) is used here deliberately — it re-enforces the same
  * self-vs-admin visibility boundary as the rest of the Salaries module, so an employee can only
  * ever generate a PDF or share link for their own payslip, never someone else's. */
-function loadSalaryData(salaryId: string): {
+async function loadSalaryData(salaryId: string): Promise<{
   salary: Salary;
-  business: { businessName: string; physicalAddress: string | null; primaryPhone: string | null; receiptFooter: string | null; currency: string };
-} {
+  business: DocumentBusinessInfo;
+  logo: DocumentLogo;
+}> {
   const salary = getSalary(salaryId);
+  if (salary.status === "draft") {
+    throw new Error("This payslip hasn't been completed yet — there's nothing to print or share");
+  }
   const tenantRow = tenantRepository.findTenantRow();
   if (!tenantRow) {
     throw new Error("Business profile not found");
   }
 
+  const employeeRow = employeeRepository.findEmployeeRowById(salary.employeeId);
+  const logo = await resolveDocumentLogo(employeeRow?.branch_id ?? null, tenantRow);
+
   return {
     salary,
-    business: {
-      businessName: tenantRow.business_name,
-      physicalAddress: tenantRow.physical_address,
-      primaryPhone: tenantRow.primary_phone,
-      receiptFooter: tenantRow.receipt_footer,
-      currency: tenantRow.currency
-    }
+    business: resolveDocumentBusiness(employeeRow?.branch_id ?? null, tenantRow),
+    logo
   };
 }
 
@@ -875,7 +988,7 @@ function loadSalaryData(salaryId: string): {
  * and quotation documents, reused for both PDF download and the manual-share flow. */
 function buildPayslipHtml(
   salary: Salary,
-  business: { businessName: string; physicalAddress: string | null; primaryPhone: string | null; receiptFooter: string | null; currency: string },
+  business: DocumentBusinessInfo,
   logo: DocumentLogo
 ): string {
   const money = (cents: number): string => `${business.currency} ${formatReceiptCents(cents)}`;
@@ -938,7 +1051,7 @@ function buildPayslipHtml(
       </div>
       <div class="meta-block">
         <p class="label">Payment Method</p>
-        <p>${escapeHtml(salary.paymentMethodName)}</p>
+        <p>${escapeHtml(salary.paymentMethodName ?? "—")}</p>
         ${salary.paymentReference ? `<p class="label" style="margin-top:10px;">Reference</p><p>${escapeHtml(salary.paymentReference)}</p>` : ""}
       </div>
     </div>
@@ -952,28 +1065,16 @@ function buildPayslipHtml(
 
     ${salary.notes ? `<div class="notes"><strong>Notes</strong><p>${escapeHtml(salary.notes)}</p></div>` : ""}
 
-    <div class="footer">${escapeHtml(business.receiptFooter ?? "This is a system-generated payslip.")}</div>
+    <div class="footer">This is a system-generated payslip.</div>
   </div>
 </body>
 </html>`;
 }
 
-async function resolveBusinessLogo(): Promise<DocumentLogo> {
-  const tenantRow = tenantRepository.findTenantRow();
-  if (!tenantRow?.business_logo_path) {
-    return { logoDataUrl: null, logoRatio: null };
-  }
-  const logoDataUrl = await readManagedBusinessLogoPreview(tenantRow.business_logo_path);
-  return logoDataUrl
-    ? { logoDataUrl, logoRatio: tenantRow.business_logo_ratio as LogoRatio | null }
-    : { logoDataUrl: null, logoRatio: null };
-}
-
 /** Renders the payslip to PDF and prompts the user for a save location. Returns the saved path, or
  * null if cancelled. Access is gated inside loadSalaryData() -> getSalary(), not here. */
 export async function generateSalaryPdf(salaryId: string): Promise<string | null> {
-  const { salary, business } = loadSalaryData(salaryId);
-  const logo = await resolveBusinessLogo();
+  const { salary, business, logo } = await loadSalaryData(salaryId);
   const html = buildPayslipHtml(salary, business, logo);
   const buffer = await renderHtmlToPdfBuffer(html);
 
@@ -997,8 +1098,7 @@ export async function generateSalaryPdf(salaryId: string): Promise<string | null
  */
 export async function shareSalaryPayslip(salaryId: string): Promise<PrinterActionResult> {
   try {
-    const { salary, business } = loadSalaryData(salaryId);
-    const logo = await resolveBusinessLogo();
+    const { salary, business, logo } = await loadSalaryData(salaryId);
     const html = buildPayslipHtml(salary, business, logo);
     const buffer = await renderHtmlToPdfBuffer(html);
 
@@ -1055,12 +1155,13 @@ function loadDeliveryNoteData(deliveryNoteId: string): { vm: DeliveryNoteViewMod
     throw new Error("Delivery note has no source document");
   }
 
+  const business = resolveDocumentBusiness(locationId, tenantRow);
   const vm = buildDeliveryNoteViewModel(
     delivery,
     {
-      businessName: tenantRow.business_name,
-      physicalAddress: tenantRow.physical_address,
-      primaryPhone: tenantRow.primary_phone
+      businessName: business.businessName,
+      physicalAddress: business.physicalAddress,
+      primaryPhone: business.primaryPhone
     },
     { label: sourceLabel, number: sourceNumber, createdAt: sourceCreatedAt }
   );
@@ -1068,10 +1169,23 @@ function loadDeliveryNoteData(deliveryNoteId: string): { vm: DeliveryNoteViewMod
   return { vm, locationId };
 }
 
-/** Wide/landscape, large-font layout meant to be printed and stuck onto a package with adhesive —
- * deliberately excludes every fee/cost figure (the view-model itself has no such fields). */
+function deliveryNoteField(label: string, value: string | null): string {
+  if (!value) return "";
+  return `
+      <div class="field">
+        <span class="field-label">${escapeHtml(label)}</span>
+        <span class="field-value">${escapeHtml(value)}</span>
+      </div>`;
+}
+
+/**
+ * A small, labeled sticker meant to be cut out along the dashed border and stuck onto a physical
+ * package — NOT a full-page document. Centered on an ordinary A4 sheet so it prints on any printer;
+ * the dashed border is the cut line. Deliberately excludes every fee/cost figure (the view-model
+ * itself has no such fields).
+ */
 function buildDeliveryNoteHtml(vm: DeliveryNoteViewModel, logo: DocumentLogo): string {
-  const addressLine = [vm.town, vm.country].filter(Boolean).join(", ");
+  const townCountry = [vm.town, vm.country].filter(Boolean).join(", ");
 
   return `<!doctype html>
 <html>
@@ -1079,35 +1193,40 @@ function buildDeliveryNoteHtml(vm: DeliveryNoteViewModel, logo: DocumentLogo): s
 <meta charset="utf-8" />
 <style>
   * { box-sizing: border-box; }
-  @page { size: A5 landscape; margin: 10mm; }
-  body { font-family: Arial, Helvetica, sans-serif; color: #1c1710; margin: 0; padding: 16px; }
-  .sheet { display: flex; flex-direction: column; height: 100%; min-height: 480px; }
-  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 4px solid #061e64; padding-bottom: 12px; }
-  .logo { display: block; height: auto; max-height: 60px; width: auto; max-width: 200px; object-fit: contain; margin-bottom: 6px; }
-  .business-name { font-size: 20px; font-weight: bold; color: #061e64; margin: 0; }
-  .muted { color: #666; font-size: 13px; }
-  .doc-title { font-size: 30px; font-weight: bold; text-align: right; color: #061e64; margin: 0; letter-spacing: 2px; }
-  .doc-number { font-size: 16px; font-weight: bold; text-align: right; margin-top: 4px; }
-  .badge { display: inline-block; margin-top: 8px; padding: 4px 14px; border-radius: 999px; font-size: 13px; font-weight: bold; text-transform: uppercase; background: #1f9d55; color: #fff; }
-  .body { flex: 1; display: flex; gap: 24px; margin-top: 20px; }
-  .recipient { flex: 1.4; }
-  .label { font-size: 13px; text-transform: uppercase; color: #83795f; font-weight: bold; letter-spacing: 1px; }
-  .recipient-name { font-size: 38px; font-weight: bold; color: #1c1710; margin: 4px 0 10px; line-height: 1.1; }
-  .address { font-size: 22px; font-weight: 600; line-height: 1.4; }
-  .notes { margin-top: 14px; font-size: 15px; color: #444; }
-  .rider { flex: 1; border-left: 3px dashed #ddd5c2; padding-left: 24px; }
-  .rider-name { font-size: 24px; font-weight: bold; margin: 4px 0 2px; }
-  .rider-field { font-size: 16px; margin-top: 6px; }
-  .footer { margin-top: 20px; padding-top: 12px; border-top: 2px solid #ddd5c2; display: flex; justify-content: space-between; font-size: 12px; color: #83795f; }
+  @page { size: A4 portrait; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: Arial, Helvetica, sans-serif; color: #1c1710; margin: 0;
+    display: flex; align-items: center; justify-content: center; min-height: 100vh;
+  }
+  .card {
+    width: 100mm;
+    border: 2px dashed #83795f;
+    border-radius: 6px;
+    padding: 14px 18px 12px;
+  }
+  .header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; border-bottom: 2px solid #061e64; padding-bottom: 8px; }
+  .logo { display: block; height: auto; max-height: 34px; width: auto; max-width: 110px; object-fit: contain; margin-bottom: 3px; }
+  .business-name { font-size: 12px; font-weight: bold; color: #061e64; margin: 0; }
+  .muted { color: #83795f; font-size: 9px; margin: 1px 0 0; }
+  .doc-title { font-size: 13px; font-weight: bold; text-align: right; color: #061e64; margin: 0; letter-spacing: 1px; }
+  .doc-number { font-size: 10px; font-weight: bold; text-align: right; color: #83795f; margin-top: 2px; }
+  .badge { display: inline-block; margin-top: 4px; padding: 2px 8px; border-radius: 999px; font-size: 8px; font-weight: bold; text-transform: uppercase; background: #1f9d55; color: #fff; }
+  .section-label { margin: 10px 0 4px; font-size: 9px; text-transform: uppercase; letter-spacing: 1px; font-weight: bold; color: #061e64; }
+  .field { display: flex; gap: 8px; padding: 2.5px 0; border-bottom: 1px dotted #ddd5c2; }
+  .field-label { flex: 0 0 60px; font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.4px; color: #83795f; font-weight: bold; padding-top: 1px; }
+  .field-value { flex: 1; font-size: 12px; font-weight: 700; color: #1c1710; line-height: 1.25; word-break: break-word; }
+  .recipient-name .field-value { font-size: 15px; }
+  .divider { margin-top: 10px; border-top: 1px dashed #ddd5c2; }
+  .footer { margin-top: 8px; display: flex; justify-content: space-between; font-size: 8px; color: #83795f; }
 </style>
 </head>
 <body>
-  <div class="sheet">
+  <div class="card">
     <div class="header">
       <div>
         ${logo.logoDataUrl ? `<img src="${logo.logoDataUrl}" class="logo" alt="" />` : ""}
         <p class="business-name">${escapeHtml(vm.businessName)}</p>
-        ${vm.businessAddress ? `<p class="muted">${escapeHtml(vm.businessAddress)}</p>` : ""}
         ${vm.businessPhone ? `<p class="muted">${escapeHtml(vm.businessPhone)}</p>` : ""}
       </div>
       <div>
@@ -1117,23 +1236,18 @@ function buildDeliveryNoteHtml(vm: DeliveryNoteViewModel, logo: DocumentLogo): s
       </div>
     </div>
 
-    <div class="body">
-      <div class="recipient">
-        <p class="label">Deliver To</p>
-        <p class="recipient-name">${escapeHtml(vm.recipientName)}</p>
-        <p class="address">${escapeHtml(vm.deliveryAddress)}</p>
-        ${addressLine ? `<p class="address">${escapeHtml(addressLine)}</p>` : ""}
-        ${vm.deliveryNotes ? `<p class="notes"><strong>Notes:</strong> ${escapeHtml(vm.deliveryNotes)}</p>` : ""}
-      </div>
-      <div class="rider">
-        <p class="label">Rider</p>
-        <p class="rider-name">${escapeHtml(vm.riderName ?? "Not assigned")}</p>
-        ${vm.riderPhone ? `<p class="rider-field">${escapeHtml(vm.riderPhone)}</p>` : ""}
-        ${vm.riderCompany ? `<p class="rider-field">${escapeHtml(vm.riderCompany)}</p>` : ""}
-        ${vm.riderVehicleDescription ? `<p class="rider-field">${escapeHtml(vm.riderVehicleDescription)}</p>` : ""}
-      </div>
-    </div>
+    <p class="section-label">Deliver To</p>
+    <div class="recipient-name">${deliveryNoteField("Recipient", vm.recipientName)}</div>
+    ${deliveryNoteField("Address", vm.deliveryAddress)}
+    ${deliveryNoteField("Town", townCountry || null)}
+    ${deliveryNoteField("Notes", vm.deliveryNotes)}
 
+    <p class="section-label">Rider</p>
+    ${deliveryNoteField("Name", vm.riderName ?? "Not assigned")}
+    ${deliveryNoteField("Phone", vm.riderPhone)}
+    ${deliveryNoteField("Vehicle", vm.riderVehicleDescription)}
+
+    <div class="divider"></div>
     <div class="footer">
       <span>${escapeHtml(vm.sourceDocumentLabel)}: ${escapeHtml(vm.sourceDocumentNumber ?? "-")}</span>
       <span>${escapeHtml(vm.dateLabel)}</span>
@@ -1143,30 +1257,136 @@ function buildDeliveryNoteHtml(vm: DeliveryNoteViewModel, logo: DocumentLogo): s
 </html>`;
 }
 
-/** Opens the native print dialog for the delivery note — landscape, large font, meant to be printed
- * and stuck onto a package. Uses the same HTML->native-print pipeline as invoices/quotations, not the
- * ESC/POS thermal receipt path (which has no orientation concept at all). */
+/**
+ * A backup for shops with only a narrow thermal receipt printer and no pre-printed sticker labels.
+ * A thermal roll has no orientation concept — it only prints a fixed-width strip — so this lays the
+ * note out at "landscape" proportions (wide x short) and rotates the whole thing 90° before printing.
+ * The strip comes out with text running bottom-to-top; physically rotating the printed strip 90°
+ * (portrait -> landscape) then reads it right-side-up, ready to stick onto a package with clear tape.
+ * Deliberately excludes every fee/cost figure, same as the regular delivery note.
+ */
+function buildDeliveryNoteThermalHtml(vm: DeliveryNoteViewModel, logo: DocumentLogo, paperWidthIn: number): string {
+  const townCountry = [vm.town, vm.country].filter(Boolean).join(", ");
+  // The "true" design is a short, wide landscape strip (stageHeight x stageWidth); rotating it 90°
+  // clockwise around its top-left corner and shifting up by its own height turns that WxH box into an
+  // HxW strip that exactly fills the printer's actual (narrow, tall) page — the standard CSS recipe
+  // for printing landscape content on a portrait-only device.
+  const stageHeight = paperWidthIn;
+  const stageWidth = 11; // generous — the printer driver clips/continues the roll, it doesn't paginate
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  * { box-sizing: border-box; }
+  @page { size: ${paperWidthIn}in ${stageWidth}in; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: Arial, 'Segoe UI', Helvetica, sans-serif; color: #1c1710; font-weight: 700; }
+  .stage {
+    position: absolute; top: 0; left: 0;
+    width: ${stageWidth}in; height: ${stageHeight}in;
+    transform-origin: top left;
+    transform: rotate(90deg) translateY(-100%);
+    padding: 0.12in 0.2in;
+    display: flex; align-items: center; gap: 0.3in;
+  }
+  .col { flex: 1; min-width: 0; }
+  .logo { display: block; height: auto; max-height: 0.45in; width: auto; max-width: 1.1in; object-fit: contain; margin-bottom: 2px; }
+  .business-name { font-size: 13px; font-weight: 700; margin: 0; }
+  .muted { color: #1c1710; font-size: 9px; margin: 1px 0 0; font-weight: 700; }
+  .doc-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 3px; }
+  .field-label { font-size: 8px; text-transform: uppercase; letter-spacing: 0.4px; margin: 0; }
+  .field-value { font-size: 13px; font-weight: 700; margin: 0 0 4px; line-height: 1.2; word-break: break-word; }
+  .recipient .field-value { font-size: 17px; }
+  .divider { width: 1px; align-self: stretch; background: #1c1710; opacity: 0.25; }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="col" style="flex: 0 0 1.3in;">
+      ${logo.logoDataUrl ? `<img src="${logo.logoDataUrl}" class="logo" alt="" />` : ""}
+      <p class="business-name">${escapeHtml(vm.businessName)}</p>
+      ${vm.businessPhone ? `<p class="muted">${escapeHtml(vm.businessPhone)}</p>` : ""}
+      <p class="doc-title" style="margin-top: 6px;">Delivery Note</p>
+      <p class="muted">${escapeHtml(vm.deliveryNoteNumber)}</p>
+    </div>
+    <div class="divider"></div>
+    <div class="col recipient">
+      <p class="field-label">Deliver To</p>
+      <p class="field-value">${escapeHtml(vm.recipientName)}</p>
+      <p class="field-label">Address</p>
+      <p class="field-value">${escapeHtml(vm.deliveryAddress)}${townCountry ? `, ${escapeHtml(townCountry)}` : ""}</p>
+      ${vm.deliveryNotes ? `<p class="field-label">Notes</p><p class="field-value">${escapeHtml(vm.deliveryNotes)}</p>` : ""}
+    </div>
+    <div class="divider"></div>
+    <div class="col" style="flex: 0 0 1.8in;">
+      <p class="field-label">Rider</p>
+      <p class="field-value">${escapeHtml(vm.riderName ?? "Not assigned")}</p>
+      ${vm.riderPhone ? `<p class="field-label">Phone</p><p class="field-value">${escapeHtml(vm.riderPhone)}</p>` : ""}
+      <p class="muted" style="margin-top: 6px;">${escapeHtml(vm.sourceDocumentLabel)}: ${escapeHtml(vm.sourceDocumentNumber ?? "-")}</p>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+/** Prints the delivery note through the configured system/USB thermal printer via the same
+ * pdf-to-printer pipeline used for compact receipts, using the rotated layout above. */
+export async function printDeliveryNoteViaThermal(deliveryNoteId: string): Promise<PrinterActionResult> {
+  requirePermission("sales", "view");
+  const settings = loadPrinterSettings();
+  if (!settings.enabled || (requiresExplicitAddress(settings) && !settings.address)) {
+    return { success: false, message: "No printer is configured yet. Set one up in Settings." };
+  }
+  if (settings.connectionType !== "usb") {
+    return {
+      success: false,
+      message: "This backup print needs a printer set up as a Windows/USB printer in Settings (not a raw network/serial connection)."
+    };
+  }
+
+  const { vm, locationId } = loadDeliveryNoteData(deliveryNoteId);
+  const tenantRow = tenantRepository.findTenantRow();
+  const logo = tenantRow ? await resolveDocumentLogo(locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
+  // Matches the same fixed 80mm-roll page size the compact receipt print already uses (see
+  // printReceiptToSystemPrinter) — there's no per-tenant physical-paper-width setting in this app;
+  // `settings.paperWidth` is the thermal-printer character width, an unrelated unit.
+  const paperWidthIn = 3.15;
+  const html = buildDeliveryNoteThermalHtml(vm, logo, paperWidthIn);
+  const buffer = await renderHtmlToPdfBuffer(html, {
+    pageSize: { width: paperWidthIn, height: 11 },
+    margins: { marginType: "none" }
+  });
+  const tempPath = join(app.getPath("temp"), `blue-ledger-delivery-note-${randomUUID()}.pdf`);
+  await writeFile(tempPath, buffer);
+  try {
+    await printPdfToPrinter(tempPath, { silent: true, ...(settings.address ? { printer: settings.address } : {}) });
+    return { success: true, message: "Sent to the receipt printer — rotate the printed strip 90° once it's out." };
+  } catch (err) {
+    return { success: false, message: err instanceof Error ? err.message : "Failed to print delivery note" };
+  } finally {
+    await unlink(tempPath).catch(() => {});
+  }
+}
+
+/** Sends the delivery note straight to Windows' default printer — an A4 cut-out sticker card, meant
+ * to be printed and stuck onto a package. Uses pdf-to-printer (see printHtmlViaSystemPrinter), not
+ * webContents.print(), which fails with "Invalid printer settings" whenever a POS/label printer is
+ * among the installed devices — the same root cause already fixed for receipts. For a narrow thermal
+ * roll printer with no A4 tray at all, use printDeliveryNoteViaThermal instead. */
 export async function printDeliveryNote(deliveryNoteId: string): Promise<PrinterActionResult> {
   requirePermission("sales", "view");
   const { vm, locationId } = loadDeliveryNoteData(deliveryNoteId);
   const tenantRow = tenantRepository.findTenantRow();
   const logo = tenantRow ? await resolveDocumentLogo(locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
   const html = buildDeliveryNoteHtml(vm, logo);
-  const win = new BrowserWindow({ show: false });
 
   try {
-    await win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(html).toString("base64")}`);
-    await new Promise<void>((resolve, reject) => {
-      win.webContents.print({ silent: false, printBackground: true, landscape: true }, (success, errorType) => {
-        if (success) resolve();
-        else reject(new Error(errorType || "Print was cancelled"));
-      });
-    });
-    return { success: true, message: "Print dialog opened" };
+    await printHtmlViaSystemPrinter(html, "delivery-note");
+    return { success: true, message: "Sent to printer" };
   } catch (err) {
     return { success: false, message: err instanceof Error ? err.message : "Failed to print delivery note" };
-  } finally {
-    win.destroy();
   }
 }
 
@@ -1178,7 +1398,7 @@ export async function generateDeliveryNotePdf(deliveryNoteId: string): Promise<s
   const tenantRow = tenantRepository.findTenantRow();
   const logo = tenantRow ? await resolveDocumentLogo(locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
   const html = buildDeliveryNoteHtml(vm, logo);
-  const buffer = await renderHtmlToPdfBuffer(html, { landscape: true });
+  const buffer = await renderHtmlToPdfBuffer(html);
 
   const result = await dialog.showSaveDialog({
     title: "Save Delivery Note",
@@ -1201,7 +1421,7 @@ export async function shareDeliveryNote(deliveryNoteId: string): Promise<Printer
     const tenantRow = tenantRepository.findTenantRow();
     const logo = tenantRow ? await resolveDocumentLogo(locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
     const html = buildDeliveryNoteHtml(vm, logo);
-    const buffer = await renderHtmlToPdfBuffer(html, { landscape: true });
+    const buffer = await renderHtmlToPdfBuffer(html);
 
     const shareDir = join(app.getPath("temp"), "BlueLedger", "delivery-notes");
     mkdirSync(shareDir, { recursive: true });

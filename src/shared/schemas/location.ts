@@ -38,6 +38,8 @@ export const locationInputSchema = z.object({
   openingTime: optionalText(20),
   closingTime: optionalText(20),
   description: optionalText(1000),
+  receiptHeader: optionalText(500),
+  receiptFooter: optionalText(500),
   canReceiveStock: z.boolean(),
   canSellStock: z.boolean(),
   canTransferStock: z.boolean()

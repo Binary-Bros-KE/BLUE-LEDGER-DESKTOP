@@ -77,6 +77,7 @@ import {
   generateSalaryPdf,
   getPrinterSettings,
   printDeliveryNote,
+  printDeliveryNoteViaThermal,
   printInvoiceDocument,
   printQuotationDocument,
   printReceipt,
@@ -92,6 +93,7 @@ import {
   setDeliveryNoteDelivered
 } from "@main/services/delivery-note-service";
 import { exportListToCsv, exportListToExcel, exportListToPdf } from "@main/services/export-service";
+import { exportReportToExcel, exportReportToPdf } from "@main/services/report-export-service";
 import {
   approveStockRequest,
   createStockRequest,
@@ -100,7 +102,20 @@ import {
   rejectStockRequest
 } from "@main/services/stock-request-service";
 import {
+  advanceRecurringBill,
+  createRecurringBill,
+  deleteRecurringBill,
+  getRecurringBill,
+  listRecurringBills,
+  markRecurringBillPaid,
+  setRecurringBillStatus,
+  updateRecurringBill
+} from "@main/services/recurring-bill-service";
+import {
+  completeSalary,
   createSalary,
+  createSalaryAdvance,
+  deleteSalaryAdvance,
   getSalary,
   listSalaries,
   restoreSalary,
@@ -112,6 +127,7 @@ import {
   getProductStockSummary,
   listProducts,
   listProductsForStorefront,
+  nextProductSku,
   setProductStatus,
   updateProduct
 } from "@main/services/product-service";
@@ -137,7 +153,7 @@ import {
   setQuotationStatus,
   updateQuotation
 } from "@main/services/quotation-service";
-import { createRole, deleteRole, getRole, listRoles, updateRole } from "@main/services/role-service";
+import { createRole, deleteRole, getRole, listRoles, listRolesForPicker, updateRole } from "@main/services/role-service";
 import {
   createSupplier,
   getSupplier,
@@ -206,6 +222,7 @@ import {
 import { getSyncSnapshot, listSyncQueue } from "@main/services/sync-service";
 import { saveTheme } from "@main/services/theme-service";
 import {
+  getCancelledPurchasesInRange,
   getMySales,
   getPaymentTransactions,
   getSalesByEmployee,
@@ -218,7 +235,11 @@ import {
 import { getInventoryReportData } from "@main/services/inventory-report-service";
 import { getProductSalesHistory, getProductsPerformanceReport } from "@main/services/product-report-service";
 import { getCustomerPurchaseHistory, getOutstandingInvoices, getTopCustomers } from "@main/services/customer-report-service";
-import { getOutstandingPurchases, getSupplierPurchaseHistory } from "@main/services/supplier-report-service";
+import {
+  getOutstandingPurchases,
+  getSupplierPurchaseHistory,
+  getSupplierSpendBreakdown
+} from "@main/services/supplier-report-service";
 import { brandThemeSchema } from "@shared/schemas/theme";
 import type { CategoryStatus } from "@shared/types/category";
 import type { CustomerStatus } from "@shared/types/customer";
@@ -226,6 +247,8 @@ import type { ExpenseCategoryStatus } from "@shared/types/expense-category";
 import type { SupplierStatus } from "@shared/types/supplier";
 import type { RiderStatus } from "@shared/types/rider";
 import type { ExportListRequest } from "@shared/types/export";
+import type { ReportExportRequest } from "@shared/types/report-export";
+import type { RecurringBillStatus } from "@shared/types/recurring-bill";
 import type { EmployeeStatus } from "@shared/types/employee";
 import type { LocationStatus } from "@shared/types/location";
 import type { ProductStatus } from "@shared/types/product";
@@ -312,6 +335,7 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.categoryDelete, (_event, id: string) => deleteCategory(id));
   ipcMain.handle(ipcChannels.productList, () => listProducts());
+  ipcMain.handle(ipcChannels.productNextSku, () => nextProductSku());
   ipcMain.handle(ipcChannels.productStockSummary, (_event, id: string) => getProductStockSummary(id));
   ipcMain.handle(ipcChannels.productGet, (_event, id: string) => getProduct(id));
   ipcMain.handle(ipcChannels.productCreate, (_event, input: unknown) => createProduct(input));
@@ -353,6 +377,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.stockMovementCreate, (_event, input: unknown) => recordStockMovement(input));
   ipcMain.handle(ipcChannels.stockMovementTransfer, (_event, input: unknown) => recordStockTransfer(input));
   ipcMain.handle(ipcChannels.roleList, () => listRoles());
+  ipcMain.handle(ipcChannels.roleListForPicker, () => listRolesForPicker());
   ipcMain.handle(ipcChannels.roleGet, (_event, id: string) => getRole(id));
   ipcMain.handle(ipcChannels.roleCreate, (_event, input: unknown) => createRole(input));
   ipcMain.handle(ipcChannels.roleUpdate, (_event, id: string, input: unknown) => updateRole(id, input));
@@ -452,6 +477,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.salaryList, () => listSalaries());
   ipcMain.handle(ipcChannels.salaryGet, (_event, id: string) => getSalary(id));
   ipcMain.handle(ipcChannels.salaryCreate, (_event, input: unknown) => createSalary(input));
+  ipcMain.handle(ipcChannels.salaryCreateAdvance, (_event, input: unknown) => createSalaryAdvance(input));
+  ipcMain.handle(ipcChannels.salaryComplete, (_event, id: string, input: unknown) => completeSalary(id, input));
+  ipcMain.handle(ipcChannels.salaryDeleteAdvance, (_event, id: string) => deleteSalaryAdvance(id));
   ipcMain.handle(ipcChannels.salaryVoid, (_event, id: string) => voidSalary(id));
   ipcMain.handle(ipcChannels.salaryRestore, (_event, id: string) => restoreSalary(id));
   ipcMain.handle(ipcChannels.saleList, () => listSales());
@@ -533,6 +561,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.printerPrintDeliveryNote, (_event, deliveryNoteId: string) =>
     printDeliveryNote(deliveryNoteId)
   );
+  ipcMain.handle(ipcChannels.printerPrintDeliveryNoteThermal, (_event, deliveryNoteId: string) =>
+    printDeliveryNoteViaThermal(deliveryNoteId)
+  );
   ipcMain.handle(ipcChannels.printerGenerateDeliveryNotePdf, (_event, deliveryNoteId: string) =>
     generateDeliveryNotePdf(deliveryNoteId)
   );
@@ -550,11 +581,25 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.exportToPdf, (_event, request: ExportListRequest) => exportListToPdf(request));
   ipcMain.handle(ipcChannels.exportToCsv, (_event, request: ExportListRequest) => exportListToCsv(request));
   ipcMain.handle(ipcChannels.exportToExcel, (_event, request: ExportListRequest) => exportListToExcel(request));
+  ipcMain.handle(ipcChannels.reportExportToPdf, (_event, request: ReportExportRequest) => exportReportToPdf(request));
+  ipcMain.handle(ipcChannels.reportExportToExcel, (_event, request: ReportExportRequest) =>
+    exportReportToExcel(request)
+  );
   ipcMain.handle(ipcChannels.stockRequestList, () => listStockRequests());
   ipcMain.handle(ipcChannels.stockRequestGet, (_event, id: string) => getStockRequest(id));
   ipcMain.handle(ipcChannels.stockRequestCreate, (_event, input: unknown) => createStockRequest(input));
   ipcMain.handle(ipcChannels.stockRequestApprove, (_event, id: string) => approveStockRequest(id));
   ipcMain.handle(ipcChannels.stockRequestReject, (_event, id: string, input: unknown) => rejectStockRequest(id, input));
+  ipcMain.handle(ipcChannels.recurringBillList, () => listRecurringBills());
+  ipcMain.handle(ipcChannels.recurringBillGet, (_event, id: string) => getRecurringBill(id));
+  ipcMain.handle(ipcChannels.recurringBillCreate, (_event, input: unknown) => createRecurringBill(input));
+  ipcMain.handle(ipcChannels.recurringBillUpdate, (_event, id: string, input: unknown) => updateRecurringBill(id, input));
+  ipcMain.handle(ipcChannels.recurringBillSetStatus, (_event, id: string, status: RecurringBillStatus) =>
+    setRecurringBillStatus(id, status)
+  );
+  ipcMain.handle(ipcChannels.recurringBillAdvance, (_event, id: string) => advanceRecurringBill(id));
+  ipcMain.handle(ipcChannels.recurringBillMarkPaid, (_event, id: string, input: unknown) => markRecurringBillPaid(id, input));
+  ipcMain.handle(ipcChannels.recurringBillDelete, (_event, id: string) => deleteRecurringBill(id));
   ipcMain.handle(ipcChannels.syncGetSnapshot, () => getSyncSnapshot());
   ipcMain.handle(ipcChannels.syncListQueue, (_event, input?: { limit?: number }) =>
     listSyncQueue(input?.limit)
@@ -566,6 +611,7 @@ export function registerIpcHandlers(): void {
     getSalesFinancialOverview(range)
   );
   ipcMain.handle(ipcChannels.reportSalesTransactions, (_event, range: unknown) => getSalesTransactions(range));
+  ipcMain.handle(ipcChannels.reportCancelledPurchases, (_event, range: unknown) => getCancelledPurchasesInRange(range));
   ipcMain.handle(ipcChannels.reportPaymentTransactions, (_event, range: unknown) => getPaymentTransactions(range));
   ipcMain.handle(ipcChannels.reportMySales, (_event, range: unknown) => getMySales(range));
   ipcMain.handle(ipcChannels.reportSalesTrendWindow, (_event, input: unknown) => getSalesTrendWindow(input));
@@ -582,4 +628,5 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.reportOutstandingInvoices, () => getOutstandingInvoices());
   ipcMain.handle(ipcChannels.reportOutstandingPurchases, () => getOutstandingPurchases());
   ipcMain.handle(ipcChannels.reportSupplierPurchaseHistory, (_event, input: unknown) => getSupplierPurchaseHistory(input));
+  ipcMain.handle(ipcChannels.reportSupplierSpendBreakdown, (_event, input: unknown) => getSupplierSpendBreakdown(input));
 }

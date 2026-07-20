@@ -30,6 +30,8 @@ export type LocationRow = {
   manager_email: string | null;
   opening_time: string | null;
   closing_time: string | null;
+  receipt_header: string | null;
+  receipt_footer: string | null;
   working_days: string | null;
   default_tax_rate: number | null;
   allow_negative_stock: number;
@@ -82,10 +84,10 @@ export function insertLocationRow(
         id, tenant_id, location_code, location_name, location_type, logo_path, logo_ratio,
         phone, alternative_phone, email, country, county, city, physical_address,
         manager_name, manager_phone, manager_email, opening_time, closing_time,
-        description, can_receive_stock, can_sell_stock, can_transfer_stock,
+        description, receipt_header, receipt_footer, can_receive_stock, can_sell_stock, can_transfer_stock,
         status, created_at, updated_at, created_by, sync_status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
     `
     )
     .run(
@@ -109,6 +111,8 @@ export function insertLocationRow(
       input.openingTime,
       input.closingTime,
       input.description,
+      input.receiptHeader,
+      input.receiptFooter,
       input.canReceiveStock ? 1 : 0,
       input.canSellStock ? 1 : 0,
       input.canTransferStock ? 1 : 0,
@@ -152,6 +156,8 @@ export function updateLocationRow(
         opening_time = ?,
         closing_time = ?,
         description = ?,
+        receipt_header = ?,
+        receipt_footer = ?,
         can_receive_stock = ?,
         can_sell_stock = ?,
         can_transfer_stock = ?,
@@ -180,6 +186,8 @@ export function updateLocationRow(
       input.openingTime,
       input.closingTime,
       input.description,
+      input.receiptHeader,
+      input.receiptFooter,
       input.canReceiveStock ? 1 : 0,
       input.canSellStock ? 1 : 0,
       input.canTransferStock ? 1 : 0,
@@ -239,6 +247,8 @@ export function mapLocationRow(row: LocationRow): Location {
     managerEmail: row.manager_email,
     openingTime: row.opening_time,
     closingTime: row.closing_time,
+    receiptHeader: row.receipt_header,
+    receiptFooter: row.receipt_footer,
     workingDays: row.working_days,
     defaultTaxRate: row.default_tax_rate,
     allowNegativeStock: Boolean(row.allow_negative_stock),

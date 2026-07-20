@@ -22,6 +22,13 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import {
+  ALL_YEARS_VALUE,
+  buildAvailableYears,
+  currentYear,
+  matchesYearFilter,
+  yearFilterOptions
+} from "@renderer/shared/lib/year-filter";
 import type { ExportListRequest } from "@shared/types/export";
 import type { Location } from "@shared/types/location";
 import type { PaymentMethod } from "@shared/types/payment-method";
@@ -103,6 +110,7 @@ export function PurchasesRoute(): React.JSX.Element {
   const [taxTypeFilter, setTaxTypeFilter] = useState<TaxTypeFilter>("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [yearFilter, setYearFilter] = useState<string>(String(currentYear()));
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingPurchase, setEditingPurchase] = useState<Purchase | null>(null);
@@ -142,6 +150,11 @@ export function PurchasesRoute(): React.JSX.Element {
     return () => clearTimeout(timer);
   }, [actionError]);
 
+  const availableYears = useMemo(
+    () => buildAvailableYears((purchases ?? []).map((purchase) => purchase.createdAt)),
+    [purchases]
+  );
+
   const filteredPurchases = useMemo(() => {
     if (!purchases) return null;
     let list = purchases;
@@ -170,6 +183,8 @@ export function PurchasesRoute(): React.JSX.Element {
       list = list.filter((purchase) => new Date(purchase.createdAt).getTime() <= toTime);
     }
 
+    list = list.filter((purchase) => matchesYearFilter(purchase.createdAt, yearFilter));
+
     const term = searchTerm.trim().toLowerCase();
     if (term) {
       list = list.filter((purchase) => {
@@ -180,7 +195,18 @@ export function PurchasesRoute(): React.JSX.Element {
     }
 
     return list;
-  }, [purchases, statusFilter, supplierFilter, locationFilter, paymentStatusFilter, taxTypeFilter, dateFrom, dateTo, searchTerm]);
+  }, [
+    purchases,
+    statusFilter,
+    supplierFilter,
+    locationFilter,
+    paymentStatusFilter,
+    taxTypeFilter,
+    dateFrom,
+    dateTo,
+    yearFilter,
+    searchTerm
+  ]);
 
   const exportRequest = useMemo<ExportListRequest | null>(() => {
     if (!filteredPurchases) return null;
@@ -195,6 +221,7 @@ export function PurchasesRoute(): React.JSX.Element {
       filterParts.push(`Destination: ${locations.find((l) => l.id === locationFilter)?.locationName ?? locationFilter}`);
     }
     if (dateFrom || dateTo) filterParts.push(`Date: ${dateFrom || "…"} to ${dateTo || "…"}`);
+    if (yearFilter !== ALL_YEARS_VALUE) filterParts.push(`Year: ${yearFilter}`);
     if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
 
     return {
@@ -245,6 +272,7 @@ export function PurchasesRoute(): React.JSX.Element {
     locationFilter,
     dateFrom,
     dateTo,
+    yearFilter,
     searchTerm,
     suppliers,
     locations
@@ -396,6 +424,7 @@ export function PurchasesRoute(): React.JSX.Element {
             onChange={(value) => setStatusFilter(value as StatusFilter)}
             options={[{ value: "all", label: "All Statuses" }, ...PURCHASE_STATUS_OPTIONS]}
           />
+          <SelectField label="Year" value={yearFilter} onChange={setYearFilter} options={yearFilterOptions(availableYears)} />
           <SelectField
             label="Payment Status"
             value={paymentStatusFilter}

@@ -100,6 +100,11 @@ export function prepareCart(
     if (item.discountAmountCents > lineSubtotalCents) {
       throw new Error(`Discount for "${product.name}" can't exceed its subtotal`);
     }
+    const minLineSubtotalCents =
+      product.minimum_price_cents !== null ? product.minimum_price_cents * item.quantity : 0;
+    if (lineSubtotalCents - item.discountAmountCents < minLineSubtotalCents) {
+      throw new Error(`Discount for "${product.name}" would drop it below its minimum price`);
+    }
 
     const taxableCents = lineSubtotalCents - item.discountAmountCents;
     const lineTaxCents = Math.round(taxableCents * (product.tax_rate / 100));

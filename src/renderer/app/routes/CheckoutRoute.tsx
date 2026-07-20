@@ -47,7 +47,9 @@ type CartLine = {
   name: string;
   sku: string;
   quantity: number;
-  discountAmountCents: number;
+  /** Raw text the cashier typed (currency units, e.g. "250.00"), not cents — converted only at the
+   * pricing/submission boundary, so the input never fights the user mid-type. */
+  discount: string;
 };
 
 type DraftStatus = "draft" | "suspended";
@@ -81,6 +83,7 @@ export function CheckoutRoute(): React.JSX.Element {
   const [stockLevels, setStockLevels] = useState<LocationStockLevel[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [autoPrintOnSale, setAutoPrintOnSale] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -109,15 +112,17 @@ export function CheckoutRoute(): React.JSX.Element {
     void (async () => {
       setLoadError(null);
       try {
-        const [productList, customerList, methodList, pendingList] = await Promise.all([
+        const [productList, customerList, methodList, pendingList, printerSettings] = await Promise.all([
           window.blueLedger.product.list(),
           window.blueLedger.customer.list(),
           window.blueLedger.paymentMethod.list(),
-          window.blueLedger.sale.listPending()
+          window.blueLedger.sale.listPending(),
+          window.blueLedger.printer.getSettings().catch(() => null)
         ]);
         setProducts(productList);
         setCustomers(customerList);
         setPaymentMethods(methodList);
+        setAutoPrintOnSale(printerSettings?.enabled === true && printerSettings.autoPrintOnSale === true);
 
         const drafts = await Promise.all(
           pendingList.map(async (pending) => {
@@ -134,7 +139,7 @@ export function CheckoutRoute(): React.JSX.Element {
                 name: item.productName,
                 sku: item.sku,
                 quantity: item.quantity,
-                discountAmountCents: item.discountAmountCents
+                discount: fromCents(item.discountAmountCents)
               })),
               serviceCharges: full.serviceCharges.map((charge) => ({
                 key: charge.id,
@@ -224,7 +229,7 @@ export function CheckoutRoute(): React.JSX.Element {
     for (const line of items) {
       const product = productById.get(line.productId);
       if (!product) continue;
-      const pricing = computeLinePricing(product, line.quantity, line.discountAmountCents);
+      const pricing = computeLinePricing(product, line.quantity, toCents(line.discount));
       subtotalCents += pricing.lineSubtotalCents;
       discountAmountCents += pricing.discountAmountCents;
       taxAmountCents += pricing.taxCents;
@@ -296,7 +301,7 @@ export function CheckoutRoute(): React.JSX.Element {
         )
       : [
           ...draft.items,
-          { productId: product.id, name: product.name, sku: product.sku, quantity: 1, discountAmountCents: 0 }
+          { productId: product.id, name: product.name, sku: product.sku, quantity: 1, discount: "0.00" }
         ];
     return { ...draft, items };
   }
@@ -314,6 +319,29 @@ export function CheckoutRoute(): React.JSX.Element {
     setActiveKey(draft.key);
   }
 
+  /** A barcode scanner is just a keyboard that types fast and finishes with Enter — no special
+   * detection is needed as long as this field stays focused (it already auto-focuses). Enter either
+   * resolves an exact SKU/barcode match or, for a typed search narrowed to one product, adds that —
+   * then clears the field so the next scan lands on a clean input. */
+  function handleSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>): void {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return;
+
+    const exactMatch = filteredProducts.find(
+      (product) => product.sku.toLowerCase() === term || (product.barcode ?? "").toLowerCase() === term
+    );
+    const target = exactMatch ?? (filteredProducts.length === 1 ? filteredProducts[0] : null);
+
+    if (!target) {
+      showErrorToast(`No product found for "${searchTerm.trim()}"`);
+      return;
+    }
+    addToCart(target);
+    setSearchTerm("");
+  }
+
   function updateActiveItems(updater: (items: CartLine[]) => CartLine[]): void {
     if (!activeKey) return;
     setOpenSales((prev) =>
@@ -329,9 +357,8 @@ export function CheckoutRoute(): React.JSX.Element {
   }
 
   function updateDiscount(productId: string, value: string): void {
-    const cents = toCents(value);
     updateActiveItems((items) =>
-      items.map((line) => (line.productId === productId ? { ...line, discountAmountCents: cents } : line))
+      items.map((line) => (line.productId === productId ? { ...line, discount: value } : line))
     );
   }
 
@@ -438,7 +465,7 @@ export function CheckoutRoute(): React.JSX.Element {
         items: activeDraft.items.map((line) => ({
           productId: line.productId,
           quantity: line.quantity,
-          discountAmountCents: line.discountAmountCents
+          discountAmountCents: toCents(line.discount)
         })),
         ...buildExtrasPayload(activeDraft)
       });
@@ -472,7 +499,7 @@ export function CheckoutRoute(): React.JSX.Element {
         items: activeDraft.items.map((line) => ({
           productId: line.productId,
           quantity: line.quantity,
-          discountAmountCents: line.discountAmountCents
+          discountAmountCents: toCents(line.discount)
         })),
         ...buildExtrasPayload(activeDraft),
         paymentMethodId,
@@ -486,6 +513,11 @@ export function CheckoutRoute(): React.JSX.Element {
       setShowDeliveryNote(false);
       if (branchId) void window.blueLedger.inventory.listForLocation(branchId).then(setStockLevels);
       showSuccessToast(`Sale completed — ${sale.receiptNumber ?? formatCents(sale.grandTotalCents)}`);
+      if (autoPrintOnSale) {
+        void window.blueLedger.printer.printReceipt(sale.id).then((result) => {
+          if (!result.success) showErrorToast(`Auto-print failed: ${result.message}`);
+        });
+      }
     } catch (err) {
       const message = getErrorMessage(err, "Failed to complete sale");
       setActionError(message);
@@ -575,6 +607,7 @@ export function CheckoutRoute(): React.JSX.Element {
                 autoFocus
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
+                onKeyDown={handleSearchKeyDown}
                 placeholder="Scan a barcode, or search by SKU / name"
                 className="h-11 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm font-semibold text-ink outline-none transition placeholder:font-normal placeholder:text-muted/60 focus:border-accent focus:ring-4 focus:ring-accent/15"
               />
@@ -767,7 +800,7 @@ export function CheckoutRoute(): React.JSX.Element {
                                   type="number"
                                   min={0}
                                   step="0.01"
-                                  value={fromCents(line.discountAmountCents) || "0.00"}
+                                  value={line.discount}
                                   onChange={(event) => updateDiscount(line.productId, event.target.value)}
                                   className="h-7 w-16 rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
                                 />
@@ -1032,6 +1065,7 @@ export function CheckoutRoute(): React.JSX.Element {
           <DeliveryNotePreview
             delivery={completedSale.delivery}
             tenant={tenantContext}
+            locationId={completedSale.locationId}
             sourceDocumentLabel="Receipt"
             sourceDocumentNumber={completedSale.receiptNumber}
             onDeliveredChange={(next) =>

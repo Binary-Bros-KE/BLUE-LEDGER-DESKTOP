@@ -147,7 +147,7 @@ export const navGroups: NavGroup[] = [
         label: "Main Store",
         description: "Central stock & distribution",
         icon: Boxes,
-        permissionModule: "inventory"
+        permissionModule: "main_store"
       },
       {
         key: "stock",

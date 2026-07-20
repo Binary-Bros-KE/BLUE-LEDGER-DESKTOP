@@ -45,6 +45,7 @@ const api: BlueLedgerApi = {
   },
   product: {
     list: () => invoke("product:list"),
+    nextSku: () => invoke("product:next-sku"),
     stockSummary: (id) => invoke("product:stock-summary", id),
     get: (id) => invoke("product:get", id),
     create: (input) => invoke("product:create", input),
@@ -76,6 +77,7 @@ const api: BlueLedgerApi = {
   },
   role: {
     list: () => invoke("role:list"),
+    listForPicker: () => invoke("role:list-for-picker"),
     get: (id) => invoke("role:get", id),
     create: (input) => invoke("role:create", input),
     update: (id, input) => invoke("role:update", id, input),
@@ -157,6 +159,9 @@ const api: BlueLedgerApi = {
     list: () => invoke("salary:list"),
     get: (id) => invoke("salary:get", id),
     create: (input) => invoke("salary:create", input),
+    createAdvance: (input) => invoke("salary:create-advance", input),
+    complete: (id, input) => invoke("salary:complete", id, input),
+    deleteAdvance: (id) => invoke("salary:delete-advance", id),
     void: (id) => invoke("salary:void", id),
     restore: (id) => invoke("salary:restore", id)
   },
@@ -216,6 +221,7 @@ const api: BlueLedgerApi = {
     generateSalaryPdf: (salaryId) => invoke("printer:generate-salary-pdf", salaryId),
     shareSalaryPayslip: (salaryId) => invoke("printer:share-salary-payslip", salaryId),
     printDeliveryNote: (deliveryNoteId) => invoke("printer:print-delivery-note", deliveryNoteId),
+    printDeliveryNoteThermal: (deliveryNoteId) => invoke("printer:print-delivery-note-thermal", deliveryNoteId),
     generateDeliveryNotePdf: (deliveryNoteId) => invoke("printer:generate-delivery-note-pdf", deliveryNoteId),
     shareDeliveryNote: (deliveryNoteId) => invoke("printer:share-delivery-note", deliveryNoteId)
   },
@@ -230,12 +236,26 @@ const api: BlueLedgerApi = {
     toCsv: (request) => invoke("export:to-csv", request),
     toExcel: (request) => invoke("export:to-excel", request)
   },
+  reportExport: {
+    toPdf: (request) => invoke("report-export:to-pdf", request),
+    toExcel: (request) => invoke("report-export:to-excel", request)
+  },
   stockRequest: {
     list: () => invoke("stock-request:list"),
     get: (id) => invoke("stock-request:get", id),
     create: (input) => invoke("stock-request:create", input),
     approve: (id) => invoke("stock-request:approve", id),
     reject: (id, input) => invoke("stock-request:reject", id, input)
+  },
+  recurringBill: {
+    list: () => invoke("recurring-bill:list"),
+    get: (id) => invoke("recurring-bill:get", id),
+    create: (input) => invoke("recurring-bill:create", input),
+    update: (id, input) => invoke("recurring-bill:update", id, input),
+    setStatus: (id, status) => invoke("recurring-bill:set-status", id, status),
+    advance: (id) => invoke("recurring-bill:advance", id),
+    markPaid: (id, input) => invoke("recurring-bill:mark-paid", id, input),
+    delete: (id) => invoke("recurring-bill:delete", id)
   },
   sync: {
     getSnapshot: () => invoke("sync:get-snapshot"),
@@ -247,6 +267,7 @@ const api: BlueLedgerApi = {
   report: {
     salesFinancialOverview: (range) => invoke("report:sales-financial-overview", range),
     salesTransactions: (range) => invoke("report:sales-transactions", range),
+    cancelledPurchases: (range) => invoke("report:cancelled-purchases", range),
     paymentTransactions: (range) => invoke("report:payment-transactions", range),
     mySales: (range) => invoke("report:my-sales", range),
     salesTrendWindow: (input) => invoke("report:sales-trend-window", input),
@@ -260,7 +281,8 @@ const api: BlueLedgerApi = {
     customerPurchaseHistory: (input) => invoke("report:customer-purchase-history", input),
     outstandingInvoices: () => invoke("report:outstanding-invoices"),
     outstandingPurchases: () => invoke("report:outstanding-purchases"),
-    supplierPurchaseHistory: (input) => invoke("report:supplier-purchase-history", input)
+    supplierPurchaseHistory: (input) => invoke("report:supplier-purchase-history", input),
+    supplierSpendBreakdown: (input) => invoke("report:supplier-spend-breakdown", input)
   }
 };
 

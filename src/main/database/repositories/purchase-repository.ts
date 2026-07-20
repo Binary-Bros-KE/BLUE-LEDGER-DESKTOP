@@ -117,6 +117,47 @@ export function findAllPurchaseListRows(tenantId: string, locationId: string | n
     .all(tenantId, locationId, locationId) as PurchaseListRow[];
 }
 
+/** Cancelled purchases created within [startIso, endIsoExclusive) — dated by created_at, matching how
+ * every other Sales Report figure windows its period. Reports assume a cancelled purchase was never
+ * paid (or the money was returned), so it's shown here as informational context, never added into any
+ * revenue/expense total. */
+export function findCancelledPurchaseRowsInRange(
+  tenantId: string,
+  locationId: string | null,
+  startIso: string,
+  endIsoExclusive: string
+): PurchaseListRow[] {
+  return getDatabase()
+    .prepare(
+      `
+      SELECT
+        p.id,
+        p.purchase_number,
+        p.supplier_id,
+        s.business_name AS supplier_name,
+        p.supplier_invoice_number,
+        p.location_id,
+        l.location_name AS location_name,
+        p.status,
+        p.tax_type,
+        p.grand_total_cents,
+        p.payment_status,
+        p.amount_paid_cents,
+        p.ordered_at,
+        p.received_at,
+        p.created_at
+      FROM purchases p
+      JOIN suppliers s ON s.id = p.supplier_id
+      JOIN locations l ON l.id = p.location_id
+      WHERE p.tenant_id = ? AND p.status = 'cancelled'
+        AND (? IS NULL OR p.location_id = ?)
+        AND p.created_at >= ? AND p.created_at < ?
+      ORDER BY p.created_at DESC
+    `
+    )
+    .all(tenantId, locationId, locationId, startIso, endIsoExclusive) as PurchaseListRow[];
+}
+
 export function mapPurchaseListRow(row: PurchaseListRow): PurchaseListItem {
   return {
     id: row.id,

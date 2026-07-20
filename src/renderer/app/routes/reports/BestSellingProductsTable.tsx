@@ -8,7 +8,8 @@ function money(cents: number): string {
 }
 
 type SortKey = "quantitySold" | "revenueCents" | "profitCents";
-const TOP_LIMIT = 20;
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 500;
 
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "quantitySold", label: "By Quantity" },
@@ -16,33 +17,47 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "profitCents", label: "By Profit" },
 ];
 
-/** The top 20 products by whichever metric is selected — re-sorted client
- * side from the full set of products that sold anything in the period, so
- * switching to "By Revenue" can surface a low-volume, high-value product
- * that a quantity-only cut would have dropped entirely. */
+/** The top N products (user-adjustable, defaults to 20) by whichever metric is selected —
+ * re-sorted client side from the full set of products that sold anything in the period, so
+ * switching to "By Revenue" can surface a low-volume, high-value product that a quantity-only
+ * cut would have dropped entirely. */
 export function BestSellingProductsTable({ rows }: { rows: ProductPerformanceRow[] }): React.JSX.Element {
   const [sortKey, setSortKey] = useState<SortKey>("quantitySold");
+  const [limit, setLimit] = useState(DEFAULT_LIMIT);
 
-  const topRows = useMemo(() => [...rows].sort((a, b) => b[sortKey] - a[sortKey]).slice(0, TOP_LIMIT), [rows, sortKey]);
+  const topRows = useMemo(() => [...rows].sort((a, b) => b[sortKey] - a[sortKey]).slice(0, limit), [rows, sortKey, limit]);
 
   return (
     <div className="rounded-lg border border-line bg-white p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-[11px] font-bold uppercase tracking-wide text-muted">Top 20 best selling products</p>
-        <div className="flex flex-wrap gap-1.5 rounded-lg border border-line bg-soft p-1">
-          {SORT_OPTIONS.map((option) => (
-            <button
-              key={option.key}
-              type="button"
-              onClick={() => setSortKey(option.key)}
-              className={cn(
-                "rounded-md px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide transition cursor-pointer",
-                sortKey === option.key ? "bg-primary text-white" : "text-muted hover:bg-white"
-              )}
-            >
-              {option.label}
-            </button>
-          ))}
+        <p className="text-[11px] font-bold uppercase tracking-wide text-muted">Best selling products</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Show</span>
+            <input
+              type="number"
+              min={1}
+              max={MAX_LIMIT}
+              value={limit}
+              onChange={(event) => setLimit(Math.max(1, Math.min(MAX_LIMIT, Number(event.target.value) || 1)))}
+              className="h-7 w-16 rounded-md border border-line bg-white px-2 text-xs font-bold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+            />
+          </label>
+          <div className="flex flex-wrap gap-1.5 rounded-lg border border-line bg-soft p-1">
+            {SORT_OPTIONS.map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => setSortKey(option.key)}
+                className={cn(
+                  "rounded-md px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide transition cursor-pointer",
+                  sortKey === option.key ? "bg-primary text-white" : "text-muted hover:bg-white"
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

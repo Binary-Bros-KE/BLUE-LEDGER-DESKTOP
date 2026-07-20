@@ -14,12 +14,14 @@ const STATUS_STYLE: Record<string, string> = {
   received: "bg-success/10 text-success",
   partially_received: "bg-warning/10 text-warning",
   ordered: "bg-soft text-muted",
+  cancelled: "bg-danger-soft text-danger",
 };
 
 const STATUS_LABEL: Record<string, string> = {
   received: "Received",
   partially_received: "Partially Received",
   ordered: "Ordered",
+  cancelled: "Cancelled",
 };
 
 function formatDate(value: string | null): string {

@@ -27,7 +27,8 @@ export type ExpenseInputFields = {
   amountCents: number;
   paidBy: string | null;
   paymentMethodId: string;
-  storefrontId: string | null;
+  /** Never null — every expense belongs to a real storefront, no "General/Head Office" catch-all. */
+  storefrontId: string;
   reference: string | null;
   description: string | null;
   attachmentPath: string | null;
@@ -42,7 +43,7 @@ export type Expense = ExpenseInputFields & {
   expenseNumber: string;
   categoryName: string;
   paymentMethodName: string;
-  storefrontName: string | null;
+  storefrontName: string;
   status: ExpenseStatus;
   isRecurring: boolean;
   recurrenceFrequency: RecurrenceFrequency | null;

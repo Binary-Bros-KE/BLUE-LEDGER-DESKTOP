@@ -4,7 +4,7 @@ import { Button } from "@renderer/shared/components/Button";
 import { Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
-import { formatCents, toCents } from "@renderer/shared/lib/money";
+import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
 import type { EmployeeListItem } from "@shared/types/employee";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import type { Salary } from "@shared/types/salary";
@@ -94,18 +94,26 @@ function LineItemEditor({
   );
 }
 
+function toLineDrafts(items: Array<{ name: string; amountCents: number }>): LineDraft[] {
+  return items.map((item) => ({ key: crypto.randomUUID(), name: item.name, amount: fromCents(item.amountCents) }));
+}
+
 export function SalaryFormModal({
   open,
   onClose,
   employees,
   paymentMethods,
-  onProcessed
+  onProcessed,
+  completingDraft
 }: {
   open: boolean;
   onClose: () => void;
   employees: EmployeeListItem[];
   paymentMethods: PaymentMethod[];
   onProcessed: (salary: Salary) => Promise<void> | void;
+  /** When set, the modal completes this existing draft (employee/pay period locked, deductions
+   * pre-seeded) instead of creating a brand-new record. */
+  completingDraft?: Salary | null;
 }): React.JSX.Element {
   const [employeeId, setEmployeeId] = useState<string | null>(null);
   const [employeeSearch, setEmployeeSearch] = useState("");
@@ -121,6 +129,19 @@ export function SalaryFormModal({
 
   useEffect(() => {
     if (!open) return;
+    if (completingDraft) {
+      setEmployeeId(completingDraft.employeeId);
+      setEmployeeSearch("");
+      setPayPeriod(completingDraft.payPeriod);
+      setBasicSalary("");
+      setAllowanceLines([]);
+      setDeductionLines(toLineDrafts(completingDraft.deductions));
+      setPaymentMethodId("");
+      setReference("");
+      setNotes(completingDraft.notes ?? "");
+      setError(null);
+      return;
+    }
     setEmployeeId(null);
     setEmployeeSearch("");
     setPayPeriod(currentPayPeriod());
@@ -131,7 +152,7 @@ export function SalaryFormModal({
     setReference("");
     setNotes("");
     setError(null);
-  }, [open]);
+  }, [open, completingDraft]);
 
   const activeEmployees = useMemo(() => employees.filter((employee) => employee.status === "active"), [employees]);
   const selectedEmployee = activeEmployees.find((employee) => employee.id === employeeId) ?? null;
@@ -179,7 +200,7 @@ export function SalaryFormModal({
 
     setSaving(true);
     try {
-      const salary = await window.blueLedger.salary.create({
+      const payload = {
         employeeId,
         payPeriod,
         basicSalaryCents: toCents(basicSalary),
@@ -188,11 +209,14 @@ export function SalaryFormModal({
         paymentMethodId,
         paymentReference: reference,
         notes
-      });
+      };
+      const salary = completingDraft
+        ? await window.blueLedger.salary.complete(completingDraft.id, payload)
+        : await window.blueLedger.salary.create(payload);
       await onProcessed(salary);
       onClose();
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to process salary"));
+      setError(getErrorMessage(err, completingDraft ? "Failed to complete payslip" : "Failed to process salary"));
     } finally {
       setSaving(false);
     }
@@ -202,8 +226,12 @@ export function SalaryFormModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Process Salary"
-      description="Creates a new payroll record and generates the employee's payslip."
+      title={completingDraft ? "Complete Payslip" : "Process Salary"}
+      description={
+        completingDraft
+          ? "Fill in the rest to finish processing this payslip — the deductions already recorded are kept."
+          : "Creates a new payroll record and generates the employee's payslip."
+      }
       widthClassName="max-w-lg"
     >
       <form onSubmit={handleSubmit}>
@@ -223,13 +251,15 @@ export function SalaryFormModal({
                 </p>
                 <p className="text-[11px] font-semibold text-muted">{selectedEmployee.employeeCode}</p>
               </div>
-              <button
-                type="button"
-                onClick={() => setEmployeeId(null)}
-                className="text-[11px] font-extrabold uppercase text-accent hover:underline cursor-pointer"
-              >
-                Change
-              </button>
+              {!completingDraft && (
+                <button
+                  type="button"
+                  onClick={() => setEmployeeId(null)}
+                  className="text-[11px] font-extrabold uppercase text-accent hover:underline cursor-pointer"
+                >
+                  Change
+                </button>
+              )}
             </div>
           ) : (
             <div className="relative mt-1.5">
@@ -269,7 +299,14 @@ export function SalaryFormModal({
         </div>
 
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Pay Period" type="month" value={payPeriod} onChange={setPayPeriod} required />
+          <Field
+            label="Pay Period"
+            type="month"
+            value={payPeriod}
+            onChange={setPayPeriod}
+            required
+            disabled={Boolean(completingDraft)}
+          />
           <Field
             label="Basic Salary"
             type="number"
@@ -291,7 +328,7 @@ export function SalaryFormModal({
 
         <div className="mt-4">
           <LineItemEditor
-            title="Deductions (optional)"
+            title={completingDraft ? "Deductions (includes the advance already recorded)" : "Deductions (optional)"}
             addLabel="Add Deduction"
             lines={deductionLines}
             onChange={setDeductionLines}
@@ -352,7 +389,7 @@ export function SalaryFormModal({
           </Button>
           <Button type="submit" disabled={saving} className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50">
             {saving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
-            {saving ? "Processing..." : "Process Salary"}
+            {saving ? "Saving..." : completingDraft ? "Complete Payslip" : "Process Salary"}
           </Button>
         </div>
       </form>

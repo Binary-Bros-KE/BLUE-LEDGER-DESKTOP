@@ -1,6 +1,7 @@
 import electron from "electron";
 import { migrateDatabase } from "@main/database/migrate";
 import { ensureDefaultExpenseCategories } from "@main/services/expense-category-service";
+import { ensureExpensesHaveStorefront } from "@main/services/expense-service";
 import { registerIpcHandlers } from "@main/ipc/register";
 import { ensureDefaultSystemEmployee } from "@main/services/employee-service";
 import { ensureMainStoreLocation } from "@main/services/location-service";
@@ -9,6 +10,8 @@ import {
   consolidateToFourCoreRoles,
   ensureDefaultRoles,
   ensureExpensesPermissions,
+  ensureMainStorePermission,
+  ensureManagerEmployeesPermission,
   ensureQuotationsPermission,
   ensureRidersPermission,
   ensureSalariesPermission,
@@ -42,12 +45,15 @@ export async function bootstrap(): Promise<void> {
   ensureSalariesPermission(tenant.tenantId);
   ensureRidersPermission(tenant.tenantId);
   ensureStockRequestsPermission(tenant.tenantId);
+  ensureMainStorePermission(tenant.tenantId);
+  ensureManagerEmployeesPermission(tenant.tenantId);
   restrictReportsToAdminRoles(tenant.tenantId);
   fixCashierPermissionDrift(tenant.tenantId);
   ensureMainStoreLocation(tenant.tenantId);
   ensureDefaultSystemEmployee(tenant.tenantId);
   ensureDefaultPaymentMethods(tenant.tenantId);
   ensureDefaultExpenseCategories(tenant.tenantId);
+  ensureExpensesHaveStorefront(tenant.tenantId);
 
   if (process.env.BLUE_LEDGER_SEED_DEMO === "1") {
     try {

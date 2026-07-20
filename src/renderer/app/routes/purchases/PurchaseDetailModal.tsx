@@ -421,14 +421,20 @@ export function PurchaseDetailModal({
               </>
             )}
             {(purchase.status === "draft" || purchase.status === "ordered") && (
-              <Button
-                type="button"
-                onClick={() => void handleCancel()}
-                className="h-9 flex-1 border border-danger/30 bg-white text-xs text-danger shadow-none hover:bg-danger-soft"
-              >
-                <Ban className="mr-1.5 size-3.5" aria-hidden="true" />
-                Cancel Purchase
-              </Button>
+              <div className="flex-1">
+                <Button
+                  type="button"
+                  onClick={() => void handleCancel()}
+                  className="h-9 w-full border border-danger/30 bg-white text-xs text-danger shadow-none hover:bg-danger-soft"
+                >
+                  <Ban className="mr-1.5 size-3.5" aria-hidden="true" />
+                  Cancel Purchase
+                </Button>
+                <p className="mt-1.5 text-[10px] font-semibold leading-snug text-muted">
+                  Reports assume a cancelled purchase was never paid — or if it was, that the money was
+                  returned. It won't count toward supplier spend either way.
+                </p>
+              </div>
             )}
           </div>
         )}

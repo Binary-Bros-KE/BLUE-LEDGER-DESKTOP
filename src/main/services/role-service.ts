@@ -10,7 +10,8 @@ import {
   type PermissionModuleKey,
   type PermissionsMap,
   type Role,
-  type RoleListItem
+  type RoleListItem,
+  type RolePickerItem
 } from "@shared/types/role";
 
 const MODULE_ACTIONS = new Map<PermissionModuleKey, readonly PermissionAction[]>(
@@ -75,11 +76,14 @@ const DEFAULT_SYSTEM_ROLES: Array<{
         "expense_categories",
         "salaries",
         "reports",
-        "locations",
+        "employees",
         "approvals"
       ]),
       // Manager requests stock like a Cashier does — approving a request is Storekeeper/Super Admin only.
       stock_requests: ["view", "create"]
+      // Deliberately no "main_store" (the cross-storefront Main Store screen — Storekeeper/Super
+      // Admin only) and no "locations" (Storefronts setup — Super Admin only). Manager still sees
+      // their own storefront's stock via "inventory" and can create/edit products from Products.
     }
   },
   {
@@ -88,11 +92,13 @@ const DEFAULT_SYSTEM_ROLES: Array<{
     permissions: {
       dashboard: ["view"],
       products: ["view"],
+      categories: ["view"],
       sales: ["view", "create", "edit", "delete"],
       quotations: ["view", "create", "edit"],
       customers: ["view", "create"],
-      riders: ["view", "create"],
+      riders: ["view", "create", "edit"],
       payment_methods: ["view"],
+      stock_transfers: ["view"],
       salaries: ["view"],
       stock_requests: ["view", "create"]
     }
@@ -105,6 +111,7 @@ const DEFAULT_SYSTEM_ROLES: Array<{
       products: ["view", "create", "edit"],
       categories: ["view"],
       inventory: ["view", "create", "edit"],
+      main_store: ["view", "create", "edit", "export"],
       stock_transfers: ["view", "create", "approve"],
       purchases: ["view", "create"],
       suppliers: ["view", "create"],
@@ -439,10 +446,71 @@ export function ensureStockRequestsPermission(tenantId: string): void {
   }
 }
 
+/**
+ * Retroactively grants "main_store" (Storekeeper/Super Admin: full CRUD) to system roles seeded
+ * before the Main Store screen was split out from the general "inventory" permission — new installs
+ * get it for free via DEFAULT_SYSTEM_ROLES. Deliberately does NOT touch Manager, who keeps "inventory"
+ * (Stock Ledger, per-product stock) but never gets "main_store" — that's the whole point of the split.
+ * Safe every boot: a no-op once a role's stored permissions already include main_store.
+ */
+export function ensureMainStorePermission(tenantId: string): void {
+  const defaultsByName = new Map(DEFAULT_SYSTEM_ROLES.map((role) => [role.roleName, role.permissions.main_store]));
+
+  for (const row of roleRepository.findAllRoleRows(tenantId)) {
+    if (!row.is_system_role) continue;
+    const grant = defaultsByName.get(row.role_name);
+    if (!grant || grant.length === 0) continue;
+
+    const role = roleRepository.mapRoleRow(row);
+    if (role.permissions.main_store) continue;
+
+    roleRepository.updateRoleRow(row.id, {
+      roleName: role.roleName,
+      description: role.description,
+      permissions: { ...role.permissions, main_store: grant },
+      updatedBy: null
+    });
+  }
+}
+
+/**
+ * Retroactively grants full "employees" access to the Manager role, seeded before a tenant decided
+ * Managers should manage staff too — new installs get it for free via DEFAULT_SYSTEM_ROLES. Safe
+ * every boot: a no-op once Manager's stored permissions already include employees.
+ */
+export function ensureManagerEmployeesPermission(tenantId: string): void {
+  const grant = DEFAULT_SYSTEM_ROLES.find((role) => role.roleName === "Manager")?.permissions.employees;
+  if (!grant || grant.length === 0) return;
+
+  for (const row of roleRepository.findAllRoleRows(tenantId)) {
+    if (!row.is_system_role || row.role_name !== "Manager") continue;
+
+    const role = roleRepository.mapRoleRow(row);
+    if (role.permissions.employees) continue;
+
+    roleRepository.updateRoleRow(row.id, {
+      roleName: role.roleName,
+      description: role.description,
+      permissions: { ...role.permissions, employees: grant },
+      updatedBy: null
+    });
+  }
+}
+
 export function listRoles(): RoleListItem[] {
   requirePermission("roles", "view");
   const { tenantId } = getCurrentTenant();
   return roleRepository.findAllRoleListRows(tenantId).map(roleRepository.mapRoleListRow);
+}
+
+/** Just id+name, for populating a role picker/label elsewhere (currently Employees) — gated on
+ * "employees:view" instead of "roles:view", since a role's bare name isn't what Roles & Permissions
+ * actually guards (its permission breakdown is) and shouldn't block a screen someone IS allowed into
+ * just because a Promise.all alongside it touched a module they can't see. */
+export function listRolesForPicker(): RolePickerItem[] {
+  requirePermission("employees", "view");
+  const { tenantId } = getCurrentTenant();
+  return roleRepository.findAllRoleRows(tenantId).map((row) => ({ id: row.id, roleName: row.role_name }));
 }
 
 export function getRole(id: string): Role {

@@ -30,7 +30,7 @@ export async function readLocalImagePreview(filePath: string): Promise<string | 
 }
 
 const DEFAULT_ALLOWED_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
-const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
+const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
 
 /**
  * Builds a self-contained "pick / store / preview / delete" API for a managed image category

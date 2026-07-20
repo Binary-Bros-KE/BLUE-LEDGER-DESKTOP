@@ -34,6 +34,13 @@ import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
+import {
+  ALL_YEARS_VALUE,
+  buildAvailableYears,
+  currentYear,
+  matchesYearFilter,
+  yearFilterOptions
+} from "@renderer/shared/lib/year-filter";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import type { Customer } from "@shared/types/customer";
 import type { ExportListRequest } from "@shared/types/export";
@@ -156,6 +163,7 @@ export function InvoicesRoute(): React.JSX.Element {
 
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
   const [searchTerm, setSearchTerm] = useState("");
+  const [yearFilter, setYearFilter] = useState<string>(String(currentYear()));
   const [sortKey, setSortKey] = useState<SortKey>("invoiceDate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -165,6 +173,7 @@ export function InvoicesRoute(): React.JSX.Element {
   const [viewingDelivery, setViewingDelivery] = useState<{
     delivery: SaleDelivery;
     sourceNumber: string | null;
+    locationId: string;
   } | null>(null);
   const [deliveryLoading, setDeliveryLoading] = useState(false);
 
@@ -231,6 +240,11 @@ export function InvoicesRoute(): React.JSX.Element {
   const selectedMarkPaidMethod = activePaymentMethods.find((method) => method.id === markPaidMethodId) ?? null;
   const selectedInitialMethod = activePaymentMethods.find((method) => method.id === initialPaymentMethodId) ?? null;
 
+  const availableYears = useMemo(
+    () => buildAvailableYears((invoices ?? []).map((invoice) => invoice.invoiceDate)),
+    [invoices]
+  );
+
   const filteredInvoices = useMemo(() => {
     if (!invoices) return null;
     let list = invoices;
@@ -249,6 +263,8 @@ export function InvoicesRoute(): React.JSX.Element {
       const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
       list = list.filter((invoice) => new Date(invoice.createdAt).getTime() >= sevenDaysAgo);
     }
+
+    list = list.filter((invoice) => matchesYearFilter(invoice.invoiceDate, yearFilter));
 
     const term = searchTerm.trim().toLowerCase();
     if (term) {
@@ -272,13 +288,14 @@ export function InvoicesRoute(): React.JSX.Element {
     });
 
     return sorted;
-  }, [invoices, activeTab, searchTerm, sortKey, sortDir]);
+  }, [invoices, activeTab, searchTerm, yearFilter, sortKey, sortDir]);
 
   const exportRequest = useMemo<ExportListRequest | null>(() => {
     if (!filteredInvoices) return null;
     const filterParts: string[] = [];
     if (activeTab !== "all") filterParts.push(`Filter: ${FILTER_TABS.find((tab) => tab.value === activeTab)?.label}`);
     if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
+    if (yearFilter !== ALL_YEARS_VALUE) filterParts.push(`Year: ${yearFilter}`);
 
     return {
       module: "sales",
@@ -317,7 +334,7 @@ export function InvoicesRoute(): React.JSX.Element {
         : [],
       fileBaseName: `Invoices_${new Date().toISOString().slice(0, 10)}`
     };
-  }, [filteredInvoices, summary, activeTab, searchTerm, currency]);
+  }, [filteredInvoices, summary, activeTab, searchTerm, yearFilter, currency]);
 
   function toggleSort(key: SortKey): void {
     if (sortKey === key) {
@@ -350,7 +367,7 @@ export function InvoicesRoute(): React.JSX.Element {
     setActionError(null);
     try {
       const delivery = await window.blueLedger.deliveryNote.getForSale(invoice.id);
-      if (delivery) setViewingDelivery({ delivery, sourceNumber: invoice.invoiceNumber });
+      if (delivery) setViewingDelivery({ delivery, sourceNumber: invoice.invoiceNumber, locationId: invoice.locationId });
     } catch (err) {
       setActionError(getErrorMessage(err, "Failed to load delivery note"));
     } finally {
@@ -753,8 +770,8 @@ export function InvoicesRoute(): React.JSX.Element {
           ))}
         </div>
 
-        <div className="mt-4">
-          <label className="block sm:max-w-xs">
+        <div className="mt-4 flex flex-wrap items-end gap-3">
+          <label className="block sm:max-w-xs sm:flex-1">
             <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Search</span>
             <div className="relative mt-1.5">
               <Search
@@ -770,6 +787,13 @@ export function InvoicesRoute(): React.JSX.Element {
               />
             </div>
           </label>
+          <SelectField
+            label="Year"
+            value={yearFilter}
+            onChange={setYearFilter}
+            options={yearFilterOptions(availableYears)}
+            className="w-32"
+          />
         </div>
 
         <div className="mt-5">
@@ -1158,6 +1182,7 @@ export function InvoicesRoute(): React.JSX.Element {
           <DeliveryNotePreview
             delivery={viewingDelivery.delivery}
             tenant={tenantContext}
+            locationId={viewingDelivery.locationId}
             sourceDocumentLabel="Invoice"
             sourceDocumentNumber={viewingDelivery.sourceNumber}
             onDeliveredChange={(next) => setViewingDelivery((prev) => (prev ? { ...prev, delivery: next } : prev))}

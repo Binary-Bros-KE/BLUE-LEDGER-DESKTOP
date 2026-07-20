@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Loader2, Package } from "lucide-react";
-import { ExportMenu } from "@renderer/shared/components/ExportMenu";
+import { ReportExportMenu } from "@renderer/shared/components/ReportExportMenu";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
-import type { ExportListRequest } from "@shared/types/export";
 import type { DateRangeInput, SalesReportMode } from "@shared/types/report";
 import type { ProductsPerformanceReport } from "@shared/types/product-report";
+import type { ReportExportRequest, ReportExportSection } from "@shared/types/report-export";
 import { BestSellingProductsTable } from "./reports/BestSellingProductsTable";
 import { ProductSalesHistorySection } from "./reports/ProductSalesHistorySection";
 import { defaultAnchorForMode, rangeForAnchor, shiftAnchor, todayIso } from "./reports/salesReportDate";
@@ -36,14 +36,15 @@ export function ProductsReportRoute(): React.JSX.Element {
   );
 
   const [data, setData] = useState<ProductsPerformanceReport | null>(null);
+  const [slowMovingLimit, setSlowMovingLimit] = useState(20);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async (range: DateRangeInput) => {
+  const load = useCallback(async (range: DateRangeInput, limit: number) => {
     setLoading(true);
     setError(null);
     try {
-      const result = await window.blueLedger.report.productsPerformance(range);
+      const result = await window.blueLedger.report.productsPerformance({ ...range, slowMovingLimit: limit });
       setData(result);
     } catch (err) {
       setError(getErrorMessage(err, "Failed to load the products report"));
@@ -53,33 +54,81 @@ export function ProductsReportRoute(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    void load(resolvedRange);
-  }, [resolvedRange.startDate, resolvedRange.endDate, load]);
+    void load(resolvedRange, slowMovingLimit);
+  }, [resolvedRange.startDate, resolvedRange.endDate, slowMovingLimit, load]);
 
-  const exportRequest = useMemo<ExportListRequest | null>(() => {
+  const reportExportRequest = useMemo<ReportExportRequest | null>(() => {
     if (!data) return null;
+
+    const totalQtySold = data.bestSelling.reduce((sum, row) => sum + row.quantitySold, 0);
+    const totalRevenue = data.bestSelling.reduce((sum, row) => sum + row.revenueCents, 0);
+    const totalProfit = data.bestSelling.reduce((sum, row) => sum + row.profitCents, 0);
+
+    const rawSections: Array<ReportExportSection | false> = [
+      {
+        type: "tiles",
+        title: "Period Summary",
+        tiles: [
+          { label: "Units Sold", value: String(totalQtySold) },
+          { label: "Revenue", value: formatCents(totalRevenue) },
+          { label: "Profit", value: formatCents(totalProfit) }
+        ]
+      },
+      data.bestSelling.length > 0 && {
+        type: "table",
+        title: "Best Selling Products",
+        columns: [
+          { key: "product", header: "Product" },
+          { key: "sku", header: "SKU" },
+          { key: "category", header: "Category" },
+          { key: "qtySold", header: "Qty Sold", align: "right" },
+          { key: "revenue", header: "Revenue", align: "right" },
+          { key: "profit", header: "Profit", align: "right" },
+          { key: "margin", header: "Margin", align: "right" }
+        ],
+        rows: data.bestSelling.map((row) => ({
+          product: row.productName,
+          sku: row.sku,
+          category: row.categoryName ?? "—",
+          qtySold: String(row.quantitySold),
+          revenue: formatCents(row.revenueCents),
+          profit: formatCents(row.profitCents),
+          margin: row.revenueCents > 0 ? `${((row.profitCents / row.revenueCents) * 100).toFixed(1)}%` : "—"
+        }))
+      },
+      data.slowMoving.length > 0 && {
+        type: "table",
+        title: "Slowest Moving Products",
+        description: "Fewest units sold in this period first — includes products with zero sales entirely.",
+        columns: [
+          { key: "product", header: "Product" },
+          { key: "sku", header: "SKU" },
+          { key: "category", header: "Category" },
+          { key: "qtySold", header: "Qty Sold (Period)", align: "right" },
+          { key: "revenue", header: "Revenue (Period)", align: "right" },
+          { key: "lastSold", header: "Last Sold" }
+        ],
+        rows: data.slowMoving.map((row) => ({
+          product: row.productName,
+          sku: row.sku,
+          category: row.categoryName ?? "—",
+          qtySold: String(row.quantitySoldInPeriod),
+          revenue: formatCents(row.revenueCentsInPeriod),
+          lastSold:
+            row.lastSoldAt === null
+              ? "Never sold"
+              : `${new Date(row.lastSoldAt).toLocaleDateString()}${row.daysSinceLastSale !== null ? ` (${row.daysSinceLastSale}d ago)` : ""}`,
+          ...(row.quantitySoldInPeriod === 0 ? { _tone: "danger" as const } : {})
+        }))
+      }
+    ];
+    const sections = rawSections.filter((section): section is ReportExportSection => Boolean(section));
+
     return {
       module: "reports",
-      title: "Products Report — Best Selling",
+      title: "Products Report",
       subtitle: `${resolvedRange.startDate} to ${resolvedRange.endDate}`,
-      columns: [
-        { key: "product", header: "Product" },
-        { key: "sku", header: "SKU" },
-        { key: "category", header: "Category" },
-        { key: "qtySold", header: "Qty Sold", align: "right" },
-        { key: "revenue", header: "Revenue", align: "right" },
-        { key: "profit", header: "Profit", align: "right" },
-        { key: "margin", header: "Margin", align: "right" }
-      ],
-      rows: data.bestSelling.map((row) => ({
-        product: row.productName,
-        sku: row.sku,
-        category: row.categoryName ?? "—",
-        qtySold: String(row.quantitySold),
-        revenue: formatCents(row.revenueCents),
-        profit: formatCents(row.profitCents),
-        margin: row.revenueCents > 0 ? `${((row.profitCents / row.revenueCents) * 100).toFixed(1)}%` : "—"
-      })),
+      sections,
       fileBaseName: `ProductsReport_${resolvedRange.startDate}_to_${resolvedRange.endDate}`
     };
   }, [data, resolvedRange]);
@@ -97,7 +146,7 @@ export function ProductsReportRoute(): React.JSX.Element {
             Best sellers and slow movers for a period you pick, plus a full sales history for any single product.
           </p>
         </div>
-        {canExport && exportRequest && <ExportMenu request={exportRequest} />}
+        {canExport && reportExportRequest && <ReportExportMenu request={reportExportRequest} />}
       </div>
 
       <div className="rounded-lg border border-line bg-white p-5 shadow-soft">
@@ -123,7 +172,7 @@ export function ProductsReportRoute(): React.JSX.Element {
           {data && (
             <>
               <BestSellingProductsTable rows={data.bestSelling} />
-              <SlowMovingProductsTable rows={data.slowMoving} />
+              <SlowMovingProductsTable rows={data.slowMoving} limit={slowMovingLimit} onLimitChange={setSlowMovingLimit} />
             </>
           )}
         </div>

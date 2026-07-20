@@ -4,11 +4,19 @@ import { motion } from "framer-motion";
 import { ArrowDownCircle, ArrowUpCircle, Loader2, Search, Warehouse } from "lucide-react";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { ExportMenu } from "@renderer/shared/components/ExportMenu";
+import { SelectField } from "@renderer/shared/components/form-fields";
 import { StatTile } from "@renderer/shared/components/StatTile";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import {
+  ALL_YEARS_VALUE,
+  buildAvailableYears,
+  currentYear,
+  matchesYearFilter,
+  yearFilterOptions
+} from "@renderer/shared/lib/year-filter";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import type { ExportListRequest } from "@shared/types/export";
 import { STOCK_MOVEMENT_TYPE_OPTIONS, type StockMovementFeedItem, type StockMovementType } from "@shared/types/stock-movement";
@@ -42,11 +50,12 @@ export function StockLedgerRoute(): React.JSX.Element {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [typeFilter, setTypeFilter] = useState<StockMovementType | "all">("all");
+  const [yearFilter, setYearFilter] = useState<string>(String(currentYear()));
 
-  const loadMovements = useCallback(async () => {
+  const loadMovements = useCallback(async (limit: number) => {
     setLoadError(null);
     try {
-      const result = await window.blueLedger.stockMovement.listAll({ limit: 300 });
+      const result = await window.blueLedger.stockMovement.listAll({ limit });
       setMovements(result);
     } catch (err) {
       setLoadError(getErrorMessage(err, "Failed to load stock movements"));
@@ -54,8 +63,15 @@ export function StockLedgerRoute(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    void loadMovements();
-  }, [loadMovements]);
+    // The default (current year) only needs the recent-300 feed; picking "All Years" or a past year
+    // re-fetches with a much wider cap so older movements are actually there to filter into view.
+    void loadMovements(yearFilter === String(currentYear()) ? 300 : 5000);
+  }, [loadMovements, yearFilter]);
+
+  const availableYears = useMemo(
+    () => buildAvailableYears((movements ?? []).map((movement) => movement.createdAt)),
+    [movements]
+  );
 
   const filteredMovements = useMemo(() => {
     if (!movements) return null;
@@ -65,6 +81,8 @@ export function StockLedgerRoute(): React.JSX.Element {
       list = list.filter((movement) => movement.movementType === typeFilter);
     }
 
+    list = list.filter((movement) => matchesYearFilter(movement.createdAt, yearFilter));
+
     const term = searchTerm.trim().toLowerCase();
     if (term) {
       list = list.filter((movement) =>
@@ -73,7 +91,7 @@ export function StockLedgerRoute(): React.JSX.Element {
     }
 
     return list;
-  }, [movements, searchTerm, typeFilter]);
+  }, [movements, searchTerm, typeFilter, yearFilter]);
 
   const summary = useMemo(() => {
     if (!movements) return null;
@@ -91,6 +109,7 @@ export function StockLedgerRoute(): React.JSX.Element {
     const filterParts: string[] = [];
     if (typeFilter !== "all") filterParts.push(`Type: ${movementTypeLabel(typeFilter)}`);
     if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
+    if (yearFilter !== ALL_YEARS_VALUE) filterParts.push(`Year: ${yearFilter}`);
 
     return {
       module: "inventory",
@@ -125,7 +144,7 @@ export function StockLedgerRoute(): React.JSX.Element {
         : [],
       fileBaseName: `StockLedger_${new Date().toISOString().slice(0, 10)}`
     };
-  }, [filteredMovements, summary, typeFilter, searchTerm, currency]);
+  }, [filteredMovements, summary, typeFilter, searchTerm, yearFilter, currency]);
 
   return (
     <motion.div
@@ -212,8 +231,8 @@ export function StockLedgerRoute(): React.JSX.Element {
           ))}
         </div>
 
-        <div className="mt-4">
-          <label className="block sm:max-w-xs">
+        <div className="mt-4 flex flex-wrap items-end gap-3">
+          <label className="block sm:max-w-xs sm:flex-1">
             <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Search</span>
             <div className="relative mt-1.5">
               <Search
@@ -229,6 +248,13 @@ export function StockLedgerRoute(): React.JSX.Element {
               />
             </div>
           </label>
+          <SelectField
+            label="Year"
+            value={yearFilter}
+            onChange={setYearFilter}
+            options={yearFilterOptions(availableYears)}
+            className="w-32"
+          />
         </div>
 
         <div className="mt-5">

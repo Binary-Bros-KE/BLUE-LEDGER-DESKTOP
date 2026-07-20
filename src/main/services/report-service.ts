@@ -1,9 +1,11 @@
+import * as purchaseRepository from "@main/database/repositories/purchase-repository";
 import * as reportRepository from "@main/database/repositories/report-repository";
 import type { CompletedSaleRow, InvoicePaymentCandidateRow, PurchasePaymentCandidateRow, SaleItemProfitRow } from "@main/database/repositories/report-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission, requirePermissionAnyOf } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { dateRangeInputSchema, salesTrendWindowInputSchema } from "@shared/schemas/report";
 import type {
+  CancelledPurchasesReport,
   MySaleEntry,
   PaymentTransactionRow,
   SalesByEmployeeRow,
@@ -489,6 +491,42 @@ export function getSalesTransactions(input: unknown): SalesTransactionRow[] {
     amountPaidCents: row.amount_paid_cents,
     paymentStatus: row.payment_status,
   }));
+}
+
+/** Cancelled purchases in the period — shown separately from every other figure on this page since
+ * reports assume a cancelled purchase was never paid (or the money was returned): it doesn't count
+ * toward supplier spend, expenses, or anything else, but the admin still needs to see what got
+ * cancelled and why the numbers might look lower than expected. */
+export function getCancelledPurchasesInRange(input: unknown): CancelledPurchasesReport {
+  requirePermissionAnyOf([
+    ["reports", "view"],
+    ["purchases", "view"]
+  ]);
+  const { startDate, endDate } = dateRangeInputSchema.parse(input);
+  const { tenantId } = getCurrentTenant();
+  const locationId = getCurrentBranchScope();
+
+  const rows = purchaseRepository.findCancelledPurchaseRowsInRange(
+    tenantId,
+    locationId,
+    startOfDayIso(startDate),
+    startOfDayIso(addDaysIso(endDate, 1))
+  );
+
+  const purchases = rows.map((row) => ({
+    purchaseId: row.id,
+    purchaseNumber: row.purchase_number,
+    supplierName: row.supplier_name,
+    locationName: row.location_name,
+    createdAt: row.created_at,
+    grandTotalCents: row.grand_total_cents
+  }));
+
+  return {
+    count: purchases.length,
+    totalCents: purchases.reduce((sum, purchase) => sum + purchase.grandTotalCents, 0),
+    purchases
+  };
 }
 
 function parseSalePaymentsJson(raw: string): SalePayment[] {
