@@ -32,6 +32,7 @@ export type EmployeeRow = {
   sync_status: string;
   last_synced_at: string | null;
   photo_path: string | null;
+  synced_updated_at: string | null;
 };
 
 export type EmployeeListRow = EmployeeRow & {

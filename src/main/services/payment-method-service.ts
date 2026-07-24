@@ -122,6 +122,12 @@ export function deletePaymentMethod(id: string): { id: string } {
   if (row.is_system_method) {
     throw new Error("System payment methods can't be deleted");
   }
+  // Cloud sync has no delete propagation — a payment method already synced would leave a stale
+  // copy on the cloud/other devices forever if hard-deleted here. Deactivating already achieves
+  // "no longer offered at checkout" without losing the historical link from past sales.
+  if (row.sync_status !== "pending") {
+    throw new Error("This payment method has already synced to the cloud — deactivate it instead of deleting it.");
+  }
 
   paymentMethodRepository.deletePaymentMethodRow(id);
   return { id };

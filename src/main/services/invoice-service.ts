@@ -11,6 +11,7 @@ import {
   getSession,
   requirePermission
 } from "@main/services/auth-service";
+import { generateDocumentNumber } from "@main/services/document-number-service";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
 import {
   getSaleDetail,
@@ -33,10 +34,12 @@ const markPaidSchema = z.object({
 });
 
 function generateInvoiceNumber(tenantId: string): string {
-  const maxInvoice = saleRepository.findMaxInvoiceNumberRow(tenantId);
-  const currentNumber = maxInvoice ? Number(maxInvoice.slice("INV-".length)) : 0;
-  const nextNumber = Number.isFinite(currentNumber) ? currentNumber + 1 : 1;
-  return `INV-${String(nextNumber).padStart(6, "0")}`;
+  return generateDocumentNumber({
+    tenantId,
+    prefix: "INV",
+    digits: 6,
+    existingNumbers: saleRepository.findMaxInvoiceNumberRow(tenantId)
+  });
 }
 
 function addDaysIso(isoDate: string, days: number): string {
@@ -187,6 +190,22 @@ export function insertInvoiceFromCart(input: {
     throw new Error("The initial payment can't exceed the invoice total");
   }
   const balanceDueCents = input.cart.grandTotalCents - amountPaidCents;
+
+  // Credit is only ever extended here — a regular POS sale is paid in full at checkout before it's
+  // ever recorded, so this is the one place a customer's credit limit needs enforcing.
+  if (balanceDueCents > 0) {
+    const customer = customerRepository.findCustomerRowById(input.customerId);
+    if (customer?.credit_limit_cents !== null && customer?.credit_limit_cents !== undefined) {
+      const existingOutstandingCents = saleRepository.findCustomerOutstandingBalanceRow(tenantId, input.customerId);
+      const projectedOutstandingCents = existingOutstandingCents + balanceDueCents;
+      if (projectedOutstandingCents > customer.credit_limit_cents) {
+        const availableCents = Math.max(0, customer.credit_limit_cents - existingOutstandingCents);
+        throw new Error(
+          `This invoice's balance of ${(balanceDueCents / 100).toFixed(2)} would exceed ${customer.name}'s credit limit — only ${(availableCents / 100).toFixed(2)} of credit is available`
+        );
+      }
+    }
+  }
   const paymentStatus = computePaymentStatus({
     balanceDueCents,
     amountPaidCents,

@@ -30,9 +30,15 @@ export const CURRENCY_OPTIONS = [
 
 export type Currency = (typeof CURRENCY_OPTIONS)[number]["value"];
 
-export type LicenseStatus = "trial" | "active" | "expired" | "suspended";
-export type SubscriptionPlan = "free" | "starter" | "pro" | "enterprise";
+/** Mirrors the cloud registry's License.status exactly (see SERVER/prisma/schema.prisma) — no
+ * "expired" here; a license doesn't expire on its own, it's explicitly suspended or cancelled. */
+export type LicenseStatus = "trial" | "active" | "suspended" | "cancelled";
 export type TenantSyncStatus = "pending" | "synced" | "syncing" | "error";
+
+/** Mirrors the cloud registry's Subscription.subscriptionType — drives the grace-period policy in
+ * shared/lib/grace-period.ts: only "monthly" ever hard-locks the POS once its grace period lapses;
+ * "lifetime"/"custom" (one-time purchase + yearly maintenance fee) only ever lose sync. */
+export type SubscriptionType = "monthly" | "lifetime" | "custom";
 
 /** Editable fields the business owner manages from the Business Profile settings page. */
 export type BusinessProfile = {
@@ -58,21 +64,29 @@ export type BusinessProfile = {
   receiptFooter: string | null;
 };
 
-/** Read-only fields intended to be owned by the future online management dashboard. */
+/** Read-only fields owned by the online admin dashboard (SERVER/NEXT/admin), pulled in via
+ * activation + periodic heartbeat — see main/services/license-service.ts. subscriptionPlan is a
+ * plain string (the cloud Plan's own name, e.g. "Duka" or a one-off custom plan) rather than a
+ * fixed enum, since plans are admin-defined on the dashboard, not a closed set baked into this app. */
 export type TenantManagement = {
   licenseKey: string | null;
   licenseStatus: LicenseStatus;
-  subscriptionPlan: SubscriptionPlan;
+  subscriptionPlan: string;
+  subscriptionType: SubscriptionType | null;
   subscriptionStartDate: string | null;
-  subscriptionExpiryDate: string | null;
+  /** Rolling next-due date, not a fixed contract expiry — see the cloud Subscription model. */
+  nextDueDate: string | null;
   maxBranches: number;
   maxUsers: number;
   maxDevices: number;
   appVersion: string;
   pendingSyncRecords: number;
   developerNotes: string | null;
-  isDemoAccount: boolean;
   isSuspended: boolean;
+  /** Last time this install successfully heard back from the server — null until the first
+   * activation/heartbeat ever succeeds. Never blocks the app on its own; see license-service.ts for
+   * the offline grace-period policy that reads it. */
+  lastLicenseCheckAt: string | null;
 };
 
 export type TenantRecord = BusinessProfile &
@@ -99,6 +113,19 @@ export type TenantContext = {
   receiptHeader: string | null;
   receiptFooter: string | null;
   currency: Currency;
+  /** True once this install has a real license key from the cloud registry — App.tsx gates the
+   * entire app on this, before even the employee login screen. False means "freshly installed,
+   * never activated" (licenseKey is still null). */
+  activated: boolean;
+  /** Cached from the last successful activation/heartbeat — App.tsx blocks the app outright when
+   * this is "suspended" or "cancelled", which is the actual enforcement point for a revoked
+   * license. Never re-derived locally; only a real server response ever changes it. */
+  licenseStatus: LicenseStatus;
+  /** Rolling next-due date + subscription type — the two inputs to the 30-day grace-period policy
+   * (see shared/lib/grace-period.ts). Same cached-from-last-server-response guarantee as
+   * licenseStatus above. */
+  nextDueDate: string | null;
+  subscriptionType: SubscriptionType | null;
   createdAt: string;
   updatedAt: string;
 };

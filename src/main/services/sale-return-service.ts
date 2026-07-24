@@ -4,6 +4,7 @@ import * as saleRepository from "@main/database/repositories/sale-repository";
 import * as saleReturnRepository from "@main/database/repositories/sale-return-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
+import { assertNotAlreadyDecidedRemotely } from "@main/services/sync-engine";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { approvalDecisionSchema } from "@shared/schemas/sale-void";
 import { saleReturnRequestSchema } from "@shared/schemas/sale-return";
@@ -111,7 +112,7 @@ export function requestSaleReturn(input: unknown): SaleReturn {
 }
 
 /** Manager approval: restocks the returned quantities (as a 'return' movement) and marks the request approved. */
-export function approveSaleReturn(id: string, input: unknown): SaleReturn {
+export async function approveSaleReturn(id: string, input: unknown): Promise<SaleReturn> {
   requirePermission("approvals", "approve");
   const parsed = approvalDecisionSchema.parse(input);
   const { tenantId } = getCurrentTenant();
@@ -124,6 +125,7 @@ export function approveSaleReturn(id: string, input: unknown): SaleReturn {
   if (returnRow.status !== "pending_approval") {
     throw new Error("This request has already been decided");
   }
+  await assertNotAlreadyDecidedRemotely("sale_returns", id, "pending_approval");
 
   const sale = saleRepository.findSaleRowById(returnRow.sale_id);
   if (!sale) {
@@ -153,7 +155,7 @@ export function approveSaleReturn(id: string, input: unknown): SaleReturn {
   return getSaleReturnDetail(id);
 }
 
-export function rejectSaleReturn(id: string, input: unknown): SaleReturn {
+export async function rejectSaleReturn(id: string, input: unknown): Promise<SaleReturn> {
   requirePermission("approvals", "approve");
   const parsed = approvalDecisionSchema.parse(input);
   const { tenantId } = getCurrentTenant();
@@ -166,6 +168,7 @@ export function rejectSaleReturn(id: string, input: unknown): SaleReturn {
   if (returnRow.status !== "pending_approval") {
     throw new Error("This request has already been decided");
   }
+  await assertNotAlreadyDecidedRemotely("sale_returns", id, "pending_approval");
 
   saleReturnRepository.updateSaleReturnStatusRow(id, "rejected", approverId, parsed.notes);
   return getSaleReturnDetail(id);

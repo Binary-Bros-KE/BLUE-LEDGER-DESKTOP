@@ -29,6 +29,7 @@ export type QuotationRow = {
   updated_at: string;
   sync_status: string;
   last_synced_at: string | null;
+  synced_updated_at: string | null;
 };
 
 export type QuotationDetailRow = QuotationRow & {
@@ -124,13 +125,13 @@ export function findQuotationItemDetailRows(quotationId: string): QuotationItemD
     .all(quotationId) as QuotationItemDetailRow[];
 }
 
-export function findMaxQuotationNumberRow(tenantId: string): string | null {
-  const row = getDatabase()
-    .prepare(
-      "SELECT MAX(quotation_number) as maxNumber FROM quotations WHERE tenant_id = ? AND quotation_number LIKE 'QT-%'"
-    )
-    .get(tenantId) as { maxNumber: string | null };
-  return row.maxNumber;
+// Returns every matching number, not just the max — see document-number-service.ts's own comment.
+export function findMaxQuotationNumberRow(tenantId: string): string[] {
+  return (
+    getDatabase()
+      .prepare("SELECT quotation_number FROM quotations WHERE tenant_id = ? AND quotation_number LIKE 'QT-%'")
+      .all(tenantId) as Array<{ quotation_number: string }>
+  ).map((row) => row.quotation_number);
 }
 
 export function insertQuotationRow(input: {

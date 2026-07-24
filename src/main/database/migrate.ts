@@ -1161,6 +1161,706 @@ const migrations = [
       ALTER TABLE locations ADD COLUMN receipt_header TEXT;
       ALTER TABLE locations ADD COLUMN receipt_footer TEXT;
     `
+  },
+  {
+    version: 32,
+    name: "cloud_activation",
+    sql: `
+      ALTER TABLE tenant ADD COLUMN next_due_date TEXT;
+      ALTER TABLE tenant ADD COLUMN last_license_check_at TEXT;
+
+      ALTER TABLE workstations ADD COLUMN device_type TEXT NOT NULL DEFAULT 'desktop';
+      ALTER TABLE workstations ADD COLUMN os_name TEXT;
+      ALTER TABLE workstations ADD COLUMN app_version TEXT;
+    `
+  },
+  {
+    version: 33,
+    name: "subscription_type",
+    sql: `
+      ALTER TABLE tenant ADD COLUMN subscription_type TEXT;
+    `
+  },
+  {
+    version: 34,
+    name: "cloud_sync_outbox_triggers_phase1",
+    sql: `
+      -- Populates the (previously unused) sync_outbox table automatically on every write to a
+      -- Phase-1 synced table — no application code needs to remember to enqueue anything. Each
+      -- trigger only writes a lightweight breadcrumb (which row, which operation); the actual
+      -- payload is built fresh at push time by re-reading the row through its own existing
+      -- mapXRow() function (see sync-engine.ts), so multiple edits between sync cycles naturally
+      -- coalesce into one push of current state rather than replaying every intermediate edit.
+      -- idempotency_key mixes in a random suffix (not just id:updated_at) so two edits to the same
+      -- row within the same millisecond can never collide against the column's UNIQUE constraint.
+
+      CREATE TRIGGER trg_categories_sync_ai AFTER INSERT ON categories BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'categories', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_categories_sync_au AFTER UPDATE ON categories BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'categories', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_categories_sync_ad AFTER DELETE ON categories BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'categories', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      CREATE TRIGGER trg_payment_methods_sync_ai AFTER INSERT ON payment_methods BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'payment_methods', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_payment_methods_sync_au AFTER UPDATE ON payment_methods BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'payment_methods', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_payment_methods_sync_ad AFTER DELETE ON payment_methods BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'payment_methods', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      CREATE TRIGGER trg_riders_sync_ai AFTER INSERT ON riders BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'riders', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_riders_sync_au AFTER UPDATE ON riders BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'riders', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_riders_sync_ad AFTER DELETE ON riders BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'riders', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      CREATE TRIGGER trg_suppliers_sync_ai AFTER INSERT ON suppliers BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'suppliers', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_suppliers_sync_au AFTER UPDATE ON suppliers BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'suppliers', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_suppliers_sync_ad AFTER DELETE ON suppliers BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'suppliers', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      CREATE TRIGGER trg_customers_sync_ai AFTER INSERT ON customers BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'customers', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_customers_sync_au AFTER UPDATE ON customers BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'customers', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_customers_sync_ad AFTER DELETE ON customers BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'customers', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      CREATE TRIGGER trg_employees_sync_ai AFTER INSERT ON employees BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'employees', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_employees_sync_au AFTER UPDATE ON employees BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'employees', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_employees_sync_ad AFTER DELETE ON employees BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'employees', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      CREATE TRIGGER trg_roles_sync_ai AFTER INSERT ON roles BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'roles', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_roles_sync_au AFTER UPDATE ON roles BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'roles', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_roles_sync_ad AFTER DELETE ON roles BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'roles', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+    `
+  },
+  {
+    version: 35,
+    name: "cloud_sync_fix_update_triggers_and_backfill",
+    sql: `
+      -- Fixes a real bug found in real use: the v34 AFTER UPDATE triggers fired on EVERY update to
+      -- a synced table, including updates that only touch fields that were never even part of the
+      -- sync payload — most notably employees.last_login/failed_login_attempts/locked_until, which
+      -- get written on every single login attempt (see employee-repository.ts's
+      -- recordSuccessfulLoginRow/the failed-attempt tracker). Neither of those queries touches
+      -- updated_at, so re-scoping the trigger to WHEN NEW.updated_at != OLD.updated_at means a login
+      -- no longer re-queues that employee for no reason. Every other table's own UPDATE statements
+      -- already bump updated_at whenever a synced field genuinely changes, so this WHEN clause is
+      -- purely a safety net for them, not a behavior change.
+      DROP TRIGGER trg_categories_sync_au;
+      CREATE TRIGGER trg_categories_sync_au AFTER UPDATE ON categories WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'categories', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      DROP TRIGGER trg_payment_methods_sync_au;
+      CREATE TRIGGER trg_payment_methods_sync_au AFTER UPDATE ON payment_methods WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'payment_methods', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      DROP TRIGGER trg_riders_sync_au;
+      CREATE TRIGGER trg_riders_sync_au AFTER UPDATE ON riders WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'riders', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      DROP TRIGGER trg_suppliers_sync_au;
+      CREATE TRIGGER trg_suppliers_sync_au AFTER UPDATE ON suppliers WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'suppliers', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      DROP TRIGGER trg_customers_sync_au;
+      CREATE TRIGGER trg_customers_sync_au AFTER UPDATE ON customers WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'customers', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      DROP TRIGGER trg_employees_sync_au;
+      CREATE TRIGGER trg_employees_sync_au AFTER UPDATE ON employees WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'employees', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      DROP TRIGGER trg_roles_sync_au;
+      CREATE TRIGGER trg_roles_sync_au AFTER UPDATE ON roles WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'roles', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      -- One-time backfill: any Phase-1 row that existed BEFORE migration v34 installed the triggers
+      -- above never got enqueued at all (a trigger only fires on a write that happens after it
+      -- exists). Without this, every tenant's pre-existing categories/riders/suppliers/etc. would
+      -- silently never sync until each one happened to be edited again. Safe to run unconditionally
+      -- — a fresh install just has empty tables here, and re-enqueuing an already-synced row is
+      -- harmless (push is an idempotent upsert).
+      INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = categories.tenant_id), 'categories', id, 'upsert', 'push', 'queued', 0, '{}', id || ':backfill:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+      FROM categories;
+
+      INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = payment_methods.tenant_id), 'payment_methods', id, 'upsert', 'push', 'queued', 0, '{}', id || ':backfill:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+      FROM payment_methods;
+
+      INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = riders.tenant_id), 'riders', id, 'upsert', 'push', 'queued', 0, '{}', id || ':backfill:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+      FROM riders;
+
+      INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = suppliers.tenant_id), 'suppliers', id, 'upsert', 'push', 'queued', 0, '{}', id || ':backfill:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+      FROM suppliers;
+
+      INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = customers.tenant_id), 'customers', id, 'upsert', 'push', 'queued', 0, '{}', id || ':backfill:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+      FROM customers;
+
+      INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = employees.tenant_id), 'employees', id, 'upsert', 'push', 'queued', 0, '{}', id || ':backfill:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+      FROM employees;
+
+      INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = roles.tenant_id), 'roles', id, 'upsert', 'push', 'queued', 0, '{}', id || ':backfill:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+      FROM roles;
+    `
+  },
+  {
+    version: 36,
+    name: "cloud_sync_phase2_products_conflict_detection",
+    sql: `
+      -- Phase 2: Products is the one conflict-aware entity — synced_updated_at caches the last
+      -- server value this device actually saw (the optimistic-lock baseline sent as
+      -- baseUpdatedAt on push, see sync-engine.ts). remote_snapshot_json holds the OTHER half of a
+      -- detected conflict (the server's current row), populated only when a push comes back
+      -- status: "conflict" — together with the outbox row's own already-stored payload_json (the
+      -- rejected local version), one outbox row is the whole conflict record; no new table needed.
+      ALTER TABLE products ADD COLUMN synced_updated_at TEXT;
+      ALTER TABLE sync_outbox ADD COLUMN remote_snapshot_json TEXT;
+
+      -- Learned from the v35 fix (employees' login-touch bug) — scope every trigger with the
+      -- updated_at WHEN clause from the start this time, not just on update.
+      CREATE TRIGGER trg_products_sync_ai AFTER INSERT ON products BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'products', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_products_sync_au AFTER UPDATE ON products WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'products', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_products_sync_ad AFTER DELETE ON products BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'products', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      -- One-time backfill, same reasoning as v35's: any product that existed before this
+      -- migration installed the triggers above never got enqueued at all.
+      INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = products.tenant_id), 'products', id, 'upsert', 'push', 'queued', 0, '{}', id || ':backfill:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+      FROM products;
+    `
+  },
+  {
+    version: 37,
+    name: "cloud_sync_phase3_locations_and_sales",
+    sql: `
+      -- Locations must sync before anything that references it (employees.branch_id,
+      -- products.storefront_id, customers.location_id, sales.location_id, etc. are all already-
+      -- opaque strings on those models — they only resolve to something meaningful on a fresh
+      -- device once this table itself has synced).
+      CREATE TRIGGER trg_locations_sync_ai AFTER INSERT ON locations BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'locations', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_locations_sync_au AFTER UPDATE ON locations WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'locations', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_locations_sync_ad AFTER DELETE ON locations BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'locations', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      -- Sales/receipts/invoices — one local table covers all three via transaction_type/
+      -- payment_status. Its own header-row triggers, same shape as every prior entity.
+      CREATE TRIGGER trg_sales_sync_ai AFTER INSERT ON sales BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'sales', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_sales_sync_au AFTER UPDATE ON sales WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'sales', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_sales_sync_ad AFTER DELETE ON sales BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'sales', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      -- sale_items/sale_service_charges/delivery_notes are NOT independent sync units — they ride
+      -- along nested inside their parent sale's own payload (see sync-engine.ts's bespoke sales
+      -- apply logic). A write to any of them must re-queue the PARENT sale, not enqueue an entry
+      -- for itself under an entity name that doesn't exist in SYNC_ENTITIES. No delete triggers
+      -- needed on any of these three — deleting a held/draft sale deletes the parent row too (which
+      -- already enqueues its own 'delete' op), and none of them are ever deleted independently of
+      -- their parent in normal use.
+      CREATE TRIGGER trg_sale_items_reenqueue_sale_ai AFTER INSERT ON sale_items BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), s.tenant_id, (SELECT client_id FROM tenant WHERE id = s.tenant_id), 'sales', s.id, 'upsert', 'push', 'queued', 0, '{}', s.id || ':' || s.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+        FROM sales s WHERE s.id = NEW.sale_id;
+      END;
+      CREATE TRIGGER trg_service_charges_reenqueue_sale_ai AFTER INSERT ON sale_service_charges WHEN NEW.sale_id IS NOT NULL BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), s.tenant_id, (SELECT client_id FROM tenant WHERE id = s.tenant_id), 'sales', s.id, 'upsert', 'push', 'queued', 0, '{}', s.id || ':' || s.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+        FROM sales s WHERE s.id = NEW.sale_id;
+      END;
+      CREATE TRIGGER trg_delivery_notes_reenqueue_sale_ai AFTER INSERT ON delivery_notes WHEN NEW.sale_id IS NOT NULL BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), s.tenant_id, (SELECT client_id FROM tenant WHERE id = s.tenant_id), 'sales', s.id, 'upsert', 'push', 'queued', 0, '{}', s.id || ':' || s.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+        FROM sales s WHERE s.id = NEW.sale_id;
+      END;
+      -- The one child-table UPDATE that matters: marking a delivery note delivered doesn't touch
+      -- the sale row at all, but delivery status lives inside the sale's own nested payload now —
+      -- so this must re-queue the parent sale, or a "mark delivered" click would silently never sync.
+      CREATE TRIGGER trg_delivery_notes_reenqueue_sale_au AFTER UPDATE ON delivery_notes WHEN NEW.sale_id IS NOT NULL AND NEW.is_delivered != OLD.is_delivered BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), s.tenant_id, (SELECT client_id FROM tenant WHERE id = s.tenant_id), 'sales', s.id, 'upsert', 'push', 'queued', 0, '{}', s.id || ':' || s.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+        FROM sales s WHERE s.id = NEW.sale_id;
+      END;
+
+      -- One-time backfill for the two real sync units (locations, sales) — a sale's backfill entry
+      -- naturally picks up its current items/serviceCharges/delivery at push time, since the payload
+      -- is always built fresh by re-reading the row's current children, not replayed from history.
+      INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = locations.tenant_id), 'locations', id, 'upsert', 'push', 'queued', 0, '{}', id || ':backfill:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+      FROM locations;
+
+      INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = sales.tenant_id), 'sales', id, 'upsert', 'push', 'queued', 0, '{}', id || ':backfill:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+      FROM sales;
+    `
+  },
+  {
+    version: 38,
+    name: "cloud_sync_phase3_followup_documents",
+    sql: `
+      -- Flat, single-row documents (no line items) — plain Phase 1/2-style triggers, one set per
+      -- table. WHEN updated_at changed from the start (v35's lesson).
+      CREATE TRIGGER trg_expense_categories_sync_ai AFTER INSERT ON expense_categories BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'expense_categories', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_expense_categories_sync_au AFTER UPDATE ON expense_categories WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'expense_categories', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_expense_categories_sync_ad AFTER DELETE ON expense_categories BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'expense_categories', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      CREATE TRIGGER trg_expenses_sync_ai AFTER INSERT ON expenses BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'expenses', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_expenses_sync_au AFTER UPDATE ON expenses WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'expenses', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_expenses_sync_ad AFTER DELETE ON expenses BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'expenses', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      CREATE TRIGGER trg_salaries_sync_ai AFTER INSERT ON salaries BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'salaries', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_salaries_sync_au AFTER UPDATE ON salaries WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'salaries', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_salaries_sync_ad AFTER DELETE ON salaries BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'salaries', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      CREATE TRIGGER trg_recurring_bills_sync_ai AFTER INSERT ON recurring_bills BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'recurring_bills', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_recurring_bills_sync_au AFTER UPDATE ON recurring_bills WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'recurring_bills', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_recurring_bills_sync_ad AFTER DELETE ON recurring_bills BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'recurring_bills', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      CREATE TRIGGER trg_sale_voids_sync_ai AFTER INSERT ON sale_voids BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'sale_voids', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_sale_voids_sync_au AFTER UPDATE ON sale_voids WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'sale_voids', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_sale_voids_sync_ad AFTER DELETE ON sale_voids BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'sale_voids', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      -- Documents-with-line-items — same "header triggers + child re-enqueue" pattern as Sales.
+      CREATE TRIGGER trg_sale_returns_sync_ai AFTER INSERT ON sale_returns BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'sale_returns', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_sale_returns_sync_au AFTER UPDATE ON sale_returns WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'sale_returns', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_sale_returns_sync_ad AFTER DELETE ON sale_returns BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'sale_returns', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_sale_return_items_reenqueue_ai AFTER INSERT ON sale_return_items BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), sr.tenant_id, (SELECT client_id FROM tenant WHERE id = sr.tenant_id), 'sale_returns', sr.id, 'upsert', 'push', 'queued', 0, '{}', sr.id || ':' || sr.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+        FROM sale_returns sr WHERE sr.id = NEW.sale_return_id;
+      END;
+
+      CREATE TRIGGER trg_quotations_sync_ai AFTER INSERT ON quotations BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'quotations', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_quotations_sync_au AFTER UPDATE ON quotations WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'quotations', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_quotations_sync_ad AFTER DELETE ON quotations BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'quotations', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_quotation_items_reenqueue_ai AFTER INSERT ON quotation_items BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), q.tenant_id, (SELECT client_id FROM tenant WHERE id = q.tenant_id), 'quotations', q.id, 'upsert', 'push', 'queued', 0, '{}', q.id || ':' || q.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+        FROM quotations q WHERE q.id = NEW.quotation_id;
+      END;
+      -- sale_service_charges/delivery_notes already re-enqueue the parent SALE when sale_id is set
+      -- (v37) — these are the quotation_id-keyed counterparts, since both tables can attach to
+      -- either a sale or a quotation (CHECK constraint enforces exactly one).
+      CREATE TRIGGER trg_service_charges_reenqueue_quotation_ai AFTER INSERT ON sale_service_charges WHEN NEW.quotation_id IS NOT NULL BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), q.tenant_id, (SELECT client_id FROM tenant WHERE id = q.tenant_id), 'quotations', q.id, 'upsert', 'push', 'queued', 0, '{}', q.id || ':' || q.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+        FROM quotations q WHERE q.id = NEW.quotation_id;
+      END;
+      CREATE TRIGGER trg_delivery_notes_reenqueue_quotation_ai AFTER INSERT ON delivery_notes WHEN NEW.quotation_id IS NOT NULL BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), q.tenant_id, (SELECT client_id FROM tenant WHERE id = q.tenant_id), 'quotations', q.id, 'upsert', 'push', 'queued', 0, '{}', q.id || ':' || q.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+        FROM quotations q WHERE q.id = NEW.quotation_id;
+      END;
+      CREATE TRIGGER trg_delivery_notes_reenqueue_quotation_au AFTER UPDATE ON delivery_notes WHEN NEW.quotation_id IS NOT NULL AND NEW.is_delivered != OLD.is_delivered BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), q.tenant_id, (SELECT client_id FROM tenant WHERE id = q.tenant_id), 'quotations', q.id, 'upsert', 'push', 'queued', 0, '{}', q.id || ':' || q.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+        FROM quotations q WHERE q.id = NEW.quotation_id;
+      END;
+
+      CREATE TRIGGER trg_purchases_sync_ai AFTER INSERT ON purchases BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'purchases', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_purchases_sync_au AFTER UPDATE ON purchases WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'purchases', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_purchases_sync_ad AFTER DELETE ON purchases BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'purchases', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_purchase_items_reenqueue_ai AFTER INSERT ON purchase_items BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), p.tenant_id, (SELECT client_id FROM tenant WHERE id = p.tenant_id), 'purchases', p.id, 'upsert', 'push', 'queued', 0, '{}', p.id || ':' || p.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+        FROM purchases p WHERE p.id = NEW.purchase_id;
+      END;
+
+      -- One-time backfill for the 8 real sync units (their nested children ride along at push time).
+      INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = expense_categories.tenant_id), 'expense_categories', id, 'upsert', 'push', 'queued', 0, '{}', id || ':backfill:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+      FROM expense_categories;
+
+      INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = expenses.tenant_id), 'expenses', id, 'upsert', 'push', 'queued', 0, '{}', id || ':backfill:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+      FROM expenses;
+
+      INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = salaries.tenant_id), 'salaries', id, 'upsert', 'push', 'queued', 0, '{}', id || ':backfill:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+      FROM salaries;
+
+      INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = recurring_bills.tenant_id), 'recurring_bills', id, 'upsert', 'push', 'queued', 0, '{}', id || ':backfill:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+      FROM recurring_bills;
+
+      INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = sale_voids.tenant_id), 'sale_voids', id, 'upsert', 'push', 'queued', 0, '{}', id || ':backfill:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+      FROM sale_voids;
+
+      INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = sale_returns.tenant_id), 'sale_returns', id, 'upsert', 'push', 'queued', 0, '{}', id || ':backfill:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+      FROM sale_returns;
+
+      INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = quotations.tenant_id), 'quotations', id, 'upsert', 'push', 'queued', 0, '{}', id || ':backfill:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+      FROM quotations;
+
+      INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = purchases.tenant_id), 'purchases', id, 'upsert', 'push', 'queued', 0, '{}', id || ':backfill:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+      FROM purchases;
+    `
+  },
+  {
+    version: 39,
+    name: "cloud_sync_phase4_stock_movements",
+    sql: `
+      -- inventory.quantity/main_store_allocations are locally-DERIVED running totals, not
+      -- independently-edited values (see applyValidatedStockMovement in inventory-service.ts) — they
+      -- are never synced directly. stock_movements IS the source of truth ledger, and it's genuinely
+      -- immutable (no update/delete function exists anywhere in the codebase), so it gets an
+      -- INSERT-only trigger, no update/delete trigger, and sync-engine.ts applies a pulled movement
+      -- as a DELTA to local inventory/allocations rather than an upsert of the movement row itself.
+      --
+      -- allocation_storefront_id/allocation_explicit persist what applyValidatedStockMovement already
+      -- computes at write time but previously threw away: whether the ORIGINAL call explicitly
+      -- targeted an allocation bucket (allocation_explicit = 1; NULL bucket id means the unallocated
+      -- bucket, targeted precisely) vs never mentioned allocations at all (allocation_explicit = 0,
+      -- the fallback "adjust the unallocated bucket, clamped at zero" path every other caller takes).
+      -- Without this, a second device replaying the movement can't tell those two cases apart, since
+      -- both look identical (a plain quantity_change) without it.
+      ALTER TABLE stock_movements ADD COLUMN allocation_storefront_id TEXT;
+      ALTER TABLE stock_movements ADD COLUMN allocation_explicit INTEGER NOT NULL DEFAULT 0;
+
+      CREATE TRIGGER trg_stock_movements_sync_ai AFTER INSERT ON stock_movements BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'stock_movements', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.created_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = stock_movements.tenant_id), 'stock_movements', id, 'upsert', 'push', 'queued', 0, '{}', id || ':backfill:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+      FROM stock_movements;
+    `
+  },
+  {
+    version: 40,
+    name: "cloud_sync_stock_requests",
+    sql: `
+      -- The last entity in "buy a new device, get everything back" — a plain document-with-line-items
+      -- (like Quotations/Purchases/SaleReturns), NOT a ledger like stock_movements: stock_requests has
+      -- a real update path (approve/reject bumps status/reviewed_by/reviewed_at/updated_at), and its
+      -- items are only ever inserted once at creation, never edited afterward (confirmed — no
+      -- update/delete function exists for stock_request_items). Approving a request creates its OWN
+      -- stock_movements rows via distributeMainStoreStockCore, which already sync independently — this
+      -- entity is purely the approval-workflow record itself, nothing about stock quantities.
+      CREATE TRIGGER trg_stock_requests_sync_ai AFTER INSERT ON stock_requests BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'stock_requests', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_stock_requests_sync_au AFTER UPDATE ON stock_requests WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'stock_requests', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_stock_requests_sync_ad AFTER DELETE ON stock_requests BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'stock_requests', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_stock_request_items_reenqueue_ai AFTER INSERT ON stock_request_items BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), sr.tenant_id, (SELECT client_id FROM tenant WHERE id = sr.tenant_id), 'stock_requests', sr.id, 'upsert', 'push', 'queued', 0, '{}', sr.id || ':' || sr.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+        FROM stock_requests sr WHERE sr.id = NEW.stock_request_id;
+      END;
+
+      INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = stock_requests.tenant_id), 'stock_requests', id, 'upsert', 'push', 'queued', 0, '{}', id || ':backfill:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+      FROM stock_requests;
+    `
+  },
+  {
+    version: 41,
+    name: "sync_id_aliases",
+    sql: `
+      -- Backs applyPulledRow's natural-key reconciliation (roles/employees/payment_methods/
+      -- expense_categories/locations — every entity seeded locally at boot, see APPLY_CONFIG's own
+      -- naturalKey comment). When a second device's locally-seeded default collides by name/code with
+      -- the SAME default pushed independently by another device, the LOCAL row's id is kept stable
+      -- (never renamed in place — found live via real two-device testing that renaming breaks any
+      -- OTHER payload, including that same row's own future re-pulls, still holding the old id). This
+      -- table instead remembers "the cloud once called this local row by a different id" so any
+      -- foreign-key-shaped field encountered later (in ANY payload) can be resolved to the correct
+      -- local id instead of failing to find a row that was never created under that id.
+      CREATE TABLE IF NOT EXISTS sync_id_aliases (
+        entity TEXT NOT NULL,
+        cloud_id TEXT NOT NULL,
+        local_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (entity, cloud_id)
+      );
+    `
+  },
+  {
+    version: 42,
+    name: "workstation_device_sequence",
+    sql: `
+      -- Written once by a successful activation (see license-service.ts's activateInstallation) —
+      -- the permanent, never-reused ordinal the server assigned this device (Device.sequenceNumber).
+      -- Null until activation completes; used as the per-device tag baked into every document
+      -- number this device generates from then on (see document-number-service.ts), so two offline
+      -- devices for the same tenant can never independently mint the same receipt/invoice/etc number.
+      ALTER TABLE workstations ADD COLUMN device_sequence INTEGER;
+    `
+  },
+  {
+    version: 43,
+    name: "conflict_aware_reference_data",
+    sql: `
+      -- Extends Phase 2's optimistic-lock mechanism (previously Products only) to every other
+      -- entity that goes through the generic (non-bespoke) apply path — see sync-engine.ts's
+      -- CONFLICT_AWARE_ENTITIES. Identical role to products.synced_updated_at: caches the last
+      -- localUpdatedAt value this device saw from the server, sent back as baseUpdatedAt on the
+      -- next push so the server can detect "someone else's write landed in between" instead of
+      -- silently last-write-wins overwriting it. Documents (sales/quotations/purchases/
+      -- sale_returns/stock_requests) and the append-only stock_movements ledger are NOT included
+      -- here — they go through bespoke apply functions that don't support this caching yet; that's
+      -- a separate, larger follow-up, not a config-only change like this one.
+      ALTER TABLE categories ADD COLUMN synced_updated_at TEXT;
+      ALTER TABLE payment_methods ADD COLUMN synced_updated_at TEXT;
+      ALTER TABLE riders ADD COLUMN synced_updated_at TEXT;
+      ALTER TABLE suppliers ADD COLUMN synced_updated_at TEXT;
+      ALTER TABLE customers ADD COLUMN synced_updated_at TEXT;
+      ALTER TABLE employees ADD COLUMN synced_updated_at TEXT;
+      ALTER TABLE roles ADD COLUMN synced_updated_at TEXT;
+      ALTER TABLE locations ADD COLUMN synced_updated_at TEXT;
+      ALTER TABLE expense_categories ADD COLUMN synced_updated_at TEXT;
+      ALTER TABLE expenses ADD COLUMN synced_updated_at TEXT;
+      ALTER TABLE salaries ADD COLUMN synced_updated_at TEXT;
+      ALTER TABLE recurring_bills ADD COLUMN synced_updated_at TEXT;
+      ALTER TABLE sale_voids ADD COLUMN synced_updated_at TEXT;
+    `
+  },
+  {
+    version: 44,
+    name: "conflict_aware_documents",
+    sql: `
+      -- The follow-up v43 itself deferred: extends the same optimistic-lock caching to the
+      -- document entities (sales/quotations/purchases/sale_returns/stock_requests) — their bespoke
+      -- apply functions (upsertDocumentHeader, applySalePulledRow) gained the same conditional
+      -- synced_updated_at handling the generic path already had. stock_movements stays out
+      -- permanently — an append-only ledger has no concurrent-edit scenario to guard against.
+      ALTER TABLE sales ADD COLUMN synced_updated_at TEXT;
+      ALTER TABLE quotations ADD COLUMN synced_updated_at TEXT;
+      ALTER TABLE purchases ADD COLUMN synced_updated_at TEXT;
+      ALTER TABLE sale_returns ADD COLUMN synced_updated_at TEXT;
+      ALTER TABLE stock_requests ADD COLUMN synced_updated_at TEXT;
+    `
+  },
+  {
+    version: 45,
+    name: "requeue_employee_secrets",
+    sql: `
+      -- One-time re-push trigger for the PIN/password hash sync fix shipped earlier today (see
+      -- password-hash.ts / PAYLOAD_BUILDERS.employees) — an employee already marked 'synced' before
+      -- that change shipped never re-enqueues on its own (nothing re-queues an already-synced row
+      -- without a real edit), so its hash would stay permanently missing on the cloud and on any
+      -- other device that pulls it. Self-scoping so it's safe on EVERY device, no "which device is
+      -- primary" judgment call needed: a device only flips sync_status back to 'pending' for
+      -- employees where IT holds a real (non-null) pin_hash locally. A device that only ever
+      -- received a given employee via an already-broken pull (pin_hash pulled as NULL, before this
+      -- fix existed) does nothing for that row, so it can't re-push a null hash over the real one
+      -- about to arrive from wherever the real data actually lives.
+      UPDATE employees SET sync_status = 'pending' WHERE pin_hash IS NOT NULL AND sync_status = 'synced';
+    `
+  },
+  {
+    version: 46,
+    name: "requeue_employee_secrets_bump_updated_at",
+    sql: `
+      -- v45 above flipped sync_status back to 'pending' WITHOUT bumping updated_at, to avoid
+      -- disturbing real edit history — but that breaks applyPulledRow()'s own pull-side guard
+      -- ("local is already same-or-newer, don't overwrite" — see sync-engine.ts), which compares
+      -- ONLY updated_at. A device that had already pulled one of these employees before today gets
+      -- back the exact same updated_at it already has locally, so the guard's >= comparison treats
+      -- it as "nothing new" and silently no-ops forever — confirmed live: a second device's
+      -- last_synced_at for these rows stayed frozen days in the past no matter how long it was left
+      -- open, because every pull attempt hit this guard and returned immediately. Every OTHER write
+      -- path in this codebase always bumps updated_at when a row's synced content changes (every
+      -- updateXRow() does); this migration corrects v45's break of that invariant for the same
+      -- self-scoped set of rows, so the next push carries a genuinely newer timestamp a pulling
+      -- device's guard will accept.
+      UPDATE employees SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), sync_status = 'pending'
+      WHERE pin_hash IS NOT NULL;
+    `
+  },
+  {
+    version: 47,
+    name: "tenant_business_profile_updated_at",
+    sql: `
+      -- Business Profile has always used its OWN separate push/pull path (POST /activation/profile
+      -- and the register/heartbeat responses), never the generic entity sync_outbox mechanism — this
+      -- column is this device's own local "when did I last actually edit my business profile"
+      -- timestamp, used to decide whether an incoming heartbeat's copy is newer before ever
+      -- overwriting anything. Deliberately NOT the same as tenant.updated_at, which also bumps for a
+      -- dozen unrelated reasons (license/device-sequence writes on every heartbeat) and so can't
+      -- tell "the profile actually changed" from "something about this tenant changed".
+      ALTER TABLE tenant ADD COLUMN business_profile_updated_at TEXT;
+    `
   }
 ] as const;
 

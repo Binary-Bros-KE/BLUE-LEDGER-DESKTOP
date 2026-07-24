@@ -18,6 +18,13 @@ export type StockMovementRow = {
   reference_id: string | null;
   performed_by: string | null;
   notes: string | null;
+  // Which Main Store allocation bucket (if any) this movement affected, and whether the caller
+  // targeted it explicitly — see migrate.ts v39's own comment on why both are needed to correctly
+  // replay the allocation side-effect on a second device. NULL bucket id + explicit=1 means the
+  // unallocated bucket was targeted precisely; explicit=0 means no bucket was ever specified (the
+  // fallback path in applyValidatedStockMovement).
+  allocation_storefront_id: string | null;
+  allocation_explicit: number;
   created_at: string;
   sync_status: string;
   last_synced_at: string | null;
@@ -41,7 +48,7 @@ export function findStockMovementRowById(id: string): StockMovementListRow | und
 }
 
 export function insertStockMovementRow(
-  input: StockMovementInput & { id: string; tenantId: string }
+  input: StockMovementInput & { id: string; tenantId: string; allocationStorefrontId?: string | null }
 ): StockMovementListRow {
   const now = new Date().toISOString();
 
@@ -50,9 +57,10 @@ export function insertStockMovementRow(
       `
       INSERT INTO stock_movements (
         id, tenant_id, product_id, location_id, movement_type, quantity_change,
-        reference_type, reference_id, performed_by, notes, created_at, sync_status
+        reference_type, reference_id, performed_by, notes, allocation_storefront_id, allocation_explicit,
+        created_at, sync_status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
     `
     )
     .run(
@@ -66,6 +74,8 @@ export function insertStockMovementRow(
       input.referenceId,
       input.performedBy,
       input.notes,
+      input.allocationStorefrontId ?? null,
+      input.allocationStorefrontId !== undefined ? 1 : 0,
       now
     );
 

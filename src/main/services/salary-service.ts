@@ -9,15 +9,18 @@ import {
   requirePermission,
   requireSignedIn
 } from "@main/services/auth-service";
+import { generateDocumentNumber } from "@main/services/document-number-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { salaryAdvanceInputSchema, salaryInputSchema, type SalaryAdvanceInput, type SalaryInput } from "@shared/schemas/salary";
 import type { Salary } from "@shared/types/salary";
 
 function generatePayslipNumber(tenantId: string): string {
-  const maxNumber = salaryRepository.findMaxPayslipNumberRow(tenantId);
-  const currentNumber = maxNumber ? Number(maxNumber.slice("PAY-".length)) : 0;
-  const nextNumber = Number.isFinite(currentNumber) ? currentNumber + 1 : 1;
-  return `PAY-${String(nextNumber).padStart(6, "0")}`;
+  return generateDocumentNumber({
+    tenantId,
+    prefix: "PAY",
+    digits: 6,
+    existingNumbers: salaryRepository.findMaxPayslipNumberRow(tenantId)
+  });
 }
 
 function assertEmployeeExists(tenantId: string, employeeId: string): void {
@@ -246,6 +249,12 @@ export function deleteSalaryAdvance(id: string): void {
     throw new Error("Only a draft can be deleted — void a processed payslip instead");
   }
   assertEmployeeInBranchScope(existing.employee_id, getCurrentBranchScope());
+  // Cloud sync has no delete propagation — a draft already synced would leave a stale copy on the
+  // cloud/other devices forever if hard-deleted here. A draft is rarely synced in practice, but if
+  // it has been, this stops it rather than silently orphaning the cloud copy.
+  if (existing.sync_status !== "pending") {
+    throw new Error("This draft has already synced to the cloud and can't be deleted — void it instead.");
+  }
   salaryRepository.deleteSalaryRow(id);
 }
 

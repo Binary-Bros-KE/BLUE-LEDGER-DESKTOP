@@ -30,6 +30,10 @@ export type ProductRow = {
   updated_by: string | null;
   sync_status: string;
   last_synced_at: string | null;
+  /** Phase 2's optimistic-lock baseline — the last server value this device actually saw, cached
+   * so a push can detect whether another device wrote in between. Null until this product's first
+   * successful push or pull. See sync-engine.ts's CONFLICT_AWARE_ENTITIES. */
+  synced_updated_at: string | null;
 };
 
 export type ProductListRow = ProductRow & {
@@ -95,11 +99,13 @@ export function findProductBySkuRow(
 /** For auto-generating the next "PROD-000001"-style SKU — only considers SKUs following that exact
  * pattern, so a tenant's pre-existing manually-entered SKUs (whatever scheme they used) are simply
  * ignored rather than confusing the counter. */
-export function findMaxProductSkuNumberRow(tenantId: string): string | null {
-  const row = getDatabase()
-    .prepare("SELECT MAX(sku) as maxSku FROM products WHERE tenant_id = ? AND sku LIKE 'PROD-%'")
-    .get(tenantId) as { maxSku: string | null };
-  return row.maxSku;
+// Returns every matching SKU, not just the max — see document-number-service.ts's own comment.
+export function findMaxProductSkuNumberRow(tenantId: string): string[] {
+  return (
+    getDatabase()
+      .prepare("SELECT sku FROM products WHERE tenant_id = ? AND sku LIKE 'PROD-%'")
+      .all(tenantId) as Array<{ sku: string }>
+  ).map((row) => row.sku);
 }
 
 export function findProductByBarcodeRow(

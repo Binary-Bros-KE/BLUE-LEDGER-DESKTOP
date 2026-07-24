@@ -4,6 +4,7 @@ import * as expenseRepository from "@main/database/repositories/expense-reposito
 import * as locationRepository from "@main/database/repositories/location-repository";
 import * as paymentMethodRepository from "@main/database/repositories/payment-method-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
+import { generateDocumentNumber } from "@main/services/document-number-service";
 import { deleteManagedExpenseAttachment } from "@main/services/image-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { expenseInputSchema, type ExpenseInput } from "@shared/schemas/expense";
@@ -11,10 +12,12 @@ import { isStorefrontType, type LocationType } from "@shared/types/location";
 import type { Expense, ExpenseSummary } from "@shared/types/expense";
 
 function generateExpenseNumber(tenantId: string): string {
-  const maxNumber = expenseRepository.findMaxExpenseNumberRow(tenantId);
-  const currentNumber = maxNumber ? Number(maxNumber.slice("EXP-".length)) : 0;
-  const nextNumber = Number.isFinite(currentNumber) ? currentNumber + 1 : 1;
-  return `EXP-${String(nextNumber).padStart(6, "0")}`;
+  return generateDocumentNumber({
+    tenantId,
+    prefix: "EXP",
+    digits: 6,
+    existingNumbers: expenseRepository.findMaxExpenseNumberRow(tenantId)
+  });
 }
 
 function assertCategoryExists(tenantId: string, categoryId: string): void {

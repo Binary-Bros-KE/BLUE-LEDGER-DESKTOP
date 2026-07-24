@@ -14,6 +14,11 @@ const api: BlueLedgerApi = {
   app: {
     getContext: () => invoke("app:get-context")
   },
+  activation: {
+    activate: (licenseKey) => invoke("activation:activate", licenseKey),
+    heartbeat: () => invoke("activation:heartbeat"),
+    payments: () => invoke("activation:payments")
+  },
   auth: {
     login: (input) => invoke("auth:login", input),
     logout: () => invoke("auth:logout"),
@@ -259,7 +264,20 @@ const api: BlueLedgerApi = {
   },
   sync: {
     getSnapshot: () => invoke("sync:get-snapshot"),
-    listQueue: (input) => invoke("sync:list-queue", input ?? {})
+    listQueue: (input) => invoke("sync:list-queue", input ?? {}),
+    runNow: () => invoke("sync:run-now"),
+    listConflicts: () => invoke("sync:list-conflicts"),
+    resolveConflict: (id, resolution) => invoke("sync:resolve-conflict", id, resolution),
+    listReconciliations: () => invoke("sync:list-reconciliations"),
+    getEntityOverview: () => invoke("sync:get-entity-overview")
+  },
+  import: {
+    pickFile: (entityType) => invoke("import:pick-file", entityType),
+    preview: (request) => invoke("import:preview", request),
+    commit: (request) => invoke("import:commit", request)
+  },
+  share: {
+    createLink: (entity, entityId) => invoke("share:create-link", entity, entityId)
   },
   theme: {
     save: (theme) => invoke("theme:save", theme)

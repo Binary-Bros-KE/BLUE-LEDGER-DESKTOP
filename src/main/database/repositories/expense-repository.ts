@@ -31,6 +31,7 @@ export type ExpenseRow = {
   updated_at: string;
   sync_status: string;
   last_synced_at: string | null;
+  synced_updated_at: string | null;
 };
 
 export type ExpenseDetailRow = ExpenseRow & {
@@ -121,13 +122,13 @@ export function mapExpenseCategoryBreakdownRow(row: ExpenseCategoryBreakdownRow)
   };
 }
 
-export function findMaxExpenseNumberRow(tenantId: string): string | null {
-  const row = getDatabase()
-    .prepare(
-      "SELECT MAX(expense_number) as maxNumber FROM expenses WHERE tenant_id = ? AND expense_number LIKE 'EXP-%'"
-    )
-    .get(tenantId) as { maxNumber: string | null };
-  return row.maxNumber;
+// Returns every matching number, not just the max — see document-number-service.ts's own comment.
+export function findMaxExpenseNumberRow(tenantId: string): string[] {
+  return (
+    getDatabase()
+      .prepare("SELECT expense_number FROM expenses WHERE tenant_id = ? AND expense_number LIKE 'EXP-%'")
+      .all(tenantId) as Array<{ expense_number: string }>
+  ).map((row) => row.expense_number);
 }
 
 export function findExpenseRowById(id: string): ExpenseRow | undefined {

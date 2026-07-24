@@ -1,20 +1,35 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Loader2, LogIn } from "lucide-react";
+import { AlertTriangle, Loader2, LogIn } from "lucide-react";
 import { Field } from "@renderer/shared/components/form-fields";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { useAuthStore } from "@renderer/shared/stores/auth-store";
+import { computeGraceStatus } from "@shared/lib/grace-period";
 
 const PUNCH_COUNT = 3;
 
 export function LoginRoute(): React.JSX.Element {
   const context = useAppStore((state) => state.context);
+  const hydrate = useAppStore((state) => state.hydrate);
   const login = useAuthStore((state) => state.login);
   const error = useAuthStore((state) => state.error);
 
   const [employeeCode, setEmployeeCode] = useState("");
   const [pin, setPin] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    // Every time this screen is reached — first launch or a logout — re-check the license live
+    // instead of waiting for the boot/4-hour timer. Non-blocking: the form renders immediately;
+    // if this reveals a suspension, App.tsx's context change swaps this screen out for
+    // LicenseBlockedRoute on its own. checkInWithServer() never throws, so this is always safe
+    // to fire and forget even with no internet.
+    void window.blueLedger.activation.heartbeat().then(() => hydrate());
+  }, [hydrate]);
+
+  const grace = context
+    ? computeGraceStatus(context.tenant.nextDueDate, context.tenant.subscriptionType)
+    : { state: "current" as const };
 
   async function handleSubmit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
@@ -103,6 +118,27 @@ export function LoginRoute(): React.JSX.Element {
             <p className="mt-1 text-xs font-semibold text-muted">
               Enter your employee code and 6-digit PIN.
             </p>
+
+            {grace.state === "grace" && (
+              <div className="mt-4 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5 text-xs font-bold text-warning">
+                <AlertTriangle className="mt-0.5 size-4 flex-none" aria-hidden="true" />
+                <span>
+                  {grace.hardLock ? (
+                    <>
+                      Your subscription payment is overdue. The POS will stop working in{" "}
+                      {grace.daysRemaining} day{grace.daysRemaining === 1 ? "" : "s"} unless payment
+                      is made.
+                    </>
+                  ) : (
+                    <>
+                      Your maintenance fee is overdue. Cloud sync will pause in {grace.daysRemaining}{" "}
+                      day{grace.daysRemaining === 1 ? "" : "s"} — the POS itself keeps working
+                      normally.
+                    </>
+                  )}
+                </span>
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-4">
               {error && (

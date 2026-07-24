@@ -46,6 +46,7 @@ export type SaleRow = {
   updated_at: string;
   sync_status: string;
   last_synced_at: string | null;
+  synced_updated_at: string | null;
 };
 
 export type SaleDetailRow = SaleRow & {
@@ -151,22 +152,23 @@ export function mapSaleSummaryRow(row: SaleSummaryRow): SaleListItem {
   };
 }
 
-export function findMaxReceiptNumberRow(tenantId: string): string | null {
-  const row = getDatabase()
-    .prepare(
-      "SELECT MAX(receipt_number) as maxReceipt FROM sales WHERE tenant_id = ? AND receipt_number LIKE 'BL-%'"
-    )
-    .get(tenantId) as { maxReceipt: string | null };
-  return row.maxReceipt;
+// Returns every matching number, not just the max — see document-number-service.ts's own comment
+// on why a bare SQL MAX() is wrong once tagged ("BL-D1-0000045") and untagged ("BL-0004000")
+// numbers coexist (lexicographic string comparison picks the wrong one).
+export function findMaxReceiptNumberRow(tenantId: string): string[] {
+  return (
+    getDatabase()
+      .prepare("SELECT receipt_number FROM sales WHERE tenant_id = ? AND receipt_number LIKE 'BL-%'")
+      .all(tenantId) as Array<{ receipt_number: string }>
+  ).map((row) => row.receipt_number);
 }
 
-export function findMaxInvoiceNumberRow(tenantId: string): string | null {
-  const row = getDatabase()
-    .prepare(
-      "SELECT MAX(invoice_number) as maxInvoice FROM sales WHERE tenant_id = ? AND invoice_number LIKE 'INV-%'"
-    )
-    .get(tenantId) as { maxInvoice: string | null };
-  return row.maxInvoice;
+export function findMaxInvoiceNumberRow(tenantId: string): string[] {
+  return (
+    getDatabase()
+      .prepare("SELECT invoice_number FROM sales WHERE tenant_id = ? AND invoice_number LIKE 'INV-%'")
+      .all(tenantId) as Array<{ invoice_number: string }>
+  ).map((row) => row.invoice_number);
 }
 
 export type InvoiceRow = {
@@ -269,6 +271,22 @@ export function findInvoiceSummaryRow(tenantId: string, locationId: string | nul
     `
     )
     .get(tenantId, locationId, locationId) as InvoiceSummaryRow;
+}
+
+/** Sum of every one of this customer's own invoices/wholesale-credit sales not yet fully paid off or
+ * cancelled — the "credit already extended" figure a new invoice's balance gets checked against. */
+export function findCustomerOutstandingBalanceRow(tenantId: string, customerId: string): number {
+  const row = getDatabase()
+    .prepare(
+      `
+      SELECT COALESCE(SUM(balance_due_cents), 0) AS outstanding_cents
+      FROM sales
+      WHERE tenant_id = ? AND customer_id = ? AND invoice_number IS NOT NULL
+        AND payment_status NOT IN ('paid', 'cancelled')
+    `
+    )
+    .get(tenantId, customerId) as { outstanding_cents: number };
+  return row.outstanding_cents;
 }
 
 export function mapInvoiceSummaryRow(row: InvoiceSummaryRow): InvoiceSummary {

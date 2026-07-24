@@ -474,6 +474,60 @@ export function ensureMainStorePermission(tenantId: string): void {
 }
 
 /**
+ * Retroactively grants "data_import" (Super Admin only, per DEFAULT_SYSTEM_ROLES) to system roles
+ * seeded before the bulk Import tab existed — new installs get it for free via DEFAULT_SYSTEM_ROLES.
+ * Without this, every already-installed tenant's Super Admin role is a persisted DB row a new
+ * PERMISSION_MODULES entry alone can never reach. Safe every boot: a no-op once a role's stored
+ * permissions already include data_import.
+ */
+export function ensureDataImportPermission(tenantId: string): void {
+  const defaultsByName = new Map(DEFAULT_SYSTEM_ROLES.map((role) => [role.roleName, role.permissions.data_import]));
+
+  for (const row of roleRepository.findAllRoleRows(tenantId)) {
+    if (!row.is_system_role) continue;
+    const grant = defaultsByName.get(row.role_name);
+    if (!grant || grant.length === 0) continue;
+
+    const role = roleRepository.mapRoleRow(row);
+    if (role.permissions.data_import) continue;
+
+    roleRepository.updateRoleRow(row.id, {
+      roleName: role.roleName,
+      description: role.description,
+      permissions: { ...role.permissions, data_import: grant },
+      updatedBy: null
+    });
+  }
+}
+
+/**
+ * Retroactively grants "owner_app" (Super Admin only, per DEFAULT_SYSTEM_ROLES) to system roles
+ * seeded before the read-only Owner mobile app existed — new installs get it for free via
+ * DEFAULT_SYSTEM_ROLES. Without this, every already-installed tenant's Super Admin role is a
+ * persisted DB row a new PERMISSION_MODULES entry alone can never reach. Safe every boot: a no-op
+ * once a role's stored permissions already include owner_app.
+ */
+export function ensureOwnerAppPermission(tenantId: string): void {
+  const defaultsByName = new Map(DEFAULT_SYSTEM_ROLES.map((role) => [role.roleName, role.permissions.owner_app]));
+
+  for (const row of roleRepository.findAllRoleRows(tenantId)) {
+    if (!row.is_system_role) continue;
+    const grant = defaultsByName.get(row.role_name);
+    if (!grant || grant.length === 0) continue;
+
+    const role = roleRepository.mapRoleRow(row);
+    if (role.permissions.owner_app) continue;
+
+    roleRepository.updateRoleRow(row.id, {
+      roleName: role.roleName,
+      description: role.description,
+      permissions: { ...role.permissions, owner_app: grant },
+      updatedBy: null
+    });
+  }
+}
+
+/**
  * Retroactively grants full "employees" access to the Manager role, seeded before a tenant decided
  * Managers should manage staff too — new installs get it for free via DEFAULT_SYSTEM_ROLES. Safe
  * every boot: a no-op once Manager's stored permissions already include employees.
@@ -578,6 +632,14 @@ export function deleteRole(id: string): { id: string } {
   const employeeCount = employeeRepository.countEmployeesByRoleRow(id);
   if (employeeCount > 0) {
     throw new Error(`Reassign ${employeeCount} employee(s) to a different role before deleting this role`);
+  }
+
+  // Cloud sync has no delete propagation — a role already synced would leave a stale copy on the
+  // cloud/other devices forever if hard-deleted here. Roles have no active/inactive flag to fall
+  // back on the way categories/employees do, so this is a hard stop, not a redirect — an unused
+  // role with zero employees assigned (already required above) is harmless to just leave in place.
+  if (row.sync_status !== "pending") {
+    throw new Error("This role has already synced to the cloud and can't be deleted — it's safe to leave an unused role in place.");
   }
 
   roleRepository.deleteRoleRow(id);

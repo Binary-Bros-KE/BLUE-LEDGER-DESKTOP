@@ -4,6 +4,7 @@ import * as saleRepository from "@main/database/repositories/sale-repository";
 import * as saleVoidRepository from "@main/database/repositories/sale-void-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
+import { assertNotAlreadyDecidedRemotely } from "@main/services/sync-engine";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { approvalDecisionSchema, saleVoidRequestSchema } from "@shared/schemas/sale-void";
 import type { SaleVoid } from "@shared/types/sale-void";
@@ -66,7 +67,7 @@ export function requestSaleVoid(input: unknown): SaleVoid {
 }
 
 /** Manager approval: restocks every item on the sale (as a 'return' movement) and marks the request approved. */
-export function approveSaleVoid(id: string, input: unknown): SaleVoid {
+export async function approveSaleVoid(id: string, input: unknown): Promise<SaleVoid> {
   requirePermission("approvals", "approve");
   const parsed = approvalDecisionSchema.parse(input);
   const { tenantId } = getCurrentTenant();
@@ -79,6 +80,7 @@ export function approveSaleVoid(id: string, input: unknown): SaleVoid {
   if (voidRow.status !== "pending_approval") {
     throw new Error("This request has already been decided");
   }
+  await assertNotAlreadyDecidedRemotely("sale_voids", id, "pending_approval");
 
   const sale = saleRepository.findSaleRowById(voidRow.sale_id);
   if (!sale) {
@@ -108,7 +110,7 @@ export function approveSaleVoid(id: string, input: unknown): SaleVoid {
   return getSaleVoidDetail(id);
 }
 
-export function rejectSaleVoid(id: string, input: unknown): SaleVoid {
+export async function rejectSaleVoid(id: string, input: unknown): Promise<SaleVoid> {
   requirePermission("approvals", "approve");
   const parsed = approvalDecisionSchema.parse(input);
   const { tenantId } = getCurrentTenant();
@@ -121,6 +123,7 @@ export function rejectSaleVoid(id: string, input: unknown): SaleVoid {
   if (voidRow.status !== "pending_approval") {
     throw new Error("This request has already been decided");
   }
+  await assertNotAlreadyDecidedRemotely("sale_voids", id, "pending_approval");
 
   saleVoidRepository.updateSaleVoidStatusRow(id, "rejected", approverId, parsed.notes);
   return getSaleVoidDetail(id);

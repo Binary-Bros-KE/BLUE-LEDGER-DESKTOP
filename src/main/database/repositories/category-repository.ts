@@ -18,6 +18,7 @@ export type CategoryRow = {
   updated_by: string | null;
   sync_status: string;
   last_synced_at: string | null;
+  synced_updated_at: string | null;
 };
 
 export function findAllCategoryRows(tenantId: string): CategoryRow[] {
@@ -30,6 +31,18 @@ export function findCategoryRowById(id: string): CategoryRow | undefined {
   return getDatabase().prepare("SELECT * FROM categories WHERE id = ?").get(id) as
     | CategoryRow
     | undefined;
+}
+
+/** Every category (any level/parent) tenant-wide whose name matches case-insensitively — used by
+ * bulk Import to resolve a plain category name typed in a spreadsheet cell. Deliberately NOT scoped
+ * to one parent: names are only guaranteed unique among siblings (see findSiblingCategoryRow), so
+ * the caller must handle 0/1/2+ matches itself rather than this function guessing for it. */
+export function findCategoryRowsByName(tenantId: string, name: string): CategoryRow[] {
+  return getDatabase()
+    .prepare(
+      "SELECT * FROM categories WHERE tenant_id = ? AND lower(name) = lower(?) ORDER BY level ASC, sort_order ASC"
+    )
+    .all(tenantId, name) as CategoryRow[];
 }
 
 export function findSiblingCategoryRow(

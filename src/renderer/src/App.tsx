@@ -3,15 +3,19 @@ import { Loader2 } from "lucide-react";
 import { AppShell } from "@renderer/app/layouts/AppShell";
 import { navItemsByKey } from "@renderer/app/layouts/navigation";
 import { AccessDeniedRoute } from "@renderer/app/routes/AccessDeniedRoute";
+import { ActivationRoute } from "@renderer/app/routes/ActivationRoute";
 import { ApprovalsRoute } from "@renderer/app/routes/ApprovalsRoute";
 import { BusinessProfileRoute } from "@renderer/app/routes/BusinessProfileRoute";
 import { CategoriesRoute } from "@renderer/app/routes/CategoriesRoute";
 import { CheckoutRoute } from "@renderer/app/routes/CheckoutRoute";
+import { CloudSyncRoute } from "@renderer/app/routes/CloudSyncRoute";
 import { CustomersRoute } from "@renderer/app/routes/CustomersRoute";
 import { DashboardRoute } from "@renderer/app/routes/DashboardRoute";
 import { EmployeesRoute } from "@renderer/app/routes/EmployeesRoute";
 import { ExpensesRoute } from "@renderer/app/routes/ExpensesRoute";
+import { ImportRoute } from "@renderer/app/routes/ImportRoute";
 import { InvoicesRoute } from "@renderer/app/routes/InvoicesRoute";
+import { LicenseBlockedRoute } from "@renderer/app/routes/LicenseBlockedRoute";
 import { LoginRoute } from "@renderer/app/routes/LoginRoute";
 import { MainStoreRoute } from "@renderer/app/routes/MainStoreRoute";
 import { PaymentMethodsRoute } from "@renderer/app/routes/PaymentMethodsRoute";
@@ -38,8 +42,10 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { useAuthStore } from "@renderer/shared/stores/auth-store";
 import { useUiStore } from "@renderer/shared/stores/ui-store";
+import { computeGraceStatus } from "@shared/lib/grace-period";
 
 export function App(): React.JSX.Element {
+  const context = useAppStore((state) => state.context);
   const hydrate = useAppStore((state) => state.hydrate);
   const authStatus = useAuthStore((state) => state.status);
   const hydrateAuth = useAuthStore((state) => state.hydrate);
@@ -49,14 +55,41 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     void hydrate();
     void hydrateAuth();
+
+    // The main process re-checks the license with the server on its own timer (see
+    // license-service.ts / bootstrap.ts) — this just re-reads whatever it last cached, so an
+    // already-open app eventually notices a suspension without needing a restart. Bounded,
+    // reasonable propagation delay; never blocks anything while it's pending.
+    const interval = setInterval(() => void hydrate(), 30 * 60 * 1000);
+    return () => clearInterval(interval);
   }, [hydrate, hydrateAuth]);
 
-  if (authStatus === "loading") {
+  if (!context || authStatus === "loading") {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-app text-muted">
         <Loader2 className="size-6 animate-spin" aria-hidden="true" />
       </div>
     );
+  }
+
+  // A fresh install can't be used at all until this succeeds — checked before even the employee
+  // login screen, since there's nothing to log into yet without a real tenant identity.
+  if (!context.tenant.activated) {
+    return <ActivationRoute />;
+  }
+
+  // The actual enforcement point for a revoked license — this status only ever comes from a real
+  // server response (activation or heartbeat), so there's no local way around it.
+  if (context.tenant.licenseStatus === "suspended" || context.tenant.licenseStatus === "cancelled") {
+    return <LicenseBlockedRoute status={context.tenant.licenseStatus} />;
+  }
+
+  // Only a MONTHLY subscription's grace period ever hard-locks the app this way — see
+  // shared/lib/grace-period.ts. LIFETIME/CUSTOM tenants never hit this branch (hardLock is always
+  // false for them); they only ever see LoginRoute's softer warning banner.
+  const grace = computeGraceStatus(context.tenant.nextDueDate, context.tenant.subscriptionType);
+  if (grace.state === "expired" && grace.hardLock) {
+    return <LicenseBlockedRoute status="grace_expired" />;
   }
 
   if (authStatus === "unauthenticated") {
@@ -129,6 +162,10 @@ export function App(): React.JSX.Element {
         <SuppliersReportRoute />
       ) : activeNavKey === "settings" ? (
         <SettingsRoute />
+      ) : activeNavKey === "sync" ? (
+        <CloudSyncRoute />
+      ) : activeNavKey === "data-import" ? (
+        <ImportRoute />
       ) : (
         <PlaceholderRoute
           icon={activeItem.icon}

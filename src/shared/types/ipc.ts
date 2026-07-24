@@ -1,4 +1,5 @@
-import type { AppContext, TenantRecord } from "./tenant";
+import type { AppContext, TenantContext, TenantRecord } from "./tenant";
+import type { PaymentHistoryResult } from "./subscription-payment";
 import type { BrandTheme } from "./theme";
 import type { AuthSession } from "./auth";
 import type { Category, CategoryStatus } from "./category";
@@ -44,12 +45,40 @@ import type { SaleVoid } from "./sale-void";
 import type { RecurringBill } from "./recurring-bill";
 import type { StockMovement, StockMovementFeedItem, StockTransferResult } from "./stock-movement";
 import type { StockRequest, StockRequestListItem } from "./stock-request";
-import type { SyncQueueItem, SyncSnapshot } from "./sync";
+import type {
+  ConflictResolution,
+  EntitySyncOverviewRow,
+  SyncConflictItem,
+  SyncQueueItem,
+  SyncReconciliationItem,
+  SyncSnapshot
+} from "./sync";
+import type {
+  ImportCommitRequest,
+  ImportCommitResult,
+  ImportEntityType,
+  ImportParsedFile,
+  ImportPreviewRequest,
+  ImportPreviewResult
+} from "./import";
+import type { ShareDocumentEntity } from "./share";
 
 export type IpcInvokeMap = {
   "app:get-context": {
     args: [];
     result: AppContext;
+  };
+  "activation:activate": {
+    args: [string];
+    result: TenantContext;
+  };
+  "activation:heartbeat": {
+    args: [];
+    result: TenantContext;
+  };
+  "activation:payments": {
+    args: [];
+    result: PaymentHistoryResult | null;
   };
   "auth:login": {
     args: [Record<string, unknown>];
@@ -799,6 +828,42 @@ export type IpcInvokeMap = {
     args: [{ limit?: number }];
     result: SyncQueueItem[];
   };
+  "sync:run-now": {
+    args: [];
+    result: SyncSnapshot;
+  };
+  "sync:list-conflicts": {
+    args: [];
+    result: SyncConflictItem[];
+  };
+  "sync:resolve-conflict": {
+    args: [string, ConflictResolution];
+    result: { success: true };
+  };
+  "sync:list-reconciliations": {
+    args: [];
+    result: SyncReconciliationItem[];
+  };
+  "sync:get-entity-overview": {
+    args: [];
+    result: EntitySyncOverviewRow[];
+  };
+  "import:pick-file": {
+    args: [ImportEntityType];
+    result: ImportParsedFile | null;
+  };
+  "import:preview": {
+    args: [ImportPreviewRequest];
+    result: ImportPreviewResult;
+  };
+  "import:commit": {
+    args: [ImportCommitRequest];
+    result: ImportCommitResult;
+  };
+  "share:create-link": {
+    args: [ShareDocumentEntity, string];
+    result: string;
+  };
   "theme:save": {
     args: [BrandTheme];
     result: BrandTheme;
@@ -882,6 +947,11 @@ export type IpcChannel = keyof IpcInvokeMap;
 export type BlueLedgerApi = {
   app: {
     getContext: () => Promise<IpcInvokeMap["app:get-context"]["result"]>;
+  };
+  activation: {
+    activate: (licenseKey: string) => Promise<IpcInvokeMap["activation:activate"]["result"]>;
+    heartbeat: () => Promise<IpcInvokeMap["activation:heartbeat"]["result"]>;
+    payments: () => Promise<IpcInvokeMap["activation:payments"]["result"]>;
   };
   auth: {
     login: (input: Record<string, unknown>) => Promise<IpcInvokeMap["auth:login"]["result"]>;
@@ -1278,6 +1348,25 @@ export type BlueLedgerApi = {
   sync: {
     getSnapshot: () => Promise<IpcInvokeMap["sync:get-snapshot"]["result"]>;
     listQueue: (input?: { limit?: number }) => Promise<IpcInvokeMap["sync:list-queue"]["result"]>;
+    runNow: () => Promise<IpcInvokeMap["sync:run-now"]["result"]>;
+    listConflicts: () => Promise<IpcInvokeMap["sync:list-conflicts"]["result"]>;
+    resolveConflict: (
+      id: string,
+      resolution: ConflictResolution
+    ) => Promise<IpcInvokeMap["sync:resolve-conflict"]["result"]>;
+    listReconciliations: () => Promise<IpcInvokeMap["sync:list-reconciliations"]["result"]>;
+    getEntityOverview: () => Promise<IpcInvokeMap["sync:get-entity-overview"]["result"]>;
+  };
+  import: {
+    pickFile: (entityType: ImportEntityType) => Promise<IpcInvokeMap["import:pick-file"]["result"]>;
+    preview: (request: ImportPreviewRequest) => Promise<IpcInvokeMap["import:preview"]["result"]>;
+    commit: (request: ImportCommitRequest) => Promise<IpcInvokeMap["import:commit"]["result"]>;
+  };
+  share: {
+    createLink: (
+      entity: ShareDocumentEntity,
+      entityId: string
+    ) => Promise<IpcInvokeMap["share:create-link"]["result"]>;
   };
   theme: {
     save: (theme: BrandTheme) => Promise<BrandTheme>;

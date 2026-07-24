@@ -49,6 +49,7 @@ export type LocationRow = {
   updated_by: string | null;
   sync_status: string;
   last_synced_at: string | null;
+  synced_updated_at: string | null;
 };
 
 export function findAllLocationRows(tenantId: string): LocationRow[] {
@@ -70,6 +71,19 @@ export function findMainStoreLocationRow(tenantId: string): LocationRow | undefi
       "SELECT * FROM locations WHERE tenant_id = ? AND location_type = 'distribution_center' LIMIT 1"
     )
     .get(tenantId) as LocationRow | undefined;
+}
+
+/** Every sell-facing storefront (excludes Main Store's warehouse/distribution-center types — same
+ * distinction shared/types/location.ts's isStorefrontType() already encodes) whose name matches
+ * case-insensitively — used by bulk Import to resolve a plain storefront name typed in a
+ * spreadsheet cell. Returns every match rather than guessing; the caller decides what 0/1/2+ means. */
+export function findStorefrontRowsByName(tenantId: string, name: string): LocationRow[] {
+  return getDatabase()
+    .prepare(
+      `SELECT * FROM locations WHERE tenant_id = ? AND lower(location_name) = lower(?)
+       AND location_type NOT IN ('warehouse', 'distribution_center')`
+    )
+    .all(tenantId, name) as LocationRow[];
 }
 
 export function insertLocationRow(

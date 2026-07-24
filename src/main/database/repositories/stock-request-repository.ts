@@ -44,13 +44,13 @@ const SELECT_WITH_JOINS = `
   LEFT JOIN employees rev ON rev.id = sr.reviewed_by
 `;
 
-export function findMaxStockRequestNumberRow(tenantId: string): string | null {
-  const row = getDatabase()
-    .prepare(
-      "SELECT MAX(request_number) as maxNumber FROM stock_requests WHERE tenant_id = ? AND request_number LIKE 'SR-%'"
-    )
-    .get(tenantId) as { maxNumber: string | null };
-  return row.maxNumber;
+// Returns every matching number, not just the max — see document-number-service.ts's own comment.
+export function findMaxStockRequestNumberRow(tenantId: string): string[] {
+  return (
+    getDatabase()
+      .prepare("SELECT request_number FROM stock_requests WHERE tenant_id = ? AND request_number LIKE 'SR-%'")
+      .all(tenantId) as Array<{ request_number: string }>
+  ).map((row) => row.request_number);
 }
 
 export function findStockRequestRowById(id: string): StockRequestRow | undefined {

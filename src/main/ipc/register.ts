@@ -219,7 +219,18 @@ import {
   pickBusinessLogoPath,
   updateTenantProfile
 } from "@main/services/tenant-service";
-import { getSyncSnapshot, listSyncQueue } from "@main/services/sync-service";
+import { activateInstallation, fetchPaymentHistory, heartbeatAndGetContext } from "@main/services/license-service";
+import {
+  getEntitySyncOverview,
+  getSyncSnapshot,
+  listConflicts,
+  listRecentReconciliations,
+  listSyncQueue,
+  resolveConflict,
+  runSyncNow
+} from "@main/services/sync-service";
+import { commitImport, pickImportFile, previewImport } from "@main/services/import-service";
+import { createShareLink } from "@main/services/share-service";
 import { saveTheme } from "@main/services/theme-service";
 import {
   getCancelledPurchasesInRange,
@@ -253,6 +264,8 @@ import type { EmployeeStatus } from "@shared/types/employee";
 import type { LocationStatus } from "@shared/types/location";
 import type { ProductStatus } from "@shared/types/product";
 import type { QuotationStatus } from "@shared/types/quotation";
+import type { ImportEntityType } from "@shared/types/import";
+import type { ShareDocumentEntity } from "@shared/types/share";
 import { ZodError } from "zod";
 import { ipcChannels } from "./channels";
 
@@ -296,6 +309,9 @@ const ipcMain = {
 
 export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.appGetContext, () => getAppContext());
+  ipcMain.handle(ipcChannels.activationActivate, (_event, licenseKey: string) => activateInstallation(licenseKey));
+  ipcMain.handle(ipcChannels.activationHeartbeat, () => heartbeatAndGetContext());
+  ipcMain.handle(ipcChannels.activationPayments, () => fetchPaymentHistory());
   ipcMain.handle(ipcChannels.authLogin, (_event, input: unknown) => login(input));
   ipcMain.handle(ipcChannels.authLogout, () => {
     logout();
@@ -601,8 +617,21 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.recurringBillMarkPaid, (_event, id: string, input: unknown) => markRecurringBillPaid(id, input));
   ipcMain.handle(ipcChannels.recurringBillDelete, (_event, id: string) => deleteRecurringBill(id));
   ipcMain.handle(ipcChannels.syncGetSnapshot, () => getSyncSnapshot());
+  ipcMain.handle(ipcChannels.syncRunNow, () => runSyncNow());
   ipcMain.handle(ipcChannels.syncListQueue, (_event, input?: { limit?: number }) =>
     listSyncQueue(input?.limit)
+  );
+  ipcMain.handle(ipcChannels.syncListConflicts, () => listConflicts());
+  ipcMain.handle(ipcChannels.syncResolveConflict, (_event, id: string, resolution: "mine" | "theirs") =>
+    resolveConflict(id, resolution)
+  );
+  ipcMain.handle(ipcChannels.syncListReconciliations, () => listRecentReconciliations());
+  ipcMain.handle(ipcChannels.syncGetEntityOverview, () => getEntitySyncOverview());
+  ipcMain.handle(ipcChannels.importPickFile, (_event, entityType: ImportEntityType) => pickImportFile(entityType));
+  ipcMain.handle(ipcChannels.importPreview, (_event, input: unknown) => previewImport(input));
+  ipcMain.handle(ipcChannels.importCommit, (_event, input: unknown) => commitImport(input));
+  ipcMain.handle(ipcChannels.shareCreateLink, (_event, entity: ShareDocumentEntity, entityId: string) =>
+    createShareLink(entity, entityId)
   );
   ipcMain.handle(ipcChannels.themeSave, (_event, theme: unknown) =>
     saveTheme(brandThemeSchema.parse(theme))

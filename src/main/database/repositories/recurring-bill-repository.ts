@@ -19,6 +19,8 @@ export type RecurringBillRow = {
   created_by_name: string | null;
   created_at: string;
   updated_at: string;
+  sync_status: string;
+  synced_updated_at: string | null;
 };
 
 const SELECT_WITH_JOINS = `

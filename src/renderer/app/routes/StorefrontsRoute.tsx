@@ -132,7 +132,10 @@ export function StorefrontsRoute(): React.JSX.Element {
     setLoadError(null);
     try {
       const list = await window.blueLedger.location.list();
-      setLocations(list);
+      // Main Store (the one distribution-center location every tenant gets automatically) already
+      // has its own dedicated "Main Store" nav item/screen — showing it again here, as if it were a
+      // manageable storefront someone chose to create, is just confusing clutter, not useful info.
+      setLocations(list.filter((location) => location.locationType !== "distribution_center"));
     } catch (err) {
       setLoadError(getErrorMessage(err, "Failed to load storefronts"));
     }

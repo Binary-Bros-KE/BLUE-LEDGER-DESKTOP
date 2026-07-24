@@ -1,15 +1,19 @@
 import * as deliveryNoteRepository from "@main/database/repositories/delivery-note-repository";
 import { requirePermission } from "@main/services/auth-service";
+import { generateDocumentNumber } from "@main/services/document-number-service";
 import type { SaleDelivery } from "@shared/types/sale";
 
-/** DN-000001, DN-000002, ... — generated fresh every time a delivery is attached to a sale/invoice/
- * quotation, including on quotation-conversion (the quotation's own delivery note number is never
- * reused, since the sale is a distinct document under the same tenant-wide unique index). */
+/** DN-D{n}-000001, DN-D{n}-000002, ... — generated fresh every time a delivery is attached to a
+ * sale/invoice/quotation, including on quotation-conversion (the quotation's own delivery note
+ * number is never reused, since the sale is a distinct document under the same tenant-wide unique
+ * index). */
 export function generateDeliveryNoteNumber(tenantId: string): string {
-  const maxNumber = deliveryNoteRepository.findMaxDeliveryNoteNumberRow(tenantId);
-  const currentNumber = maxNumber ? Number(maxNumber.slice("DN-".length)) : 0;
-  const nextNumber = Number.isFinite(currentNumber) ? currentNumber + 1 : 1;
-  return `DN-${String(nextNumber).padStart(6, "0")}`;
+  return generateDocumentNumber({
+    tenantId,
+    prefix: "DN",
+    digits: 6,
+    existingNumbers: deliveryNoteRepository.findMaxDeliveryNoteNumberRow(tenantId)
+  });
 }
 
 export function getDeliveryNote(id: string): SaleDelivery {

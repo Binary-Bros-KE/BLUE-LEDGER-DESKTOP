@@ -7,6 +7,7 @@ import * as purchaseRepository from "@main/database/repositories/purchase-reposi
 import type { PurchaseRow } from "@main/database/repositories/purchase-repository";
 import * as supplierRepository from "@main/database/repositories/supplier-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, getSession, requirePermission } from "@main/services/auth-service";
+import { generateDocumentNumber } from "@main/services/document-number-service";
 import { deleteManagedPurchaseAttachment } from "@main/services/image-service";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
@@ -41,10 +42,12 @@ type PreparedPurchaseCart = {
 };
 
 function generatePurchaseNumber(tenantId: string): string {
-  const maxNumber = purchaseRepository.findMaxPurchaseNumberRow(tenantId);
-  const currentNumber = maxNumber ? Number(maxNumber.slice("PO-".length)) : 0;
-  const nextNumber = Number.isFinite(currentNumber) ? currentNumber + 1 : 1;
-  return `PO-${String(nextNumber).padStart(6, "0")}`;
+  return generateDocumentNumber({
+    tenantId,
+    prefix: "PO",
+    digits: 6,
+    existingNumbers: purchaseRepository.findMaxPurchaseNumberRow(tenantId)
+  });
 }
 
 function assertSupplierExists(tenantId: string, supplierId: string): void {

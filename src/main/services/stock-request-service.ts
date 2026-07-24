@@ -2,7 +2,9 @@ import { runInTransaction } from "@main/database/connection";
 import * as locationRepository from "@main/database/repositories/location-repository";
 import * as stockRequestRepository from "@main/database/repositories/stock-request-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
+import { generateDocumentNumber } from "@main/services/document-number-service";
 import { distributeMainStoreStockCore } from "@main/services/main-store-service";
+import { assertNotAlreadyDecidedRemotely } from "@main/services/sync-engine";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import {
   stockRequestCreateSchema,
@@ -13,12 +15,14 @@ import {
 import { isStorefrontType, type LocationType } from "@shared/types/location";
 import type { StockRequest, StockRequestItem, StockRequestListItem } from "@shared/types/stock-request";
 
-/** SR-000001, SR-000002, ... */
+/** SR-D{n}-000001, SR-D{n}-000002, ... */
 function generateStockRequestNumber(tenantId: string): string {
-  const maxNumber = stockRequestRepository.findMaxStockRequestNumberRow(tenantId);
-  const currentNumber = maxNumber ? Number(maxNumber.slice("SR-".length)) : 0;
-  const nextNumber = Number.isFinite(currentNumber) ? currentNumber + 1 : 1;
-  return `SR-${String(nextNumber).padStart(6, "0")}`;
+  return generateDocumentNumber({
+    tenantId,
+    prefix: "SR",
+    digits: 6,
+    existingNumbers: stockRequestRepository.findMaxStockRequestNumberRow(tenantId)
+  });
 }
 
 function mapListRow(row: stockRequestRepository.StockRequestRow): StockRequestListItem {
@@ -131,7 +135,7 @@ export function createStockRequest(input: unknown): StockRequest {
  * ledger. If ANY item doesn't have enough stock at Main Store, the whole approval rolls back — nothing
  * partially fulfils, so the approver must free up stock (or reject) and try again.
  */
-export function approveStockRequest(id: string): StockRequest {
+export async function approveStockRequest(id: string): Promise<StockRequest> {
   requirePermission("stock_requests", "approve");
   const { tenantId } = getCurrentTenant();
   const employeeId = getCurrentEmployeeId();
@@ -146,6 +150,7 @@ export function approveStockRequest(id: string): StockRequest {
   if (row.status !== "pending") {
     throw new Error("This request has already been reviewed");
   }
+  await assertNotAlreadyDecidedRemotely("stock_requests", id, "pending");
 
   const items = stockRequestRepository.findStockRequestItemRows(id);
 
@@ -178,7 +183,7 @@ export function approveStockRequest(id: string): StockRequest {
   return buildStockRequest(id);
 }
 
-export function rejectStockRequest(id: string, input: unknown): StockRequest {
+export async function rejectStockRequest(id: string, input: unknown): Promise<StockRequest> {
   requirePermission("stock_requests", "approve");
   const parsed: StockRequestRejectInput = stockRequestRejectSchema.parse(input);
   const employeeId = getCurrentEmployeeId();
@@ -193,6 +198,7 @@ export function rejectStockRequest(id: string, input: unknown): StockRequest {
   if (row.status !== "pending") {
     throw new Error("This request has already been reviewed");
   }
+  await assertNotAlreadyDecidedRemotely("stock_requests", id, "pending");
 
   stockRequestRepository.updateStockRequestStatusRow(id, {
     status: "rejected",

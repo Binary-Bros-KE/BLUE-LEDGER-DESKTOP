@@ -9,6 +9,7 @@ import * as quotationRepository from "@main/database/repositories/quotation-repo
 import type { QuotationItemDetailRow } from "@main/database/repositories/quotation-repository";
 import * as serviceChargeRepository from "@main/database/repositories/service-charge-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
+import { generateDocumentNumber } from "@main/services/document-number-service";
 import { insertInvoiceFromCart } from "@main/services/invoice-service";
 import {
   getSaleDetail,
@@ -40,10 +41,12 @@ import type {
 import type { Sale } from "@shared/types/sale";
 
 function generateQuotationNumber(tenantId: string): string {
-  const maxNumber = quotationRepository.findMaxQuotationNumberRow(tenantId);
-  const currentNumber = maxNumber ? Number(maxNumber.slice("QT-".length)) : 0;
-  const nextNumber = Number.isFinite(currentNumber) ? currentNumber + 1 : 1;
-  return `QT-${String(nextNumber).padStart(6, "0")}`;
+  return generateDocumentNumber({
+    tenantId,
+    prefix: "QT",
+    digits: 6,
+    existingNumbers: quotationRepository.findMaxQuotationNumberRow(tenantId)
+  });
 }
 
 function assertCustomerExists(tenantId: string, customerId: string): void {
@@ -217,7 +220,14 @@ export function updateQuotation(id: string, input: unknown): Quotation {
 export function deleteQuotation(id: string): { id: string } {
   requirePermission("quotations", "delete");
   const { tenantId } = getCurrentTenant();
-  requireEditableDraft(id, tenantId);
+  const row = requireEditableDraft(id, tenantId);
+  // Cloud sync has no delete propagation — a quotation already synced would leave a stale copy on
+  // the cloud/other devices forever if hard-deleted here. A draft is rarely synced in practice
+  // (nothing pushes it until it's touched again), but if it has been, this stops it rather than
+  // silently orphaning the cloud copy.
+  if (row.sync_status !== "pending") {
+    throw new Error("This quotation has already synced to the cloud and can't be deleted — reject it instead.");
+  }
 
   runInTransaction(() => {
     serviceChargeRepository.deleteServiceChargesForQuotationRow(id);

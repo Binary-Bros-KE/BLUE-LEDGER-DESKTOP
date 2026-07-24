@@ -1,8 +1,10 @@
 import type { PropsWithChildren } from "react";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { formatRelativeSyncTime, SYNC_STATUS_COPY } from "@renderer/shared/lib/sync-status";
 import { useUiStore } from "@renderer/shared/stores/ui-store";
 import { navGroups, navItemsByKey } from "./navigation";
 import { Sidebar } from "./Sidebar";
+import { useSyncStatusWidget } from "./useSyncStatusWidget";
 
 export function AppShell({ children }: PropsWithChildren): React.JSX.Element {
   const activeNavKey = useUiStore((state) => state.activeNavKey);
@@ -19,6 +21,8 @@ export function AppShell({ children }: PropsWithChildren): React.JSX.Element {
   const eyebrow = isDashboard ? "Daily Focus" : (activeGroup?.title ?? "Blue Ledger");
   const title = isDashboard ? "Command Center" : (activeItem?.label ?? "Blue Ledger");
 
+  const snapshot = useSyncStatusWidget();
+
   return (
     <div className="flex h-screen bg-app text-ink">
       <Sidebar />
@@ -32,8 +36,24 @@ export function AppShell({ children }: PropsWithChildren): React.JSX.Element {
             <h1 className="mt-1 text-3xl font-extrabold tracking-tight">{title}</h1>
           </div>
           <div className="flex items-center gap-3 rounded-lg border border-line bg-white px-3.5 py-2.5 shadow-soft">
-            <DashedPill tone="warning">Local Mode</DashedPill>
-            <p className="text-xs font-bold text-muted">SQLite ready &middot; cloud sync staged</p>
+            {snapshot ? (
+              <>
+                <DashedPill tone={SYNC_STATUS_COPY[snapshot.status].tone}>
+                  {SYNC_STATUS_COPY[snapshot.status].label}
+                </DashedPill>
+                <p className="text-xs font-bold text-muted">
+                  {snapshot.status === "not_activated"
+                    ? "Cloud sync not set up yet"
+                    : `Synced ${formatRelativeSyncTime(
+                        [snapshot.lastPushAt, snapshot.lastPullAt].filter(Boolean).sort().at(-1) ?? null
+                      )}`}
+                  {snapshot.queuedCount > 0 ? ` · ${snapshot.queuedCount} pending` : ""}
+                  {snapshot.failedCount > 0 ? ` · ${snapshot.failedCount} failed` : ""}
+                </p>
+              </>
+            ) : (
+              <DashedPill tone="warning">Loading sync status&hellip;</DashedPill>
+            )}
           </div>
         </header>
 

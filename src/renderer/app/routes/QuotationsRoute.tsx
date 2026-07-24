@@ -12,6 +12,7 @@ import {
   Printer,
   Search,
   Send,
+  Share2,
   ShoppingCart,
   Trash2,
   XCircle
@@ -27,6 +28,7 @@ import {
 } from "@renderer/shared/components/ExtraChargesSection";
 import { Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
+import { ShareModal } from "@renderer/shared/components/ShareModal";
 import { StatTile } from "@renderer/shared/components/StatTile";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { computeLinePricing } from "@renderer/shared/lib/cart-pricing";
@@ -138,6 +140,7 @@ export function QuotationsRoute(): React.JSX.Element {
   const [dateTo, setDateTo] = useState("");
 
   const [viewingQuotation, setViewingQuotation] = useState<Quotation | null>(null);
+  const [sharing, setSharing] = useState(false);
   const [viewLoading, setViewLoading] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -998,7 +1001,7 @@ export function QuotationsRoute(): React.JSX.Element {
               </div>
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-2">
+            <div className="mt-4 grid grid-cols-3 gap-2">
               <Button
                 type="button"
                 onClick={() => void handlePrint()}
@@ -1015,7 +1018,24 @@ export function QuotationsRoute(): React.JSX.Element {
                 <Download className="mr-1.5 size-3.5" aria-hidden="true" />
                 Download PDF
               </Button>
+              <Button
+                type="button"
+                onClick={() => setSharing(true)}
+                className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+              >
+                <Share2 className="mr-1.5 size-3.5" aria-hidden="true" />
+                Share
+              </Button>
             </div>
+
+            <ShareModal
+              open={sharing}
+              onClose={() => setSharing(false)}
+              entity="quotation"
+              entityId={viewingQuotation.id}
+              documentLabel={`Quotation ${viewingQuotation.quotationNumber}`}
+              customerId={viewingQuotation.customerId}
+            />
 
             {canEdit && viewingQuotation.status === "draft" && (
               <div className="mt-2">

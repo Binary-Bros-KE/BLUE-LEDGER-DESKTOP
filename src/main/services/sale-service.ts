@@ -9,6 +9,7 @@ import { runInTransaction } from "@main/database/connection";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
 import { getCurrentBranchScope, getSession, requirePermission } from "@main/services/auth-service";
 import { generateDeliveryNoteNumber } from "@main/services/delivery-note-service";
+import { generateDocumentNumber } from "@main/services/document-number-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import type { DeliveryInput, ServiceChargeInput } from "@shared/schemas/charges";
 import {
@@ -195,10 +196,12 @@ function discardResumedSale(tenantId: string, resumeSaleId: string | null | unde
 }
 
 function generateReceiptNumber(tenantId: string): string {
-  const maxReceipt = saleRepository.findMaxReceiptNumberRow(tenantId);
-  const currentNumber = maxReceipt ? Number(maxReceipt.slice("BL-".length)) : 0;
-  const nextNumber = Number.isFinite(currentNumber) ? currentNumber + 1 : 1;
-  return `BL-${String(nextNumber).padStart(7, "0")}`;
+  return generateDocumentNumber({
+    tenantId,
+    prefix: "BL",
+    digits: 7,
+    existingNumbers: saleRepository.findMaxReceiptNumberRow(tenantId)
+  });
 }
 
 export function getSaleDetail(id: string): Sale {
@@ -301,6 +304,12 @@ export function deletePendingSale(id: string): { id: string } {
   }
   if (row.sale_status !== "pending") {
     throw new Error("Only pending sales can be deleted");
+  }
+  // Cloud sync has no delete propagation — a held sale already synced would leave a stale copy on
+  // the cloud/other devices forever if hard-deleted here. A pending (held) sale is rarely synced
+  // in practice, but if it has been, this stops it rather than silently orphaning the cloud copy.
+  if (row.sync_status !== "pending") {
+    throw new Error("This held sale has already synced to the cloud and can't be deleted.");
   }
 
   runInTransaction(() => {

@@ -6,6 +6,7 @@ import * as locationRepository from "@main/database/repositories/location-reposi
 import * as mainStoreAllocationRepository from "@main/database/repositories/main-store-allocation-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
+import { generateDocumentNumber } from "@main/services/document-number-service";
 import { deleteManagedProductImage } from "@main/services/image-service";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
@@ -161,10 +162,12 @@ function assertOpeningStockLocationsAllowed(
 export function nextProductSku(): string {
   requirePermission("products", "create");
   const { tenantId } = getCurrentTenant();
-  const maxSku = productRepository.findMaxProductSkuNumberRow(tenantId);
-  const currentNumber = maxSku ? Number(maxSku.slice("PROD-".length)) : 0;
-  const nextNumber = Number.isFinite(currentNumber) ? currentNumber + 1 : 1;
-  return `PROD-${String(nextNumber).padStart(6, "0")}`;
+  return generateDocumentNumber({
+    tenantId,
+    prefix: "PROD",
+    digits: 6,
+    existingNumbers: productRepository.findMaxProductSkuNumberRow(tenantId)
+  });
 }
 
 export function createProduct(input: unknown): Product {

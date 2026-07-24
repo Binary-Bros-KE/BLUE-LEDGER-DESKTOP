@@ -233,5 +233,11 @@ export function deleteRecurringBill(id: string): void {
     throw new Error("Recurring bill not found");
   }
   assertBillStorefrontAssignmentAllowed(existing.storefront_id, getCurrentBranchScope());
+  // Cloud sync has no delete propagation — a recurring bill already synced would leave a stale
+  // copy on the cloud/other devices forever if hard-deleted here. Pausing already achieves "stop
+  // reminding me about this" without losing the historical link from bills already marked paid.
+  if (existing.sync_status !== "pending") {
+    throw new Error("This recurring bill has already synced to the cloud — pause it instead of deleting it.");
+  }
   recurringBillRepository.deleteRecurringBillRow(id);
 }

@@ -8,6 +8,7 @@ import {
   ClipboardCheck,
   ClipboardList,
   CreditCard,
+  FileSpreadsheet,
   FileText,
   FolderTree,
   LayoutDashboard,
@@ -286,6 +287,13 @@ export const navGroups: NavGroup[] = [
         description: "Sync status & queue",
         icon: RefreshCw,
         permissionModule: "cloud_sync"
+      },
+      {
+        key: "data-import",
+        label: "Data Import",
+        description: "Bulk import products, customers & suppliers",
+        icon: FileSpreadsheet,
+        permissionModule: "data_import"
       },
       {
         key: "settings",

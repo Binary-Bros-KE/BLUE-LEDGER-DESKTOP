@@ -14,6 +14,7 @@ export type RoleRow = {
   updated_by: string | null;
   sync_status: string;
   last_synced_at: string | null;
+  synced_updated_at: string | null;
 };
 
 export type RoleListRow = RoleRow & {

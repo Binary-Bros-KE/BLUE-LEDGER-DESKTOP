@@ -12,6 +12,7 @@ import {
   Plus,
   Printer,
   Search,
+  Share2,
   Wallet,
   X
 } from "lucide-react";
@@ -27,6 +28,7 @@ import {
 } from "@renderer/shared/components/ExtraChargesSection";
 import { Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
+import { ShareModal } from "@renderer/shared/components/ShareModal";
 import { StatTile } from "@renderer/shared/components/StatTile";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { computeLinePricing } from "@renderer/shared/lib/cart-pricing";
@@ -169,6 +171,7 @@ export function InvoicesRoute(): React.JSX.Element {
 
   const [viewingSale, setViewingSale] = useState<Sale | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
   const [viewingDelivery, setViewingDelivery] = useState<{
     delivery: SaleDelivery;
@@ -1119,7 +1122,7 @@ export function InvoicesRoute(): React.JSX.Element {
               </div>
             )}
 
-            <div className="mt-2 grid grid-cols-2 gap-2">
+            <div className="mt-2 grid grid-cols-3 gap-2">
               <Button
                 type="button"
                 onClick={() => void handlePrint()}
@@ -1136,7 +1139,24 @@ export function InvoicesRoute(): React.JSX.Element {
                 <Download className="mr-1.5 size-3.5" aria-hidden="true" />
                 Download PDF
               </Button>
+              <Button
+                type="button"
+                onClick={() => setSharing(true)}
+                className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+              >
+                <Share2 className="mr-1.5 size-3.5" aria-hidden="true" />
+                Share
+              </Button>
             </div>
+
+            <ShareModal
+              open={sharing}
+              onClose={() => setSharing(false)}
+              entity="sale"
+              entityId={viewingSale.id}
+              documentLabel={`Invoice ${viewingSale.invoiceNumber ?? ""}`.trim()}
+              customerId={viewingSale.customerId}
+            />
 
             {canCreate && (
               <div className="mt-2">

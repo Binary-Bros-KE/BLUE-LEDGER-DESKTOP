@@ -1,5 +1,23 @@
 import { getDatabase } from "@main/database/connection";
-import type { SyncQueueItem, SyncSnapshot } from "@shared/types/sync";
+import {
+  getCloudIdentity,
+  getEntitySyncOverview as getEntitySyncOverviewFromEngine,
+  listConflicts as listConflictsFromEngine,
+  listRecentReconciliations as listRecentReconciliationsFromEngine,
+  readSetting,
+  resolveConflict as resolveConflictInEngine,
+  syncNow,
+  type DriftReport
+} from "@main/services/sync-engine";
+import { API_BASE_URL } from "@main/services/license-service";
+import type {
+  ConflictResolution,
+  EntitySyncOverviewRow,
+  SyncConflictItem,
+  SyncQueueItem,
+  SyncReconciliationItem,
+  SyncSnapshot
+} from "@shared/types/sync";
 
 type SyncRow = {
   id: string;
@@ -19,6 +37,15 @@ type SyncRow = {
   updated_at: string;
 };
 
+/** "Recent" for online/offline purposes — a few multiples of the coupled sync cycle's own interval
+ * (see bootstrap.ts's SYNC_INTERVAL_MS, 20s) so a single missed tick doesn't flip the status to
+ * "offline" and back, while still reflecting real connectivity promptly now that this is shown
+ * prominently in the persistent header widget (see AppShell.tsx), not just the dedicated Cloud Sync
+ * page. Was 5 minutes, sized for the OLD independent 10-minute pull timer — left that stale this
+ * long would make "Online" a meaningless label for a device that's actually been offline for
+ * several minutes. */
+const RECENT_SYNC_WINDOW_MS = 90 * 1000;
+
 export function getSyncSnapshot(): SyncSnapshot {
   const db = getDatabase();
   const queuedCountRow = db
@@ -28,14 +55,38 @@ export function getSyncSnapshot(): SyncSnapshot {
     .prepare("SELECT COUNT(*) FROM sync_outbox WHERE status = 'failed'")
     .get() as { "COUNT(*)": number };
 
+  const lastPushAt = readSetting<string>("sync_last_push_at");
+  const lastPullAt = readSetting<string>("sync_last_pull_at");
+  const lastDriftCheckAt = readSetting<string>("sync_last_drift_check_at");
+  const drift = readSetting<DriftReport>("sync_drift_report") ?? {};
+  const failedCount = failedCountRow["COUNT(*)"];
+
+  const status = ((): SyncSnapshot["status"] => {
+    if (!getCloudIdentity()) return "not_activated";
+    if (failedCount > 0) return "error";
+    const mostRecent = [lastPushAt, lastPullAt].filter((v): v is string => v !== null).map((v) => new Date(v).getTime());
+    const recentlySynced = mostRecent.some((t) => Date.now() - t < RECENT_SYNC_WINDOW_MS);
+    return recentlySynced ? "online" : "offline";
+  })();
+
   return {
-    status: "offline",
-    lastPushAt: null,
-    lastPullAt: null,
+    status,
+    lastPushAt,
+    lastPullAt,
+    lastDriftCheckAt,
     queuedCount: queuedCountRow["COUNT(*)"],
-    failedCount: failedCountRow["COUNT(*)"],
-    serverUrl: process.env.BLUE_LEDGER_SYNC_URL ?? null
+    failedCount,
+    serverUrl: API_BASE_URL,
+    drift
   };
+}
+
+/** Renderer-invokable "Sync Now" button — runs a full push+pull+drift-check cycle immediately
+ * instead of waiting for the next timer tick (see bootstrap.ts), then returns the fresh snapshot so
+ * the UI can update without a second round trip. */
+export async function runSyncNow(): Promise<SyncSnapshot> {
+  await syncNow();
+  return getSyncSnapshot();
 }
 
 export function listSyncQueue(limit = 20): SyncQueueItem[] {
@@ -61,4 +112,21 @@ export function listSyncQueue(limit = 20): SyncQueueItem[] {
     createdAt: row.created_at,
     updatedAt: row.updated_at
   }));
+}
+
+export function listConflicts(): SyncConflictItem[] {
+  return listConflictsFromEngine();
+}
+
+export function listRecentReconciliations(): SyncReconciliationItem[] {
+  return listRecentReconciliationsFromEngine();
+}
+
+export function resolveConflict(id: string, resolution: ConflictResolution): { success: true } {
+  resolveConflictInEngine(id, resolution);
+  return { success: true };
+}
+
+export async function getEntitySyncOverview(): Promise<EntitySyncOverviewRow[]> {
+  return getEntitySyncOverviewFromEngine();
 }

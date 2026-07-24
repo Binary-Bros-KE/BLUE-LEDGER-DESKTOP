@@ -16,6 +16,7 @@ export type PaymentMethodRow = {
   updated_at: string;
   sync_status: string;
   last_synced_at: string | null;
+  synced_updated_at: string | null;
 };
 
 export function findAllPaymentMethodRows(tenantId: string): PaymentMethodRow[] {

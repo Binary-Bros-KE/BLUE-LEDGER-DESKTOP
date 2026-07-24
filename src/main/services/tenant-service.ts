@@ -5,11 +5,19 @@ import { getDatabase, getDatabasePath, runInTransaction } from "@main/database/c
 import * as tenantRepository from "@main/database/repositories/tenant-repository";
 import { requirePermission } from "@main/services/auth-service";
 import { deleteManagedBusinessLogo, pickAndStoreBusinessLogo } from "@main/services/image-service";
+import { pushProfileToServer } from "@main/services/license-service";
 
 const { app } = electron;
 import { APP_NAME } from "@shared/constants/app";
 import { businessProfileInputSchema } from "@shared/schemas/tenant";
-import type { AppContext, Currency, TenantContext, TenantRecord } from "@shared/types/tenant";
+import type {
+  AppContext,
+  Currency,
+  LicenseStatus,
+  SubscriptionType,
+  TenantContext,
+  TenantRecord
+} from "@shared/types/tenant";
 
 type WorkstationRow = {
   id: string;
@@ -32,6 +40,10 @@ function toTenantContext(row: tenantRepository.TenantRow): TenantContext {
     receiptHeader: row.receipt_header,
     receiptFooter: row.receipt_footer,
     currency: row.currency as Currency,
+    activated: row.license_key !== null,
+    licenseStatus: row.license_status as LicenseStatus,
+    nextDueDate: row.next_due_date,
+    subscriptionType: row.subscription_type as SubscriptionType | null,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -64,7 +76,10 @@ export function ensureTenantContext(): TenantContext {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `
         )
-        .run(workstationId, tenantId, null, "Front Counter", hostname(), now, now, now);
+        // "Device" is a placeholder — activateInstallation renames this to "Device {N}" once
+        // registration hands back this workstation's permanent sequence number (never overwrites a
+        // label the user has already customized by then — see updateWorkstationActivationRow).
+        .run(workstationId, tenantId, null, "Device", hostname(), now, now, now);
     });
   }
 
@@ -108,6 +123,28 @@ export function updateTenantProfile(input: unknown): TenantRecord {
   if (existing?.business_logo_path && existing.business_logo_path !== parsed.businessLogoPath) {
     deleteManagedBusinessLogo(existing.business_logo_path);
   }
+
+  // Best-effort, fire-and-forget — the local save above already succeeded and is the source of
+  // truth regardless of whether this reaches the cloud right now. Never awaited/blocking; see
+  // pushProfileToServer's own doc comment for why it can never throw.
+  void pushProfileToServer({
+    businessName: parsed.businessName,
+    businessType: parsed.businessType,
+    currency: parsed.currency,
+    ownerName: parsed.ownerName,
+    primaryPhone: parsed.primaryPhone,
+    businessRegistrationNumber: parsed.businessRegistrationNumber,
+    kraPin: parsed.kraPin,
+    email: parsed.email,
+    alternativePhone: parsed.alternativePhone,
+    website: parsed.website,
+    country: parsed.country,
+    countyState: parsed.countyState,
+    cityTown: parsed.cityTown,
+    physicalAddress: parsed.physicalAddress,
+    ownerPhone: parsed.ownerPhone,
+    ownerEmail: parsed.ownerEmail
+  });
 
   return tenantRepository.mapTenantRow(row, app.getVersion());
 }

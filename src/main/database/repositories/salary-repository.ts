@@ -23,6 +23,7 @@ export type SalaryRow = {
   updated_at: string;
   sync_status: string;
   last_synced_at: string | null;
+  synced_updated_at: string | null;
 };
 
 export type SalaryDetailRow = SalaryRow & {
@@ -64,13 +65,13 @@ export function findSalaryDetailRowsForEmployee(tenantId: string, employeeId: st
     .all(tenantId, employeeId) as SalaryDetailRow[];
 }
 
-export function findMaxPayslipNumberRow(tenantId: string): string | null {
-  const row = getDatabase()
-    .prepare(
-      "SELECT MAX(payslip_number) as maxNumber FROM salaries WHERE tenant_id = ? AND payslip_number LIKE 'PAY-%'"
-    )
-    .get(tenantId) as { maxNumber: string | null };
-  return row.maxNumber;
+// Returns every matching number, not just the max — see document-number-service.ts's own comment.
+export function findMaxPayslipNumberRow(tenantId: string): string[] {
+  return (
+    getDatabase()
+      .prepare("SELECT payslip_number FROM salaries WHERE tenant_id = ? AND payslip_number LIKE 'PAY-%'")
+      .all(tenantId) as Array<{ payslip_number: string }>
+  ).map((row) => row.payslip_number);
 }
 
 export function findActiveSalaryForEmployeePeriodRow(

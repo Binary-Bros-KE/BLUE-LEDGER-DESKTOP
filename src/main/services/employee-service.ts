@@ -201,6 +201,13 @@ export function deleteEmployee(id: string): { id: string } {
   if (!existing) {
     throw new Error("Employee not found");
   }
+  // Cloud sync has no delete propagation — an employee already synced would leave a stale copy on
+  // the cloud/other devices forever if hard-deleted here. Setting status to Inactive already
+  // achieves "this person can no longer log in" without losing the historical link from their past
+  // sales/salary records.
+  if (existing.sync_status !== "pending") {
+    throw new Error("This employee has already synced to the cloud — set their status to Inactive instead of deleting them.");
+  }
   employeeRepository.deleteEmployeeRow(id);
   deleteManagedEmployeePhoto(existing.photo_path);
   return { id };

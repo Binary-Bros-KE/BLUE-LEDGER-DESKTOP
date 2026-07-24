@@ -30,6 +30,7 @@ export type SupplierRow = {
   updated_at: string;
   sync_status: string;
   last_synced_at: string | null;
+  synced_updated_at: string | null;
 };
 
 /** Active suppliers first, inactive ones sorted to the bottom — then alphabetical within each group. */

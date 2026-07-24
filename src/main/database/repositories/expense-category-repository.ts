@@ -12,6 +12,7 @@ export type ExpenseCategoryRow = {
   updated_at: string;
   sync_status: string;
   last_synced_at: string | null;
+  synced_updated_at: string | null;
 };
 
 /** Active categories first, then alphabetical within each group. */

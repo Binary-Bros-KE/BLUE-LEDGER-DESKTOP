@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Download, Loader2, Printer, Share2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
+import { ShareModal } from "@renderer/shared/components/ShareModal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { buildReceiptViewModel, formatReceiptCents } from "@shared/lib/receipt";
@@ -11,6 +12,7 @@ import type { TenantContext } from "@shared/types/tenant";
 export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantContext }): React.JSX.Element {
   const [printing, setPrinting] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // The receipt must show THIS SALE's own storefront identity, never the tenant-wide Business
@@ -215,14 +217,22 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
         </Button>
         <Button
           type="button"
-          disabled
-          title="Available once cloud sync is enabled"
-          className="h-9 cursor-not-allowed border border-line bg-white text-[11px] text-muted shadow-none opacity-50"
+          onClick={() => setSharing(true)}
+          className="h-9 border border-line bg-white text-[11px] text-ink shadow-none hover:bg-soft"
         >
           <Share2 className="mr-1.5 size-3.5" aria-hidden="true" />
           Share
         </Button>
       </div>
+
+      <ShareModal
+        open={sharing}
+        onClose={() => setSharing(false)}
+        entity="sale"
+        entityId={sale.id}
+        documentLabel={`Receipt ${vm.receiptNumber ?? ""}`.trim()}
+        customerId={sale.customerId}
+      />
     </div>
   );
 }

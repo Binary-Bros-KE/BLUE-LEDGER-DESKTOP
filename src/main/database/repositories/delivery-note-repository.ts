@@ -51,13 +51,13 @@ export function findDeliveryNoteRowByQuotationId(quotationId: string): DeliveryN
     | undefined;
 }
 
-export function findMaxDeliveryNoteNumberRow(tenantId: string): string | null {
-  const row = getDatabase()
-    .prepare(
-      "SELECT MAX(delivery_note_number) as maxNumber FROM delivery_notes WHERE tenant_id = ? AND delivery_note_number LIKE 'DN-%'"
-    )
-    .get(tenantId) as { maxNumber: string | null };
-  return row.maxNumber;
+// Returns every matching number, not just the max — see document-number-service.ts's own comment.
+export function findMaxDeliveryNoteNumberRow(tenantId: string): string[] {
+  return (
+    getDatabase()
+      .prepare("SELECT delivery_note_number FROM delivery_notes WHERE tenant_id = ? AND delivery_note_number LIKE 'DN-%'")
+      .all(tenantId) as Array<{ delivery_note_number: string }>
+  ).map((row) => row.delivery_note_number);
 }
 
 export function insertDeliveryNoteRow(input: {

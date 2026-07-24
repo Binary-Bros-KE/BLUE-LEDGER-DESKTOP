@@ -39,6 +39,7 @@ export type PurchaseRow = {
   updated_at: string;
   sync_status: string;
   last_synced_at: string | null;
+  synced_updated_at: string | null;
 };
 
 export type PurchaseDetailRow = PurchaseRow & {
@@ -217,13 +218,13 @@ export function mapPurchaseSummaryRow(row: PurchaseSummaryRow): PurchaseSummary 
   };
 }
 
-export function findMaxPurchaseNumberRow(tenantId: string): string | null {
-  const row = getDatabase()
-    .prepare(
-      "SELECT MAX(purchase_number) as maxNumber FROM purchases WHERE tenant_id = ? AND purchase_number LIKE 'PO-%'"
-    )
-    .get(tenantId) as { maxNumber: string | null };
-  return row.maxNumber;
+// Returns every matching number, not just the max — see document-number-service.ts's own comment.
+export function findMaxPurchaseNumberRow(tenantId: string): string[] {
+  return (
+    getDatabase()
+      .prepare("SELECT purchase_number FROM purchases WHERE tenant_id = ? AND purchase_number LIKE 'PO-%'")
+      .all(tenantId) as Array<{ purchase_number: string }>
+  ).map((row) => row.purchase_number);
 }
 
 export function findPurchaseRowById(id: string): PurchaseRow | undefined {

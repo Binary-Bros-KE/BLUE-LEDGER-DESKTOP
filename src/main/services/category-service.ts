@@ -84,6 +84,17 @@ export function setCategoryStatus(id: string, status: CategoryStatus): Category 
 
 export function deleteCategory(id: string): { id: string } {
   requirePermission("categories", "delete");
+  const existing = categoryRepository.findCategoryRowById(id);
+  if (!existing) {
+    throw new Error("Category not found");
+  }
+  // Cloud sync has no delete propagation (see project notes) — a category already synced would
+  // leave a stale copy on the cloud/other devices forever if hard-deleted here. Deactivating is
+  // already the normal way to retire a category without losing the historical link from products/
+  // sales that reference it, so this doesn't lose any real capability.
+  if (existing.sync_status !== "pending") {
+    throw new Error("This category has already synced to the cloud — set it to Inactive instead of deleting it.");
+  }
   const childCount = categoryRepository.countChildCategoryRows(id);
   if (childCount > 0) {
     throw new Error("Delete or move its subcategories before deleting this category");
