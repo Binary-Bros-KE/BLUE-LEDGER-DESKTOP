@@ -1035,6 +1035,7 @@ export function QuotationsRoute(): React.JSX.Element {
               entityId={viewingQuotation.id}
               documentLabel={`Quotation ${viewingQuotation.quotationNumber}`}
               customerId={viewingQuotation.customerId}
+              hasDeliveryNote={viewingQuotation.delivery !== null}
             />
 
             {canEdit && viewingQuotation.status === "draft" && (

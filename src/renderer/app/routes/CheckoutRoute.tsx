@@ -1068,6 +1068,8 @@ export function CheckoutRoute(): React.JSX.Element {
             locationId={completedSale.locationId}
             sourceDocumentLabel="Receipt"
             sourceDocumentNumber={completedSale.receiptNumber}
+            parentEntity="sale"
+            parentEntityId={completedSale.id}
             onDeliveredChange={(next) =>
               setCompletedSale((prev) => (prev ? { ...prev, delivery: next } : prev))
             }

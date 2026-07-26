@@ -109,6 +109,7 @@ export function ReceiptsRoute(): React.JSX.Element {
     delivery: SaleDelivery;
     sourceNumber: string | null;
     locationId: string;
+    saleId: string;
   } | null>(null);
   const [deliveryLoading, setDeliveryLoading] = useState(false);
 
@@ -307,7 +308,7 @@ export function ReceiptsRoute(): React.JSX.Element {
     setActionError(null);
     try {
       const delivery = await window.blueLedger.deliveryNote.getForSale(sale.id);
-      if (delivery) setViewingDelivery({ delivery, sourceNumber: sale.receiptNumber, locationId: sale.locationId });
+      if (delivery) setViewingDelivery({ delivery, sourceNumber: sale.receiptNumber, locationId: sale.locationId, saleId: sale.id });
     } catch (err) {
       setActionError(getErrorMessage(err, "Failed to load delivery note"));
     } finally {
@@ -752,6 +753,8 @@ export function ReceiptsRoute(): React.JSX.Element {
             locationId={viewingDelivery.locationId}
             sourceDocumentLabel="Receipt"
             sourceDocumentNumber={viewingDelivery.sourceNumber}
+            parentEntity="sale"
+            parentEntityId={viewingDelivery.saleId}
             onDeliveredChange={(next) => setViewingDelivery((prev) => (prev ? { ...prev, delivery: next } : prev))}
           />
         ) : null}

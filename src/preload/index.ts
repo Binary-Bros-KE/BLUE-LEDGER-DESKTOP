@@ -228,7 +228,11 @@ const api: BlueLedgerApi = {
     printDeliveryNote: (deliveryNoteId) => invoke("printer:print-delivery-note", deliveryNoteId),
     printDeliveryNoteThermal: (deliveryNoteId) => invoke("printer:print-delivery-note-thermal", deliveryNoteId),
     generateDeliveryNotePdf: (deliveryNoteId) => invoke("printer:generate-delivery-note-pdf", deliveryNoteId),
-    shareDeliveryNote: (deliveryNoteId) => invoke("printer:share-delivery-note", deliveryNoteId)
+    generateStatementPdf: (customerId) => invoke("printer:generate-statement-pdf", customerId),
+    printStatementDocument: (customerId) => invoke("printer:print-statement-document", customerId)
+  },
+  statement: {
+    getForCustomer: (customerId) => invoke("statement:get-for-customer", customerId)
   },
   deliveryNote: {
     get: (id) => invoke("delivery-note:get", id),
@@ -277,7 +281,9 @@ const api: BlueLedgerApi = {
     commit: (request) => invoke("import:commit", request)
   },
   share: {
-    createLink: (entity, entityId) => invoke("share:create-link", entity, entityId)
+    createLink: (entity, entityId, includePreview) => invoke("share:create-link", entity, entityId, includePreview),
+    createDeliveryLink: (entity, entityId, includePreview) =>
+      invoke("share:create-delivery-link", entity, entityId, includePreview)
   },
   theme: {
     save: (theme) => invoke("theme:save", theme)

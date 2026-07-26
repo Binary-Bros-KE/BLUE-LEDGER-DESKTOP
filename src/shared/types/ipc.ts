@@ -62,6 +62,7 @@ import type {
   ImportPreviewResult
 } from "./import";
 import type { ShareDocumentEntity } from "./share";
+import type { CustomerStatementViewModel } from "./statement";
 
 export type IpcInvokeMap = {
   "app:get-context": {
@@ -700,6 +701,14 @@ export type IpcInvokeMap = {
     args: [string];
     result: PrinterActionResult;
   };
+  "printer:generate-statement-pdf": {
+    args: [string];
+    result: string | null;
+  };
+  "printer:print-statement-document": {
+    args: [string];
+    result: PrinterActionResult;
+  };
   "printer:generate-quotation-pdf": {
     args: [string];
     result: string | null;
@@ -728,10 +737,6 @@ export type IpcInvokeMap = {
     args: [string];
     result: string | null;
   };
-  "printer:share-delivery-note": {
-    args: [string];
-    result: PrinterActionResult;
-  };
   "delivery-note:get": {
     args: [string];
     result: SaleDelivery;
@@ -743,6 +748,10 @@ export type IpcInvokeMap = {
   "delivery-note:get-for-quotation": {
     args: [string];
     result: SaleDelivery | null;
+  };
+  "statement:get-for-customer": {
+    args: [string];
+    result: CustomerStatementViewModel;
   };
   "delivery-note:set-delivered": {
     args: [string, boolean];
@@ -861,8 +870,12 @@ export type IpcInvokeMap = {
     result: ImportCommitResult;
   };
   "share:create-link": {
-    args: [ShareDocumentEntity, string];
-    result: string;
+    args: [ShareDocumentEntity, string, boolean];
+    result: { url: string; message: string };
+  };
+  "share:create-delivery-link": {
+    args: [ShareDocumentEntity, string, boolean];
+    result: { url: string; message: string };
   };
   "theme:save": {
     args: [BrandTheme];
@@ -1292,9 +1305,13 @@ export type BlueLedgerApi = {
     generateDeliveryNotePdf: (
       deliveryNoteId: string
     ) => Promise<IpcInvokeMap["printer:generate-delivery-note-pdf"]["result"]>;
-    shareDeliveryNote: (
-      deliveryNoteId: string
-    ) => Promise<IpcInvokeMap["printer:share-delivery-note"]["result"]>;
+    generateStatementPdf: (customerId: string) => Promise<IpcInvokeMap["printer:generate-statement-pdf"]["result"]>;
+    printStatementDocument: (
+      customerId: string
+    ) => Promise<IpcInvokeMap["printer:print-statement-document"]["result"]>;
+  };
+  statement: {
+    getForCustomer: (customerId: string) => Promise<IpcInvokeMap["statement:get-for-customer"]["result"]>;
   };
   deliveryNote: {
     get: (id: string) => Promise<IpcInvokeMap["delivery-note:get"]["result"]>;
@@ -1365,8 +1382,14 @@ export type BlueLedgerApi = {
   share: {
     createLink: (
       entity: ShareDocumentEntity,
-      entityId: string
+      entityId: string,
+      includePreview: boolean
     ) => Promise<IpcInvokeMap["share:create-link"]["result"]>;
+    createDeliveryLink: (
+      entity: ShareDocumentEntity,
+      entityId: string,
+      includePreview: boolean
+    ) => Promise<IpcInvokeMap["share:create-delivery-link"]["result"]>;
   };
   theme: {
     save: (theme: BrandTheme) => Promise<BrandTheme>;

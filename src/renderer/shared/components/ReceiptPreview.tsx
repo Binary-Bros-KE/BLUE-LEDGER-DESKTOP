@@ -232,6 +232,7 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
         entityId={sale.id}
         documentLabel={`Receipt ${vm.receiptNumber ?? ""}`.trim()}
         customerId={sale.customerId}
+        hasDeliveryNote={sale.delivery !== null}
       />
     </div>
   );

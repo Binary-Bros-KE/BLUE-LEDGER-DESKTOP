@@ -6,6 +6,7 @@ import {
   Copy,
   Download,
   Eye,
+  FileBarChart,
   FileText,
   Loader2,
   Package,
@@ -29,6 +30,7 @@ import {
 import { Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { ShareModal } from "@renderer/shared/components/ShareModal";
+import { StatementPreview } from "@renderer/shared/components/StatementPreview";
 import { StatTile } from "@renderer/shared/components/StatTile";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { computeLinePricing } from "@renderer/shared/lib/cart-pricing";
@@ -57,6 +59,7 @@ import {
   type SaleDelivery,
   type TransactionType
 } from "@shared/types/sale";
+import type { CustomerStatementViewModel } from "@shared/types/statement";
 
 type FilterTab = "all" | "outstanding" | "partially_paid" | "overdue" | "paid" | "cancelled" | "recent";
 
@@ -177,8 +180,14 @@ export function InvoicesRoute(): React.JSX.Element {
     delivery: SaleDelivery;
     sourceNumber: string | null;
     locationId: string;
+    saleId: string;
   } | null>(null);
   const [deliveryLoading, setDeliveryLoading] = useState(false);
+
+  const [statementPickerOpen, setStatementPickerOpen] = useState(false);
+  const [statementSearch, setStatementSearch] = useState("");
+  const [statementVm, setStatementVm] = useState<CustomerStatementViewModel | null>(null);
+  const [statementLoading, setStatementLoading] = useState(false);
 
   const [recordPaymentOpen, setRecordPaymentOpen] = useState(false);
   const [paymentMethodId, setPaymentMethodId] = useState("");
@@ -370,7 +379,7 @@ export function InvoicesRoute(): React.JSX.Element {
     setActionError(null);
     try {
       const delivery = await window.blueLedger.deliveryNote.getForSale(invoice.id);
-      if (delivery) setViewingDelivery({ delivery, sourceNumber: invoice.invoiceNumber, locationId: invoice.locationId });
+      if (delivery) setViewingDelivery({ delivery, sourceNumber: invoice.invoiceNumber, locationId: invoice.locationId, saleId: invoice.id });
     } catch (err) {
       setActionError(getErrorMessage(err, "Failed to load delivery note"));
     } finally {
@@ -381,6 +390,20 @@ export function InvoicesRoute(): React.JSX.Element {
   async function refreshViewing(saleId: string): Promise<void> {
     const sale = await window.blueLedger.sale.get(saleId);
     setViewingSale(sale);
+  }
+
+  async function openStatement(customerId: string): Promise<void> {
+    setStatementPickerOpen(false);
+    setStatementLoading(true);
+    setActionError(null);
+    try {
+      const vm = await window.blueLedger.statement.getForCustomer(customerId);
+      setStatementVm(vm);
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to generate statement"));
+    } finally {
+      setStatementLoading(false);
+    }
   }
 
   function openRecordPayment(): void {
@@ -514,6 +537,15 @@ export function InvoicesRoute(): React.JSX.Element {
       .filter((customer) => `${customer.name} ${customer.phone}`.toLowerCase().includes(term))
       .slice(0, 20);
   }, [customers, customerSearch]);
+
+  const filteredStatementCustomers = useMemo(() => {
+    const active = customers.filter((customer) => customer.status === "active");
+    const term = statementSearch.trim().toLowerCase();
+    if (!term) return active.slice(0, 20);
+    return active
+      .filter((customer) => `${customer.name} ${customer.phone}`.toLowerCase().includes(term))
+      .slice(0, 20);
+  }, [customers, statementSearch]);
 
   const selectedCreateCustomer = customers.find((customer) => customer.id === createCustomerId) ?? null;
 
@@ -712,6 +744,17 @@ export function InvoicesRoute(): React.JSX.Element {
           </div>
           <div className="flex items-center gap-2">
             {canExport && exportRequest && <ExportMenu request={exportRequest} />}
+            <Button
+              type="button"
+              onClick={() => {
+                setStatementSearch("");
+                setStatementPickerOpen(true);
+              }}
+              className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+            >
+              <FileBarChart className="mr-1.5 size-4" aria-hidden="true" />
+              Statement
+            </Button>
             {canCreate && (
               <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
                 <Plus className="mr-1.5 size-4" aria-hidden="true" />
@@ -1156,6 +1199,7 @@ export function InvoicesRoute(): React.JSX.Element {
               entityId={viewingSale.id}
               documentLabel={`Invoice ${viewingSale.invoiceNumber ?? ""}`.trim()}
               customerId={viewingSale.customerId}
+              hasDeliveryNote={viewingSale.delivery !== null}
             />
 
             {canCreate && (
@@ -1205,8 +1249,68 @@ export function InvoicesRoute(): React.JSX.Element {
             locationId={viewingDelivery.locationId}
             sourceDocumentLabel="Invoice"
             sourceDocumentNumber={viewingDelivery.sourceNumber}
+            parentEntity="sale"
+            parentEntityId={viewingDelivery.saleId}
             onDeliveredChange={(next) => setViewingDelivery((prev) => (prev ? { ...prev, delivery: next } : prev))}
           />
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={statementPickerOpen}
+        onClose={() => setStatementPickerOpen(false)}
+        title="Generate Statement"
+        description="Search for a customer to see every invoice they haven't fully paid off yet."
+        widthClassName="max-w-md"
+      >
+        <div className="relative">
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted"
+            aria-hidden="true"
+          />
+          <input
+            autoFocus
+            type="text"
+            value={statementSearch}
+            onChange={(event) => setStatementSearch(event.target.value)}
+            placeholder="Search customers..."
+            className="h-10 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+          />
+        </div>
+        <div className="mt-3 max-h-80 space-y-1.5 overflow-y-auto">
+          {filteredStatementCustomers.length === 0 ? (
+            <p className="px-1 py-4 text-center text-xs font-semibold text-muted">No customers found</p>
+          ) : (
+            filteredStatementCustomers.map((customer) => (
+              <button
+                key={customer.id}
+                type="button"
+                onClick={() => void openStatement(customer.id)}
+                className="flex w-full items-center justify-between rounded-lg border border-line px-3.5 py-2.5 text-left transition hover:bg-soft cursor-pointer"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-extrabold text-ink">{customer.name}</p>
+                  <p className="text-[11px] font-semibold text-muted">{customer.phone}</p>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      </Modal>
+
+      <Modal
+        open={statementVm !== null || statementLoading}
+        onClose={() => setStatementVm(null)}
+        title={statementVm ? `Statement — ${statementVm.customerName}` : "Statement"}
+        description="Print, download, or share this customer's outstanding balance."
+        widthClassName="max-w-lg"
+      >
+        {statementLoading ? (
+          <div className="flex min-h-[160px] items-center justify-center text-muted">
+            <Loader2 className="size-6 animate-spin" aria-hidden="true" />
+          </div>
+        ) : statementVm ? (
+          <StatementPreview vm={statementVm} />
         ) : null}
       </Modal>
 

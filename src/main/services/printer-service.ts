@@ -16,6 +16,7 @@ import * as tenantRepository from "@main/database/repositories/tenant-repository
 import { requirePermission } from "@main/services/auth-service";
 import { readManagedBusinessLogoPreview, readManagedLocationLogoPreview } from "@main/services/image-service";
 import { getSalary } from "@main/services/salary-service";
+import { getCustomerStatement } from "@main/services/statement-service";
 import { PRINTER_SETTINGS_STORAGE_KEY } from "@shared/constants/app";
 import { buildDeliveryNoteViewModel, type DeliveryNoteViewModel } from "@shared/lib/delivery-note";
 import { buildReceiptViewModel, formatReceiptCents, type ReceiptViewModel } from "@shared/lib/receipt";
@@ -36,6 +37,7 @@ import {
   type SaleServiceCharge
 } from "@shared/types/sale";
 import type { Salary } from "@shared/types/salary";
+import type { CustomerStatementViewModel } from "@shared/types/statement";
 
 const { app, BrowserWindow, dialog, shell } = electron;
 
@@ -222,7 +224,7 @@ async function printHtmlViaSystemPrinter(html: string, fileLabel: string): Promi
 }
 
 async function printReceiptToSystemPrinter(vm: ReceiptViewModel, deviceName: string): Promise<void> {
-  const html = buildReceiptHtml(vm, { compact: true });
+  const html = buildReceiptHtml(vm);
   // Matches the Aclas driver's own reported page size (80(72.1)x297mm) — without an explicit narrow
   // pageSize, printToPDF defaults to a full Letter page, which the thermal driver can't reconcile
   // with an 80mm roll and simply prints blank.
@@ -306,12 +308,13 @@ function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-/** `compact` renders for an actual 80mm thermal roll (full-bleed width, tight padding, smaller type)
- * — used only when printing straight to a system/USB printer. The default, roomier layout is for the
- * Download PDF, which renders onto a normal Letter/A4 page and is meant to be viewed or emailed. */
-function buildReceiptHtml(vm: ReceiptViewModel, options?: { compact?: boolean }): string {
+/** Renders for an actual 80mm thermal roll (full-bleed width, tight padding, bold text — thermal
+ * printheads burn regular-weight anti-aliased text too faintly to register reliably) — used ONLY
+ * when printing straight to a system/USB thermal printer. The Download PDF / share-link version is a
+ * completely different, full letterhead-style document (see buildReceiptLetterheadHtml below),
+ * matching the rest of the document family instead of looking like a till receipt. */
+function buildReceiptHtml(vm: ReceiptViewModel): string {
   const money = (cents: number | null): string => `${vm.currency} ${formatReceiptCents(cents)}`;
-  const compact = options?.compact ?? false;
 
   const itemRows = [...vm.items, ...vm.extraLines]
     .map(
@@ -323,39 +326,23 @@ function buildReceiptHtml(vm: ReceiptViewModel, options?: { compact?: boolean })
     )
     .join("");
 
-  const bodyPadding = compact ? "4px 8px" : "32px";
-  const receiptWidth = compact ? "100%" : "360px";
-  const baseFontSize = compact ? "12px" : "12px";
-  const headingSize = compact ? "14px" : "16px";
-  const mutedFontSize = compact ? "10.5px" : "11px";
-  const grandFontSize = compact ? "13px" : "14px";
-  // Thermal printheads burn regular-weight, anti-aliased PDF text very faintly — strokes need to be
-  // bold and pure black to register reliably, unlike on-screen/A4-PDF rendering where gray + regular
-  // weight read fine. The roomier non-compact layout (Download PDF) is unaffected.
-  const bodyWeight = compact ? "700" : "400";
-  const mutedColor = compact ? "#1c1710" : "#666";
-  // Courier New's serifs and fine curves (especially on digits) don't rasterize cleanly at 203dpi —
-  // they break apart into dot-like fragments. A plain sans-serif has simpler, more uniform strokes
-  // that reproduce far more cleanly on a thermal head, matching how the driver's own Test Page looks.
-  const fontFamily = compact ? "Arial, 'Segoe UI', Helvetica, sans-serif" : "'Courier New', monospace";
-
   return `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8" />
 <style>
   * { box-sizing: border-box; }
-  body { font-family: ${fontFamily}; color: #1c1710; margin: 0; padding: ${bodyPadding}; font-size: ${baseFontSize}; font-weight: ${bodyWeight}; }
-  .receipt { max-width: ${receiptWidth}; margin: 0 auto; }
-  h1 { font-size: ${headingSize}; text-align: center; margin: 0 0 4px; }
+  body { font-family: Arial, 'Segoe UI', Helvetica, sans-serif; color: #1c1710; margin: 0; padding: 4px 8px; font-size: 12px; font-weight: 700; }
+  .receipt { max-width: 100%; margin: 0 auto; }
+  h1 { font-size: 14px; text-align: center; margin: 0 0 4px; }
   .center { text-align: center; }
-  .muted { color: ${mutedColor}; font-size: ${mutedFontSize}; }
+  .muted { color: #1c1710; font-size: 10.5px; }
   hr { border: none; border-top: 1px dashed #999; margin: 10px 0; }
-  table { width: 100%; border-collapse: collapse; font-size: ${baseFontSize}; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
   td { padding: 4px 0; vertical-align: top; }
   .right { text-align: right; white-space: nowrap; }
   .totals td { padding: 2px 0; }
-  .grand { font-weight: bold; font-size: ${grandFontSize}; }
+  .grand { font-weight: bold; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -394,6 +381,123 @@ function buildReceiptHtml(vm: ReceiptViewModel, options?: { compact?: boolean })
 </html>`;
 }
 
+/** Letterhead-style receipt for the Download PDF / share-link path — same visual family as the
+ * invoice/quotation/statement documents (buildInvoiceHtml etc.), not the narrow thermal-roll look
+ * above. Deliberately a simpler 5-column item table (no per-item discount/tax/SKU) — ReceiptViewModel
+ * itself never carries that detail (see shared/lib/receipt.ts), so this shows only what's really
+ * there rather than fabricating columns an invoice happens to have. */
+function buildReceiptLetterheadHtml(vm: ReceiptViewModel, logo: DocumentLogo): string {
+  const money = (cents: number | null): string => (cents === null ? "-" : `${vm.currency} ${formatReceiptCents(cents)}`);
+
+  const itemRows = [...vm.items, ...vm.extraLines]
+    .map(
+      (item, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${escapeHtml(item.name)}</td>
+        <td class="center">${item.quantity}</td>
+        <td class="right">${money(item.unitPriceCents)}</td>
+        <td class="right">${money(item.lineTotalCents)}</td>
+      </tr>`
+    )
+    .join("");
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #1c1710; margin: 0; padding: 48px; font-size: 13px; }
+  .sheet { max-width: 720px; margin: 0 auto; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #061e64; padding-bottom: 16px; }
+  .logo { display: block; height: auto; max-height: 64px; width: auto; max-width: 220px; object-fit: contain; margin-bottom: 8px; }
+  .business-name { font-size: 20px; font-weight: bold; color: #061e64; margin: 0; }
+  .muted { color: #666; font-size: 11px; }
+  .invoice-title { font-size: 26px; font-weight: bold; text-align: right; color: #061e64; margin: 0; letter-spacing: 1px; }
+  .meta { display: flex; justify-content: space-between; margin-top: 20px; gap: 24px; }
+  .meta-block p { margin: 2px 0; }
+  .meta-block .label { font-size: 10px; text-transform: uppercase; color: #83795f; font-weight: bold; }
+  table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+  th { text-align: left; font-size: 10px; text-transform: uppercase; color: #83795f; border-bottom: 2px solid #ddd5c2; padding: 6px 4px; }
+  td { padding: 8px 4px; border-bottom: 1px solid #eee; vertical-align: top; }
+  .center { text-align: center; }
+  .right { text-align: right; white-space: nowrap; }
+  .totals { width: 260px; margin-left: auto; margin-top: 16px; }
+  .totals td { border-bottom: none; padding: 3px 4px; }
+  .totals .grand td { font-size: 15px; font-weight: bold; border-top: 2px solid #061e64; padding-top: 8px; }
+  .payment { margin-top: 20px; }
+  .payment p { margin: 2px 0; }
+  .footer { margin-top: 32px; text-align: center; color: #83795f; font-size: 11px; }
+</style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="header">
+      <div>
+        ${logo.logoDataUrl ? `<img src="${logo.logoDataUrl}" class="logo" alt="" />` : ""}
+        <p class="business-name">${escapeHtml(vm.businessName)}</p>
+        ${vm.physicalAddress ? `<p class="muted">${escapeHtml(vm.physicalAddress)}</p>` : ""}
+        ${vm.primaryPhone ? `<p class="muted">${escapeHtml(vm.primaryPhone)}</p>` : ""}
+        ${vm.receiptHeader ? `<p class="muted">${escapeHtml(vm.receiptHeader)}</p>` : ""}
+      </div>
+      <div>
+        <p class="invoice-title">RECEIPT</p>
+        <p class="muted" style="text-align:right;">${escapeHtml(vm.receiptNumber ?? "-")}</p>
+      </div>
+    </div>
+
+    <div class="meta">
+      <div class="meta-block">
+        <p class="label">Sold To</p>
+        <p><strong>${escapeHtml(vm.customerName ?? "Walk-in Customer")}</strong></p>
+      </div>
+      <div class="meta-block">
+        <p class="label">Date</p>
+        <p>${escapeHtml(vm.dateLabel)}</p>
+      </div>
+      <div class="meta-block">
+        <p class="label">Storefront</p>
+        <p>${escapeHtml(vm.branchName)}</p>
+        <p class="label" style="margin-top:10px;">Served By</p>
+        <p>${escapeHtml(vm.cashierName)}</p>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Product</th>
+          <th class="center">Qty</th>
+          <th class="right">Unit Price</th>
+          <th class="right">Line Total</th>
+        </tr>
+      </thead>
+      <tbody>${itemRows}</tbody>
+    </table>
+
+    <table class="totals">
+      <tr><td>Subtotal</td><td class="right">${money(vm.subtotalCents)}</td></tr>
+      ${vm.discountAmountCents > 0 ? `<tr><td>Discount</td><td class="right">-${money(vm.discountAmountCents)}</td></tr>` : ""}
+      <tr><td>Tax</td><td class="right">${money(vm.taxAmountCents)}</td></tr>
+      <tr class="grand"><td>Total</td><td class="right">${money(vm.grandTotalCents)}</td></tr>
+    </table>
+
+    <div class="payment">
+      <p class="label" style="font-size:10px;text-transform:uppercase;color:#83795f;font-weight:bold;">Payment</p>
+      <p>${escapeHtml(vm.paymentMethodName ?? "-")}</p>
+      ${vm.paymentReference ? `<p>Ref: ${escapeHtml(vm.paymentReference)}</p>` : ""}
+      ${vm.amountReceivedCents !== null ? `<p>Received: ${money(vm.amountReceivedCents)}</p>` : ""}
+      ${vm.changeGivenCents !== null && vm.changeGivenCents > 0 ? `<p>Change: ${money(vm.changeGivenCents)}</p>` : ""}
+    </div>
+
+    <div class="footer">${escapeHtml(vm.receiptFooter ?? "Thank you for your business!")}</div>
+  </div>
+</body>
+</html>`;
+}
+
 async function renderHtmlToPdfBuffer(
   html: string,
   options?: { landscape?: boolean; pageSize?: Electron.PrintToPDFOptions["pageSize"]; margins?: Electron.Margins }
@@ -417,7 +521,9 @@ export async function generateReceiptPdf(saleId: string): Promise<string | null>
   requirePermission("sales", "view");
   const { sale, business } = loadReceiptData(saleId);
   const viewModel = buildReceiptViewModel(sale, business);
-  const html = buildReceiptHtml(viewModel);
+  const tenantRow = tenantRepository.findTenantRow();
+  const logo = tenantRow ? await resolveDocumentLogo(sale.locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
+  const html = buildReceiptLetterheadHtml(viewModel, logo);
   const buffer = await renderHtmlToPdfBuffer(html);
 
   const result = await dialog.showSaveDialog({
@@ -1179,10 +1285,9 @@ function deliveryNoteField(label: string, value: string | null): string {
 }
 
 /**
- * A small, labeled sticker meant to be cut out along the dashed border and stuck onto a physical
- * package — NOT a full-page document. Centered on an ordinary A4 sheet so it prints on any printer;
- * the dashed border is the cut line. Deliberately excludes every fee/cost figure (the view-model
- * itself has no such fields).
+ * A labeled, dashed-border card centered on an ordinary A4 sheet. Sized to fill most of the page
+ * (180mm of ~210mm width) — an earlier 100mm version left the sheet looking almost entirely blank.
+ * Deliberately excludes every fee/cost figure (the view-model itself has no such fields).
  */
 function buildDeliveryNoteHtml(vm: DeliveryNoteViewModel, logo: DocumentLogo): string {
   const townCountry = [vm.town, vm.country].filter(Boolean).join(", ");
@@ -1200,25 +1305,25 @@ function buildDeliveryNoteHtml(vm: DeliveryNoteViewModel, logo: DocumentLogo): s
     display: flex; align-items: center; justify-content: center; min-height: 100vh;
   }
   .card {
-    width: 100mm;
-    border: 2px dashed #83795f;
-    border-radius: 6px;
-    padding: 14px 18px 12px;
+    width: 180mm;
+    border: 3px dashed #83795f;
+    border-radius: 10px;
+    padding: 28px 36px 24px;
   }
-  .header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; border-bottom: 2px solid #061e64; padding-bottom: 8px; }
-  .logo { display: block; height: auto; max-height: 34px; width: auto; max-width: 110px; object-fit: contain; margin-bottom: 3px; }
-  .business-name { font-size: 12px; font-weight: bold; color: #061e64; margin: 0; }
-  .muted { color: #83795f; font-size: 9px; margin: 1px 0 0; }
-  .doc-title { font-size: 13px; font-weight: bold; text-align: right; color: #061e64; margin: 0; letter-spacing: 1px; }
-  .doc-number { font-size: 10px; font-weight: bold; text-align: right; color: #83795f; margin-top: 2px; }
-  .badge { display: inline-block; margin-top: 4px; padding: 2px 8px; border-radius: 999px; font-size: 8px; font-weight: bold; text-transform: uppercase; background: #1f9d55; color: #fff; }
-  .section-label { margin: 10px 0 4px; font-size: 9px; text-transform: uppercase; letter-spacing: 1px; font-weight: bold; color: #061e64; }
-  .field { display: flex; gap: 8px; padding: 2.5px 0; border-bottom: 1px dotted #ddd5c2; }
-  .field-label { flex: 0 0 60px; font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.4px; color: #83795f; font-weight: bold; padding-top: 1px; }
-  .field-value { flex: 1; font-size: 12px; font-weight: 700; color: #1c1710; line-height: 1.25; word-break: break-word; }
-  .recipient-name .field-value { font-size: 15px; }
-  .divider { margin-top: 10px; border-top: 1px dashed #ddd5c2; }
-  .footer { margin-top: 8px; display: flex; justify-content: space-between; font-size: 8px; color: #83795f; }
+  .header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; border-bottom: 3px solid #061e64; padding-bottom: 14px; }
+  .logo { display: block; height: auto; max-height: 58px; width: auto; max-width: 190px; object-fit: contain; margin-bottom: 5px; }
+  .business-name { font-size: 20px; font-weight: bold; color: #061e64; margin: 0; }
+  .muted { color: #83795f; font-size: 15px; margin: 3px 0 0; }
+  .doc-title { font-size: 22px; font-weight: bold; text-align: right; color: #061e64; margin: 0; letter-spacing: 1px; }
+  .doc-number { font-size: 16px; font-weight: bold; text-align: right; color: #83795f; margin-top: 4px; }
+  .badge { display: inline-block; margin-top: 8px; padding: 4px 14px; border-radius: 999px; font-size: 13px; font-weight: bold; text-transform: uppercase; background: #1f9d55; color: #fff; }
+  .section-label { margin: 18px 0 8px; font-size: 15px; text-transform: uppercase; letter-spacing: 1px; font-weight: bold; color: #061e64; }
+  .field { display: flex; gap: 14px; padding: 6px 0; border-bottom: 1px dotted #ddd5c2; }
+  .field-label { flex: 0 0 110px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.4px; color: #83795f; font-weight: bold; padding-top: 2px; }
+  .field-value { flex: 1; font-size: 18px; font-weight: 700; color: #1c1710; line-height: 1.3; word-break: break-word; }
+  .recipient-name .field-value { font-size: 24px; }
+  .divider { margin-top: 18px; border-top: 1px dashed #ddd5c2; }
+  .footer { margin-top: 16px; display: flex; justify-content: space-between; font-size: 13px; color: #83795f; }
 </style>
 </head>
 <body>
@@ -1413,27 +1518,153 @@ export async function generateDeliveryNotePdf(deliveryNoteId: string): Promise<s
   return result.filePath;
 }
 
-/** Mirrors shareSalaryPayslip — the one working "share" implementation in the app: render to a temp
- * PDF, then reveal it in the file explorer so the user can manually attach it to WhatsApp, email, etc. */
-export async function shareDeliveryNote(deliveryNoteId: string): Promise<PrinterActionResult> {
+/** Builds a Statement of Account — not tied to one storefront (a customer's invoices can span
+ * several), so unlike every other document template here this one never resolves a per-location
+ * business override; vm's business fields are already the tenant-wide default (see
+ * statement-service.ts). Reuses the same letterhead styling as buildInvoiceHtml for visual family. */
+function buildStatementHtml(vm: CustomerStatementViewModel): string {
+  const money = (cents: number): string => `${vm.currency} ${formatReceiptCents(cents)}`;
+
+  const rows =
+    vm.invoices
+      .map(
+        (invoice, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${escapeHtml(invoice.invoiceNumber ?? "-")}</td>
+        <td>${formatInvoiceDate(invoice.invoiceDate)}</td>
+        <td>${formatInvoiceDate(invoice.dueDate)}</td>
+        <td class="right">${money(invoice.grandTotalCents)}</td>
+        <td class="right">${money(invoice.amountPaidCents)}</td>
+        <td class="right">${money(invoice.balanceDueCents)}</td>
+        <td><span class="badge">${escapeHtml(paymentStatusLabel(invoice.paymentStatus))}</span></td>
+      </tr>`
+      )
+      .join("") ||
+    `<tr><td colspan="8" class="center muted" style="padding:16px 4px;">No outstanding invoices</td></tr>`;
+
+  const availableCreditCents =
+    vm.creditLimitCents !== null ? Math.max(0, vm.creditLimitCents - vm.totalOutstandingCents) : null;
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #1c1710; margin: 0; padding: 48px; font-size: 13px; }
+  .sheet { max-width: 720px; margin: 0 auto; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #061e64; padding-bottom: 16px; }
+  .business-name { font-size: 20px; font-weight: bold; color: #061e64; margin: 0; }
+  .muted { color: #666; font-size: 11px; }
+  .invoice-title { font-size: 26px; font-weight: bold; text-align: right; color: #061e64; margin: 0; letter-spacing: 1px; }
+  .meta { display: flex; justify-content: space-between; margin-top: 20px; gap: 24px; }
+  .meta-block p { margin: 2px 0; }
+  .meta-block .label { font-size: 10px; text-transform: uppercase; color: #83795f; font-weight: bold; }
+  table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+  th { text-align: left; font-size: 10px; text-transform: uppercase; color: #83795f; border-bottom: 2px solid #ddd5c2; padding: 6px 4px; }
+  td { padding: 8px 4px; border-bottom: 1px solid #eee; vertical-align: top; }
+  .center { text-align: center; }
+  .right { text-align: right; white-space: nowrap; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 10px; font-weight: bold; text-transform: uppercase; background: #f1ede1; color: #1c1710; }
+  .totals { width: 260px; margin-left: auto; margin-top: 16px; }
+  .totals td { border-bottom: none; padding: 3px 4px; }
+  .totals .grand td { font-size: 15px; font-weight: bold; border-top: 2px solid #061e64; padding-top: 8px; color: #ad3a29; }
+  .footer { margin-top: 32px; text-align: center; color: #83795f; font-size: 11px; }
+</style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="header">
+      <div>
+        <p class="business-name">${escapeHtml(vm.businessName)}</p>
+        ${vm.physicalAddress ? `<p class="muted">${escapeHtml(vm.physicalAddress)}</p>` : ""}
+        ${vm.primaryPhone ? `<p class="muted">${escapeHtml(vm.primaryPhone)}</p>` : ""}
+      </div>
+      <div>
+        <p class="invoice-title">STATEMENT</p>
+        <p class="muted" style="text-align:right;">${formatInvoiceDate(vm.generatedAt)}</p>
+      </div>
+    </div>
+
+    <div class="meta">
+      <div class="meta-block">
+        <p class="label">Statement For</p>
+        <p><strong>${escapeHtml(vm.customerName)}</strong></p>
+        <p>${escapeHtml(vm.customerPhone)}</p>
+        ${vm.customerEmail ? `<p>${escapeHtml(vm.customerEmail)}</p>` : ""}
+      </div>
+      ${
+        vm.creditLimitCents !== null && availableCreditCents !== null
+          ? `<div class="meta-block">
+        <p class="label">Credit Limit</p>
+        <p>${money(vm.creditLimitCents)}</p>
+        <p class="label" style="margin-top:10px;">Available Credit</p>
+        <p>${money(availableCreditCents)}</p>
+      </div>`
+          : ""
+      }
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Invoice</th>
+          <th>Date</th>
+          <th>Due</th>
+          <th class="right">Total</th>
+          <th class="right">Paid</th>
+          <th class="right">Balance</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+
+    <table class="totals">
+      <tr><td>Total Invoiced</td><td class="right">${money(vm.totalInvoicedCents)}</td></tr>
+      <tr><td>Total Paid</td><td class="right">${money(vm.totalPaidCents)}</td></tr>
+      <tr class="grand"><td>Total Outstanding</td><td class="right">${money(vm.totalOutstandingCents)}</td></tr>
+    </table>
+
+    <div class="footer">Generated by ${escapeHtml(vm.businessName)} — please settle outstanding invoices at your earliest convenience.</div>
+  </div>
+</body>
+</html>`;
+}
+
+/** Renders the statement to PDF and prompts the user for a save location. Returns the saved path, or null if cancelled. */
+export async function generateStatementPdf(customerId: string): Promise<string | null> {
+  requirePermission("sales", "view");
+  const vm = getCustomerStatement(customerId);
+  const html = buildStatementHtml(vm);
+  const buffer = await renderHtmlToPdfBuffer(html);
+
+  const result = await dialog.showSaveDialog({
+    title: "Save Statement",
+    defaultPath: `Statement-${vm.customerName.replace(/[^a-z0-9]+/gi, "-")}.pdf`,
+    filters: [{ name: "PDF", extensions: ["pdf"] }]
+  });
+  if (result.canceled || !result.filePath) {
+    return null;
+  }
+
+  await writeFile(result.filePath, buffer);
+  return result.filePath;
+}
+
+/** Sends the statement straight to Windows' default printer — same A4 system-printer path as
+ * printInvoiceDocument, not the ESC/POS thermal one. */
+export async function printStatementDocument(customerId: string): Promise<PrinterActionResult> {
+  requirePermission("sales", "view");
   try {
-    const { vm, locationId } = loadDeliveryNoteData(deliveryNoteId);
-    const tenantRow = tenantRepository.findTenantRow();
-    const logo = tenantRow ? await resolveDocumentLogo(locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
-    const html = buildDeliveryNoteHtml(vm, logo);
-    const buffer = await renderHtmlToPdfBuffer(html);
-
-    const shareDir = join(app.getPath("temp"), "BlueLedger", "delivery-notes");
-    mkdirSync(shareDir, { recursive: true });
-    const filePath = join(shareDir, `${vm.deliveryNoteNumber}.pdf`);
-    await writeFile(filePath, buffer);
-
-    shell.showItemInFolder(filePath);
-    return { success: true, message: "Delivery note ready — attach it from the file that just opened." };
+    const vm = getCustomerStatement(customerId);
+    const html = buildStatementHtml(vm);
+    await printHtmlViaSystemPrinter(html, "statement");
+    return { success: true, message: "Sent to printer" };
   } catch (err) {
-    return {
-      success: false,
-      message: err instanceof Error ? err.message : "Failed to prepare delivery note for sharing"
-    };
+    return { success: false, message: err instanceof Error ? err.message : "Failed to print statement" };
   }
 }
+

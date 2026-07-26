@@ -221,6 +221,41 @@ export function findAllInvoiceRows(tenantId: string, locationId: string | null):
     .all(tenantId, locationId, locationId) as InvoiceRow[];
 }
 
+/** Every one of this customer's invoices not yet fully paid off or cancelled — the basis of a
+ * Statement of Account. Oldest due date first, matching how a real statement reads. Same row shape
+ * as findAllInvoiceRows (reuses mapInvoiceListRow) — just scoped to one customer and pre-filtered to
+ * outstanding balances instead of covering every invoice tenant-wide. */
+export function findOutstandingInvoiceRowsForCustomer(tenantId: string, customerId: string): InvoiceRow[] {
+  return getDatabase()
+    .prepare(
+      `
+      SELECT
+        s.id,
+        s.invoice_number,
+        s.receipt_number,
+        c.name AS customer_name,
+        s.transaction_type,
+        l.location_name AS location_name,
+        s.invoice_date,
+        s.due_date,
+        s.grand_total_cents,
+        s.amount_paid_cents,
+        s.balance_due_cents,
+        s.payment_status,
+        s.created_at,
+        EXISTS(SELECT 1 FROM delivery_notes dn WHERE dn.sale_id = s.id) AS has_delivery_note,
+        s.location_id
+      FROM sales s
+      JOIN locations l ON l.id = s.location_id
+      LEFT JOIN customers c ON c.id = s.customer_id
+      WHERE s.tenant_id = ? AND s.customer_id = ? AND s.invoice_number IS NOT NULL
+        AND s.payment_status NOT IN ('paid', 'cancelled')
+      ORDER BY COALESCE(s.due_date, s.invoice_date) ASC
+    `
+    )
+    .all(tenantId, customerId) as InvoiceRow[];
+}
+
 export function mapInvoiceListRow(row: InvoiceRow): InvoiceListItem {
   return {
     id: row.id,

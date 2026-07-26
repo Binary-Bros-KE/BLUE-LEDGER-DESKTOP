@@ -2,17 +2,20 @@ import { useEffect, useState } from "react";
 import { CheckCircle2, Download, Loader2, Printer, RotateCcw, RotateCw, Share2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { ShareModal } from "@renderer/shared/components/ShareModal";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { Location } from "@shared/types/location";
 import type { SaleDelivery } from "@shared/types/sale";
+import type { ShareDocumentEntity } from "@shared/types/share";
 import type { TenantContext } from "@shared/types/tenant";
 
 /**
- * Wide/landscape-styled, mirrors ReceiptPreview's structure — but Share actually works here (via the
- * payslip pattern), and it never shows a fee/cost figure since SaleDelivery/DeliveryNoteViewModel
- * carry none. Delivery status is fully independent of the sale's own revenue recognition.
+ * Wide/landscape-styled, mirrors ReceiptPreview's structure. Share opens the real WhatsApp/Email
+ * ShareModal in `deliveryOnly` mode — it never shows a fee/cost figure since
+ * SaleDelivery/DeliveryNoteViewModel carry none. Delivery status is fully independent of the sale's
+ * own revenue recognition.
  */
 function DeliveryField({
   label,
@@ -38,6 +41,8 @@ export function DeliveryNotePreview({
   locationId,
   sourceDocumentLabel,
   sourceDocumentNumber,
+  parentEntity,
+  parentEntityId,
   onDeliveredChange
 }: {
   delivery: SaleDelivery;
@@ -47,6 +52,11 @@ export function DeliveryNotePreview({
   locationId: string;
   sourceDocumentLabel: string;
   sourceDocumentNumber: string | null;
+  /** The sale/quotation this delivery note is attached to — a delivery note has no id of its own to
+   * share by (see share-service.ts), so ShareModal keys off the PARENT's entity/id, tagged
+   * `deliveryOnly` so it shares just this delivery note instead of the parent document. */
+  parentEntity: ShareDocumentEntity;
+  parentEntityId: string;
   onDeliveredChange?: (next: SaleDelivery) => void;
 }): React.JSX.Element {
   const [printing, setPrinting] = useState(false);
@@ -118,21 +128,6 @@ export function DeliveryNotePreview({
       setError(getErrorMessage(err, "Failed to generate PDF"));
     } finally {
       setDownloading(false);
-    }
-  }
-
-  async function handleShare(): Promise<void> {
-    setSharing(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const result = await window.blueLedger.printer.shareDeliveryNote(delivery.id);
-      if (result.success) setNotice(result.message);
-      else setError(result.message);
-    } catch (err) {
-      setError(getErrorMessage(err, "Failed to share delivery note"));
-    } finally {
-      setSharing(false);
     }
   }
 
@@ -259,15 +254,10 @@ export function DeliveryNotePreview({
         </Button>
         <Button
           type="button"
-          onClick={() => void handleShare()}
-          disabled={sharing}
-          className="h-9 border border-line bg-white text-[11px] text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={() => setSharing(true)}
+          className="h-9 border border-line bg-white text-[11px] text-ink shadow-none hover:bg-soft"
         >
-          {sharing ? (
-            <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
-          ) : (
-            <Share2 className="mr-1.5 size-3.5" aria-hidden="true" />
-          )}
+          <Share2 className="mr-1.5 size-3.5" aria-hidden="true" />
           Share
         </Button>
       </div>
@@ -286,6 +276,16 @@ export function DeliveryNotePreview({
         )}
         Print via Receipt Printer
       </Button>
+
+      <ShareModal
+        open={sharing}
+        onClose={() => setSharing(false)}
+        entity={parentEntity}
+        entityId={parentEntityId}
+        documentLabel={`Delivery Note ${delivery.deliveryNoteNumber}`}
+        customerId={null}
+        deliveryOnly
+      />
     </div>
   );
 }

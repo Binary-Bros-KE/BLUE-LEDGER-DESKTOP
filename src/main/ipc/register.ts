@@ -75,14 +75,15 @@ import {
   generateQuotationPdf,
   generateReceiptPdf,
   generateSalaryPdf,
+  generateStatementPdf,
   getPrinterSettings,
   printDeliveryNote,
   printDeliveryNoteViaThermal,
   printInvoiceDocument,
   printQuotationDocument,
   printReceipt,
+  printStatementDocument,
   savePrinterSettings,
-  shareDeliveryNote,
   shareSalaryPayslip,
   testPrinterConnection
 } from "@main/services/printer-service";
@@ -92,6 +93,7 @@ import {
   getDeliveryNoteForSale,
   setDeliveryNoteDelivered
 } from "@main/services/delivery-note-service";
+import { getCustomerStatement } from "@main/services/statement-service";
 import { exportListToCsv, exportListToExcel, exportListToPdf } from "@main/services/export-service";
 import { exportReportToExcel, exportReportToPdf } from "@main/services/report-export-service";
 import {
@@ -230,7 +232,7 @@ import {
   runSyncNow
 } from "@main/services/sync-service";
 import { commitImport, pickImportFile, previewImport } from "@main/services/import-service";
-import { createShareLink } from "@main/services/share-service";
+import { createDeliveryShareLink, createShareLink } from "@main/services/share-service";
 import { saveTheme } from "@main/services/theme-service";
 import {
   getCancelledPurchasesInRange,
@@ -583,9 +585,13 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.printerGenerateDeliveryNotePdf, (_event, deliveryNoteId: string) =>
     generateDeliveryNotePdf(deliveryNoteId)
   );
-  ipcMain.handle(ipcChannels.printerShareDeliveryNote, (_event, deliveryNoteId: string) =>
-    shareDeliveryNote(deliveryNoteId)
+  ipcMain.handle(ipcChannels.printerGenerateStatementPdf, (_event, customerId: string) =>
+    generateStatementPdf(customerId)
   );
+  ipcMain.handle(ipcChannels.printerPrintStatementDocument, (_event, customerId: string) =>
+    printStatementDocument(customerId)
+  );
+  ipcMain.handle(ipcChannels.statementGetForCustomer, (_event, customerId: string) => getCustomerStatement(customerId));
   ipcMain.handle(ipcChannels.deliveryNoteGet, (_event, id: string) => getDeliveryNote(id));
   ipcMain.handle(ipcChannels.deliveryNoteGetForSale, (_event, saleId: string) => getDeliveryNoteForSale(saleId));
   ipcMain.handle(ipcChannels.deliveryNoteGetForQuotation, (_event, quotationId: string) =>
@@ -630,8 +636,15 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.importPickFile, (_event, entityType: ImportEntityType) => pickImportFile(entityType));
   ipcMain.handle(ipcChannels.importPreview, (_event, input: unknown) => previewImport(input));
   ipcMain.handle(ipcChannels.importCommit, (_event, input: unknown) => commitImport(input));
-  ipcMain.handle(ipcChannels.shareCreateLink, (_event, entity: ShareDocumentEntity, entityId: string) =>
-    createShareLink(entity, entityId)
+  ipcMain.handle(
+    ipcChannels.shareCreateLink,
+    (_event, entity: ShareDocumentEntity, entityId: string, includePreview: boolean) =>
+      createShareLink(entity, entityId, includePreview)
+  );
+  ipcMain.handle(
+    ipcChannels.shareCreateDeliveryLink,
+    (_event, entity: ShareDocumentEntity, entityId: string, includePreview: boolean) =>
+      createDeliveryShareLink(entity, entityId, includePreview)
   );
   ipcMain.handle(ipcChannels.themeSave, (_event, theme: unknown) =>
     saveTheme(brandThemeSchema.parse(theme))
