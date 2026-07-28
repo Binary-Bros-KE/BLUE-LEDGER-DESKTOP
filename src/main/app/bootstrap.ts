@@ -27,6 +27,7 @@ import {
 import { ensureTenantContext } from "@main/services/tenant-service";
 import { checkInWithServer } from "@main/services/license-service";
 import { checkDrift, syncCycle } from "@main/services/sync-engine";
+import { checkForUpdates } from "@main/services/update-service";
 import { createMainWindow } from "@main/windows/main-window";
 import { seedDemoData } from "@main/dev/seed-demo-data";
 import { verifyImport } from "@main/dev/verify-import";
@@ -63,6 +64,11 @@ const { app } = electron;
  * alongside syncCycle() needs no extra error isolation. */
 const SYNC_INTERVAL_MS = 20 * 1000;
 const SYNC_DRIFT_CHECK_INTERVAL_MS = 30 * 60 * 1000;
+// A new app version isn't urgent the way license/data sync is — this only needs to notice within a
+// few hours of a release going out, not seconds. Deliberately its own interval, not folded onto
+// SYNC_INTERVAL_MS the way checkInWithServer was — update checks are a genuinely separate concern
+// (a release feed, not billing/data state) and don't need to run every 20 seconds.
+const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
 export async function bootstrap(): Promise<void> {
   await app.whenReady();
@@ -130,11 +136,13 @@ export async function bootstrap(): Promise<void> {
   void checkInWithServer();
   void syncCycle();
   void checkDrift();
+  void checkForUpdates();
   setInterval(() => {
     void checkInWithServer();
     void syncCycle();
   }, SYNC_INTERVAL_MS);
   setInterval(() => void checkDrift(), SYNC_DRIFT_CHECK_INTERVAL_MS);
+  setInterval(() => void checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);
 
   await createMainWindow();
 

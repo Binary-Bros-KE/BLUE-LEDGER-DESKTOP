@@ -9,11 +9,14 @@ import {
   Package,
   PauseCircle,
   Plus,
+  RefreshCw,
   Search,
   ShoppingCart,
+  Smartphone,
   Store,
   Trash2,
-  UserRound
+  UserRound,
+  XCircle
 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { useConfirm } from "@renderer/shared/components/ConfirmModal";
@@ -29,6 +32,7 @@ import { Modal } from "@renderer/shared/components/Modal";
 import { ProductInfoModal } from "@renderer/shared/components/ProductInfoModal";
 import { ReceiptPreview } from "@renderer/shared/components/ReceiptPreview";
 import { StampBadge } from "@renderer/shared/components/StampBadge";
+import { StorefrontPicker } from "@renderer/shared/components/StorefrontPicker";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { computeLinePricing, type LinePricing } from "@renderer/shared/lib/cart-pricing";
 import { cn } from "@renderer/shared/lib/cn";
@@ -38,6 +42,7 @@ import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import type { Customer } from "@shared/types/customer";
 import type { LocationStockLevel } from "@shared/types/inventory";
+import type { MpesaTransactionStatus } from "@shared/types/mpesa";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import type { ProductListItem } from "@shared/types/product";
 import type { Sale } from "@shared/types/sale";
@@ -66,6 +71,23 @@ type OpenSaleDraft = {
   delivery: DeliveryDraft | null;
   createdAt: number;
 };
+
+/** SERVER's own `message` field is a short, stable label (used elsewhere/kept simple on purpose) —
+ * this screen shows the cashier something more actionable instead. Frontend-only by design; SERVER's
+ * wording is untouched. */
+const MPESA_FRIENDLY_MESSAGES: Record<MpesaTransactionStatus, string> = {
+  pending: "Waiting for the customer to enter their M-Pesa PIN...",
+  success: "Payment completed successfully.",
+  insufficient: "The customer has insufficient M-Pesa balance to complete this transaction.",
+  cancelled: "The customer cancelled the payment request on their phone.",
+  wrong_pin: "The customer entered an incorrect M-Pesa PIN. Please try again.",
+  timeout: "Request timed out — please re-initiate the STK push and ask the customer to respond quicker.",
+  failed: "The payment could not be completed. Please try again."
+};
+
+function mpesaFriendlyMessage(status: MpesaTransactionStatus): string {
+  return MPESA_FRIENDLY_MESSAGES[status];
+}
 
 const BARCODE_STYLE = {
   backgroundImage:
@@ -100,13 +122,26 @@ export function CheckoutRoute(): React.JSX.Element {
   const [paymentReference, setPaymentReference] = useState("");
   const [amountReceived, setAmountReceived] = useState("");
 
+  const [mpesaConfigured, setMpesaConfigured] = useState(false);
+  const [mpesaPhone, setMpesaPhone] = useState("");
+  const [mpesaState, setMpesaState] = useState<"idle" | "sending" | "awaiting" | "success" | "error">("idle");
+  const [mpesaMessage, setMpesaMessage] = useState<string | null>(null);
+  const [mpesaCheckoutRequestId, setMpesaCheckoutRequestId] = useState<string | null>(null);
+  const [mpesaManualChecking, setMpesaManualChecking] = useState(false);
+
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
 
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
   const [showDeliveryNote, setShowDeliveryNote] = useState(false);
+  // Only ever consulted when session.branch is null (see StorefrontPicker/requireActiveSession) —
+  // otherwise the backend always uses the assigned branch regardless of this value.
+  const [storefrontId, setStorefrontId] = useState("");
 
   const branchId = session?.branch?.id ?? null;
+  // Same fallback the rest of checkout already uses for a session with no assigned branch — the
+  // cashier's StorefrontPicker choice below stands in for it.
+  const effectiveLocationId = branchId ?? (storefrontId || null);
 
   useEffect(() => {
     void (async () => {
@@ -173,12 +208,34 @@ export function CheckoutRoute(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    if (!branchId) {
+    if (!effectiveLocationId) {
       setStockLevels([]);
       return;
     }
-    void window.blueLedger.inventory.listForLocation(branchId).then(setStockLevels);
-  }, [branchId]);
+    void window.blueLedger.inventory.listForLocation(effectiveLocationId).then(setStockLevels);
+  }, [effectiveLocationId]);
+
+  // Cheap, secret-free check — decides whether the STK push flow even appears for this storefront's
+  // payment section. Re-checked whenever the effective storefront changes (assigned branch, or the
+  // one chosen via StorefrontPicker for a session with none).
+  useEffect(() => {
+    if (!effectiveLocationId) {
+      setMpesaConfigured(false);
+      return;
+    }
+    let cancelled = false;
+    void window.blueLedger.mpesa
+      .isConfigured(effectiveLocationId)
+      .then((result) => {
+        if (!cancelled) setMpesaConfigured(result.configured);
+      })
+      .catch(() => {
+        if (!cancelled) setMpesaConfigured(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveLocationId]);
 
   useEffect(() => {
     setPaymentMethodId("");
@@ -261,6 +318,107 @@ export function CheckoutRoute(): React.JSX.Element {
     [paymentMethods]
   );
   const selectedPaymentMethod = activePaymentMethods.find((method) => method.id === paymentMethodId) ?? null;
+
+  // Resets the STK flow every time the payment method (or active draft) changes, so switching away
+  // from M-Pesa and back never carries over a stale checkoutRequestId from a previous attempt.
+  // Prefills the phone from the selected customer's own record as a convenience, same spirit as
+  // customerLabel defaulting to "Walk-in Customer".
+  useEffect(() => {
+    setMpesaState("idle");
+    setMpesaMessage(null);
+    setMpesaCheckoutRequestId(null);
+    setMpesaManualChecking(false);
+    if (selectedPaymentMethod?.code === "MPESA" && activeDraft?.customerId) {
+      setMpesaPhone(customers.find((customer) => customer.id === activeDraft.customerId)?.phone ?? "");
+    } else {
+      setMpesaPhone("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentMethodId, activeKey]);
+
+  // Passive auto-poll while showing "waiting for customer to enter PIN" — reads ONLY the
+  // transaction's own current status as already written by SERVER's Safaricom callback. Deliberately
+  // NEVER triggers an active Safaricom query itself (that's the separate, explicit "Check Status Now"
+  // action below) — the callback is the source of truth; this just watches for it to land. Runs
+  // indefinitely while awaiting since a passive DB read is cheap and harmless to keep polling.
+  useEffect(() => {
+    if (mpesaState !== "awaiting" || !mpesaCheckoutRequestId) return;
+    const POLL_INTERVAL_MS = 3_000;
+    let cancelled = false;
+    const checkoutRequestId = mpesaCheckoutRequestId;
+    const interval = setInterval(() => {
+      void window.blueLedger.mpesa
+        .getStkStatus(checkoutRequestId)
+        .then((result) => {
+          if (cancelled || result.status === "pending") return;
+          if (result.status === "success") {
+            setMpesaState("success");
+            setMpesaMessage(mpesaFriendlyMessage(result.status));
+            if (result.mpesaReceiptNumber) setPaymentReference(result.mpesaReceiptNumber);
+          } else {
+            setMpesaState("error");
+            setMpesaMessage(mpesaFriendlyMessage(result.status));
+          }
+        })
+        .catch(() => {
+          // A transient network hiccup between this device and SERVER — try again next tick rather
+          // than ending the flow on one failed poll (the customer may still be entering their PIN).
+        });
+    }, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [mpesaState, mpesaCheckoutRequestId]);
+
+  /** The explicit "STK is taking a while" recovery action — actively asks SERVER to re-query
+   * Safaricom directly (throttled server-side), rather than just waiting on the callback. Only ever
+   * called from a deliberate cashier click, never automatically. */
+  async function handleCheckStatusNow(): Promise<void> {
+    if (!mpesaCheckoutRequestId) return;
+    setMpesaManualChecking(true);
+    try {
+      const result = await window.blueLedger.mpesa.checkStkStatus(mpesaCheckoutRequestId);
+      if (result.status === "success") {
+        setMpesaState("success");
+        setMpesaMessage(mpesaFriendlyMessage(result.status));
+        if (result.mpesaReceiptNumber) setPaymentReference(result.mpesaReceiptNumber);
+      } else if (result.status !== "pending") {
+        setMpesaState("error");
+        setMpesaMessage(mpesaFriendlyMessage(result.status));
+      }
+      // Still "pending" — stay in "awaiting", nothing to change; the passive poll keeps watching.
+    } catch (err) {
+      setMpesaMessage(getErrorMessage(err, "Failed to check payment status"));
+    } finally {
+      setMpesaManualChecking(false);
+    }
+  }
+
+  async function handleSendStkPush(): Promise<void> {
+    if (!effectiveLocationId || !activeTotals) return;
+    const phone = mpesaPhone.trim();
+    if (phone.length < 9) {
+      setMpesaState("error");
+      setMpesaMessage("Enter a valid phone number");
+      return;
+    }
+    setMpesaState("sending");
+    setMpesaMessage(null);
+    try {
+      const result = await window.blueLedger.mpesa.sendStkPush({
+        locationId: effectiveLocationId,
+        phone,
+        amountCents: activeTotals.grandTotalCents
+      });
+      setMpesaCheckoutRequestId(result.checkoutRequestId);
+      setMpesaState("awaiting");
+      setMpesaMessage("STK push sent — waiting for the customer to enter their PIN...");
+    } catch (err) {
+      setMpesaState("error");
+      setMpesaMessage(getErrorMessage(err, "Failed to send STK push"));
+    }
+  }
 
   const filteredCustomerResults = useMemo(() => {
     const active = customers.filter((customer) => customer.status === "active");
@@ -455,6 +613,10 @@ export function CheckoutRoute(): React.JSX.Element {
 
   async function handleSuspend(): Promise<void> {
     if (!activeDraft || activeDraft.items.length === 0) return;
+    if (session && !session.branch && !storefrontId) {
+      setActionError("Choose a storefront before holding this sale.");
+      return;
+    }
     setSuspending(true);
     setActionError(null);
     try {
@@ -467,7 +629,8 @@ export function CheckoutRoute(): React.JSX.Element {
           quantity: line.quantity,
           discountAmountCents: toCents(line.discount)
         })),
-        ...buildExtrasPayload(activeDraft)
+        ...buildExtrasPayload(activeDraft),
+        locationId: session && !session.branch ? storefrontId : undefined
       });
       const suspendedKey = activeDraft.key;
       setOpenSales((prev) =>
@@ -489,6 +652,10 @@ export function CheckoutRoute(): React.JSX.Element {
   async function handleComplete(event: React.FormEvent): Promise<void> {
     event.preventDefault();
     if (!activeDraft) return;
+    if (session && !session.branch && !storefrontId) {
+      setActionError("Choose a storefront before completing this sale.");
+      return;
+    }
     setCompleting(true);
     setActionError(null);
     try {
@@ -504,14 +671,15 @@ export function CheckoutRoute(): React.JSX.Element {
         ...buildExtrasPayload(activeDraft),
         paymentMethodId,
         paymentReference,
-        amountReceivedCents: amountReceived.trim() === "" ? null : toCents(amountReceived)
+        amountReceivedCents: amountReceived.trim() === "" ? null : toCents(amountReceived),
+        locationId: session && !session.branch ? storefrontId : undefined
       });
       const completedKey = activeDraft.key;
       setOpenSales((prev) => prev.filter((draft) => draft.key !== completedKey));
       setActiveKey(null);
       setCompletedSale(sale);
       setShowDeliveryNote(false);
-      if (branchId) void window.blueLedger.inventory.listForLocation(branchId).then(setStockLevels);
+      if (effectiveLocationId) void window.blueLedger.inventory.listForLocation(effectiveLocationId).then(setStockLevels);
       showSuccessToast(`Sale completed — ${sale.receiptNumber ?? formatCents(sale.grandTotalCents)}`);
       if (autoPrintOnSale) {
         void window.blueLedger.printer.printReceipt(sale.id).then((result) => {
@@ -530,18 +698,6 @@ export function CheckoutRoute(): React.JSX.Element {
   const amountReceivedCents = amountReceived.trim() === "" ? null : toCents(amountReceived);
   const changeDueCents =
     activeTotals && amountReceivedCents !== null ? amountReceivedCents - activeTotals.grandTotalCents : null;
-
-  if (session && !session.branch) {
-    return (
-      <div className="mt-6 flex min-h-[320px] flex-col items-center justify-center rounded-lg border border-dashed border-warning/40 bg-warning/10 p-10 text-center">
-        <Store className="size-8 text-warning" aria-hidden="true" />
-        <h3 className="mt-4 text-lg font-extrabold">No branch assigned</h3>
-        <p className="mt-1 max-w-sm text-sm font-semibold text-muted">
-          You need a branch assigned to your account before you can make sales. Contact an administrator.
-        </p>
-      </div>
-    );
-  }
 
   return (
     <motion.div
@@ -574,7 +730,7 @@ export function CheckoutRoute(): React.JSX.Element {
             <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-muted">
               <span className="inline-flex items-center gap-1">
                 <Store className="size-3.5 text-primary" aria-hidden="true" />
-                {session?.branch?.locationName ?? "—"}
+                {session?.branch?.locationName ?? "No branch assigned"}
               </span>
               <span className="inline-flex items-center gap-1">
                 <UserRound className="size-3.5 text-primary" aria-hidden="true" />
@@ -583,6 +739,12 @@ export function CheckoutRoute(): React.JSX.Element {
             </p>
           </div>
         </div>
+
+        {session && !session.branch && (
+          <div className="mt-4">
+            <StorefrontPicker value={storefrontId} onChange={setStorefrontId} />
+          </div>
+        )}
 
         {(loadError ?? actionError) && (
           <div className="mt-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
@@ -888,6 +1050,73 @@ export function CheckoutRoute(): React.JSX.Element {
                       ))}
                     </div>
                   </div>
+
+                  {selectedPaymentMethod?.code === "MPESA" && mpesaConfigured && (
+                    <div className="mt-3 rounded-lg border border-line bg-soft/60 p-3">
+                      <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">
+                        M-Pesa STK Push
+                      </p>
+                      {(mpesaState === "idle" || mpesaState === "error") && (
+                        <div className="mt-2 flex items-end gap-2">
+                          <Field
+                            label="Phone Number"
+                            value={mpesaPhone}
+                            onChange={setMpesaPhone}
+                            placeholder="e.g. 0712 345 678"
+                            className="flex-1"
+                          />
+                          <Button
+                            type="button"
+                            onClick={() => void handleSendStkPush()}
+                            disabled={!mpesaPhone.trim() || totals.lines.length === 0}
+                            className="h-10 shrink-0 bg-teal text-xs hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <Smartphone className="mr-1.5 size-3.5" aria-hidden="true" />
+                            Send STK Push
+                          </Button>
+                        </div>
+                      )}
+                      {mpesaState === "sending" && (
+                        <div className="mt-2 flex items-center gap-2 text-sm font-bold text-muted">
+                          <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                          Sending STK push...
+                        </div>
+                      )}
+                      {mpesaState === "awaiting" && (
+                        <div className="mt-2 space-y-2">
+                          <div className="flex items-center gap-2 text-sm font-bold text-teal">
+                            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                            Waiting for customer to enter PIN...
+                          </div>
+                          <Button
+                            type="button"
+                            onClick={() => void handleCheckStatusNow()}
+                            disabled={mpesaManualChecking}
+                            className="h-8 border border-line bg-white px-2.5 text-[11px] text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {mpesaManualChecking ? (
+                              <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+                            ) : (
+                              <RefreshCw className="mr-1.5 size-3.5" aria-hidden="true" />
+                            )}
+                            {mpesaManualChecking ? "Checking..." : "Taking long? Check Status Now"}
+                          </Button>
+                        </div>
+                      )}
+                      {mpesaState === "success" && (
+                        <div className="mt-2 flex items-center gap-2 text-sm font-extrabold text-success">
+                          <CheckCircle2 className="size-4" aria-hidden="true" />
+                          {mpesaMessage ?? "Payment successful"}
+                        </div>
+                      )}
+                      {mpesaState === "error" && mpesaMessage && (
+                        <div className="mt-2 flex items-center gap-2 text-sm font-bold text-danger">
+                          <XCircle className="size-4 flex-none" aria-hidden="true" />
+                          {mpesaMessage}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {selectedPaymentMethod?.requiresReference && (
                     <Field

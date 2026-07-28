@@ -30,6 +30,7 @@ import { Field, SelectField, TextAreaField } from "@renderer/shared/components/f
 import { Modal } from "@renderer/shared/components/Modal";
 import { ShareModal } from "@renderer/shared/components/ShareModal";
 import { StatTile } from "@renderer/shared/components/StatTile";
+import { StorefrontPicker } from "@renderer/shared/components/StorefrontPicker";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { computeLinePricing } from "@renderer/shared/lib/cart-pricing";
 import { cn } from "@renderer/shared/lib/cn";
@@ -117,7 +118,7 @@ function Th({ children, className }: { children: React.ReactNode; className?: st
 
 export function QuotationsRoute(): React.JSX.Element {
   const currency = useAppStore((state) => state.context?.tenant.currency ?? "");
-  const { can } = usePermissions();
+  const { can, session } = usePermissions();
   const canCreate = can("quotations", "create");
   const canEdit = can("quotations", "edit");
   const canDelete = can("quotations", "delete");
@@ -145,6 +146,8 @@ export function QuotationsRoute(): React.JSX.Element {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createCustomerId, setCreateCustomerId] = useState<string | null>(null);
+  // Only ever consulted when session.branch is null (see StorefrontPicker/requireActiveSession).
+  const [createStorefrontId, setCreateStorefrontId] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
   const [createValidUntil, setCreateValidUntil] = useState(addDaysIso(7));
   const [createNotes, setCreateNotes] = useState("");
@@ -520,6 +523,7 @@ export function QuotationsRoute(): React.JSX.Element {
 
   function openCreateModal(): void {
     setCreateCustomerId(null);
+    setCreateStorefrontId("");
     setCustomerSearch("");
     setCreateValidUntil(addDaysIso(7));
     setCreateNotes("");
@@ -573,12 +577,18 @@ export function QuotationsRoute(): React.JSX.Element {
       setCreateSaving(false);
       return;
     }
+    if (session && !session.branch && !createStorefrontId) {
+      setCreateError("Choose a storefront for this quotation");
+      setCreateSaving(false);
+      return;
+    }
 
     try {
       await window.blueLedger.quotation.create({
         customerId: createCustomerId,
         validUntil: createValidUntil,
         notes: createNotes,
+        locationId: session && !session.branch ? createStorefrontId : undefined,
         items: createItems.map((line) => ({
           productId: line.productId,
           quantity: line.quantity,
@@ -1304,6 +1314,12 @@ export function QuotationsRoute(): React.JSX.Element {
           {createError && (
             <div className="mb-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
               {createError}
+            </div>
+          )}
+
+          {session && !session.branch && (
+            <div className="mb-4">
+              <StorefrontPicker value={createStorefrontId} onChange={setCreateStorefrontId} />
             </div>
           )}
 

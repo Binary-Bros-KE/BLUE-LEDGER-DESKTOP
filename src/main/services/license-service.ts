@@ -2,7 +2,7 @@ import * as os from "node:os";
 import electron from "electron";
 import * as tenantRepository from "@main/database/repositories/tenant-repository";
 import { getCurrentTenant } from "@main/services/tenant-service";
-import type { PaymentHistoryResult } from "@shared/types/subscription-payment";
+import type { PaymentHistoryResult, PaymentScheduleResult } from "@shared/types/subscription-payment";
 import type { TenantContext } from "@shared/types/tenant";
 
 const { app } = electron;
@@ -356,6 +356,26 @@ export async function fetchPaymentHistory(): Promise<PaymentHistoryResult | null
       signal: AbortSignal.timeout(8_000)
     });
     return await parseJsonResponse<PaymentHistoryResult>(response);
+  } catch {
+    return null;
+  }
+}
+
+/** Renderer-invokable — the "Jan ✅ Feb ✅ Mar ❌" calendar plus per-period pricing for the "pay in
+ * advance" picker (see PayNowModal.tsx / BusinessProfileRoute.tsx). Same null-on-failure contract
+ * as fetchPaymentHistory above. */
+export async function fetchPaymentSchedule(): Promise<PaymentScheduleResult | null> {
+  const tenantRow = tenantRepository.findTenantRow();
+  if (!tenantRow?.license_key) return null;
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/activation/payment-schedule`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ licenseKey: tenantRow.license_key }),
+      signal: AbortSignal.timeout(8_000)
+    });
+    return await parseJsonResponse<PaymentScheduleResult>(response);
   } catch {
     return null;
   }

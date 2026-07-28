@@ -14,10 +14,21 @@ const api: BlueLedgerApi = {
   app: {
     getContext: () => invoke("app:get-context")
   },
+  update: {
+    getStatus: () => invoke("update:get-status"),
+    checkNow: () => invoke("update:check-now"),
+    installNow: () => invoke("update:install-now")
+  },
   activation: {
     activate: (licenseKey) => invoke("activation:activate", licenseKey),
     heartbeat: () => invoke("activation:heartbeat"),
-    payments: () => invoke("activation:payments")
+    payments: () => invoke("activation:payments"),
+    paymentSchedule: () => invoke("activation:payment-schedule")
+  },
+  billingMpesa: {
+    sendStkPush: (input) => invoke("billing-mpesa:send-stk-push", input),
+    getStkStatus: (checkoutRequestId) => invoke("billing-mpesa:get-stk-status", checkoutRequestId),
+    checkStkStatus: (checkoutRequestId) => invoke("billing-mpesa:check-stk-status", checkoutRequestId)
   },
   auth: {
     login: (input) => invoke("auth:login", input),
@@ -39,6 +50,14 @@ const api: BlueLedgerApi = {
     setStatus: (id, status) => invoke("location:set-status", id, status),
     pickLogo: () => invoke("location:pick-logo"),
     readLogoPreview: (relativePath) => invoke("location:read-logo-preview", relativePath)
+  },
+  mpesa: {
+    getSettings: (locationId) => invoke("mpesa:get-settings", locationId),
+    saveSettings: (locationId, input) => invoke("mpesa:save-settings", locationId, input),
+    isConfigured: (locationId) => invoke("mpesa:is-configured", locationId),
+    sendStkPush: (input) => invoke("mpesa:send-stk-push", input),
+    getStkStatus: (checkoutRequestId) => invoke("mpesa:get-stk-status", checkoutRequestId),
+    checkStkStatus: (checkoutRequestId) => invoke("mpesa:check-stk-status", checkoutRequestId)
   },
   category: {
     list: () => invoke("category:list"),

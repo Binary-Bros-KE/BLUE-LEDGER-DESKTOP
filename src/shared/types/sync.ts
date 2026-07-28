@@ -25,7 +25,8 @@ export type SyncEntity =
   | "quotations"
   | "purchases"
   | "stock_movements"
-  | "stock_requests";
+  | "stock_requests"
+  | "main_store_allocations";
 
 export type SyncQueueItem = {
   id: string;

@@ -9,6 +9,7 @@ import {
   Power,
   PowerOff,
   ShoppingCart,
+  Smartphone,
   Store,
   TruckIcon,
   X
@@ -28,6 +29,7 @@ import {
   type LocationType
 } from "@shared/types/location";
 import { LOGO_RATIO_OPTIONS, type LogoRatio } from "@shared/types/logo";
+import { MpesaSettingsModal } from "./storefronts/MpesaSettingsModal";
 
 type FormState = {
   locationName: string;
@@ -121,6 +123,7 @@ export function StorefrontsRoute(): React.JSX.Element {
   const [locations, setLocations] = useState<Location[] | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [mpesaLocation, setMpesaLocation] = useState<Location | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
   const [logoBusy, setLogoBusy] = useState(false);
@@ -343,6 +346,17 @@ export function StorefrontsRoute(): React.JSX.Element {
                               className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-ink cursor-pointer"
                             >
                               <Pencil className="size-3.5" aria-hidden="true" />
+                            </button>
+                          )}
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={() => setMpesaLocation(location)}
+                              aria-label={`M-Pesa Till settings for ${location.locationName}`}
+                              title="M-Pesa Till settings"
+                              className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-ink cursor-pointer"
+                            >
+                              <Smartphone className="size-3.5" aria-hidden="true" />
                             </button>
                           )}
                           {canEdit && (
@@ -622,6 +636,15 @@ export function StorefrontsRoute(): React.JSX.Element {
           </div>
         </form>
       </Modal>
+
+      {mpesaLocation && (
+        <MpesaSettingsModal
+          open={Boolean(mpesaLocation)}
+          onClose={() => setMpesaLocation(null)}
+          locationId={mpesaLocation.id}
+          locationName={mpesaLocation.locationName}
+        />
+      )}
     </motion.div>
   );
 }

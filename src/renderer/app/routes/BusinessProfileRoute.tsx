@@ -19,6 +19,7 @@ import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { Field, SelectField } from "@renderer/shared/components/form-fields";
 import { PayNowModal } from "@renderer/shared/components/PayNowModal";
 import { StampBadge } from "@renderer/shared/components/StampBadge";
+import { PaymentScheduleCalendar } from "./business-profile/PaymentScheduleCalendar";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
@@ -112,6 +113,7 @@ export function BusinessProfileRoute(): React.JSX.Element {
   } | null>(null);
   const [paymentsLoading, setPaymentsLoading] = useState(true);
   const [payTarget, setPayTarget] = useState<SubscriptionPaymentRecord | null>(null);
+  const [payInAdvanceOpen, setPayInAdvanceOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -583,13 +585,18 @@ export function BusinessProfileRoute(): React.JSX.Element {
                 </div>
               )}
             </div>
+
+            <PaymentScheduleCalendar onPayInAdvance={() => setPayInAdvanceOpen(true)} />
           </>
         )}
       </section>
 
       <PayNowModal
-        open={payTarget !== null}
-        onClose={() => setPayTarget(null)}
+        open={payTarget !== null || payInAdvanceOpen}
+        onClose={() => {
+          setPayTarget(null);
+          setPayInAdvanceOpen(false);
+        }}
         amountLabel={payTarget ? `${payTarget.currency} ${formatCents(payTarget.amountCents)}` : undefined}
       />
     </motion.div>

@@ -117,7 +117,7 @@ export function getQuotation(id: string): Quotation {
 export function createQuotation(input: unknown): Quotation {
   requirePermission("quotations", "create");
   const parsed: QuotationCreateInput = quotationCreateSchema.parse(input);
-  const { tenantId, employeeId, locationId } = requireActiveSession();
+  const { tenantId, employeeId, locationId } = requireActiveSession(parsed.locationId);
 
   assertCustomerExists(tenantId, parsed.customerId);
   const cart = prepareCart(tenantId, parsed.items, {
@@ -365,14 +365,18 @@ function buildConversionCart(
   };
 }
 
+/** No storefront prompt needed even for a no-branch (Super Admin) session — a quotation already
+ * belongs to a fixed storefront, so conversion auto-uses that one instead of asking again. Someone
+ * WITH an assigned branch still can't convert another storefront's quotation (the check below is
+ * unchanged) — this only helps the no-branch case skip a redundant pick. */
 function requireAcceptedQuotationAtActiveBranch(id: string): {
   quotation: Quotation;
   tenantId: string;
   employeeId: string;
   locationId: string;
 } {
-  const { tenantId, employeeId, locationId } = requireActiveSession();
   const quotation = getQuotationDetail(id);
+  const { tenantId, employeeId, locationId } = requireActiveSession(quotation.locationId);
 
   if (quotation.status === "converted") {
     throw new Error("This quotation has already been converted");

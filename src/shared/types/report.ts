@@ -170,12 +170,22 @@ export type SalesTransactionRow = {
 
 export type PaymentTransactionStatus = "complete" | "failed";
 
-/** One actual money-movement event — a completed retail/wholesale sale (paid in full atomically),
- * or a single recorded payment against an invoice (an invoice with 3 payments produces 3 of these,
- * not 1). Deliberately not the same shape as SalesTransactionRow, which is "one row per document"
- * and carries a multi-value payment status — this is "one row per payment," with just two possible
- * outcomes: the money was received and still stands (`complete`), or the underlying sale was later
- * voided/cancelled (`failed`). */
+/** "in" = money received (a sale/invoice payment); "out" = money paid out (a purchase payment,
+ * an expense, or a salary payout). */
+export type PaymentTransactionDirection = "in" | "out";
+
+export type PaymentTransactionSourceType = "sale" | "purchase" | "expense" | "salary";
+
+/** What `partyName` represents, per source — the OTHER side of the transaction from the business
+ * itself: who paid us (Customer), who we paid (Supplier/Employee), or what an expense was for. */
+export type PaymentTransactionPartyLabel = "Customer" | "Supplier" | "Employee" | "For";
+
+/** One actual money-movement event across the whole business, not just sales — a completed retail/
+ * wholesale sale or a single invoice payment (money IN), or a single purchase payment/expense/salary
+ * payout (money OUT). An invoice with 3 payments produces 3 of these, not 1; same for a purchase paid
+ * off across several supplier payments. Two possible outcomes per row: the money moved and still
+ * stands (`complete`), or the underlying document was later voided/cancelled/reversed (`failed`).
+ * Expenses have no such reversal concept in this codebase, so an expense row is always `complete`. */
 export type PaymentTransactionRow = {
   id: string;
   transactionCode: string;
@@ -183,6 +193,14 @@ export type PaymentTransactionRow = {
   locationName: string;
   paymentMethodName: string | null;
   processedByName: string;
+  /** The customer who paid (sale), the supplier/employee who was paid (purchase/salary), or what an
+   * expense was for (description, falling back to its category) — null only when a sale has no
+   * customer on file and isn't a walk-in either (shouldn't normally happen, but the type stays
+   * honest about it). */
+  partyName: string | null;
+  partyLabel: PaymentTransactionPartyLabel;
+  sourceType: PaymentTransactionSourceType;
+  direction: PaymentTransactionDirection;
   amountCents: number;
   status: PaymentTransactionStatus;
 };

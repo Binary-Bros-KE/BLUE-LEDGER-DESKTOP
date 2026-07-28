@@ -27,6 +27,8 @@ import * as stockRequestRepository from "@main/database/repositories/stock-reque
 import * as supplierRepository from "@main/database/repositories/supplier-repository";
 import * as tenantRepository from "@main/database/repositories/tenant-repository";
 import { API_BASE_URL } from "@main/services/license-service";
+import { computeGraceStatus } from "@shared/lib/grace-period";
+import type { SubscriptionType } from "@shared/types/tenant";
 import type {
   ConflictResolution,
   DriftEntry,
@@ -54,6 +56,9 @@ const SYNC_ENTITIES: SyncEntity[] = [
   "products",
   // Depends on products + locations already existing locally on pull (FK) — must come after both.
   "stock_movements",
+  // Depends on products + locations, same as stock_movements — but no longer reconstructed by
+  // replaying it (see this table's own migration comment); syncs directly, own cursor.
+  "main_store_allocations",
   // Depends on locations + employees (storefront_id/requested_by/reviewed_by) + products (item FKs).
   "stock_requests",
   "expense_categories",
@@ -111,7 +116,11 @@ const CONFLICT_AWARE_ENTITIES = new Set<SyncEntity>([
   "quotations",
   "purchases",
   "sale_returns",
-  "stock_requests"
+  "stock_requests",
+  // Unlike stock_movements (append-only, no concurrent-edit scenario), this table genuinely can be
+  // touched by two devices before either syncs (e.g. both reallocate the same bucket offline) — a
+  // real optimistic-lock case, same as any other mutable reference row.
+  "main_store_allocations"
 ]);
 
 /** Exported for sync-service.ts's getSyncSnapshot() — the UI-facing "what's the current sync state"
@@ -158,6 +167,22 @@ export function getCloudIdentity(): { tenantId: string; deviceId: string } | nul
   const workstation = tenantRepository.findPrimaryWorkstationRow(tenantRow.id);
   if (!workstation?.server_id) return null;
   return { tenantId: tenantRow.server_id, deviceId: workstation.server_id };
+}
+
+/** A MONTHLY tenant past grace is already fully hard-locked at the UI layer (App.tsx routes to
+ * LicenseBlockedRoute) — this check is redundant-but-harmless for them (no reason background sync
+ * should keep running behind a locked screen either). For LIFETIME/CUSTOM tenants, who the product
+ * explicitly never blocks from using the POS itself, this is the ONLY place cloud sync actually
+ * stops once their maintenance fee's grace period lapses — see the login banner's own "cloud sync
+ * will pause" wording, which this is what makes literally true rather than aspirational. Same
+ * "offline-safe, driven by this device's own already-cached clock" design as computeGraceStatus
+ * itself was built for — no network round trip needed to decide this, and it must stay that way so
+ * it works the instant the device's local clock crosses the deadline, without waiting on a heartbeat. */
+function isSyncDisabledByGracePeriod(): boolean {
+  const tenantRow = tenantRepository.findTenantRow();
+  if (!tenantRow) return false;
+  const grace = computeGraceStatus(tenantRow.next_due_date, tenantRow.subscription_type as SubscriptionType | null);
+  return grace.state === "expired";
 }
 
 /** Live pre-approval guard for stock requests/sale voids/sale returns (see SERVER's getRowStatus
@@ -360,8 +385,10 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
     };
   },
   // Not conflict-aware — the ledger is append-only, so there's never a concurrent-edit scenario to
-  // detect a lock against. allocationStorefrontId/allocationExplicit let a pulling device correctly
-  // replay the Main Store allocation side-effect (see applyStockMovementPulledRow).
+  // detect a lock against. allocationStorefrontId/allocationExplicit are kept as historical/audit
+  // context (what the original action intended) but no longer REPLAYED into allocation buckets on
+  // pull — main_store_allocations syncs directly now (its own entry below), which is authoritative;
+  // see that table's own migration comment for why ledger-replay could never fully reconstruct it.
   stock_movements: (id) => {
     const row = stockMovementRepository.findStockMovementRowById(id);
     if (!row) return null;
@@ -380,6 +407,20 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       localCreatedAt: row.created_at,
       // Immutable — no separate updated_at column locally; its "last updated" IS its creation time.
       localUpdatedAt: row.created_at
+    };
+  },
+  main_store_allocations: (id) => {
+    const row = mainStoreAllocationRepository.findAllocationRowById(id);
+    if (!row) return null;
+    return {
+      id: row.id,
+      productId: row.product_id,
+      storefrontId: row.storefront_id,
+      quantity: row.quantity,
+      bucketKey: row.bucket_key,
+      localCreatedAt: row.created_at,
+      localUpdatedAt: row.updated_at,
+      baseUpdatedAt: row.synced_updated_at
     };
   },
   // A plain document-with-line-items (like sale_returns), not a ledger — queried directly rather than
@@ -1372,6 +1413,19 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       { local: "status", cloud: "status" }
     ]
   },
+  // Not a boot-seeded default like the naturalKey entities above — reconciles a DIFFERENT collision
+  // (two devices each first-touching the same real bucket before ever syncing with each other). See
+  // this table's own migration comment for the full story.
+  main_store_allocations: {
+    table: "main_store_allocations",
+    naturalKey: { local: "bucket_key", cloud: "bucketKey" },
+    columns: [
+      { local: "product_id", cloud: "productId" },
+      { local: "storefront_id", cloud: "storefrontId", refEntity: "locations" },
+      { local: "quantity", cloud: "quantity" },
+      { local: "bucket_key", cloud: "bucketKey" }
+    ]
+  },
   expenses: {
     table: "expenses",
     columns: [
@@ -1510,8 +1564,15 @@ function resolveRefOrNull(entity: SyncEntity, value: unknown): unknown {
  * referencing a Role id the cloud had aliased away and never actually created, making that employee
  * permanently unresolvable by role from any cloud-side feature. Falls through to the original value
  * when no alias exists — the common case (only the five naturalKey entities are ever aliased, and
- * only after a genuine two-device naming collision). */
-function resolveCloudRef(entity: SyncEntity, value: unknown): unknown {
+ * only after a genuine two-device naming collision).
+ *
+ * Exported for bespoke (non-generic-sync) call sites that hand a raw local row id to a SERVER
+ * endpoint outside the normal push pipeline — e.g. mpesa-service.ts sending `locationId` to
+ * `/mpesa/*`. Those calls never pass through resolvePayloadRefsForPush, so without this they'd
+ * silently key the till settings by whichever local id happened to lose a natural-key collision,
+ * making a second device unable to find Till settings a first device already saved for the same
+ * real storefront. */
+export function resolveCloudRef(entity: SyncEntity, value: unknown): unknown {
   if (value === null || value === undefined) return value;
   const row = getDatabase()
     .prepare("SELECT cloud_id FROM sync_id_aliases WHERE entity = ? AND local_id = ?")
@@ -2128,16 +2189,18 @@ function applySaleReturnPulledRow(row: Record<string, unknown>, force: boolean):
  * requester's own rows" — re-applying either would double-count the quantity change, which a plain
  * last-write-wins upsert (fine for every other entity) would not protect against here.
  *
- * Deliberately does NOT reject on insufficient stock / insufficient allocation the way a brand-new
- * manual entry would (applyValidatedStockMovement's own checks) — a movement being replayed already
- * happened, on some device, at some point; refusing to record real history because THIS device's
- * local numbers haven't caught up yet would create permanent, silent divergence, which is strictly
- * worse than a transiently negative number that later movements correct. The one thing that's still
- * allowed to throw is the Main Store allocation adjustment's own bucket-underflow check — which is
- * the same cross-device-ordering situation `pullEntity`'s 2-pass-retry-then-skip already exists for
- * (a bucket this device hasn't caught up on yet), not a reason to reject the movement outright; the
- * whole function is wrapped in one runInTransaction so that failure rolls back the ledger insert and
- * inventory delta together, leaving nothing half-applied for the next cycle to retry.
+ * Deliberately does NOT reject on insufficient stock the way a brand-new manual entry would
+ * (applyValidatedStockMovement's own check) — a movement being replayed already happened, on some
+ * device, at some point; refusing to record real history because THIS device's local numbers
+ * haven't caught up yet would create permanent, silent divergence, which is strictly worse than a
+ * transiently negative number that later movements correct.
+ *
+ * Does NOT touch main_store_allocations at all (a previous version of this function did, replaying
+ * the movement's allocationStorefrontId/allocationExplicit as a bucket delta — removed once that
+ * table got its own direct sync, see its migration comment). Replaying it here was only ever an
+ * approximation anyway, since reallocateMainStoreStock() never produces a ledger row; now that
+ * allocations sync as their own authoritative entity, this function has nothing useful left to add
+ * and keeping it would risk the two mechanisms fighting over the same row.
  */
 function applyStockMovementPulledRow(row: Record<string, unknown>): void {
   runInTransaction(() => {
@@ -2151,6 +2214,8 @@ function applyStockMovementPulledRow(row: Record<string, unknown>): void {
     const productId = row.productId as string;
     const locationId = resolveRef("locations", row.locationId) as string;
     const quantityChange = row.quantityChange as number;
+    // Kept only as historical/audit context on the ledger row itself — no longer replayed into
+    // main_store_allocations (see this function's own doc comment).
     const allocationStorefrontId = resolveRef(
       "locations",
       (row.allocationStorefrontId as string | null | undefined) ?? null
@@ -2188,29 +2253,6 @@ function applyStockMovementPulledRow(row: Record<string, unknown>): void {
       locationId,
       quantity: (existingInventory?.quantity ?? 0) + quantityChange
     });
-
-    // Mirrors applyValidatedStockMovement's own branching exactly (see inventory-service.ts) — Main
-    // Store identity is recomputed dynamically rather than trusted from the payload, since it's
-    // itself a synced Location and consistent across devices.
-    const mainStore = locationRepository.findMainStoreLocationRow(localTenantId);
-    if (mainStore && locationId === mainStore.id) {
-      if (allocationExplicit) {
-        mainStoreAllocationRepository.adjustAllocationQuantity({
-          tenantId: localTenantId,
-          productId,
-          storefrontId: allocationStorefrontId,
-          delta: quantityChange
-        });
-      } else {
-        const unallocated = mainStoreAllocationRepository.findAllocationRow(productId, null)?.quantity ?? 0;
-        mainStoreAllocationRepository.setAllocationQuantity({
-          tenantId: localTenantId,
-          productId,
-          storefrontId: null,
-          quantity: Math.max(0, unallocated + quantityChange)
-        });
-      }
-    }
   });
 }
 
@@ -2442,6 +2484,13 @@ export async function getEntitySyncOverview(): Promise<EntitySyncOverviewRow[]> 
  * collision is at stake. Both push and pull are already fast no-ops the moment there's nothing to
  * do, so running them back-to-back on one 20-second timer costs nothing when idle. */
 export async function syncCycle(): Promise<void> {
+  // Covers BOTH the automatic timer (bootstrap.ts) and the manual "Sync Now" button (syncNow()
+  // below calls this directly) uniformly — a lapsed tenant can't just repeatedly click Sync Now to
+  // route around the intended pressure to pay. checkInWithServer() (the license heartbeat) is
+  // deliberately NOT gated here — it must keep running so this device can learn a payment landed and
+  // re-enable itself, not just from a fresh app restart.
+  if (isSyncDisabledByGracePeriod()) return;
+
   // Each half runs independently and never lets the other's failure vanish silently — bootstrap.ts
   // calls this via `void syncCycle()` with no .catch, so an uncaught throw here would previously
   // become an unhandled promise rejection: invisible, and it would also skip pushOutbox() entirely

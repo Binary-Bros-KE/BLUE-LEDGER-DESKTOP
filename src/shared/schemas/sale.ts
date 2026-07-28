@@ -17,7 +17,11 @@ export const saleCartInputSchema = z.object({
   notes: optionalText(500),
   items: z.array(saleCartItemSchema).min(1, "Add at least one product to the cart"),
   serviceCharges: serviceChargesFieldSchema,
-  delivery: deliveryFieldSchema
+  delivery: deliveryFieldSchema,
+  /** Only ever read when the signed-in session has no assigned branch (see
+   * sale-service.ts's requireActiveSession) — ignored otherwise, same as the renderer only
+   * showing a storefront picker in that case. */
+  locationId: optionalText(64)
 });
 
 export type SaleCartInput = z.infer<typeof saleCartInputSchema>;

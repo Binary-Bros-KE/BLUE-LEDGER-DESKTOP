@@ -14,7 +14,11 @@ export const quotationCreateSchema = z.object({
   notes: optionalText(1000),
   items: z.array(quotationCartItemSchema).min(1, "Add at least one product"),
   serviceCharges: serviceChargesFieldSchema,
-  delivery: deliveryFieldSchema
+  delivery: deliveryFieldSchema,
+  /** Only ever read (on CREATE) when the signed-in session has no assigned branch (see
+   * sale-service.ts's requireActiveSession) — ignored otherwise, and unused on update (a
+   * quotation's storefront is fixed at creation). */
+  locationId: optionalText(64)
 });
 
 export type QuotationCreateInput = z.infer<typeof quotationCreateSchema>;

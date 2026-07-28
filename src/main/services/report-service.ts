@@ -1,7 +1,7 @@
 import * as purchaseRepository from "@main/database/repositories/purchase-repository";
 import * as reportRepository from "@main/database/repositories/report-repository";
 import type { CompletedSaleRow, InvoicePaymentCandidateRow, PurchasePaymentCandidateRow, SaleItemProfitRow } from "@main/database/repositories/report-repository";
-import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission, requirePermissionAnyOf } from "@main/services/auth-service";
+import { getCurrentBranchScope, getCurrentEmployeeId, hasPermission, requirePermission, requirePermissionAnyOf } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { dateRangeInputSchema, salesTrendWindowInputSchema } from "@shared/schemas/report";
 import type {
@@ -25,6 +25,7 @@ import type {
   SalesVoidStats,
 } from "@shared/types/report";
 import type { SalePayment } from "@shared/types/sale";
+import type { PurchasePayment } from "@shared/types/purchase";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WINDOW_RADIUS = 5;
@@ -80,6 +81,18 @@ function parsePurchasePayments(raw: string): ParsedPurchasePayment[] {
   try {
     const parsed: unknown = JSON.parse(raw);
     return Array.isArray(parsed) ? (parsed as ParsedPurchasePayment[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Same JSON column as parsePurchasePayments, but keeps every field — needed by
+ * getPaymentTransactions (payment method, reference, who paid it), unlike the cash-flow summary
+ * functions above which only ever need the amount and date. */
+function parsePurchasePaymentEntries(raw: string): PurchasePayment[] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as PurchasePayment[]) : [];
   } catch {
     return [];
   }
@@ -544,6 +557,28 @@ function parseSalePaymentsJson(raw: string): SalePayment[] {
  * getSalesTransactions, this deliberately INCLUDES voided/cancelled sales (flagged "failed") rather
  * than hiding them, since "was this specific payment ever reversed" is exactly what this tab exists
  * to answer. */
+/**
+ * Every actual money-movement event across the whole business, in one flat ledger — money IN
+ * (sales/invoice payments) and money OUT (purchase payments, expenses, salary payouts), each
+ * flagged with a `direction`. Money-IN visibility is unchanged from before (gated on "sales", same
+ * as Checkout/Receipts — a Cashier sees their own storefront's sales here same as always).
+ *
+ * Money-OUT rows are gated on "reports:view" as a WHOLE, not on each category's own view permission
+ * ("purchases"/"expenses"/"salaries") — those permissions already mean something narrower/different
+ * for Cashier and Storekeeper (who hold them by default) and leaking company-wide payment data
+ * through them was a real bug, not a design choice:
+ *   - salary-service.ts's own `hasFullVisibility()` already establishes that plain "salaries:view"
+ *     is SELF-SCOPED ("see my own payslips") — full company payroll visibility requires
+ *     "salaries:edit" or "salaries:export", which only Manager/Super Admin hold. Gating this ledger
+ *     on bare "salaries:view" would have shown every employee's payslip to any Cashier/Storekeeper.
+ *   - Storekeeper's "purchases:view" is meant for seeing purchase ORDERS (to receive stock), not
+ *     supplier PAYMENT amounts/references — a different kind of sensitivity.
+ * "reports:view" is this app's own established boundary for exactly this kind of company-wide
+ * financial visibility (see the doc comment on ensureCashierStorekeeperReportsRemoved-style fixes
+ * elsewhere in role-service.ts: "Reports tabs must stay Super Admin/Manager only") — by default only
+ * Manager and Super Admin hold it, and using it here doesn't touch Cashier's own-payslip viewing or
+ * Storekeeper's purchase-order visibility anywhere else in the app.
+ */
 export function getPaymentTransactions(input: unknown): PaymentTransactionRow[] {
   requirePermissionAnyOf([
     ["reports", "view"],
@@ -552,22 +587,29 @@ export function getPaymentTransactions(input: unknown): PaymentTransactionRow[] 
   const { startDate, endDate } = dateRangeInputSchema.parse(input);
   const { tenantId } = getCurrentTenant();
   const locationId = getCurrentBranchScope();
-
-  const rows = reportRepository.findPaymentTransactionRows(tenantId, locationId, startOfDayIso(startDate), startOfDayIso(addDaysIso(endDate, 1)));
+  const startIso = startOfDayIso(startDate);
+  const endIsoExclusive = startOfDayIso(addDaysIso(endDate, 1));
 
   const results: PaymentTransactionRow[] = [];
-  for (const row of rows) {
+
+  const saleRows = reportRepository.findPaymentTransactionRows(tenantId, locationId, startIso, endIsoExclusive);
+  for (const row of saleRows) {
     const status = row.is_voided ? "failed" : "complete";
+    const partyName = row.customer_name ?? "Walk-in customer";
 
     if (row.invoice_number !== null) {
       for (const payment of parseSalePaymentsJson(row.payments)) {
         results.push({
           id: `${row.id}:${payment.id}`,
-          transactionCode: payment.reference ?? "—",
+          transactionCode: payment.reference ?? row.invoice_number ?? row.id,
           occurredAt: payment.receivedAt,
           locationName: row.location_name,
           paymentMethodName: payment.paymentMethodName,
           processedByName: payment.receivedByName,
+          partyName,
+          partyLabel: "Customer",
+          sourceType: "sale",
+          direction: "in",
           amountCents: payment.amountCents,
           status
         });
@@ -575,13 +617,78 @@ export function getPaymentTransactions(input: unknown): PaymentTransactionRow[] 
     } else {
       results.push({
         id: row.id,
-        transactionCode: row.payment_reference ?? "—",
+        transactionCode: row.payment_reference ?? row.receipt_number ?? row.id,
         occurredAt: row.completed_at,
         locationName: row.location_name,
         paymentMethodName: row.payment_method_name,
         processedByName: row.employee_name,
+        partyName,
+        partyLabel: "Customer",
+        sourceType: "sale",
+        direction: "in",
         amountCents: row.grand_total_cents,
         status
+      });
+    }
+  }
+
+  // See the doc comment above — every money-OUT category shares this one gate rather than each
+  // riding on its own (differently-scoped) view permission.
+  if (hasPermission("reports", "view")) {
+    const purchaseRows = reportRepository.findPurchasePaymentCandidateRows(tenantId, locationId);
+    for (const row of purchaseRows) {
+      for (const payment of parsePurchasePaymentEntries(row.payments)) {
+        if (payment.paidAt < startIso || payment.paidAt >= endIsoExclusive) continue;
+        results.push({
+          id: `${row.id}:${payment.id}`,
+          transactionCode: payment.reference ?? row.id,
+          occurredAt: payment.paidAt,
+          locationName: row.location_name,
+          paymentMethodName: payment.paymentMethodName,
+          processedByName: payment.paidByName,
+          partyName: row.supplier_name,
+          partyLabel: "Supplier",
+          sourceType: "purchase",
+          direction: "out",
+          amountCents: payment.amountCents,
+          status: "complete"
+        });
+      }
+    }
+
+    const expenseRows = reportRepository.findExpenseTransactionRows(tenantId, locationId, startDate, endDate);
+    for (const row of expenseRows) {
+      results.push({
+        id: row.id,
+        transactionCode: row.reference ?? row.expense_number,
+        occurredAt: row.expense_date,
+        locationName: row.location_name,
+        paymentMethodName: row.payment_method_name,
+        processedByName: row.created_by_name ?? "—",
+        partyName: row.description?.trim() || row.category_name,
+        partyLabel: "For",
+        sourceType: "expense",
+        direction: "out",
+        amountCents: row.amount_cents,
+        status: "complete"
+      });
+    }
+
+    const salaryRows = reportRepository.findSalaryTransactionRows(tenantId, locationId, startIso, endIsoExclusive);
+    for (const row of salaryRows) {
+      results.push({
+        id: row.id,
+        transactionCode: row.payment_reference ?? row.payslip_number,
+        occurredAt: row.created_at,
+        locationName: row.location_name,
+        paymentMethodName: row.payment_method_name,
+        processedByName: row.created_by_name ?? "Payroll",
+        partyName: row.employee_name,
+        partyLabel: "Employee",
+        sourceType: "salary",
+        direction: "out",
+        amountCents: row.net_pay_cents,
+        status: row.status === "voided" ? "failed" : "complete"
       });
     }
   }

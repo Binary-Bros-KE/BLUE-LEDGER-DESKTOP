@@ -1,5 +1,7 @@
 import type { AppContext, TenantContext, TenantRecord } from "./tenant";
-import type { PaymentHistoryResult } from "./subscription-payment";
+import type { UpdateStatusResult } from "./update";
+import type { PaymentHistoryResult, PaymentScheduleResult } from "./subscription-payment";
+import type { BillingMpesaStatusResult, BillingStkPushResult } from "./billing-mpesa";
 import type { BrandTheme } from "./theme";
 import type { AuthSession } from "./auth";
 import type { Category, CategoryStatus } from "./category";
@@ -9,6 +11,7 @@ import type { InventoryBalance, LocationStockLevel } from "./inventory";
 import type { InventoryReportData } from "./inventory-report";
 import type { InvoiceListItem, InvoiceSummary } from "./invoice";
 import type { Location, LocationStatus } from "./location";
+import type { MpesaStatusResult, MpesaStkPushResult, MpesaTillSettings } from "./mpesa";
 import type { PaymentMethod } from "./payment-method";
 import type { MainStoreAllocationSummary, MainStoreProductDetail, MainStoreProductRow } from "./main-store";
 import type { Product, ProductListItem, ProductStatus, ProductStockSummary } from "./product";
@@ -69,6 +72,18 @@ export type IpcInvokeMap = {
     args: [];
     result: AppContext;
   };
+  "update:get-status": {
+    args: [];
+    result: UpdateStatusResult;
+  };
+  "update:check-now": {
+    args: [];
+    result: void;
+  };
+  "update:install-now": {
+    args: [];
+    result: void;
+  };
   "activation:activate": {
     args: [string];
     result: TenantContext;
@@ -80,6 +95,22 @@ export type IpcInvokeMap = {
   "activation:payments": {
     args: [];
     result: PaymentHistoryResult | null;
+  };
+  "activation:payment-schedule": {
+    args: [];
+    result: PaymentScheduleResult | null;
+  };
+  "billing-mpesa:send-stk-push": {
+    args: [{ phone: string; periodCount: number }];
+    result: BillingStkPushResult;
+  };
+  "billing-mpesa:get-stk-status": {
+    args: [string];
+    result: BillingMpesaStatusResult;
+  };
+  "billing-mpesa:check-stk-status": {
+    args: [string];
+    result: BillingMpesaStatusResult;
   };
   "auth:login": {
     args: [Record<string, unknown>];
@@ -140,6 +171,30 @@ export type IpcInvokeMap = {
   "location:read-logo-preview": {
     args: [string];
     result: string | null;
+  };
+  "mpesa:get-settings": {
+    args: [string];
+    result: MpesaTillSettings | null;
+  };
+  "mpesa:save-settings": {
+    args: [string, Record<string, unknown>];
+    result: { ok: true };
+  };
+  "mpesa:is-configured": {
+    args: [string];
+    result: { configured: boolean };
+  };
+  "mpesa:send-stk-push": {
+    args: [{ locationId: string; phone: string; amountCents: number }];
+    result: MpesaStkPushResult;
+  };
+  "mpesa:get-stk-status": {
+    args: [string];
+    result: MpesaStatusResult;
+  };
+  "mpesa:check-stk-status": {
+    args: [string];
+    result: MpesaStatusResult;
   };
   "category:list": {
     args: [];
@@ -961,10 +1016,24 @@ export type BlueLedgerApi = {
   app: {
     getContext: () => Promise<IpcInvokeMap["app:get-context"]["result"]>;
   };
+  update: {
+    getStatus: () => Promise<IpcInvokeMap["update:get-status"]["result"]>;
+    checkNow: () => Promise<IpcInvokeMap["update:check-now"]["result"]>;
+    installNow: () => Promise<IpcInvokeMap["update:install-now"]["result"]>;
+  };
   activation: {
     activate: (licenseKey: string) => Promise<IpcInvokeMap["activation:activate"]["result"]>;
     heartbeat: () => Promise<IpcInvokeMap["activation:heartbeat"]["result"]>;
     payments: () => Promise<IpcInvokeMap["activation:payments"]["result"]>;
+    paymentSchedule: () => Promise<IpcInvokeMap["activation:payment-schedule"]["result"]>;
+  };
+  billingMpesa: {
+    sendStkPush: (input: {
+      phone: string;
+      periodCount: number;
+    }) => Promise<IpcInvokeMap["billing-mpesa:send-stk-push"]["result"]>;
+    getStkStatus: (checkoutRequestId: string) => Promise<IpcInvokeMap["billing-mpesa:get-stk-status"]["result"]>;
+    checkStkStatus: (checkoutRequestId: string) => Promise<IpcInvokeMap["billing-mpesa:check-stk-status"]["result"]>;
   };
   auth: {
     login: (input: Record<string, unknown>) => Promise<IpcInvokeMap["auth:login"]["result"]>;
@@ -996,6 +1065,21 @@ export type BlueLedgerApi = {
     ) => Promise<IpcInvokeMap["location:set-status"]["result"]>;
     pickLogo: () => Promise<IpcInvokeMap["location:pick-logo"]["result"]>;
     readLogoPreview: (relativePath: string) => Promise<IpcInvokeMap["location:read-logo-preview"]["result"]>;
+  };
+  mpesa: {
+    getSettings: (locationId: string) => Promise<IpcInvokeMap["mpesa:get-settings"]["result"]>;
+    saveSettings: (
+      locationId: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["mpesa:save-settings"]["result"]>;
+    isConfigured: (locationId: string) => Promise<IpcInvokeMap["mpesa:is-configured"]["result"]>;
+    sendStkPush: (input: {
+      locationId: string;
+      phone: string;
+      amountCents: number;
+    }) => Promise<IpcInvokeMap["mpesa:send-stk-push"]["result"]>;
+    getStkStatus: (checkoutRequestId: string) => Promise<IpcInvokeMap["mpesa:get-stk-status"]["result"]>;
+    checkStkStatus: (checkoutRequestId: string) => Promise<IpcInvokeMap["mpesa:check-stk-status"]["result"]>;
   };
   category: {
     list: () => Promise<IpcInvokeMap["category:list"]["result"]>;

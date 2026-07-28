@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import * as customerRepository from "@main/database/repositories/customer-repository";
 import * as deliveryNoteRepository from "@main/database/repositories/delivery-note-repository";
+import * as locationRepository from "@main/database/repositories/location-repository";
 import * as paymentMethodRepository from "@main/database/repositories/payment-method-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
 import * as saleRepository from "@main/database/repositories/sale-repository";
@@ -18,6 +19,7 @@ import {
   type CheckoutInput,
   type SaleCartInput
 } from "@shared/schemas/sale";
+import { isStorefrontType, type LocationType } from "@shared/types/location";
 import type { PendingSaleListItem, Sale, SaleListItem } from "@shared/types/sale";
 import type { ProductRow } from "@main/database/repositories/product-repository";
 
@@ -46,17 +48,44 @@ export type PreparedCart = {
   delivery: DeliveryInput | null;
 };
 
-/** The employee/branch the POS screen always acts as — never taken from renderer input. */
-export function requireActiveSession(): { tenantId: string; employeeId: string; locationId: string } {
+/**
+ * The employee/branch the POS screen always acts as. For anyone WITH an assigned branch (the
+ * normal case), that branch is authoritative and `explicitLocationId` is never even looked at —
+ * never taken from renderer input, exactly as before.
+ *
+ * Someone with no assigned branch (typically Super Admin) has no such default, so they used to be
+ * flatly blocked from making sales/invoices/quotations at all — forcing a full logout/login as a
+ * branch-assigned user just to record one transaction. Real user feedback: "annoying." Now, for
+ * that case only, the caller must supply which storefront to act as (the renderer shows a picker —
+ * see StorefrontPicker.tsx — only when the signed-in session itself has no branch); validated here
+ * to be a real, active, genuine storefront (not the Main Store/warehouse, which nothing is ever
+ * directly sold from).
+ */
+export function requireActiveSession(explicitLocationId?: string | null): { tenantId: string; employeeId: string; locationId: string } {
   const session = getSession();
   if (!session) {
     throw new Error("You must be signed in to use the POS");
   }
-  if (!session.branch) {
-    throw new Error("You have no branch assigned. Contact an administrator before making sales.");
-  }
   const { tenantId } = getCurrentTenant();
-  return { tenantId, employeeId: session.employee.id, locationId: session.branch.id };
+
+  if (session.branch) {
+    return { tenantId, employeeId: session.employee.id, locationId: session.branch.id };
+  }
+
+  if (!explicitLocationId) {
+    throw new Error("Choose a storefront first — your account has no branch assigned.");
+  }
+  const location = locationRepository.findLocationRowById(explicitLocationId);
+  if (!location || location.tenant_id !== tenantId) {
+    throw new Error("Selected storefront not found");
+  }
+  if (!isStorefrontType(location.location_type as LocationType)) {
+    throw new Error(`"${location.location_name}" isn't a storefront`);
+  }
+  if (location.status !== "active") {
+    throw new Error(`"${location.location_name}" is not active`);
+  }
+  return { tenantId, employeeId: session.employee.id, locationId: location.id };
 }
 
 function assertCustomerExists(tenantId: string, customerId: string | null): void {
@@ -244,7 +273,7 @@ export function listSales(): SaleListItem[] {
 export function suspendSale(input: unknown): { id: string } {
   requirePermission("sales", "create");
   const parsed = saleCartInputSchema.parse(input);
-  const { tenantId, employeeId, locationId } = requireActiveSession();
+  const { tenantId, employeeId, locationId } = requireActiveSession(parsed.locationId);
 
   assertCustomerExists(tenantId, parsed.customerId);
   const cart = prepareCart(tenantId, parsed.items, {
@@ -418,7 +447,7 @@ export function insertCompletedSaleFromCart(input: {
 export function completeSale(input: unknown): Sale {
   requirePermission("sales", "create");
   const parsed: CheckoutInput = checkoutInputSchema.parse(input);
-  const { tenantId, employeeId, locationId } = requireActiveSession();
+  const { tenantId, employeeId, locationId } = requireActiveSession(parsed.locationId);
 
   const paymentMethod = paymentMethodRepository.findPaymentMethodRowById(parsed.paymentMethodId);
   if (!paymentMethod || paymentMethod.tenant_id !== tenantId) {

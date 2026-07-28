@@ -293,6 +293,7 @@ export type PurchasePaymentCandidateRow = {
   id: string;
   supplier_id: string;
   supplier_name: string;
+  location_name: string;
   payments: string;
 };
 
@@ -301,19 +302,113 @@ export type PurchasePaymentCandidateRow = {
  * `paidAt`, so cash-out-in-range has to be computed in JS from this, not
  * bounded by the purchase's own created/ordered/received date. Carries the
  * supplier name too, so the same fetch feeds both the total and the
- * per-supplier breakdown without a second query. */
+ * per-supplier breakdown without a second query. `location_name` is only
+ * consumed by the money-movement Transactions ledger (getPaymentTransactions)
+ * — the cash-flow summary functions in report-service.ts don't need it. */
 export function findPurchasePaymentCandidateRows(tenantId: string, locationId: string | null): PurchasePaymentCandidateRow[] {
   return getDatabase()
     .prepare(
       `
-      SELECT p.id, p.supplier_id, s.business_name AS supplier_name, p.payments
+      SELECT p.id, p.supplier_id, s.business_name AS supplier_name, l.location_name AS location_name, p.payments
       FROM purchases p
       JOIN suppliers s ON s.id = p.supplier_id
+      JOIN locations l ON l.id = p.location_id
       WHERE p.tenant_id = ? AND p.status != 'cancelled' AND p.amount_paid_cents > 0
         AND (? IS NULL OR p.location_id = ?)
     `
     )
     .all(tenantId, locationId, locationId) as PurchasePaymentCandidateRow[];
+}
+
+export type ExpenseTransactionSourceRow = {
+  id: string;
+  expense_number: string;
+  expense_date: string;
+  amount_cents: number;
+  reference: string | null;
+  description: string | null;
+  category_name: string;
+  location_name: string;
+  payment_method_name: string | null;
+  created_by_name: string | null;
+};
+
+/** Every active (non-archived) expense in range, one row each — a single flat payment, unlike
+ * Sale/Purchase which can accumulate several. General expenses (no storefront_id) always count
+ * regardless of the storefront filter, same convention as findExpenseTotalCentsInRange. */
+export function findExpenseTransactionRows(
+  tenantId: string,
+  locationId: string | null,
+  startDate: string,
+  endDate: string
+): ExpenseTransactionSourceRow[] {
+  return getDatabase()
+    .prepare(
+      `
+      SELECT
+        e.id, e.expense_number, e.expense_date, e.amount_cents, e.reference, e.description,
+        ec.name AS category_name,
+        COALESCE(l.location_name, 'General') AS location_name,
+        pm.name AS payment_method_name,
+        (emp.first_name || ' ' || emp.last_name) AS created_by_name
+      FROM expenses e
+      JOIN expense_categories ec ON ec.id = e.category_id
+      LEFT JOIN locations l ON l.id = e.storefront_id
+      LEFT JOIN payment_methods pm ON pm.id = e.payment_method_id
+      LEFT JOIN employees emp ON emp.id = e.created_by
+      WHERE e.tenant_id = ? AND e.status = 'active'
+        AND e.expense_date >= ? AND e.expense_date <= ?
+        AND (? IS NULL OR e.storefront_id = ? OR e.storefront_id IS NULL)
+      ORDER BY e.expense_date DESC
+    `
+    )
+    .all(tenantId, startDate, endDate, locationId, locationId) as ExpenseTransactionSourceRow[];
+}
+
+export type SalaryTransactionSourceRow = {
+  id: string;
+  payslip_number: string;
+  net_pay_cents: number;
+  payment_reference: string | null;
+  status: string;
+  created_at: string;
+  payment_method_name: string | null;
+  employee_name: string;
+  created_by_name: string | null;
+  location_name: string;
+};
+
+/** Every active or voided (later-reversed) salary payout in range, one row each — a draft (an
+ * unpaid advance opened mid-cycle) never counts, no money has moved yet. Branch scoping is only
+ * approximate, via the PAID employee's own assigned branch — salaries have no location column of
+ * their own, same convention as findSalaryPayoutCentsInRange. */
+export function findSalaryTransactionRows(
+  tenantId: string,
+  locationId: string | null,
+  startIso: string,
+  endIsoExclusive: string
+): SalaryTransactionSourceRow[] {
+  return getDatabase()
+    .prepare(
+      `
+      SELECT
+        s.id, s.payslip_number, s.net_pay_cents, s.payment_reference, s.status, s.created_at,
+        pm.name AS payment_method_name,
+        (emp.first_name || ' ' || emp.last_name) AS employee_name,
+        (creator.first_name || ' ' || creator.last_name) AS created_by_name,
+        COALESCE(l.location_name, 'Unassigned') AS location_name
+      FROM salaries s
+      JOIN employees emp ON emp.id = s.employee_id
+      LEFT JOIN payment_methods pm ON pm.id = s.payment_method_id
+      LEFT JOIN employees creator ON creator.id = s.created_by
+      LEFT JOIN locations l ON l.id = emp.branch_id
+      WHERE s.tenant_id = ? AND s.status IN ('active', 'voided')
+        AND s.created_at >= ? AND s.created_at < ?
+        AND (? IS NULL OR emp.branch_id = ?)
+      ORDER BY s.created_at DESC
+    `
+    )
+    .all(tenantId, startIso, endIsoExclusive, locationId, locationId) as SalaryTransactionSourceRow[];
 }
 
 export type SalaryTotals = { totalCents: number; documentCount: number };

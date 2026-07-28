@@ -1861,6 +1861,54 @@ const migrations = [
       -- tell "the profile actually changed" from "something about this tenant changed".
       ALTER TABLE tenant ADD COLUMN business_profile_updated_at TEXT;
     `
+  },
+  {
+    version: 48,
+    name: "main_store_allocations_sync",
+    sql: `
+      -- main_store_allocations was local-only bookkeeping since its creation (v20) — but a real gap
+      -- surfaced live via two-device testing (2026-07-26): reallocateMainStoreStock() (moving stock
+      -- between two buckets, e.g. unallocated -> a specific storefront) never wrote a
+      -- stock_movements row, so a pulling device had no way to ever learn about it, and its own
+      -- attempt to replay OTHER movements against a bucket state that had silently diverged threw
+      -- and permanently froze that device's entire stock_movements pull cursor (the cursor only
+      -- advances once every row in a page applies — see pullEntity's own comment). Promoting this
+      -- table to a directly-synced entity (its OWN push/pull, not something reconstructed by
+      -- replaying the ledger) is the correct fix — every other piece of mutable state in this app
+      -- already syncs this way; ledger-replay was only ever used here because this table didn't.
+      --
+      -- bucket_key is a synthetic natural key (product_id || ':' || (storefront_id or
+      -- 'unallocated')) so this reuses the EXACT SAME naturalKey/sync_id_aliases reconciliation
+      -- every boot-seeded reference entity already has (see APPLY_CONFIG's own comment) — two
+      -- devices that each first-touch the SAME real bucket before ever syncing with each other get
+      -- merged by bucket_key instead of creating two permanent duplicate rows. Safe to use here even
+      -- though allocations aren't boot-seeded: product_id is never aliased, and storefront_id inside
+      -- a bucket only ever references a real, user-created storefront (never the boot-seeded Main
+      -- Store row itself, which is never a valid allocation target) or is NULL — so the composite
+      -- stays stable across devices in practice.
+      ALTER TABLE main_store_allocations ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'pending';
+      ALTER TABLE main_store_allocations ADD COLUMN last_synced_at TEXT;
+      ALTER TABLE main_store_allocations ADD COLUMN synced_updated_at TEXT;
+      ALTER TABLE main_store_allocations ADD COLUMN bucket_key TEXT;
+
+      UPDATE main_store_allocations SET bucket_key = product_id || ':' || COALESCE(storefront_id, 'unallocated');
+
+      CREATE UNIQUE INDEX idx_main_store_allocations_bucket_key ON main_store_allocations(tenant_id, bucket_key);
+
+      CREATE TRIGGER trg_main_store_allocations_sync_ai AFTER INSERT ON main_store_allocations BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'main_store_allocations', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_main_store_allocations_sync_au AFTER UPDATE ON main_store_allocations WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'main_store_allocations', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      -- No manual backfill INSERT needed here (unlike v39/v40's own backfill) — every existing row
+      -- just got sync_status='pending' from the ALTER TABLE's own DEFAULT above, and the standing
+      -- enqueueUnsyncedRows() sweep (runs at the start of every push cycle) already picks up any
+      -- SYNC_ENTITIES-registered table with unsynced rows automatically.
+    `
   }
 ] as const;
 

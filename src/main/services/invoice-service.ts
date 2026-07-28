@@ -191,21 +191,10 @@ export function insertInvoiceFromCart(input: {
   }
   const balanceDueCents = input.cart.grandTotalCents - amountPaidCents;
 
-  // Credit is only ever extended here — a regular POS sale is paid in full at checkout before it's
-  // ever recorded, so this is the one place a customer's credit limit needs enforcing.
-  if (balanceDueCents > 0) {
-    const customer = customerRepository.findCustomerRowById(input.customerId);
-    if (customer?.credit_limit_cents !== null && customer?.credit_limit_cents !== undefined) {
-      const existingOutstandingCents = saleRepository.findCustomerOutstandingBalanceRow(tenantId, input.customerId);
-      const projectedOutstandingCents = existingOutstandingCents + balanceDueCents;
-      if (projectedOutstandingCents > customer.credit_limit_cents) {
-        const availableCents = Math.max(0, customer.credit_limit_cents - existingOutstandingCents);
-        throw new Error(
-          `This invoice's balance of ${(balanceDueCents / 100).toFixed(2)} would exceed ${customer.name}'s credit limit — only ${(availableCents / 100).toFixed(2)} of credit is available`
-        );
-      }
-    }
-  }
+  // Credit limit is a record-keeping field only, by explicit product decision — it must never block
+  // creating a document (a tester lost real form progress navigating to Customers to raise a limit
+  // and back). Still visible/reported everywhere it already was (Statement, Owner App's "over limit"
+  // alert, the customer's own record) — just never enforced here.
   const paymentStatus = computePaymentStatus({
     balanceDueCents,
     amountPaidCents,
@@ -288,7 +277,7 @@ export function getInvoiceSummary(): InvoiceSummary {
 export function createInvoice(input: unknown): Sale {
   requirePermission("sales", "create");
   const parsed: CreateInvoiceInput = createInvoiceSchema.parse(input);
-  const { tenantId, employeeId, locationId } = requireActiveSession();
+  const { tenantId, employeeId, locationId } = requireActiveSession(parsed.locationId);
 
   const customer = customerRepository.findCustomerRowById(parsed.customerId);
   if (!customer || customer.tenant_id !== tenantId) {
@@ -351,11 +340,14 @@ export function cancelInvoice(saleId: string): Sale {
   return getSaleDetail(saleId);
 }
 
-/** Creates a fresh unpaid invoice with the same customer, items, and terms — for recurring billing. */
+/** Creates a fresh unpaid invoice with the same customer, items, and terms — for recurring billing.
+ * No storefront prompt needed even for a no-branch (Super Admin) session — the duplicate belongs at
+ * the SAME storefront as the original, same as how converting a quotation auto-uses its own
+ * storefront (see requireAcceptedQuotationAtActiveBranch). */
 export function duplicateInvoice(saleId: string): Sale {
   requirePermission("sales", "create");
-  const { tenantId, employeeId, locationId } = requireActiveSession();
   const original = getSaleDetail(saleId);
+  const { tenantId, employeeId, locationId } = requireActiveSession(original.locationId);
   if (!original.invoiceNumber) {
     throw new Error("This sale is not an invoice");
   }

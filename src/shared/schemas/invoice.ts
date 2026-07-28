@@ -25,7 +25,10 @@ export const createInvoiceSchema = z.object({
     .optional()
     .transform((value) => (value === undefined ? null : value)),
   serviceCharges: serviceChargesFieldSchema,
-  delivery: deliveryFieldSchema
+  delivery: deliveryFieldSchema,
+  /** Only ever read when the signed-in session has no assigned branch (see
+   * sale-service.ts's requireActiveSession) — ignored otherwise. */
+  locationId: optionalText(64)
 });
 
 export type CreateInvoiceInput = z.infer<typeof createInvoiceSchema>;

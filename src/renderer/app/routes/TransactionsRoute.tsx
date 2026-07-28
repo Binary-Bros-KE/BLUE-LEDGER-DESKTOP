@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeftRight, Loader2, Search } from "lucide-react";
+import { ArrowDownCircle, ArrowLeftRight, ArrowUpCircle, Loader2, Scale, Search } from "lucide-react";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import { StatTile } from "@renderer/shared/components/StatTile";
@@ -35,10 +35,14 @@ function formatDateTime(iso: string): string {
   });
 }
 
-/** Every actual payment received across the business, in one flat list — the "did we actually get
- * paid for this" answer, searched by the transaction's own unique code. Cashier-accessible (gated
- * on "sales", same as Checkout/Receipts) and always branch-scoped like everything else in this app
- * — a Cashier only ever sees their own storefront's payments here. */
+/** Every actual money-movement event across the business, in one flat list — money coming IN
+ * (sales/invoice payments) and money going OUT (purchase payments, expenses, salary payouts),
+ * flagged per row. Searched by the transaction's own unique code. Cashier-accessible (gated on
+ * "sales", same as Checkout/Receipts) and always branch-scoped like everything else in this app —
+ * a Cashier only ever sees their own storefront's sales rows here. Money-OUT rows are gated
+ * server-side (getPaymentTransactions) on "reports:view" as a whole — Super Admin/Manager only by
+ * default — so a Cashier/Storekeeper simply never receives purchase/expense/salary rows here;
+ * nothing to hide client-side. */
 export function TransactionsRoute(): React.JSX.Element {
   const { can, session } = usePermissions();
   const isSuperAdmin = getDashboardVariant(session) === "superAdmin";
@@ -112,7 +116,8 @@ export function TransactionsRoute(): React.JSX.Element {
     const term = searchTerm.trim().toLowerCase();
     if (!term) return list;
     return list.filter((row) => {
-      const haystack = `${row.transactionCode} ${row.paymentMethodName ?? ""} ${row.processedByName} ${row.locationName}`.toLowerCase();
+      const haystack =
+        `${row.transactionCode} ${row.paymentMethodName ?? ""} ${row.processedByName} ${row.locationName} ${row.partyName ?? ""}`.toLowerCase();
       return haystack.includes(term);
     });
   }, [transactions, searchTerm, paymentMethodFilter, cashierFilter, locationFilter, isSuperAdmin]);
@@ -120,11 +125,13 @@ export function TransactionsRoute(): React.JSX.Element {
   const summary = useMemo(() => {
     if (!filtered) return null;
     const complete = filtered.filter((row) => row.status === "complete");
+    const moneyInCents = complete.filter((row) => row.direction === "in").reduce((sum, row) => sum + row.amountCents, 0);
+    const moneyOutCents = complete.filter((row) => row.direction === "out").reduce((sum, row) => sum + row.amountCents, 0);
     return {
       count: filtered.length,
-      completeCount: complete.length,
-      failedCount: filtered.length - complete.length,
-      totalCents: complete.reduce((sum, row) => sum + row.amountCents, 0)
+      moneyInCents,
+      moneyOutCents,
+      netCents: moneyInCents - moneyOutCents
     };
   }, [filtered]);
 
@@ -141,8 +148,10 @@ export function TransactionsRoute(): React.JSX.Element {
       title: "Transactions",
       subtitle: filterParts.join(" · "),
       columns: [
+        { key: "direction", header: "In/Out" },
         { key: "time", header: "Time" },
         { key: "code", header: "Transaction Code" },
+        { key: "party", header: "Party" },
         { key: "storefront", header: "Storefront" },
         { key: "paymentMethod", header: "Payment Method" },
         { key: "processedBy", header: "Processed By" },
@@ -150,8 +159,10 @@ export function TransactionsRoute(): React.JSX.Element {
         { key: "status", header: "Status" }
       ],
       rows: filtered.map((row) => ({
+        direction: row.direction === "in" ? "IN" : "OUT",
         time: formatDateTime(row.occurredAt),
         code: row.transactionCode,
+        party: row.partyName ? `${row.partyLabel}: ${row.partyName}` : "—",
         storefront: row.locationName,
         paymentMethod: row.paymentMethodName ?? "—",
         processedBy: row.processedByName,
@@ -161,9 +172,9 @@ export function TransactionsRoute(): React.JSX.Element {
       stats: summary
         ? [
             { label: "Transactions", value: String(summary.count) },
-            { label: "Complete", value: String(summary.completeCount) },
-            { label: "Failed", value: String(summary.failedCount) },
-            { label: "Total Collected", value: formatCents(summary.totalCents) }
+            { label: "Money In", value: formatCents(summary.moneyInCents) },
+            { label: "Money Out", value: formatCents(summary.moneyOutCents) },
+            { label: "Net Movement", value: formatCents(summary.netCents) }
           ]
         : [],
       fileBaseName: `Transactions_${dateFrom}_to_${dateTo}`
@@ -213,9 +224,14 @@ export function TransactionsRoute(): React.JSX.Element {
 
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatTile icon={ArrowLeftRight} label="Transactions" value={String(summary?.count ?? 0)} tone="primary" />
-          <StatTile icon={ArrowLeftRight} label="Complete" value={String(summary?.completeCount ?? 0)} tone="success" />
-          <StatTile icon={ArrowLeftRight} label="Failed" value={String(summary?.failedCount ?? 0)} tone="danger" />
-          <StatTile icon={ArrowLeftRight} label="Total Collected" value={formatCents(summary?.totalCents ?? 0)} tone="accent" />
+          <StatTile icon={ArrowDownCircle} label="Money In" value={formatCents(summary?.moneyInCents ?? 0)} tone="success" />
+          <StatTile icon={ArrowUpCircle} label="Money Out" value={formatCents(summary?.moneyOutCents ?? 0)} tone="danger" />
+          <StatTile
+            icon={Scale}
+            label="Net Movement"
+            value={`${(summary?.netCents ?? 0) >= 0 ? "+" : "-"}${formatCents(Math.abs(summary?.netCents ?? 0))}`}
+            tone="accent"
+          />
         </div>
 
         <div className="mt-4 flex flex-wrap items-end gap-3">
@@ -345,27 +361,44 @@ export function TransactionsRoute(): React.JSX.Element {
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-line">
-              <table className="w-full min-w-[820px] table-fixed border-collapse text-sm">
+              <table className="w-full border-collapse text-sm">
                 <thead>
                   <tr className="bg-primary text-white">
-                    <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Time</th>
+                    <th className="whitespace-nowrap px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">In/Out</th>
+                    <th className="whitespace-nowrap px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Time</th>
                     <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Transaction Code</th>
+                    <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Party</th>
                     <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Storefront</th>
                     <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Payment Method</th>
                     <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Processed By</th>
-                    <th className="px-4 py-2.5 text-right text-[10px] font-extrabold uppercase tracking-wider">Amount</th>
+                    <th className="whitespace-nowrap px-4 py-2.5 text-right text-[10px] font-extrabold uppercase tracking-wider">Amount</th>
                     <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {(filtered ?? []).map((row) => (
                     <tr key={row.id} className="border-t border-line odd:bg-white even:bg-soft/50">
-                      <td className="px-4 py-2.5 text-xs font-semibold text-muted">{formatDateTime(row.occurredAt)}</td>
-                      <td className="truncate px-4 py-2.5 font-bold text-ink">{row.transactionCode}</td>
-                      <td className="truncate px-4 py-2.5 text-xs font-semibold text-muted">{row.locationName}</td>
-                      <td className="truncate px-4 py-2.5 text-xs font-semibold text-muted">{row.paymentMethodName ?? "—"}</td>
-                      <td className="truncate px-4 py-2.5 text-xs font-semibold text-muted">{row.processedByName}</td>
-                      <td className="px-4 py-2.5 text-right font-bold tabular-nums text-ink">{formatCents(row.amountCents)}</td>
+                      <td className="px-4 py-2.5">
+                        <DashedPill tone={row.direction === "in" ? "success" : "danger"}>{row.direction === "in" ? "IN" : "OUT"}</DashedPill>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-2.5 text-xs font-semibold text-muted">{formatDateTime(row.occurredAt)}</td>
+                      <td className="break-all px-4 py-2.5 font-bold text-ink">{row.transactionCode}</td>
+                      <td className="px-4 py-2.5 text-xs font-semibold text-muted">
+                        {row.partyName ? (
+                          <>
+                            <span className="text-[10px] font-extrabold uppercase tracking-wide text-muted/70">{row.partyLabel}: </span>
+                            {row.partyName}
+                          </>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-xs font-semibold text-muted">{row.locationName}</td>
+                      <td className="px-4 py-2.5 text-xs font-semibold text-muted">{row.paymentMethodName ?? "—"}</td>
+                      <td className="px-4 py-2.5 text-xs font-semibold text-muted">{row.processedByName}</td>
+                      <td className="whitespace-nowrap px-4 py-2.5 text-right font-bold tabular-nums text-ink">
+                        {formatCents(row.amountCents)}
+                      </td>
                       <td className="px-4 py-2.5">
                         <DashedPill tone={row.status === "complete" ? "success" : "danger"}>{row.status}</DashedPill>
                       </td>

@@ -308,22 +308,6 @@ export function findInvoiceSummaryRow(tenantId: string, locationId: string | nul
     .get(tenantId, locationId, locationId) as InvoiceSummaryRow;
 }
 
-/** Sum of every one of this customer's own invoices/wholesale-credit sales not yet fully paid off or
- * cancelled — the "credit already extended" figure a new invoice's balance gets checked against. */
-export function findCustomerOutstandingBalanceRow(tenantId: string, customerId: string): number {
-  const row = getDatabase()
-    .prepare(
-      `
-      SELECT COALESCE(SUM(balance_due_cents), 0) AS outstanding_cents
-      FROM sales
-      WHERE tenant_id = ? AND customer_id = ? AND invoice_number IS NOT NULL
-        AND payment_status NOT IN ('paid', 'cancelled')
-    `
-    )
-    .get(tenantId, customerId) as { outstanding_cents: number };
-  return row.outstanding_cents;
-}
-
 export function mapInvoiceSummaryRow(row: InvoiceSummaryRow): InvoiceSummary {
   return {
     totalOutstandingCents: row.total_outstanding_cents,

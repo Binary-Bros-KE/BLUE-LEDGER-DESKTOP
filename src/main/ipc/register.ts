@@ -62,6 +62,14 @@ import {
   updateLocation
 } from "@main/services/location-service";
 import {
+  checkStkStatus,
+  getMpesaTillSettings,
+  getStkStatus,
+  isMpesaConfigured,
+  saveMpesaTillSettings,
+  sendStkPush
+} from "@main/services/mpesa-service";
+import {
   createPaymentMethod,
   deletePaymentMethod,
   getPaymentMethod,
@@ -221,7 +229,9 @@ import {
   pickBusinessLogoPath,
   updateTenantProfile
 } from "@main/services/tenant-service";
-import { activateInstallation, fetchPaymentHistory, heartbeatAndGetContext } from "@main/services/license-service";
+import { activateInstallation, fetchPaymentHistory, fetchPaymentSchedule, heartbeatAndGetContext } from "@main/services/license-service";
+import { checkBillingStkStatus, getBillingStkStatus, sendBillingStkPush } from "@main/services/billing-mpesa-service";
+import { checkForUpdates, getUpdateStatus, installUpdateNow } from "@main/services/update-service";
 import {
   getEntitySyncOverview,
   getSyncSnapshot,
@@ -311,9 +321,22 @@ const ipcMain = {
 
 export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.appGetContext, () => getAppContext());
+  ipcMain.handle(ipcChannels.updateGetStatus, () => getUpdateStatus());
+  ipcMain.handle(ipcChannels.updateCheckNow, () => checkForUpdates());
+  ipcMain.handle(ipcChannels.updateInstallNow, () => installUpdateNow());
   ipcMain.handle(ipcChannels.activationActivate, (_event, licenseKey: string) => activateInstallation(licenseKey));
   ipcMain.handle(ipcChannels.activationHeartbeat, () => heartbeatAndGetContext());
   ipcMain.handle(ipcChannels.activationPayments, () => fetchPaymentHistory());
+  ipcMain.handle(ipcChannels.activationPaymentSchedule, () => fetchPaymentSchedule());
+  ipcMain.handle(ipcChannels.billingMpesaSendStkPush, (_event, input: { phone: string; periodCount: number }) =>
+    sendBillingStkPush(input)
+  );
+  ipcMain.handle(ipcChannels.billingMpesaGetStkStatus, (_event, checkoutRequestId: string) =>
+    getBillingStkStatus(checkoutRequestId)
+  );
+  ipcMain.handle(ipcChannels.billingMpesaCheckStkStatus, (_event, checkoutRequestId: string) =>
+    checkBillingStkStatus(checkoutRequestId)
+  );
   ipcMain.handle(ipcChannels.authLogin, (_event, input: unknown) => login(input));
   ipcMain.handle(ipcChannels.authLogout, () => {
     logout();
@@ -342,6 +365,16 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.locationReadLogoPreview, (_event, relativePath: string) =>
     readManagedLocationLogoPreview(relativePath)
   );
+  ipcMain.handle(ipcChannels.mpesaGetSettings, (_event, locationId: string) => getMpesaTillSettings(locationId));
+  ipcMain.handle(ipcChannels.mpesaSaveSettings, (_event, locationId: string, input: unknown) =>
+    saveMpesaTillSettings(locationId, input)
+  );
+  ipcMain.handle(ipcChannels.mpesaIsConfigured, (_event, locationId: string) => isMpesaConfigured(locationId));
+  ipcMain.handle(ipcChannels.mpesaSendStkPush, (_event, input: { locationId: string; phone: string; amountCents: number }) =>
+    sendStkPush(input)
+  );
+  ipcMain.handle(ipcChannels.mpesaGetStkStatus, (_event, checkoutRequestId: string) => getStkStatus(checkoutRequestId));
+  ipcMain.handle(ipcChannels.mpesaCheckStkStatus, (_event, checkoutRequestId: string) => checkStkStatus(checkoutRequestId));
   ipcMain.handle(ipcChannels.categoryList, () => listCategories());
   ipcMain.handle(ipcChannels.categoryGet, (_event, id: string) => getCategory(id));
   ipcMain.handle(ipcChannels.categoryCreate, (_event, input: unknown) => createCategory(input));

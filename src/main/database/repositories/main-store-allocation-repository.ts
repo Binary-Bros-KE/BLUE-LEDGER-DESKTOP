@@ -8,8 +8,12 @@ export type MainStoreAllocationRow = {
   product_id: string;
   storefront_id: string | null;
   quantity: number;
+  bucket_key: string;
   created_at: string;
   updated_at: string;
+  sync_status: string;
+  last_synced_at: string | null;
+  synced_updated_at: string | null;
 };
 
 export function findAllocationRow(productId: string, storefrontId: string | null): MainStoreAllocationRow | undefined {
@@ -22,6 +26,12 @@ export function findAllocationRow(productId: string, storefrontId: string | null
   return db
     .prepare("SELECT * FROM main_store_allocations WHERE product_id = ? AND storefront_id = ?")
     .get(productId, storefrontId) as MainStoreAllocationRow | undefined;
+}
+
+/** By the row's own id, not (productId, storefrontId) — needed by sync-engine.ts's PAYLOAD_BUILDER,
+ * which only ever has the outbox's entity_id to work from. */
+export function findAllocationRowById(id: string): MainStoreAllocationRow | undefined {
+  return getDatabase().prepare("SELECT * FROM main_store_allocations WHERE id = ?").get(id) as MainStoreAllocationRow | undefined;
 }
 
 /** Every bucket (including "unallocated") recorded so far for one product. Missing buckets read as zero. */
@@ -47,14 +57,15 @@ function insertAllocationRow(input: {
 }): MainStoreAllocationRow {
   const now = new Date().toISOString();
   const id = `main_store_allocation_${randomUUID()}`;
+  const bucketKey = `${input.productId}:${input.storefrontId ?? "unallocated"}`;
   getDatabase()
     .prepare(
       `
-      INSERT INTO main_store_allocations (id, tenant_id, product_id, storefront_id, quantity, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO main_store_allocations (id, tenant_id, product_id, storefront_id, quantity, bucket_key, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `
     )
-    .run(id, input.tenantId, input.productId, input.storefrontId, input.quantity, now, now);
+    .run(id, input.tenantId, input.productId, input.storefrontId, input.quantity, bucketKey, now, now);
 
   const row = findAllocationRow(input.productId, input.storefrontId);
   if (!row) {

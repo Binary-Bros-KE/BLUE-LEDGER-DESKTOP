@@ -19,3 +19,20 @@ export type PaymentHistoryResult = {
   recentPayments: SubscriptionPaymentRecord[];
   pendingPayments: SubscriptionPaymentRecord[];
 };
+
+/** Mirrors SERVER's computePaymentSchedule (billing-periods.ts) — the "Jan ✅ Feb ✅ Mar ❌"
+ * computed grid, fetched via POST /activation/payment-schedule. Powers both the paid/pending
+ * calendar on BusinessProfileRoute and the "pay in advance" period picker's pricing. */
+export type BillingPeriodEntry = {
+  key: string;
+  label: string;
+  status: "paid" | "pending" | "future";
+};
+
+export type PaymentScheduleResult = {
+  billingCycle: "MONTHLY" | "YEARLY" | "ONCE";
+  pricePerPeriodCents: number | null;
+  currency: string;
+  periods: BillingPeriodEntry[];
+  nextDueDate: string | null;
+};

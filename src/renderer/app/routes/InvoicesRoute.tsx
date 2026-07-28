@@ -32,6 +32,7 @@ import { Modal } from "@renderer/shared/components/Modal";
 import { ShareModal } from "@renderer/shared/components/ShareModal";
 import { StatementPreview } from "@renderer/shared/components/StatementPreview";
 import { StatTile } from "@renderer/shared/components/StatTile";
+import { StorefrontPicker } from "@renderer/shared/components/StorefrontPicker";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { computeLinePricing } from "@renderer/shared/lib/cart-pricing";
 import { cn } from "@renderer/shared/lib/cn";
@@ -152,7 +153,7 @@ function Th({
 export function InvoicesRoute(): React.JSX.Element {
   const currency = useAppStore((state) => state.context?.tenant.currency ?? "");
   const tenantContext = useAppStore((state) => state.context?.tenant ?? null);
-  const { can } = usePermissions();
+  const { can, session } = usePermissions();
   const canCreate = can("sales", "create");
   const canEdit = can("sales", "edit");
   const canExport = can("sales", "export");
@@ -205,6 +206,8 @@ export function InvoicesRoute(): React.JSX.Element {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createCustomerId, setCreateCustomerId] = useState<string | null>(null);
+  // Only ever consulted when session.branch is null (see StorefrontPicker/requireActiveSession).
+  const [createStorefrontId, setCreateStorefrontId] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
   const [createTransactionType, setCreateTransactionType] = useState<"invoice" | "wholesale_sale">("invoice");
   const [createDueDate, setCreateDueDate] = useState(todayIsoDate());
@@ -602,6 +605,7 @@ export function InvoicesRoute(): React.JSX.Element {
 
   function openCreateModal(): void {
     setCreateCustomerId(null);
+    setCreateStorefrontId("");
     setCustomerSearch("");
     setCreateTransactionType("invoice");
     setCreateDueDate(todayIsoDate());
@@ -660,6 +664,11 @@ export function InvoicesRoute(): React.JSX.Element {
       setCreateSaving(false);
       return;
     }
+    if (session && !session.branch && !createStorefrontId) {
+      setCreateError("Choose a storefront for this invoice");
+      setCreateSaving(false);
+      return;
+    }
 
     try {
       await window.blueLedger.invoice.create({
@@ -667,6 +676,7 @@ export function InvoicesRoute(): React.JSX.Element {
         transactionType: createTransactionType,
         dueDate: createDueDate,
         invoiceNotes: createNotes,
+        locationId: session && !session.branch ? createStorefrontId : undefined,
         items: createItems.map((line) => ({
           productId: line.productId,
           quantity: line.quantity,
@@ -1441,6 +1451,12 @@ export function InvoicesRoute(): React.JSX.Element {
           {createError && (
             <div className="mb-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
               {createError}
+            </div>
+          )}
+
+          {session && !session.branch && (
+            <div className="mb-4">
+              <StorefrontPicker value={createStorefrontId} onChange={setCreateStorefrontId} />
             </div>
           )}
 
