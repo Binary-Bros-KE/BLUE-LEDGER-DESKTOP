@@ -6,7 +6,8 @@ import type { BillingPeriodEntry, PaymentScheduleResult } from "@shared/types/su
 
 const STATUS_STYLE: Record<BillingPeriodEntry["status"], string> = {
   paid: "border-success/30 bg-success/10 text-success",
-  pending: "border-warning/30 bg-warning/10 text-warning",
+  overdue: "border-danger/30 bg-danger-soft text-danger",
+  due: "border-warning/30 bg-warning/10 text-warning",
   future: "border-line bg-soft text-muted"
 };
 
@@ -61,7 +62,7 @@ export function PaymentScheduleCalendar({ onPayInAdvance }: { onPayInAdvance: ()
           </p>
           <p className="mt-1 text-xs font-semibold text-muted">
             {schedule.billingCycle === "MONTHLY" ? "Every month" : "Every year"} since this account
-            started — green is paid, amber is owed, grey hasn't come due yet.
+            started — green is paid, amber is due now, red is overdue, grey hasn't come due yet.
           </p>
         </div>
         <Button type="button" onClick={onPayInAdvance} className="h-9 text-xs">

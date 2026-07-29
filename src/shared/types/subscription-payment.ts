@@ -22,11 +22,13 @@ export type PaymentHistoryResult = {
 
 /** Mirrors SERVER's computePaymentSchedule (billing-periods.ts) — the "Jan ✅ Feb ✅ Mar ❌"
  * computed grid, fetched via POST /activation/payment-schedule. Powers both the paid/pending
- * calendar on BusinessProfileRoute and the "pay in advance" period picker's pricing. */
+ * calendar on BusinessProfileRoute and the "pay in advance" period picker's pricing.
+ * "overdue" = unpaid and before the current period (red, genuinely late).
+ * "due" = unpaid and IS the current period (amber, due now but not yet late). */
 export type BillingPeriodEntry = {
   key: string;
   label: string;
-  status: "paid" | "pending" | "future";
+  status: "paid" | "overdue" | "due" | "future";
 };
 
 export type PaymentScheduleResult = {

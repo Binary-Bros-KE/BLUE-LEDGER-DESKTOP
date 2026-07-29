@@ -65,8 +65,8 @@ export function PayNowModal({
       .then((result) => {
         setSchedule(result);
         if (result) {
-          const pendingCount = result.periods.filter((entry) => entry.status === "pending").length;
-          setPeriodCount(Math.max(1, pendingCount));
+          const owedCount = result.periods.filter((entry) => entry.status === "overdue" || entry.status === "due").length;
+          setPeriodCount(Math.max(1, owedCount));
         }
       })
       .finally(() => setScheduleLoading(false));
@@ -194,6 +194,19 @@ export function PayNowModal({
           <div className="mt-4">
             {(state === "idle" || state === "error") && (
               <div>
+                {(() => {
+                  const owed = schedule.periods.filter((entry) => entry.status === "overdue" || entry.status === "due");
+                  if (owed.length === 0) return null;
+                  return (
+                    <div className="mb-3 rounded-lg border border-danger/30 bg-danger-soft px-3.5 py-2.5">
+                      <p className="text-[10px] font-extrabold uppercase tracking-wider text-danger">
+                        {owed.filter((e) => e.status === "overdue").length > 0 ? "Overdue" : "Due Now"}
+                      </p>
+                      <p className="mt-1 text-xs font-bold text-ink">{owed.map((entry) => entry.label).join(", ")}</p>
+                    </div>
+                  );
+                })()}
+
                 <Field label="M-Pesa Phone Number" value={phone} onChange={setPhone} placeholder="e.g. 0712 345 678" />
 
                 <div className="mt-3 flex items-center justify-between rounded-lg border border-line bg-soft/60 px-3.5 py-2.5">
