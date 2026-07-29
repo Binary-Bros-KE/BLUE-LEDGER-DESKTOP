@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, CreditCard, Landmark, Loader2, Minus, Plus, RefreshCw, Smartphone, Wallet, XCircle } from "lucide-react";
+import { CheckCircle2, CreditCard, Loader2, Minus, Plus, RefreshCw, Smartphone, Wallet, XCircle } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { Field } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
@@ -12,10 +12,8 @@ import type { PaymentScheduleResult } from "@shared/types/subscription-payment";
 
 const PAYMENT_METHODS = [
   { key: "mpesa", label: "M-Pesa", icon: Smartphone },
-  { key: "airtel", label: "Airtel Money", icon: Smartphone },
   { key: "card", label: "Card", icon: CreditCard },
-  { key: "paypal", label: "PayPal", icon: Wallet },
-  { key: "bank", label: "Bank Transfer", icon: Landmark }
+  { key: "paypal", label: "PayPal", icon: Wallet }
 ] as const;
 
 const MPESA_MESSAGES: Record<BillingMpesaTransactionStatus, string> = {
