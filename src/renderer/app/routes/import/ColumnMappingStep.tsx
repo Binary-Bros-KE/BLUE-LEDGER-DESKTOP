@@ -78,6 +78,18 @@ export function ColumnMappingStep({
               />
             )}
 
+            {!isMapped && field.kind === "enum" && field.enumOptions && (
+              <DefaultForAllRows
+                label="Use this value for every row"
+                value={fieldDefaults[field.key] ?? ""}
+                onChange={(value) => onFieldDefaultsChange({ ...fieldDefaults, [field.key]: value })}
+                options={[
+                  { value: "", label: field.required ? "— No default (rows will error) —" : "— No default —" },
+                  ...field.enumOptions
+                ]}
+              />
+            )}
+
             {!isMapped && field.kind === "storefront" && (
               <DefaultForAllRows
                 label="Assign every row to one storefront"

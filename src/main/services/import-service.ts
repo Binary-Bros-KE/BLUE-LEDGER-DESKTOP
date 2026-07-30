@@ -141,6 +141,20 @@ function normalizeForMatch(raw: string): string {
   return raw.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+/** Whether a REQUIRED-but-unmapped field is still OK to proceed with, because every row will fall
+ * back to a fixed default value instead (see buildRowCandidate's own "blank" branches below) — used
+ * by resolveImportRows' upfront mapping check, which otherwise blocked the whole file before any
+ * row was even looked at, with no awareness that a default could satisfy a required field the same
+ * way a real mapped column does. */
+function fieldHasUsableDefault(field: ImportFieldDefinition, fieldDefaults: ImportFieldDefaults): boolean {
+  const value = fieldDefaults[field.key];
+  if (!value) return false;
+  if (field.kind === "enum") {
+    return field.enumOptions?.some((option) => option.value === value) ?? false;
+  }
+  return true;
+}
+
 /** Builds one row's candidate input object + validation errors from its raw mapped cell text —
  * shared by preview and commit so they can never classify the same row differently. */
 function buildRowCandidate(
@@ -205,8 +219,21 @@ function buildRowCandidate(
       }
       case "enum": {
         if (blank) {
-          if (field.required) errors.push(`${field.label} is required`);
-          candidate[field.key] = null;
+          // Same fallback shape as "boolean" above — set once in the mapping UI when this field
+          // isn't mapped to any column at all, applied to every row. Also covers a mapped-but-messy
+          // column: the operator can unmap it here and use a fixed value instead of fighting a file
+          // whose own vocabulary doesn't match our enum (e.g. "Business"/"Individual" instead of
+          // Retail/Wholesale/Corporate/Walk-In) row by row.
+          const fallback = fieldDefaults[field.key];
+          const fallbackMatch = fallback
+            ? field.enumOptions?.find((option) => option.value === fallback)
+            : undefined;
+          if (fallbackMatch) {
+            candidate[field.key] = fallbackMatch.value;
+          } else {
+            if (field.required) errors.push(`${field.label} is required`);
+            candidate[field.key] = null;
+          }
         } else {
           const normalized = normalizeForMatch(raw);
           const match = field.enumOptions?.find(
@@ -329,7 +356,7 @@ export function resolveImportRows(
   const fieldDefs = IMPORT_FIELD_DEFINITIONS[entityType];
   const mappingErrors: string[] = [];
   for (const field of fieldDefs) {
-    if (field.required && !columnMapping[field.key]) {
+    if (field.required && !columnMapping[field.key] && !fieldHasUsableDefault(field, fieldDefaults)) {
       mappingErrors.push(`${field.label} is required — map it to a column before continuing`);
     }
   }

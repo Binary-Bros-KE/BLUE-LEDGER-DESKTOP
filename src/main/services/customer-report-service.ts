@@ -13,8 +13,21 @@ import type { SalesTransactionKind } from "@shared/types/report";
 
 const PURCHASE_HISTORY_LIMIT = 200;
 
+// The UTC instant for LOCAL midnight of dateStr — NOT literal "dateStr + Z" (which silently treats
+// the calendar day as UTC, mis-bucketing anything in the first few hours of a local day for any
+// timezone ahead of UTC). new Date(year, month, day) with no "Z"/offset is interpreted in this
+// process's own local timezone, which for this offline-first single-machine app is the exact device
+// the sale was rung up on.
 function startOfDayIso(dateStr: string): string {
-  return `${dateStr}T00:00:00.000Z`;
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return new Date(year ?? 0, (month ?? 1) - 1, day ?? 1).toISOString();
+}
+
+// The device's real local calendar date, right now — deliberately not new Date().toISOString()
+// (UTC), which is wrong by a day for part of the day in any timezone ahead of UTC.
+function localTodayIso(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
 function addDaysIso(dateStr: string, days: number): string {
@@ -103,7 +116,7 @@ export function getOutstandingInvoices(): OutstandingInvoicesSummary {
   const { tenantId } = getCurrentTenant();
   const locationId = getCurrentBranchScope();
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localTodayIso();
   const rows = customerReportRepository.findOutstandingInvoices(tenantId, locationId);
 
   const invoices: OutstandingInvoiceRow[] = rows

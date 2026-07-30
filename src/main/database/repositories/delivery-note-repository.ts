@@ -125,10 +125,36 @@ export function deleteDeliveryNoteForQuotationRow(quotationId: string): void {
 
 export function setDeliveryNoteDeliveredRow(id: string, delivered: boolean): DeliveryNoteRow {
   const now = new Date().toISOString();
+  const db = getDatabase();
 
-  getDatabase()
+  const parent = db.prepare("SELECT sale_id, quotation_id FROM delivery_notes WHERE id = ?").get(id) as
+    | { sale_id: string | null; quotation_id: string | null }
+    | undefined;
+  if (!parent) {
+    throw new Error("Delivery note not found");
+  }
+
+  db
     .prepare("UPDATE delivery_notes SET is_delivered = ?, delivered_at = ?, updated_at = ? WHERE id = ?")
     .run(delivered ? 1 : 0, delivered ? now : null, now, id);
+
+  // Delivery status lives inside the parent sale/quotation's own nested sync payload (see
+  // sync-engine.ts's PAYLOAD_BUILDERS), not as an independent sync unit — migrate.ts's
+  // trg_delivery_notes_reenqueue_sale_au/_quotation_au triggers already re-queue the parent for
+  // push when is_delivered changes, but queuing alone isn't enough: every device's own pull-side
+  // guard for sales/quotations (applySalePulledRow / upsertDocumentHeader) only applies an incoming
+  // payload when its updated_at is strictly newer than what's already stored locally. Since this
+  // update only ever touched delivery_notes.updated_at, the parent's own updated_at never changed,
+  // so a receiving device saw "already same-or-newer" and silently skipped the fresh payload forever
+  // — exactly why "mark delivered" never propagated while "mark invoice as paid" (which writes
+  // straight to the sale row) always did. Bumping the parent's updated_at here, the same way any
+  // other real edit to it would, is what makes the already-correct trigger + payload machinery
+  // actually take effect on the receiving end.
+  if (parent.sale_id) {
+    db.prepare("UPDATE sales SET updated_at = ? WHERE id = ?").run(now, parent.sale_id);
+  } else if (parent.quotation_id) {
+    db.prepare("UPDATE quotations SET updated_at = ? WHERE id = ?").run(now, parent.quotation_id);
+  }
 
   const row = findDeliveryNoteRowById(id);
   if (!row) {

@@ -35,8 +35,28 @@ function toIsoDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+/** The device's real local calendar date, right now — deliberately NOT toIsoDate(new Date()), which
+ * reads UTC date parts off a real "now" moment and is wrong by a day for part of the day in any
+ * timezone ahead of UTC (e.g. at 1am in Nairobi, UTC is still on yesterday's date). Every OTHER
+ * call to toIsoDate in this file converts an already-UTC-constructed abstract calendar Date back to
+ * a string (correct — that Date was never a real "now" moment), so only this one entry point needed
+ * to change. */
+function localTodayIso(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+/** The UTC instant corresponding to LOCAL midnight of dateStr — this is what actually bounds every
+ * report query against completed_at (stored as real UTC instants, see sale-repository.ts). Building
+ * `new Date(year, month, day)` (no "Z", no offset) is interpreted by JS in the CURRENT PROCESS's own
+ * local timezone, which for this single-machine offline-first app is exactly the device the sale was
+ * rung up on — so this is always the right boundary regardless of that device's UTC offset.
+ * Previously this just appended "T00:00:00.000Z" to the date string, silently treating every
+ * calendar day as if it were UTC — for a timezone ahead of UTC, a sale rung up in the first few
+ * hours of a local calendar day landed in the PREVIOUS day's report instead of today's. */
 function startOfDayIso(dateStr: string): string {
-  return `${dateStr}T00:00:00.000Z`;
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return new Date(year ?? 0, (month ?? 1) - 1, day ?? 1).toISOString();
 }
 
 function addDaysIso(dateStr: string, days: number): string {
@@ -258,14 +278,27 @@ function sumPurchasePaymentsBySupplier(
  * sale recognizes 100% of its margin; a half-paid invoice recognizes half.
  * This is why Net Revenue can never exceed what's realistically been earned,
  * unlike a pure accrual figure that counts profit on goods nobody's paid for.
+ *
+ * feeRows folds in delivery/service-charge FEE revenue (what the customer was charged, e.g. a
+ * delivery fee) the same way product margin is recognized — proportional to fractionPaid. Its COST
+ * side (e.g. what the rider was actually paid) is deliberately NOT subtracted again here — that's
+ * already deducted once, in full, via findServiceAndDeliveryCostsInRange feeding totalExpensesCents.
+ * Before this, the fee showed up in Total Revenue (it's baked into grand_total_cents) but never
+ * anywhere in Net Revenue/Net Profit, while its cost always was — every delivery/service charge
+ * silently ate into Net Profit with no corresponding credit for the money actually collected for it.
  */
-function computeNetRevenueCents(rows: CompletedSaleRow[], itemRows: SaleItemProfitRow[]): number {
+function computeNetRevenueCents(rows: CompletedSaleRow[], itemRows: SaleItemProfitRow[], feeRows: reportRepository.SaleFeeRow[]): number {
   const bySale = new Map<string, { revenueCents: number; costCents: number }>();
   for (const item of itemRows) {
     const existing = bySale.get(item.sale_id) ?? { revenueCents: 0, costCents: 0 };
     existing.revenueCents += item.line_total_cents;
     existing.costCents += item.quantity * item.buying_price_cents;
     bySale.set(item.sale_id, existing);
+  }
+  for (const feeRow of feeRows) {
+    const existing = bySale.get(feeRow.sale_id) ?? { revenueCents: 0, costCents: 0 };
+    existing.revenueCents += feeRow.fee_cents;
+    bySale.set(feeRow.sale_id, existing);
   }
 
   let netRevenueCents = 0;
@@ -301,8 +334,10 @@ export function getSalesFinancialOverview(input: unknown): SalesFinancialOvervie
 
   const rows = reportRepository.findCompletedSaleRows(tenantId, locationId, startIso, endIsoExclusive);
   const itemRows = reportRepository.findSaleItemRowsInRange(tenantId, locationId, startIso, endIsoExclusive);
+  const feeRows = reportRepository.findSaleFeeRowsInRange(tenantId, locationId, startIso, endIsoExclusive);
   const previousRows = reportRepository.findCompletedSaleRows(tenantId, locationId, previousStartIso, previousEndIsoExclusive);
   const previousItemRows = reportRepository.findSaleItemRowsInRange(tenantId, locationId, previousStartIso, previousEndIsoExclusive);
+  const previousFeeRows = reportRepository.findSaleFeeRowsInRange(tenantId, locationId, previousStartIso, previousEndIsoExclusive);
 
   // Invoice-payment and return-refund candidates fetched once and reused for both periods.
   const invoiceCandidates = reportRepository.findInvoicePaymentCandidateRows(tenantId, locationId, endIsoExclusive);
@@ -323,8 +358,8 @@ export function getSalesFinancialOverview(input: unknown): SalesFinancialOvervie
     previousEndIsoExclusive
   );
 
-  const netRevenueCents = computeNetRevenueCents(rows, itemRows);
-  const previousNetRevenueCents = computeNetRevenueCents(previousRows, previousItemRows);
+  const netRevenueCents = computeNetRevenueCents(rows, itemRows, feeRows);
+  const previousNetRevenueCents = computeNetRevenueCents(previousRows, previousItemRows, previousFeeRows);
 
   const expenseCategoryRows = reportRepository.findExpenseCategoryBreakdownInRange(tenantId, locationId, startDate, endDate);
   const expensesByCategory = toBreakdownEntries(
@@ -882,7 +917,7 @@ function shiftAnchor(mode: Exclude<SalesReportMode, "custom">, anchor: string, s
 }
 
 function currentAnchorForMode(mode: Exclude<SalesReportMode, "custom">): string {
-  const today = toIsoDate(new Date());
+  const today = localTodayIso();
   if (mode === "daily") return today;
   if (mode === "weekly") return mondayOf(today);
   if (mode === "monthly") return today.slice(0, 7);

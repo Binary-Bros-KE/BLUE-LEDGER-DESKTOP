@@ -11,6 +11,13 @@ import {
 import type { Expense } from "@shared/types/expense";
 import type { RecurringBill, RecurringBillCycle, RecurringBillReminderStatus, RecurringBillStatus } from "@shared/types/recurring-bill";
 
+// The device's real local calendar date, right now — deliberately not new Date().toISOString()
+// (UTC), which is wrong by a day for part of the day in any timezone ahead of UTC.
+function localTodayIso(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
 function advanceDateByCycle(dateIso: string, cycle: RecurringBillCycle): string {
   const date = new Date(dateIso);
   const next =
@@ -205,7 +212,7 @@ export function markRecurringBillPaid(id: string, input: unknown): { bill: Recur
   assertBillStorefrontAssignmentAllowed(row.storefront_id, getCurrentBranchScope());
 
   const expense = createExpense({
-    expenseDate: new Date().toISOString().slice(0, 10),
+    expenseDate: localTodayIso(),
     categoryId: row.category_id,
     amountCents: row.amount_cents,
     paidBy: getCurrentEmployeeName(),

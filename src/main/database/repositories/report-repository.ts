@@ -470,6 +470,54 @@ export function findSalariesByEmployeeInRange(
     .all(tenantId, startIso, endIsoExclusive, locationId, locationId) as EmployeeSalaryBreakdownRow[];
 }
 
+export type SaleFeeRow = { sale_id: string; fee_cents: number };
+
+/** Service-charge + delivery FEE (the revenue charged to the customer, not the cost side — see
+ * findServiceAndDeliveryCostsInRange below) per completed sale in range, so Net Revenue can
+ * recognize it as real revenue the same way it recognizes product margin — proportional to how much
+ * of that sale has actually been paid so far. Deliberately per-sale (not a flat period sum): each
+ * amount needs its OWN sale's fractionPaid applied, exactly like SaleItemProfitRow. */
+export function findSaleFeeRowsInRange(
+  tenantId: string,
+  locationId: string | null,
+  startIso: string,
+  endIsoExclusive: string
+): SaleFeeRow[] {
+  return getDatabase()
+    .prepare(
+      `
+      SELECT sale_id, SUM(fee_cents) AS fee_cents FROM (
+        SELECT sc.sale_id AS sale_id, sc.fee_cents AS fee_cents
+        FROM sale_service_charges sc
+        JOIN sales s ON s.id = sc.sale_id
+        WHERE s.tenant_id = ? AND s.sale_status = 'completed'
+          AND s.completed_at >= ? AND s.completed_at < ?
+          AND (? IS NULL OR s.location_id = ?)
+        UNION ALL
+        SELECT dn.sale_id AS sale_id, dn.fee_cents AS fee_cents
+        FROM delivery_notes dn
+        JOIN sales s ON s.id = dn.sale_id
+        WHERE s.tenant_id = ? AND s.sale_status = 'completed'
+          AND s.completed_at >= ? AND s.completed_at < ?
+          AND (? IS NULL OR s.location_id = ?)
+      )
+      GROUP BY sale_id
+    `
+    )
+    .all(
+      tenantId,
+      startIso,
+      endIsoExclusive,
+      locationId,
+      locationId,
+      tenantId,
+      startIso,
+      endIsoExclusive,
+      locationId,
+      locationId
+    ) as SaleFeeRow[];
+}
+
 export type ServiceDeliveryCostTotals = { totalCents: number; documentCount: number };
 
 /** Hidden internal cost_cents on service charges + delivery attached to completed sales in range —

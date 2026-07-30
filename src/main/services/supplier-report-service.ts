@@ -13,8 +13,14 @@ import type {
 const PURCHASE_HISTORY_LIMIT = 200;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// The UTC instant for LOCAL midnight of dateStr — NOT literal "dateStr + Z" (which silently treats
+// the calendar day as UTC, mis-bucketing anything in the first few hours of a local day for any
+// timezone ahead of UTC). new Date(year, month, day) with no "Z"/offset is interpreted in this
+// process's own local timezone, which for this offline-first single-machine app is the exact device
+// the sale was rung up on.
 function startOfDayIso(dateStr: string): string {
-  return `${dateStr}T00:00:00.000Z`;
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return new Date(year ?? 0, (month ?? 1) - 1, day ?? 1).toISOString();
 }
 
 function addDaysIso(dateStr: string, days: number): string {

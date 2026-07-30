@@ -4,8 +4,16 @@ function toIsoDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+/** The device's real local calendar date, right now — deliberately NOT toIsoDate(new Date()), which
+ * reads UTC date parts off a real "now" moment and is wrong by a day for roughly a third of the
+ * day in any timezone ahead of UTC (e.g. at 1am in Nairobi, UTC is still on yesterday's date). Every
+ * OTHER date in this module is an abstract calendar-date string being stepped/compared via UTC
+ * arithmetic purely as a DST-safe technique — that's fine and unrelated to this. This is the one
+ * spot that converts a real moment into "what day is it," and that must follow the device's own
+ * clock, never a stored/assumed timezone. */
 export function todayIso(): string {
-  return toIsoDate(new Date());
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
 function addDaysIso(dateStr: string, days: number): string {
