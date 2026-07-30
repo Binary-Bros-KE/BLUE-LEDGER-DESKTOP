@@ -1,28 +1,38 @@
 import { useEffect, useState } from "react";
 import { format } from "date-fns";
 import { motion } from "framer-motion";
-import { CreditCard, Loader2, Receipt } from "lucide-react";
+import { CreditCard, Loader2, Receipt, ShieldCheck } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { PayNowModal } from "@renderer/shared/components/PayNowModal";
 import { PaymentScheduleCalendar } from "./business-profile/PaymentScheduleCalendar";
+import { cn } from "@renderer/shared/lib/cn";
 import { formatCents } from "@renderer/shared/lib/money";
 import type { SubscriptionPaymentRecord } from "@shared/types/subscription-payment";
+import type { TenantRecord } from "@shared/types/tenant";
 
-function formatDate(value: string | null): string {
-  if (!value) return "—";
+function formatDate(value: string | null, withTime = false): string {
+  if (!value) return withTime ? "Never synced" : "—";
   try {
-    return format(new Date(value), "PP");
+    return format(new Date(value), withTime ? "PP p" : "PP");
   } catch {
     return value;
   }
 }
+
+const licenseStatusTone: Record<TenantRecord["licenseStatus"], "warning" | "success" | "danger"> = {
+  trial: "warning",
+  active: "success",
+  suspended: "danger",
+  cancelled: "danger"
+};
 
 /** Moved out of BusinessProfileRoute.tsx into its own tab — same data, same logic, same
  * window.blueLedger.activation.payments() call and PayNowModal flow, just a dedicated place to
  * live now that it's grown into its own real feature (calendar, pay-in-advance, per-invoice pay)
  * rather than a small section tacked onto the business profile form. */
 export function PaymentsRoute(): React.JSX.Element {
+  const [profile, setProfile] = useState<TenantRecord | null>(null);
   const [payments, setPayments] = useState<{
     recentPayments: SubscriptionPaymentRecord[];
     pendingPayments: SubscriptionPaymentRecord[];
@@ -30,6 +40,18 @@ export function PaymentsRoute(): React.JSX.Element {
   const [paymentsLoading, setPaymentsLoading] = useState(true);
   const [payTarget, setPayTarget] = useState<SubscriptionPaymentRecord | null>(null);
   const [payInAdvanceOpen, setPayInAdvanceOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void window.blueLedger.tenant.getProfile().then((record) => {
+      if (!cancelled) setProfile(record);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,6 +86,61 @@ export function PaymentsRoute(): React.JSX.Element {
         className="pointer-events-none absolute -left-[5px] bottom-2 size-2.5 rounded-full border-2 border-line bg-app"
         aria-hidden="true"
       />
+
+      {profile && (
+        <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">
+                Blue Ledger Management
+              </p>
+              <h2 className="mt-1 text-xl font-extrabold">License &amp; subscription</h2>
+              <p className="mt-1 text-xs font-semibold text-muted">
+                Read-only. These fields will be managed from the online dashboard once cloud sync is available.
+              </p>
+            </div>
+            <ShieldCheck className="size-7 flex-none text-accent" aria-hidden="true" />
+          </div>
+
+          <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <InfoRow label="Tenant ID" value={profile.tenantId} mono />
+            <InfoRow label="License Key" value={profile.licenseKey ?? "Not issued"} mono />
+            <InfoRow label="License Status">
+              <DashedPill tone={licenseStatusTone[profile.licenseStatus]} className="mt-1">
+                {profile.licenseStatus}
+              </DashedPill>
+            </InfoRow>
+            <InfoRow label="Subscription Plan">
+              <DashedPill tone="accent" className="mt-1">
+                {profile.subscriptionPlan}
+              </DashedPill>
+            </InfoRow>
+            <InfoRow label="Subscription Start" value={formatDate(profile.subscriptionStartDate)} />
+            <InfoRow label="Next Due Date" value={formatDate(profile.nextDueDate)} />
+            <InfoRow label="Max Branches" value={String(profile.maxBranches)} mono />
+            <InfoRow label="Max Users" value={String(profile.maxUsers)} mono />
+            <InfoRow label="Max Devices" value={String(profile.maxDevices)} mono />
+            <InfoRow label="App Version" value={profile.appVersion} mono />
+            <InfoRow label="Last Successful Sync" value={formatDate(profile.lastSyncedAt, true)} />
+            <InfoRow label="Last License Check" value={formatDate(profile.lastLicenseCheckAt, true)} />
+            <InfoRow label="Pending Sync Records" value={String(profile.pendingSyncRecords)} mono />
+            <InfoRow label="Suspended">
+              <DashedPill tone={profile.isSuspended ? "danger" : "success"} className="mt-1">
+                {profile.isSuspended ? "Yes" : "No"}
+              </DashedPill>
+            </InfoRow>
+          </div>
+
+          {profile.developerNotes && (
+            <div className="mt-5 rounded-lg border border-line bg-soft p-4">
+              <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
+                Developer Notes
+              </p>
+              <p className="mt-1 text-sm font-semibold text-ink">{profile.developerNotes}</p>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
         <div className="flex items-center justify-between gap-4">
@@ -165,5 +242,33 @@ export function PaymentsRoute(): React.JSX.Element {
         amountLabel={payTarget ? `${payTarget.currency} ${formatCents(payTarget.amountCents)}` : undefined}
       />
     </motion.div>
+  );
+}
+
+function InfoRow({
+  label,
+  value,
+  mono,
+  children
+}: {
+  label: string;
+  value?: string;
+  mono?: boolean;
+  children?: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <div className="min-w-0 rounded-lg border border-line bg-soft px-3 py-2.5">
+      <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">{label}</p>
+      {children ?? (
+        <p
+          className={cn(
+            "mt-1 truncate text-sm font-bold text-ink",
+            mono && "text-xs tabular-nums tracking-tight"
+          )}
+        >
+          {value}
+        </p>
+      )}
+    </div>
   );
 }

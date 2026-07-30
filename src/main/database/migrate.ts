@@ -1909,6 +1909,16 @@ const migrations = [
       -- enqueueUnsyncedRows() sweep (runs at the start of every push cycle) already picks up any
       -- SYNC_ENTITIES-registered table with unsynced rows automatically.
     `
+  },
+  {
+    version: 49,
+    name: "product_unit_of_measure",
+    sql: `
+      -- Deliberately no DEFAULT — NULL is a real, permanent state for a product (not just a
+      -- transitional one to be backfilled), since a lot of existing/imported products never had
+      -- a unit tracked at all and there's no safe value to guess on their behalf.
+      ALTER TABLE products ADD COLUMN unit_of_measure TEXT;
+    `
   }
 ] as const;
 

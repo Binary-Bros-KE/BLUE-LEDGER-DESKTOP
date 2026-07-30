@@ -1,5 +1,37 @@
 export type ProductId = string;
 
+/** Fixed list, not free text — keeps the field usable as a real dropdown everywhere it appears
+ * (create/edit forms, bulk import) instead of accumulating typo'd variants ("Kg", "kgs", "KG"). */
+export const UNIT_OF_MEASURE_OPTIONS = [
+  { value: "piece", label: "Piece" },
+  { value: "pack", label: "Pack" },
+  { value: "box", label: "Box" },
+  { value: "carton", label: "Carton" },
+  { value: "set", label: "Set" },
+  { value: "kg", label: "Kilogram (kg)" },
+  { value: "g", label: "Gram (g)" },
+  { value: "L", label: "Litre (L)" },
+  { value: "mL", label: "Millilitre (mL)" },
+  { value: "m", label: "Metre (m)" },
+  { value: "cm", label: "Centimetre (cm)" },
+  { value: "dozen", label: "Dozen" },
+  { value: "pair", label: "Pair" },
+  { value: "roll", label: "Roll" },
+  { value: "bottle", label: "Bottle" },
+  { value: "can", label: "Can" },
+  { value: "bag", label: "Bag" },
+  { value: "sack", label: "Sack" },
+  { value: "bundle", label: "Bundle" },
+  { value: "tray", label: "Tray" },
+  { value: "tube", label: "Tube" },
+  { value: "jar", label: "Jar" },
+  { value: "bucket", label: "Bucket" },
+  { value: "plate", label: "Plate" },
+  { value: "sheet", label: "Sheet" }
+] as const;
+
+export type UnitOfMeasure = (typeof UNIT_OF_MEASURE_OPTIONS)[number]["value"];
+
 export type ProductStatus = "active" | "inactive";
 
 export type ProductSyncStatus = "pending" | "synced" | "syncing" | "error";
@@ -19,6 +51,9 @@ export type ProductInputFields = {
   categoryId: string | null;
   /** Which storefront this product belongs to — null means it's available to every storefront ("All"). */
   storefrontId: string | null;
+  /** Null is a real, expected state — not every product has a known unit yet (especially one
+   * created via bulk import from a migration file that never tracked this). */
+  unitOfMeasure: UnitOfMeasure | null;
   buyingPriceCents: number;
   sellingPriceCents: number;
   wholesalePriceCents: number | null;

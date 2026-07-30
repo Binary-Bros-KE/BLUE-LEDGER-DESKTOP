@@ -9,7 +9,7 @@ import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { fromCents, toCents } from "@renderer/shared/lib/money";
 import type { Category } from "@shared/types/category";
 import type { Location } from "@shared/types/location";
-import type { Product } from "@shared/types/product";
+import { UNIT_OF_MEASURE_OPTIONS, type Product } from "@shared/types/product";
 
 type FormState = {
   sku: string;
@@ -20,6 +20,7 @@ type FormState = {
   description: string;
   categoryId: string;
   storefrontId: string;
+  unitOfMeasure: string;
   buyingPrice: string;
   sellingPrice: string;
   wholesalePrice: string;
@@ -42,6 +43,7 @@ function toFormState(product: Product): FormState {
     description: product.description ?? "",
     categoryId: product.categoryId ?? "",
     storefrontId: product.storefrontId ?? "",
+    unitOfMeasure: product.unitOfMeasure ?? "",
     buyingPrice: fromCents(product.buyingPriceCents),
     sellingPrice: fromCents(product.sellingPriceCents),
     wholesalePrice: product.wholesalePriceCents !== null ? fromCents(product.wholesalePriceCents) : "",
@@ -146,6 +148,7 @@ export function ProductEditModal({
         description: form.description,
         categoryId: form.categoryId ? form.categoryId : null,
         storefrontId: form.storefrontId ? form.storefrontId : null,
+        unitOfMeasure: form.unitOfMeasure ? form.unitOfMeasure : null,
         buyingPriceCents: toCents(form.buyingPrice),
         sellingPriceCents: toCents(form.sellingPrice),
         wholesalePriceCents: form.wholesalePrice.trim() ? toCents(form.wholesalePrice) : null,
@@ -267,6 +270,12 @@ export function ProductEditModal({
             value={form.supplierSku}
             onChange={(value) => updateField("supplierSku", value)}
             placeholder="e.g. supplier's own code"
+          />
+          <SelectField
+            label="Unit of Measure"
+            value={form.unitOfMeasure}
+            onChange={(value) => updateField("unitOfMeasure", value)}
+            options={[{ value: "", label: "Not set" }, ...UNIT_OF_MEASURE_OPTIONS]}
           />
           <TextAreaField
             label="Description"

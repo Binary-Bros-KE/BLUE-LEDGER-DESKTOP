@@ -275,6 +275,13 @@ export const navGroups: NavGroup[] = [
         description: "Branches & warehouses",
         icon: Store,
         permissionModule: "locations"
+      },
+      {
+        key: "data-import",
+        label: "Data Import",
+        description: "Bulk import products, customers & suppliers",
+        icon: FileSpreadsheet,
+        permissionModule: "data_import"
       }
     ]
   },
@@ -288,13 +295,6 @@ export const navGroups: NavGroup[] = [
         description: "Sync status & queue",
         icon: RefreshCw,
         permissionModule: "cloud_sync"
-      },
-      {
-        key: "data-import",
-        label: "Data Import",
-        description: "Bulk import products, customers & suppliers",
-        icon: FileSpreadsheet,
-        permissionModule: "data_import"
       },
       {
         key: "settings",

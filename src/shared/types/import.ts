@@ -1,4 +1,5 @@
 import { CUSTOMER_TYPE_OPTIONS } from "@shared/types/customer";
+import { UNIT_OF_MEASURE_OPTIONS } from "@shared/types/product";
 import { SUPPLIER_PAYMENT_OPTION_OPTIONS } from "@shared/types/supplier";
 
 export type ImportEntityType = "products" | "customers" | "suppliers";
@@ -10,8 +11,12 @@ export const IMPORT_ENTITY_OPTIONS: Array<{ value: ImportEntityType; label: stri
 ];
 
 /** How a mapped column's raw text gets parsed/resolved. "category"/"storefront" resolve a plain
- * name (typed in the spreadsheet) to an internal id via a name lookup — see import-service.ts. */
-export type ImportFieldKind = "text" | "number" | "money" | "boolean" | "enum" | "category" | "storefront";
+ * name (typed in the spreadsheet) to an internal id via a name lookup — see import-service.ts.
+ * "stockQuantity" is Products-only and depends on "storefront" having already resolved earlier in
+ * the same field list (see PRODUCT_FIELDS' own ordering comment) — it turns into the same
+ * `openingStock: [{locationId, quantity}]` shape createProduct's own "New Product" form already
+ * sends, so an imported row gets real stock the exact same way a manually-created product does. */
+export type ImportFieldKind = "text" | "number" | "money" | "boolean" | "enum" | "category" | "storefront" | "stockQuantity";
 
 export type ImportFieldDefinition = {
   /** Matches the underlying create-schema's own field name (sku, name, buyingPriceCents, ...). */
@@ -32,6 +37,13 @@ const PRODUCT_FIELDS: ImportFieldDefinition[] = [
   { key: "name", label: "Product Name", required: true, kind: "text", aliases: ["name", "product name", "item name"] },
   { key: "category", label: "Category", required: false, kind: "category", aliases: ["category", "product category"] },
   { key: "storefront", label: "Storefront", required: false, kind: "storefront", aliases: ["storefront", "location", "branch", "store"] },
+  // Must come AFTER "storefront" above — buildRowCandidate resolves fields in this exact array
+  // order, and this one reads candidate.storefrontId (already resolved by "storefront"'s own case)
+  // to know which location the imported quantity belongs to.
+  { key: "openingStockQuantity", label: "Stock Quantity (At Hand)", required: false, kind: "stockQuantity", aliases: ["stock", "stock quantity", "quantity", "qty", "quantity in stock", "at hand", "stock on hand", "current stock", "opening stock"] },
+  // Nullable/optional on purpose — a lot of real import files (especially migrated from another
+  // system) never tracked this at all, and there's no safe value to guess on their behalf.
+  { key: "unitOfMeasure", label: "Unit of Measure", required: false, kind: "enum", aliases: ["unit of measure", "uom", "unit", "units"], enumOptions: UNIT_OF_MEASURE_OPTIONS },
   { key: "buyingPriceCents", label: "Buying Price", required: true, kind: "money", aliases: ["buying price", "cost price", "purchase price"] },
   { key: "sellingPriceCents", label: "Selling Price", required: true, kind: "money", aliases: ["selling price", "price", "retail price"] },
   { key: "wholesalePriceCents", label: "Wholesale Price", required: false, kind: "money", aliases: ["wholesale price"] },
@@ -96,10 +108,21 @@ export type ImportParsedFile = {
 /** Target field key -> source header string, or null if that field isn't mapped to any column. */
 export type ImportColumnMapping = Record<string, string | null>;
 
+/** Target field key -> a fixed value applied to EVERY row when that field isn't mapped to a source
+ * column at all (a real-world import file usually just doesn't have a "storefront" column — every
+ * row in the file is for the one shop it came from). Only meaningful for "boolean" kind fields
+ * (stores "true"/"false", parsed the same way a mapped cell would be) and "storefront" kind fields
+ * (stores a real Location id chosen from a picker, used directly — never re-resolved by name).
+ * Ignored for every other field kind. See import-service.ts's buildRowCandidate for how this is
+ * consulted — only in the same "blank" branch a genuinely-unmapped/empty-cell field already hits,
+ * so this is a pure fallback, never overrides real column data. */
+export type ImportFieldDefaults = Record<string, string>;
+
 export type ImportPreviewRequest = {
   entityType: ImportEntityType;
   rows: Array<Record<string, string>>;
   columnMapping: ImportColumnMapping;
+  fieldDefaults: ImportFieldDefaults;
   /** Off by default — money columns are assumed to hold plain decimal amounts (e.g. "150.00"),
    * matching how anyone typing prices into a spreadsheet actually writes them. Turn on only for a
    * file whose money columns already hold raw integer cents (e.g. a direct export of Blue Ledger's

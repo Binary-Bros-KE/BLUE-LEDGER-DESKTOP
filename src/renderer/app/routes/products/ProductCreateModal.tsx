@@ -9,7 +9,7 @@ import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { toCents } from "@renderer/shared/lib/money";
 import type { Category } from "@shared/types/category";
 import { isStorefrontType, type Location } from "@shared/types/location";
-import type { Product } from "@shared/types/product";
+import { UNIT_OF_MEASURE_OPTIONS, type Product } from "@shared/types/product";
 
 type FormState = {
   sku: string;
@@ -20,6 +20,7 @@ type FormState = {
   description: string;
   categoryId: string;
   storefrontId: string;
+  unitOfMeasure: string;
   buyingPrice: string;
   sellingPrice: string;
   wholesalePrice: string;
@@ -42,6 +43,7 @@ function emptyForm(): FormState {
     description: "",
     categoryId: "",
     storefrontId: "",
+    unitOfMeasure: "",
     buyingPrice: "0.00",
     sellingPrice: "0.00",
     wholesalePrice: "",
@@ -194,6 +196,7 @@ export function ProductCreateModal({
         description: form.description,
         categoryId: form.categoryId ? form.categoryId : null,
         storefrontId: form.storefrontId ? form.storefrontId : null,
+        unitOfMeasure: form.unitOfMeasure ? form.unitOfMeasure : null,
         buyingPriceCents: toCents(form.buyingPrice),
         sellingPriceCents: toCents(form.sellingPrice),
         wholesalePriceCents: form.wholesalePrice.trim() ? toCents(form.wholesalePrice) : null,
@@ -315,6 +318,12 @@ export function ProductCreateModal({
             value={form.supplierSku}
             onChange={(value) => updateField("supplierSku", value)}
             placeholder="e.g. supplier's own code"
+          />
+          <SelectField
+            label="Unit of Measure"
+            value={form.unitOfMeasure}
+            onChange={(value) => updateField("unitOfMeasure", value)}
+            options={[{ value: "", label: "Not set" }, ...UNIT_OF_MEASURE_OPTIONS]}
           />
           <TextAreaField
             label="Description"

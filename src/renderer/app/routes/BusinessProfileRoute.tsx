@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { format } from "date-fns";
 import { motion } from "framer-motion";
 import {
   Camera,
@@ -9,11 +8,9 @@ import {
   Loader2,
   PenLine,
   Save,
-  ShieldCheck,
   X
 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
-import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { Field, SelectField } from "@renderer/shared/components/form-fields";
 import { StampBadge } from "@renderer/shared/components/StampBadge";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
@@ -72,22 +69,6 @@ function toFormState(record: TenantRecord): FormState {
     ownerEmail: record.ownerEmail ?? ""
   };
 }
-
-function formatDate(value: string | null, withTime = false): string {
-  if (!value) return withTime ? "Never synced" : "—";
-  try {
-    return format(new Date(value), withTime ? "PP p" : "PP");
-  } catch {
-    return value;
-  }
-}
-
-const licenseStatusTone: Record<TenantRecord["licenseStatus"], "warning" | "success" | "danger"> = {
-  trial: "warning",
-  active: "success",
-  suspended: "danger",
-  cancelled: "danger"
-};
 
 export function BusinessProfileRoute(): React.JSX.Element {
   const { can } = usePermissions();
@@ -418,60 +399,6 @@ export function BusinessProfileRoute(): React.JSX.Element {
           )}
         </div>
       </form>
-
-      <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">
-              Blue Ledger Management
-            </p>
-            <h2 className="mt-1 text-xl font-extrabold">License &amp; subscription</h2>
-            <p className="mt-1 text-xs font-semibold text-muted">
-              Read-only. These fields will be managed from the online dashboard once cloud sync is available.
-            </p>
-          </div>
-          <ShieldCheck className="size-7 flex-none text-accent" aria-hidden="true" />
-        </div>
-
-        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <InfoRow label="Tenant ID" value={profile.tenantId} mono />
-          <InfoRow label="License Key" value={profile.licenseKey ?? "Not issued"} mono />
-          <InfoRow label="License Status">
-            <DashedPill tone={licenseStatusTone[profile.licenseStatus]} className="mt-1">
-              {profile.licenseStatus}
-            </DashedPill>
-          </InfoRow>
-          <InfoRow label="Subscription Plan">
-            <DashedPill tone="accent" className="mt-1">
-              {profile.subscriptionPlan}
-            </DashedPill>
-          </InfoRow>
-          <InfoRow label="Subscription Start" value={formatDate(profile.subscriptionStartDate)} />
-          <InfoRow label="Next Due Date" value={formatDate(profile.nextDueDate)} />
-          <InfoRow label="Max Branches" value={String(profile.maxBranches)} mono />
-          <InfoRow label="Max Users" value={String(profile.maxUsers)} mono />
-          <InfoRow label="Max Devices" value={String(profile.maxDevices)} mono />
-          <InfoRow label="App Version" value={profile.appVersion} mono />
-          <InfoRow label="Last Successful Sync" value={formatDate(profile.lastSyncedAt, true)} />
-          <InfoRow label="Last License Check" value={formatDate(profile.lastLicenseCheckAt, true)} />
-          <InfoRow label="Pending Sync Records" value={String(profile.pendingSyncRecords)} mono />
-          <InfoRow label="Suspended">
-            <DashedPill tone={profile.isSuspended ? "danger" : "success"} className="mt-1">
-              {profile.isSuspended ? "Yes" : "No"}
-            </DashedPill>
-          </InfoRow>
-        </div>
-
-        {profile.developerNotes && (
-          <div className="mt-5 rounded-lg border border-line bg-soft p-4">
-            <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
-              Developer Notes
-            </p>
-            <p className="mt-1 text-sm font-semibold text-ink">{profile.developerNotes}</p>
-          </div>
-        )}
-      </section>
-
     </motion.div>
   );
 }
@@ -514,34 +441,6 @@ function FormSection({
     <div className="mt-5 border-t border-line pt-5">
       <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">{title}</p>
       <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">{children}</div>
-    </div>
-  );
-}
-
-function InfoRow({
-  label,
-  value,
-  mono,
-  children
-}: {
-  label: string;
-  value?: string;
-  mono?: boolean;
-  children?: React.ReactNode;
-}): React.JSX.Element {
-  return (
-    <div className="min-w-0 rounded-lg border border-line bg-soft px-3 py-2.5">
-      <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">{label}</p>
-      {children ?? (
-        <p
-          className={cn(
-            "mt-1 truncate text-sm font-bold text-ink",
-            mono && "text-xs tabular-nums tracking-tight"
-          )}
-        >
-          {value}
-        </p>
-      )}
     </div>
   );
 }

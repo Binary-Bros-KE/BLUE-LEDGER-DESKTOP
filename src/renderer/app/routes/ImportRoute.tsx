@@ -10,11 +10,13 @@ import { EntityPicker } from "@renderer/app/routes/import/EntityPicker";
 import { ImportPreviewTable } from "@renderer/app/routes/import/ImportPreviewTable";
 import { ImportResultsPanel } from "@renderer/app/routes/import/ImportResultsPanel";
 import { autoMatchColumnMapping } from "@renderer/app/routes/import/field-aliases";
+import { isStorefrontType } from "@shared/types/location";
 import {
   IMPORT_FIELD_DEFINITIONS,
   type ImportColumnMapping,
   type ImportCommitResult,
   type ImportEntityType,
+  type ImportFieldDefaults,
   type ImportParsedFile,
   type ImportPreviewResult
 } from "@shared/types/import";
@@ -29,6 +31,8 @@ export function ImportRoute(): React.JSX.Element {
   const [entityType, setEntityType] = useState<ImportEntityType>("products");
   const [parsedFile, setParsedFile] = useState<ImportParsedFile | null>(null);
   const [mapping, setMapping] = useState<ImportColumnMapping>({});
+  const [fieldDefaults, setFieldDefaults] = useState<ImportFieldDefaults>({});
+  const [storefronts, setStorefronts] = useState<Array<{ id: string; locationName: string }>>([]);
   const [moneyInCents, setMoneyInCents] = useState(false);
   const [preview, setPreview] = useState<ImportPreviewResult | null>(null);
   const [commitResult, setCommitResult] = useState<ImportCommitResult | null>(null);
@@ -39,8 +43,25 @@ export function ImportRoute(): React.JSX.Element {
 
   const fields = IMPORT_FIELD_DEFINITIONS[entityType];
 
+  // Loaded once — the storefront-default picker's own options (see ColumnMappingStep.tsx). Only
+  // ever read, never written by this screen, so a one-time fetch on mount is enough.
+  useEffect(() => {
+    void window.blueLedger.location.list().then((locations) => {
+      setStorefronts(
+        locations
+          .filter((location) => location.status === "active" && isStorefrontType(location.locationType))
+          .map((location) => ({ id: location.id, locationName: location.locationName }))
+      );
+    });
+  }, []);
+
   const refreshPreview = useCallback(
-    async (nextMapping: ImportColumnMapping, file: ImportParsedFile, nextMoneyInCents: boolean) => {
+    async (
+      nextMapping: ImportColumnMapping,
+      nextFieldDefaults: ImportFieldDefaults,
+      file: ImportParsedFile,
+      nextMoneyInCents: boolean
+    ) => {
       setLoadingPreview(true);
       setError(null);
       try {
@@ -48,6 +69,7 @@ export function ImportRoute(): React.JSX.Element {
           entityType,
           rows: file.rows,
           columnMapping: nextMapping,
+          fieldDefaults: nextFieldDefaults,
           moneyInCents: nextMoneyInCents
         });
         setPreview(result);
@@ -60,13 +82,13 @@ export function ImportRoute(): React.JSX.Element {
     [entityType]
   );
 
-  // Debounced live preview whenever the mapping (or the cents toggle) changes — mirrors the
-  // mapping table so the user sees the create/update/error split update as they adjust things.
+  // Debounced live preview whenever the mapping/defaults (or the cents toggle) change — mirrors
+  // the mapping table so the user sees the create/update/error split update as they adjust things.
   useEffect(() => {
     if (step !== "map" || !parsedFile) return;
-    const timeout = setTimeout(() => void refreshPreview(mapping, parsedFile, moneyInCents), 300);
+    const timeout = setTimeout(() => void refreshPreview(mapping, fieldDefaults, parsedFile, moneyInCents), 300);
     return () => clearTimeout(timeout);
-  }, [mapping, moneyInCents, parsedFile, step, refreshPreview]);
+  }, [mapping, fieldDefaults, moneyInCents, parsedFile, step, refreshPreview]);
 
   async function handlePickFile(): Promise<void> {
     setLoadingFile(true);
@@ -76,6 +98,7 @@ export function ImportRoute(): React.JSX.Element {
       if (!file) return;
       setParsedFile(file);
       setMapping(autoMatchColumnMapping(fields, file.headers));
+      setFieldDefaults({});
       setStep("map");
     } catch (err) {
       setError(getErrorMessage(err, "Failed to read that file"));
@@ -93,6 +116,7 @@ export function ImportRoute(): React.JSX.Element {
         entityType,
         rows: parsedFile.rows,
         columnMapping: mapping,
+        fieldDefaults,
         moneyInCents
       });
       setCommitResult(result);
@@ -108,6 +132,7 @@ export function ImportRoute(): React.JSX.Element {
     setStep("entity");
     setParsedFile(null);
     setMapping({});
+    setFieldDefaults({});
     setMoneyInCents(false);
     setPreview(null);
     setCommitResult(null);
@@ -198,7 +223,15 @@ export function ImportRoute(): React.JSX.Element {
             </div>
 
             <div className="mt-4">
-              <ColumnMappingStep fields={fields} headers={parsedFile.headers} mapping={mapping} onChange={setMapping} />
+              <ColumnMappingStep
+                fields={fields}
+                headers={parsedFile.headers}
+                mapping={mapping}
+                onMappingChange={setMapping}
+                fieldDefaults={fieldDefaults}
+                onFieldDefaultsChange={setFieldDefaults}
+                storefronts={storefronts}
+              />
             </div>
 
             <div className="mt-4">

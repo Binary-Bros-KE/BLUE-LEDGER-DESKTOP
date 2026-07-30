@@ -1,10 +1,19 @@
 import { z } from "zod";
 import { optionalText } from "@shared/schemas/common";
+import { UNIT_OF_MEASURE_OPTIONS } from "@shared/types/product";
 
 const nullableId = z
   .string()
   .trim()
   .min(1)
+  .nullable()
+  .optional()
+  .transform((value) => (value ? value : null));
+
+const unitOfMeasureValues = UNIT_OF_MEASURE_OPTIONS.map((option) => option.value) as [string, ...string[]];
+// Nullable/optional on purpose — bulk-imported or legacy products may never have this set.
+const nullableUnitOfMeasure = z
+  .enum(unitOfMeasureValues)
   .nullable()
   .optional()
   .transform((value) => (value ? value : null));
@@ -38,6 +47,7 @@ export const productCreateSchema = z.object({
   description: optionalText(1000),
   categoryId: nullableId,
   storefrontId: nullableId,
+  unitOfMeasure: nullableUnitOfMeasure,
   buyingPriceCents: priceCents,
   sellingPriceCents: priceCents,
   wholesalePriceCents: nullablePriceCents,

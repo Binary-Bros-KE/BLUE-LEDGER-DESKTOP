@@ -82,7 +82,11 @@ export function LoginRoute(): React.JSX.Element {
         Point of Sale <span className="text-white/20">·</span> POS
       </div>
 
-      <div className="flex w-full items-center justify-between gap-16">
+      {/* max-w caps the gap this justify-between row leaves between the headline and the card —
+          uncapped, that gap just kept growing on a monitor much wider than the ~1440px this was
+          designed around, which is what actually made the screen look sparse/off on a large
+          landscape display (nothing was broken, it just had nothing to stop stretching). */}
+      <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-16">
         <div className="flex flex-1 flex-col items-start text-left">
           <h2 className="text-[56px] font-extrabold uppercase leading-[0.95] text-white lg:text-[72px]">
             Track

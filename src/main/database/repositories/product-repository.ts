@@ -13,6 +13,7 @@ export type ProductRow = {
   description: string | null;
   category_id: string | null;
   storefront_id: string | null;
+  unit_of_measure: string | null;
   buying_price_cents: number;
   selling_price_cents: number;
   wholesale_price_cents: number | null;
@@ -130,11 +131,11 @@ export function insertProductRow(
       `
       INSERT INTO products (
         id, tenant_id, sku, barcode, supplier_sku, name, short_name, description,
-        category_id, storefront_id, buying_price_cents, selling_price_cents, wholesale_price_cents,
+        category_id, storefront_id, unit_of_measure, buying_price_cents, selling_price_cents, wholesale_price_cents,
         wholesale_min_quantity, minimum_price_cents, tax_rate, reorder_level, track_stock,
         allow_negative_stock, image_path, status, created_at, updated_at, created_by, sync_status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
     `
     )
     .run(
@@ -148,6 +149,7 @@ export function insertProductRow(
       input.description,
       input.categoryId,
       input.storefrontId,
+      input.unitOfMeasure,
       input.buyingPriceCents,
       input.sellingPriceCents,
       input.wholesalePriceCents,
@@ -188,6 +190,7 @@ export function updateProductRow(
         description = ?,
         category_id = ?,
         storefront_id = ?,
+        unit_of_measure = ?,
         buying_price_cents = ?,
         selling_price_cents = ?,
         wholesale_price_cents = ?,
@@ -213,6 +216,7 @@ export function updateProductRow(
       input.description,
       input.categoryId,
       input.storefrontId,
+      input.unitOfMeasure,
       input.buyingPriceCents,
       input.sellingPriceCents,
       input.wholesalePriceCents,
@@ -261,6 +265,7 @@ export function mapProductRow(row: ProductRow): Product {
     description: row.description,
     categoryId: row.category_id,
     storefrontId: row.storefront_id,
+    unitOfMeasure: row.unit_of_measure as Product["unitOfMeasure"],
     buyingPriceCents: row.buying_price_cents,
     sellingPriceCents: row.selling_price_cents,
     wholesalePriceCents: row.wholesale_price_cents,

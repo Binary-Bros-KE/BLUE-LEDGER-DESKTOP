@@ -4,12 +4,15 @@ export const importEntityTypeSchema = z.enum(["products", "customers", "supplier
 
 export const importColumnMappingSchema = z.record(z.string(), z.string().nullable());
 
+export const importFieldDefaultsSchema = z.record(z.string(), z.string());
+
 export const importRowSchema = z.record(z.string(), z.string());
 
 export const importPreviewRequestSchema = z.object({
   entityType: importEntityTypeSchema,
   rows: z.array(importRowSchema),
   columnMapping: importColumnMappingSchema,
+  fieldDefaults: importFieldDefaultsSchema.default({}),
   moneyInCents: z.boolean()
 });
 

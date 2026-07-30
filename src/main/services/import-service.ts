@@ -7,11 +7,13 @@ import * as locationRepository from "@main/database/repositories/location-reposi
 import * as productRepository from "@main/database/repositories/product-repository";
 import * as supplierRepository from "@main/database/repositories/supplier-repository";
 import { requirePermission } from "@main/services/auth-service";
+import { createCategory } from "@main/services/category-service";
 import { createCustomer, updateCustomer } from "@main/services/customer-service";
 import { createProduct, updateProduct } from "@main/services/product-service";
 import { createSupplier, updateSupplier } from "@main/services/supplier-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { importCommitRequestSchema, importPreviewRequestSchema } from "@shared/schemas/import";
+import { CATEGORY_COLOR_SWATCHES } from "@shared/types/category";
 import { customerInputSchema } from "@shared/schemas/customer";
 import { productCreateSchema } from "@shared/schemas/product";
 import { supplierInputSchema } from "@shared/schemas/supplier";
@@ -21,6 +23,7 @@ import {
   type ImportColumnMapping,
   type ImportCommitResult,
   type ImportEntityType,
+  type ImportFieldDefaults,
   type ImportFieldDefinition,
   type ImportParsedFile,
   type ImportPreviewResult,
@@ -144,6 +147,7 @@ function buildRowCandidate(
   entityType: ImportEntityType,
   row: Record<string, string>,
   columnMapping: ImportColumnMapping,
+  fieldDefaults: ImportFieldDefaults,
   tenantId: string,
   moneyInCents: boolean,
   errors: string[]
@@ -189,7 +193,9 @@ function buildRowCandidate(
       }
       case "boolean": {
         if (blank) {
-          candidate[field.key] = field.key === "trackStock";
+          const fallback = fieldDefaults[field.key];
+          const fallbackValue = fallback !== undefined ? parseBoolean(fallback) : null;
+          candidate[field.key] = fallbackValue ?? field.key === "trackStock";
         } else {
           const value = parseBoolean(raw);
           if (value === null) errors.push(`${field.label} must be yes/no or true/false`);
@@ -199,7 +205,8 @@ function buildRowCandidate(
       }
       case "enum": {
         if (blank) {
-          errors.push(`${field.label} is required`);
+          if (field.required) errors.push(`${field.label} is required`);
+          candidate[field.key] = null;
         } else {
           const normalized = normalizeForMatch(raw);
           const match = field.enumOptions?.find(
@@ -218,16 +225,62 @@ function buildRowCandidate(
         if (blank) {
           candidate.categoryId = null;
         } else {
-          const matches = categoryRepository.findCategoryRowsByName(tenantId, raw.trim());
-          if (matches.length === 0) errors.push(`Category '${raw.trim()}' was not found`);
-          else if (matches.length > 1) errors.push(`Category '${raw.trim()}' matches ${matches.length} categories — rename one to be unique`);
-          else candidate.categoryId = matches[0]!.id;
+          const name = raw.trim();
+          const matches = categoryRepository.findCategoryRowsByName(tenantId, name);
+          if (matches.length > 1) {
+            errors.push(`Category '${name}' matches ${matches.length} categories — rename one to be unique`);
+          } else if (matches.length === 1) {
+            candidate.categoryId = matches[0]!.id;
+          } else {
+            // Not found — auto-create it as a new top-level category rather than blocking the
+            // whole import on a data-migration reality (an import file's categories almost never
+            // already exist as real Category rows). This insert is a real, immediately-visible
+            // synchronous write, so any LATER row in this same file with the same name finds it
+            // via the same lookup above — it only ever gets created once per unique name.
+            try {
+              const created = createCategory({
+                name,
+                description: null,
+                color: CATEGORY_COLOR_SWATCHES[0]!.value,
+                sortOrder: 0,
+                parentId: null
+              });
+              candidate.categoryId = created.id;
+            } catch (err) {
+              errors.push(err instanceof Error ? err.message : `Failed to create category '${name}'`);
+            }
+          }
+        }
+        break;
+      }
+      case "stockQuantity": {
+        // Products-only, and only ever meaningful for a row that will CREATE a new product —
+        // productUpdateSchema omits openingStock entirely (see @shared/schemas/product.ts), so this
+        // is silently dropped for an update anyway. Deliberately not touching an EXISTING product's
+        // stock via import — that's a much riskier "add vs. set" ambiguity a fresh migration import
+        // doesn't need to solve; opening stock is exactly for a product that doesn't exist yet.
+        if (!blank) {
+          const quantity = parseNumber(raw);
+          if (quantity === null || quantity < 0) {
+            errors.push(`${field.label} must be a non-negative number`);
+          } else {
+            const storefrontId = candidate.storefrontId as string | null | undefined;
+            if (!storefrontId) {
+              errors.push(`${field.label} needs a Storefront (map a column, or set a default storefront for all rows) to know where the stock belongs`);
+            } else {
+              candidate.openingStock = [{ locationId: storefrontId, quantity }];
+            }
+          }
         }
         break;
       }
       case "storefront": {
         if (blank) {
-          candidate.storefrontId = null;
+          // Falls back to a real storefront id chosen once in the mapping UI ("assign every
+          // imported product to this one shop") — the overwhelmingly common import shape, since a
+          // migration file almost never has its own storefront column at all. Used directly, no
+          // re-resolution by name, since it already came from a live picker over real locations.
+          candidate.storefrontId = fieldDefaults[field.key] || null;
         } else {
           const matches = locationRepository.findStorefrontRowsByName(tenantId, raw.trim());
           if (matches.length === 0) errors.push(`Storefront '${raw.trim()}' was not found`);
@@ -269,6 +322,7 @@ export function resolveImportRows(
   entityType: ImportEntityType,
   rows: Array<Record<string, string>>,
   columnMapping: ImportColumnMapping,
+  fieldDefaults: ImportFieldDefaults,
   tenantId: string,
   moneyInCents: boolean
 ): { mappingErrors: string[]; resolved: ResolvedImportRow[] } {
@@ -291,7 +345,7 @@ export function resolveImportRows(
   const resolved = rows.map((row, index): ResolvedImportRow => {
     const rowNumber = index + 1;
     const errors: string[] = [];
-    let candidate = buildRowCandidate(entityType, row, columnMapping, tenantId, moneyInCents, errors);
+    let candidate = buildRowCandidate(entityType, row, columnMapping, fieldDefaults, tenantId, moneyInCents, errors);
 
     if (errors.length === 0) {
       const result = schema.safeParse(candidate);
@@ -341,6 +395,7 @@ export function previewImport(input: unknown): ImportPreviewResult {
     parsed.entityType as ImportEntityType,
     parsed.rows,
     parsed.columnMapping,
+    parsed.fieldDefaults,
     tenantId,
     parsed.moneyInCents
   );
@@ -377,6 +432,7 @@ export function commitImport(input: unknown): ImportCommitResult {
     entityType,
     parsed.rows,
     parsed.columnMapping,
+    parsed.fieldDefaults,
     tenantId,
     parsed.moneyInCents
   );

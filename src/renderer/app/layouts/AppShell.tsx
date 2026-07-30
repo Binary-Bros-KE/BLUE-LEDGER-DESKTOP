@@ -41,7 +41,12 @@ export function AppShell({ children }: PropsWithChildren): React.JSX.Element {
     <div className="flex h-screen bg-app text-ink">
       <Sidebar />
 
-      <main className="min-w-0 flex-1 overflow-y-auto px-7 py-6">
+      {/* overflow-x-auto is the safety net: most table-heavy tabs already wrap themselves in their
+          own scroll container, but anything that doesn't (stat-card rows, forms, the checkout grid)
+          had nowhere to go on a narrower-than-1440-design screen — content just rendered past the
+          right edge with no scrollbar to reach it. This doesn't fix any one tab's sizing, it just
+          guarantees nothing is ever permanently unreachable. */}
+      <main className="min-w-0 flex-1 overflow-x-auto overflow-y-auto px-7 py-6">
         <header className="flex items-center justify-between gap-6">
           <div>
             <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">
