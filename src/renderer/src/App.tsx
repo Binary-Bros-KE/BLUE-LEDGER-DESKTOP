@@ -19,6 +19,7 @@ import { LicenseBlockedRoute } from "@renderer/app/routes/LicenseBlockedRoute";
 import { LoginRoute } from "@renderer/app/routes/LoginRoute";
 import { MainStoreRoute } from "@renderer/app/routes/MainStoreRoute";
 import { PaymentMethodsRoute } from "@renderer/app/routes/PaymentMethodsRoute";
+import { PaymentsRoute } from "@renderer/app/routes/PaymentsRoute";
 import { PlaceholderRoute } from "@renderer/app/routes/PlaceholderRoute";
 import { SalesReportRoute } from "@renderer/app/routes/SalesReportRoute";
 import { InventoryReportRoute } from "@renderer/app/routes/InventoryReportRoute";
@@ -166,6 +167,8 @@ export function App(): React.JSX.Element {
         <CloudSyncRoute />
       ) : activeNavKey === "data-import" ? (
         <ImportRoute />
+      ) : activeNavKey === "payments" ? (
+        <PaymentsRoute />
       ) : (
         <PlaceholderRoute
           icon={activeItem.icon}

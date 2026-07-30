@@ -14,6 +14,7 @@ import {
   LayoutDashboard,
   Package,
   PackagePlus,
+  Receipt,
   ReceiptText,
   RefreshCw,
   Settings,
@@ -301,6 +302,15 @@ export const navGroups: NavGroup[] = [
         description: "Preferences & theme",
         icon: Settings,
         permissionModule: "settings"
+      },
+      {
+        key: "payments",
+        label: "Payments",
+        description: "Subscription invoices & payment history",
+        icon: Receipt,
+        // Same gating as when this lived inside Business Profile — preserves the exact same
+        // effective access for every existing role, no role/permission data needs to change.
+        permissionModule: "business_profile"
       }
     ]
   }
