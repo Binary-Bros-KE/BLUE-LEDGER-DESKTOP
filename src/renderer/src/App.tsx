@@ -87,7 +87,7 @@ export function App(): React.JSX.Element {
   // Only a MONTHLY subscription's grace period ever hard-locks the app this way — see
   // shared/lib/grace-period.ts. LIFETIME/CUSTOM tenants never hit this branch (hardLock is always
   // false for them); they only ever see LoginRoute's softer warning banner.
-  const grace = computeGraceStatus(context.tenant.nextDueDate, context.tenant.subscriptionType);
+  const grace = computeGraceStatus(context.tenant.nextDueDate, context.tenant.subscriptionType, context.tenant.licenseStatus);
   if (grace.state === "expired" && grace.hardLock) {
     return <LicenseBlockedRoute status="grace_expired" />;
   }

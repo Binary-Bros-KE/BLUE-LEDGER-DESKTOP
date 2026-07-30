@@ -34,7 +34,7 @@ export function AppShell({ children }: PropsWithChildren): React.JSX.Element {
   // own isSyncDisabledByGracePeriod() gate exactly (same computeGraceStatus call, same fields), so
   // the widget can never claim sync is disabled when it isn't, or vice versa.
   const tenant = useAppStore((state) => state.context?.tenant ?? null);
-  const grace = tenant ? computeGraceStatus(tenant.nextDueDate, tenant.subscriptionType) : null;
+  const grace = tenant ? computeGraceStatus(tenant.nextDueDate, tenant.subscriptionType, tenant.licenseStatus) : null;
   const syncDisabledByGrace = grace?.state === "expired" && !grace.hardLock;
 
   return (

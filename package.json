@@ -78,6 +78,10 @@
       {
         "from": "resources/icons",
         "to": "icons"
+      },
+      {
+        "from": "resources/.env.production",
+        "to": ".env"
       }
     ],
     "win": {

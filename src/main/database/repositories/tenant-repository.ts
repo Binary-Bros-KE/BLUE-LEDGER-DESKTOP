@@ -302,6 +302,7 @@ export function updateTenantLicenseRow(input: {
   licenseStatus: string;
   subscriptionPlan: string;
   subscriptionType: string | null;
+  subscriptionStartDate: string | null;
   nextDueDate: string | null;
   maxBranches: number;
   maxUsers: number;
@@ -325,6 +326,7 @@ export function updateTenantLicenseRow(input: {
         license_status = ?,
         subscription_plan = ?,
         subscription_type = ?,
+        subscription_start_date = ?,
         next_due_date = ?,
         max_branches = ?,
         max_users = ?,
@@ -343,6 +345,7 @@ export function updateTenantLicenseRow(input: {
       input.licenseStatus,
       input.subscriptionPlan,
       input.subscriptionType,
+      input.subscriptionStartDate,
       input.nextDueDate,
       input.maxBranches,
       input.maxUsers,

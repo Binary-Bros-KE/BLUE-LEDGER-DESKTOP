@@ -52,6 +52,7 @@ type RegisterResponse = CloudBusinessProfileFields & {
   deviceSequence: number;
   licenseStatus: string;
   subscriptionType: string | null;
+  subscriptionStartDate: string | null;
   planName: string;
   maxBranches: number;
   maxUsers: number;
@@ -64,6 +65,7 @@ type HeartbeatResponse = CloudBusinessProfileFields & {
   licenseStatus: string;
   nextDueDate: string | null;
   subscriptionType: string | null;
+  subscriptionStartDate: string | null;
   planName: string;
   maxBranches: number;
   maxUsers: number;
@@ -131,6 +133,7 @@ export async function activateInstallation(licenseKey: string): Promise<TenantCo
     licenseStatus: result.licenseStatus.toLowerCase(),
     subscriptionPlan: result.planName,
     subscriptionType: result.subscriptionType?.toLowerCase() ?? null,
+    subscriptionStartDate: result.subscriptionStartDate,
     nextDueDate: null,
     maxBranches: result.maxBranches,
     maxUsers: result.maxUsers,
@@ -203,6 +206,7 @@ export async function checkInWithServer(): Promise<void> {
         licenseStatus: "suspended",
         subscriptionPlan: tenantRow.subscription_plan,
         subscriptionType: tenantRow.subscription_type,
+        subscriptionStartDate: tenantRow.subscription_start_date,
         nextDueDate: tenantRow.next_due_date,
         maxBranches: tenantRow.max_branches,
         maxUsers: tenantRow.max_users,
@@ -221,6 +225,7 @@ export async function checkInWithServer(): Promise<void> {
       licenseStatus: result.licenseStatus.toLowerCase(),
       subscriptionPlan: result.planName,
       subscriptionType: result.subscriptionType?.toLowerCase() ?? null,
+      subscriptionStartDate: result.subscriptionStartDate,
       nextDueDate: result.nextDueDate,
       maxBranches: result.maxBranches,
       maxUsers: result.maxUsers,

@@ -28,7 +28,7 @@ export function LoginRoute(): React.JSX.Element {
   }, [hydrate]);
 
   const grace = context
-    ? computeGraceStatus(context.tenant.nextDueDate, context.tenant.subscriptionType)
+    ? computeGraceStatus(context.tenant.nextDueDate, context.tenant.subscriptionType, context.tenant.licenseStatus)
     : { state: "current" as const };
 
   async function handleSubmit(event: React.FormEvent): Promise<void> {

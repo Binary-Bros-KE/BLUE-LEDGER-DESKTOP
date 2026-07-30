@@ -8,6 +8,7 @@ dist
 .env
 .env.*
 !.env.example
+!resources/.env.production
 blue-ledger*.db
 *.sqlite
 *.zip

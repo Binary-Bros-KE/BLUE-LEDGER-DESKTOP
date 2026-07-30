@@ -28,7 +28,7 @@ import * as supplierRepository from "@main/database/repositories/supplier-reposi
 import * as tenantRepository from "@main/database/repositories/tenant-repository";
 import { API_BASE_URL } from "@main/services/license-service";
 import { computeGraceStatus } from "@shared/lib/grace-period";
-import type { SubscriptionType } from "@shared/types/tenant";
+import type { LicenseStatus, SubscriptionType } from "@shared/types/tenant";
 import type {
   ConflictResolution,
   DriftEntry,
@@ -181,7 +181,11 @@ export function getCloudIdentity(): { tenantId: string; deviceId: string } | nul
 function isSyncDisabledByGracePeriod(): boolean {
   const tenantRow = tenantRepository.findTenantRow();
   if (!tenantRow) return false;
-  const grace = computeGraceStatus(tenantRow.next_due_date, tenantRow.subscription_type as SubscriptionType | null);
+  const grace = computeGraceStatus(
+    tenantRow.next_due_date,
+    tenantRow.subscription_type as SubscriptionType | null,
+    tenantRow.license_status as LicenseStatus
+  );
   return grace.state === "expired";
 }
 
