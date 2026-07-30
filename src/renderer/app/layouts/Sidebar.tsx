@@ -94,7 +94,7 @@ export function Sidebar(): React.JSX.Element {
 
       <div className={cn("flex items-center gap-2.5 px-4  border-b-2 border-white/65 pb-2", collapsed && "justify-center px-0")}>
         <div className="grid flex-none place-items-center rounded-xl text-white shadow-soft">
-          <img src="/resources/icons/BLUE_LEDGER.png" alt="Logo" className="size-8 rounded-lg" />
+          <img src="./resources/icons/BLUE_LEDGER.png" alt="Logo" className="size-8 rounded-lg" />
         </div>
         <AnimatePresence initial={false}>
           {!collapsed && (

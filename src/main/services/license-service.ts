@@ -133,7 +133,13 @@ export async function activateInstallation(licenseKey: string): Promise<TenantCo
     licenseStatus: result.licenseStatus.toLowerCase(),
     subscriptionPlan: result.planName,
     subscriptionType: result.subscriptionType?.toLowerCase() ?? null,
-    subscriptionStartDate: result.subscriptionStartDate,
+    // ?? null (not just relying on the declared type) deliberately — a DESKTOP client can be newer
+    // than the SERVER it's talking to (they deploy independently, auto-update isn't in lockstep
+    // with a manual server redeploy), so a field this build expects can genuinely be `undefined` at
+    // runtime if the server hasn't shipped it yet. SQLite's bind only accepts null/string/number/
+    // etc — undefined throws ("cannot be bound to SQLite parameter"), which is a hard crash on
+    // activation for something that should just degrade to "unknown for now."
+    subscriptionStartDate: result.subscriptionStartDate ?? null,
     nextDueDate: null,
     maxBranches: result.maxBranches,
     maxUsers: result.maxUsers,
@@ -225,7 +231,8 @@ export async function checkInWithServer(): Promise<void> {
       licenseStatus: result.licenseStatus.toLowerCase(),
       subscriptionPlan: result.planName,
       subscriptionType: result.subscriptionType?.toLowerCase() ?? null,
-      subscriptionStartDate: result.subscriptionStartDate,
+      // Same "SERVER may not have shipped this field yet" defensiveness as registerDevice above.
+      subscriptionStartDate: result.subscriptionStartDate ?? null,
       nextDueDate: result.nextDueDate,
       maxBranches: result.maxBranches,
       maxUsers: result.maxUsers,

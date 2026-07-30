@@ -41,7 +41,7 @@ export function ActivationRoute(): React.JSX.Element {
       }}
     >
       <div className="absolute left-25 top-7 flex items-center gap-2">
-        <img src="/resources/icons/BLUE_LEDGER.png" alt="" className="size-6 rounded-md" />
+        <img src="./resources/icons/BLUE_LEDGER.png" alt="" className="size-6 rounded-md" />
         <span className="text-xs font-extrabold uppercase tracking-wide text-white">Blue Ledger</span>
       </div>
       <div className="absolute right-25 top-7 flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[0.2em] text-white/45">

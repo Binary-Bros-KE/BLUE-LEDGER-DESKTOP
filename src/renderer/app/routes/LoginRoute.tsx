@@ -31,6 +31,33 @@ export function LoginRoute(): React.JSX.Element {
     ? computeGraceStatus(context.tenant.nextDueDate, context.tenant.subscriptionType, context.tenant.licenseStatus)
     : { state: "current" as const };
 
+  // The exact overdue-period count, for a specific "you have N overdue invoices" message instead
+  // of a vague day-countdown — same schedule data PayNowModal/LicenseBlockedRoute already use, so
+  // this can never disagree with what those show. Best-effort: falls back to a generic message
+  // below if this hasn't loaded yet or the device is offline (this screen must still work offline).
+  const [owedCount, setOwedCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (grace.state !== "grace") {
+      setOwedCount(null);
+      return;
+    }
+    let cancelled = false;
+    void window.blueLedger.activation
+      .paymentSchedule()
+      .then((result) => {
+        if (cancelled || !result) return;
+        const owed = result.periods.filter((entry) => entry.status === "overdue" || entry.status === "due").length;
+        setOwedCount(owed);
+      })
+      .catch(() => {
+        // Offline or transient failure — the generic fallback message below covers this.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [grace.state]);
+
   async function handleSubmit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
     setSubmitting(true);
@@ -48,7 +75,7 @@ export function LoginRoute(): React.JSX.Element {
       }}
     >
       <div className="absolute left-25 top-7 flex items-center gap-2">
-        <img src="/resources/icons/BLUE_LEDGER.png" alt="" className="size-6 rounded-md" />
+        <img src="./resources/icons/BLUE_LEDGER.png" alt="" className="size-6 rounded-md" />
         <span className="text-xs font-extrabold uppercase tracking-wide text-white">Blue Ledger</span>
       </div>
       <div className="absolute right-25 top-7 flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[0.2em] text-white/45">
@@ -123,18 +150,13 @@ export function LoginRoute(): React.JSX.Element {
               <div className="mt-4 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5 text-xs font-bold text-warning">
                 <AlertTriangle className="mt-0.5 size-4 flex-none" aria-hidden="true" />
                 <span>
-                  {grace.hardLock ? (
+                  {owedCount !== null && owedCount > 0 ? (
                     <>
-                      Your subscription payment is overdue. The POS will stop working in{" "}
-                      {grace.daysRemaining} day{grace.daysRemaining === 1 ? "" : "s"} unless payment
-                      is made.
+                      You have {owedCount} overdue invoice{owedCount === 1 ? "" : "s"}. Please settle{" "}
+                      {owedCount === 1 ? "it" : "them"} to avoid any inconvenience.
                     </>
                   ) : (
-                    <>
-                      Your maintenance fee is overdue. Cloud sync will pause in {grace.daysRemaining}{" "}
-                      day{grace.daysRemaining === 1 ? "" : "s"} — the POS itself keeps working
-                      normally.
-                    </>
+                    <>Your subscription payment is overdue. Please settle it to avoid any inconvenience.</>
                   )}
                 </span>
               </div>

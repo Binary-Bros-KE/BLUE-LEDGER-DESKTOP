@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { CheckCircle2, Loader2, Printer, Settings as SettingsIcon, XCircle } from "lucide-react";
+import { CheckCircle2, Download, Loader2, Printer, RefreshCw, Settings as SettingsIcon, XCircle } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { CheckboxField, Field, SelectField } from "@renderer/shared/components/form-fields";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { useUpdateStatusWidget } from "@renderer/app/layouts/useUpdateStatusWidget";
 import {
   DEFAULT_PRINTER_SETTINGS,
   PRINTER_CONNECTION_OPTIONS,
@@ -37,6 +38,18 @@ const ADDRESS_HELP: Record<PrinterConnectionType, string> = {
 export function SettingsRoute(): React.JSX.Element {
   const { can } = usePermissions();
   const canEdit = can("settings", "edit");
+
+  const updateStatus = useUpdateStatusWidget();
+  const [checkingNow, setCheckingNow] = useState(false);
+
+  async function handleCheckForUpdates(): Promise<void> {
+    setCheckingNow(true);
+    try {
+      await window.blueLedger.update.checkNow();
+    } finally {
+      setCheckingNow(false);
+    }
+  }
 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -268,6 +281,57 @@ export function SettingsRoute(): React.JSX.Element {
               )}
             </form>
           )}
+        </div>
+
+        <div className="mt-6 border-t border-line pt-5">
+          <h3 className="flex items-center gap-2 text-sm font-extrabold text-ink">
+            <Download className="size-4 text-primary" aria-hidden="true" />
+            App Updates
+          </h3>
+          <p className="mt-1 text-xs font-semibold text-muted">
+            Checks automatically at startup and every few hours. Version {updateStatus?.currentVersion ?? "—"}.
+          </p>
+
+          <div className="mt-4 max-w-xl">
+            {updateStatus?.status === "downloaded" && (
+              <div className="mb-3 flex items-center gap-2 rounded-lg border border-accent/30 bg-accent/10 px-4 py-3 text-sm font-bold text-ink">
+                <CheckCircle2 className="size-4 flex-none text-accent" aria-hidden="true" />
+                Version {updateStatus.version} is downloaded and ready — restart the app to install it.
+              </div>
+            )}
+            {updateStatus?.status === "downloading" && (
+              <div className="mb-3 flex items-center gap-2 rounded-lg border border-line bg-soft/60 px-4 py-3 text-sm font-bold text-muted">
+                <Loader2 className="size-4 flex-none animate-spin" aria-hidden="true" />
+                Downloading version {updateStatus.version} in the background...
+              </div>
+            )}
+            {updateStatus?.status === "not-available" && (
+              <div className="mb-3 flex items-center gap-2 rounded-lg border border-success/30 bg-success/10 px-4 py-3 text-sm font-bold text-success">
+                <CheckCircle2 className="size-4 flex-none" aria-hidden="true" />
+                You're on the latest version.
+              </div>
+            )}
+            {updateStatus?.status === "error" && updateStatus.error && (
+              <div className="mb-3 flex items-center gap-2 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
+                <XCircle className="size-4 flex-none" aria-hidden="true" />
+                {updateStatus.error}
+              </div>
+            )}
+
+            <Button
+              type="button"
+              onClick={() => void handleCheckForUpdates()}
+              disabled={checkingNow}
+              className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {checkingNow ? (
+                <Loader2 className="mr-1.5 size-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <RefreshCw className="mr-1.5 size-4" aria-hidden="true" />
+              )}
+              {checkingNow ? "Checking..." : "Check for Updates Now"}
+            </Button>
+          </div>
         </div>
       </section>
     </motion.div>
