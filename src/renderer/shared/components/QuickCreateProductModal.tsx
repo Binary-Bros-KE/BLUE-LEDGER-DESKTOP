@@ -7,22 +7,33 @@ import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { toCents } from "@renderer/shared/lib/money";
 import type { Product } from "@shared/types/product";
 
-/** The fast path for adding a product mid-purchase — only SKU, name, and cost. Selling price
- * defaults to the buying price if left blank; everything else can be refined later from Products. */
+/** The fast path for adding a product mid-purchase, mid-invoice, or mid-quotation — only SKU, name,
+ * cost, and (when a storefront is known — invoices/quotations, not purchases, which receive stock
+ * through their own separate step) an opening stock count. Selling price defaults to the buying
+ * price if left blank; everything else can be refined later from Products.
+ *
+ * Without an opening stock count, a product created on the fly here has zero stock everywhere, so
+ * adding it straight to the invoice/quotation being built would immediately fail its own
+ * insufficient-stock check — defeating the entire point of "create on the fly." Passing
+ * `storefrontId` reveals the field and seeds that storefront's stock directly, the same way the
+ * "New Product" form's own opening-stock section does. */
 export function QuickCreateProductModal({
   open,
   onClose,
-  onCreated
+  onCreated,
+  storefrontId
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: (product: Product) => void;
+  storefrontId?: string | null;
 }): React.JSX.Element {
   const [sku, setSku] = useState("");
   const [barcode, setBarcode] = useState("");
   const [name, setName] = useState("");
   const [buyingPrice, setBuyingPrice] = useState("");
   const [sellingPrice, setSellingPrice] = useState("");
+  const [stockQuantity, setStockQuantity] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,6 +43,7 @@ export function QuickCreateProductModal({
     setName("");
     setBuyingPrice("");
     setSellingPrice("");
+    setStockQuantity("");
     setError(null);
   }
 
@@ -49,6 +61,11 @@ export function QuickCreateProductModal({
     try {
       const buyingPriceCents = toCents(buyingPrice);
       const sellingPriceCents = sellingPrice.trim() === "" ? buyingPriceCents : toCents(sellingPrice);
+      const quantity = Number(stockQuantity);
+      const openingStock =
+        storefrontId && Number.isFinite(quantity) && quantity > 0
+          ? [{ locationId: storefrontId, quantity: Math.floor(quantity) }]
+          : [];
       const product = await window.blueLedger.product.create({
         sku,
         barcode: barcode.trim() ? barcode.trim() : null,
@@ -59,7 +76,8 @@ export function QuickCreateProductModal({
         reorderLevel: 0,
         wholesaleMinQuantity: 0,
         trackStock: true,
-        allowNegativeStock: false
+        allowNegativeStock: false,
+        openingStock
       });
       reset();
       onCreated(product);
@@ -115,6 +133,15 @@ export function QuickCreateProductModal({
             onChange={setSellingPrice}
             placeholder="0.00"
           />
+          {storefrontId && (
+            <Field
+              label="Stock Quantity (optional)"
+              type="number"
+              value={stockQuantity}
+              onChange={setStockQuantity}
+              placeholder="0"
+            />
+          )}
         </div>
 
         <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">

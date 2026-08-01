@@ -308,6 +308,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       phone1: s.phone1,
       phone2: s.phone2,
       email: s.email,
+      kraPin: s.kraPin,
       website: s.website,
       country: s.country,
       county: s.county,
@@ -339,6 +340,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       name: c.name,
       phone: c.phone,
       email: c.email,
+      kraPin: c.kraPin,
       physicalAddress: c.physicalAddress,
       creditLimitCents: c.creditLimitCents,
       // currentBalanceCents deliberately NOT sent (Phase 2 finding) — it changes as a side effect
@@ -1272,6 +1274,7 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       { local: "phone_1", cloud: "phone1" },
       { local: "phone_2", cloud: "phone2" },
       { local: "email", cloud: "email" },
+      { local: "kra_pin", cloud: "kraPin" },
       { local: "website", cloud: "website" },
       { local: "country", cloud: "country" },
       { local: "county", cloud: "county" },
@@ -1297,6 +1300,7 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       { local: "name", cloud: "name" },
       { local: "phone", cloud: "phone" },
       { local: "email", cloud: "email" },
+      { local: "kra_pin", cloud: "kraPin" },
       { local: "physical_address", cloud: "physicalAddress" },
       { local: "credit_limit_cents", cloud: "creditLimitCents" },
       // current_balance_cents deliberately excluded — see PAYLOAD_BUILDERS.customers's own comment.

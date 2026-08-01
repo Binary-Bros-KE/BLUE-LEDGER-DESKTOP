@@ -23,6 +23,7 @@ export type CustomerInputFields = {
   phone: string;
   customerType: CustomerType;
   email: string | null;
+  kraPin: string | null;
   physicalAddress: string | null;
   creditLimitCents: number | null;
   notes: string | null;

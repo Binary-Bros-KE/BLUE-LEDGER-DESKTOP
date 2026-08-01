@@ -38,6 +38,7 @@ type FormState = {
   phone1: string;
   phone2: string;
   email: string;
+  kraPin: string;
   website: string;
   country: string;
   county: string;
@@ -61,6 +62,7 @@ function emptyForm(): FormState {
     phone1: "",
     phone2: "",
     email: "",
+    kraPin: "",
     website: "",
     country: "",
     county: "",
@@ -85,6 +87,7 @@ function toFormState(supplier: Supplier): FormState {
     phone1: supplier.phone1,
     phone2: supplier.phone2 ?? "",
     email: supplier.email ?? "",
+    kraPin: supplier.kraPin ?? "",
     website: supplier.website ?? "",
     country: supplier.country ?? "",
     county: supplier.county ?? "",
@@ -241,6 +244,7 @@ export function SuppliersRoute(): React.JSX.Element {
       phone1: form.phone1,
       phone2: form.phone2,
       email: form.email,
+      kraPin: form.kraPin,
       website: form.website,
       country: form.country,
       county: form.county,
@@ -609,6 +613,12 @@ export function SuppliersRoute(): React.JSX.Element {
                 value={form.website}
                 onChange={(value) => updateField("website", value)}
                 placeholder="e.g. https://supplier.com"
+              />
+              <Field
+                label="KRA PIN"
+                value={form.kraPin}
+                onChange={(value) => updateField("kraPin", value)}
+                placeholder="e.g. A012345678Z"
               />
             </div>
           </div>

@@ -33,7 +33,9 @@ export type ImportFieldDefinition = {
 };
 
 const PRODUCT_FIELDS: ImportFieldDefinition[] = [
-  { key: "sku", label: "SKU", required: true, kind: "text", aliases: ["sku", "product code", "item code"] },
+  // Not required — same as the "New Product" form, a blank cell gets an auto-generated "PROD-..."
+  // SKU at import time (see import-service.ts's buildRowCandidate) instead of blocking the row.
+  { key: "sku", label: "SKU", required: false, kind: "text", aliases: ["sku", "product code", "item code"] },
   { key: "name", label: "Product Name", required: true, kind: "text", aliases: ["name", "product name", "item name"] },
   { key: "category", label: "Category", required: false, kind: "category", aliases: ["category", "product category"] },
   { key: "storefront", label: "Storefront", required: false, kind: "storefront", aliases: ["storefront", "location", "branch", "store"] },

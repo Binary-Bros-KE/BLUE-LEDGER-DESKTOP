@@ -11,6 +11,7 @@ export type SupplierRow = {
   phone_1: string;
   phone_2: string | null;
   email: string | null;
+  kra_pin: string | null;
   website: string | null;
   country: string | null;
   county: string | null;
@@ -86,12 +87,12 @@ export function insertSupplierRow(
     .prepare(
       `
       INSERT INTO suppliers (
-        id, tenant_id, supplier_code, business_name, contact_person, phone_1, phone_2, email, website,
+        id, tenant_id, supplier_code, business_name, contact_person, phone_1, phone_2, email, kra_pin, website,
         country, county, town, physical_address, payment_option, mpesa_name, mpesa_number,
         mpesa_alternative_number, bank_name, bank_account_name, bank_account_number,
         credit_limit_cents, status, notes, created_at, updated_at, sync_status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
     `
     )
     .run(
@@ -103,6 +104,7 @@ export function insertSupplierRow(
       input.phone1,
       input.phone2,
       input.email,
+      input.kraPin,
       input.website,
       input.country,
       input.county,
@@ -140,6 +142,7 @@ export function updateSupplierRow(id: string, input: SupplierInput): SupplierRow
         phone_1 = ?,
         phone_2 = ?,
         email = ?,
+        kra_pin = ?,
         website = ?,
         country = ?,
         county = ?,
@@ -165,6 +168,7 @@ export function updateSupplierRow(id: string, input: SupplierInput): SupplierRow
       input.phone1,
       input.phone2,
       input.email,
+      input.kraPin,
       input.website,
       input.country,
       input.county,
@@ -214,6 +218,7 @@ export function mapSupplierRow(row: SupplierRow): Supplier {
     phone1: row.phone_1,
     phone2: row.phone_2,
     email: row.email,
+    kraPin: row.kra_pin,
     website: row.website,
     country: row.country,
     county: row.county,

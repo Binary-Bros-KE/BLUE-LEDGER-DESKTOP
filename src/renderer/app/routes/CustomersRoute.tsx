@@ -20,6 +20,7 @@ type FormState = {
   phone: string;
   customerType: CustomerType;
   email: string;
+  kraPin: string;
   physicalAddress: string;
   creditLimit: string;
   notes: string;
@@ -30,6 +31,7 @@ const emptyForm: FormState = {
   phone: "",
   customerType: "retail",
   email: "",
+  kraPin: "",
   physicalAddress: "",
   creditLimit: "",
   notes: ""
@@ -41,6 +43,7 @@ function toFormState(customer: Customer): FormState {
     phone: customer.phone,
     customerType: customer.customerType,
     email: customer.email ?? "",
+    kraPin: customer.kraPin ?? "",
     physicalAddress: customer.physicalAddress ?? "",
     creditLimit: fromCents(customer.creditLimitCents),
     notes: customer.notes ?? ""
@@ -152,6 +155,7 @@ export function CustomersRoute(): React.JSX.Element {
       phone: form.phone,
       customerType: form.customerType,
       email: form.email,
+      kraPin: form.kraPin,
       physicalAddress: form.physicalAddress,
       creditLimitCents: form.creditLimit.trim() === "" ? null : toCents(form.creditLimit),
       notes: form.notes
@@ -448,6 +452,12 @@ export function CustomersRoute(): React.JSX.Element {
                 value={form.email}
                 onChange={(value) => updateField("email", value)}
                 placeholder="e.g. jane@example.com"
+              />
+              <Field
+                label="KRA PIN"
+                value={form.kraPin}
+                onChange={(value) => updateField("kraPin", value)}
+                placeholder="e.g. A012345678Z"
               />
               <Field
                 label="Credit Limit"

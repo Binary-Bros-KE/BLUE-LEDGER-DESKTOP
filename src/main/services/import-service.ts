@@ -9,6 +9,7 @@ import * as supplierRepository from "@main/database/repositories/supplier-reposi
 import { requirePermission } from "@main/services/auth-service";
 import { createCategory } from "@main/services/category-service";
 import { createCustomer, updateCustomer } from "@main/services/customer-service";
+import { generateDocumentNumber } from "@main/services/document-number-service";
 import { createProduct, updateProduct } from "@main/services/product-service";
 import { createSupplier, updateSupplier } from "@main/services/supplier-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
@@ -126,7 +127,11 @@ function parseCentsDirect(raw: string): number | null {
 }
 
 function parseNumber(raw: string): number | null {
-  const value = Number(raw.trim());
+  // Strips thousand separators just like parseMoney/parseCentsDirect below — a stock count over
+  // 999 written as "5,958.00" (completely normal spreadsheet formatting) otherwise parses as NaN
+  // and gets wrongly rejected as invalid, not because the value is bad but because the comma was
+  // never stripped.
+  const value = Number(raw.trim().replace(/,/g, ""));
   return Number.isFinite(value) ? value : null;
 }
 
@@ -164,7 +169,11 @@ function buildRowCandidate(
   fieldDefaults: ImportFieldDefaults,
   tenantId: string,
   moneyInCents: boolean,
-  errors: string[]
+  errors: string[],
+  /** Products-only — every SKU already in the DB matching "PROD-%", plus every one auto-generated
+   * earlier in this same import run, so two blank-SKU rows in one file can never collide with each
+   * other (not just with the DB) — see generateDocumentNumber's own existingNumbers contract. */
+  skuPool: string[]
 ): Record<string, unknown> {
   const candidate: Record<string, unknown> = {};
   const fieldDefs: ImportFieldDefinition[] = IMPORT_FIELD_DEFINITIONS[entityType];
@@ -177,8 +186,18 @@ function buildRowCandidate(
     switch (field.kind) {
       case "text": {
         if (blank) {
-          if (field.required) errors.push(`${field.label} is required`);
-          candidate[field.key] = null;
+          if (field.key === "sku" && entityType === "products") {
+            // Same convenience the "New Product" form already gives a manual entry — a blank SKU
+            // cell shouldn't block an otherwise-good import row when we can just mint the next one.
+            const generated = generateDocumentNumber({ tenantId, prefix: "PROD", digits: 6, existingNumbers: skuPool });
+            skuPool.push(generated);
+            candidate[field.key] = generated;
+          } else if (field.required) {
+            errors.push(`${field.label} is required`);
+            candidate[field.key] = null;
+          } else {
+            candidate[field.key] = null;
+          }
         } else {
           candidate[field.key] = raw.trim();
         }
@@ -290,6 +309,11 @@ function buildRowCandidate(
           const quantity = parseNumber(raw);
           if (quantity === null || quantity < 0) {
             errors.push(`${field.label} must be a non-negative number`);
+          } else if (quantity === 0) {
+            // Zero is a real, legitimate stock level (out of stock) — there's no actual stock to
+            // place anywhere, so don't demand a Storefront just to record "nothing." Previously this
+            // fell through to the branch below and errored on every zero-stock row that didn't also
+            // resolve a storefront, silently dropping every out-of-stock product from the import.
           } else {
             const storefrontId = candidate.storefrontId as string | null | undefined;
             if (!storefrontId) {
@@ -368,11 +392,12 @@ export function resolveImportRows(
   const schema = ENTITY_CREATE_SCHEMA[entityType];
   const naturalKeyField = NATURAL_KEY_FIELD[entityType];
   const displayNameField = DISPLAY_NAME_FIELD[entityType];
+  const skuPool: string[] = entityType === "products" ? productRepository.findMaxProductSkuNumberRow(tenantId) : [];
 
   const resolved = rows.map((row, index): ResolvedImportRow => {
     const rowNumber = index + 1;
     const errors: string[] = [];
-    let candidate = buildRowCandidate(entityType, row, columnMapping, fieldDefaults, tenantId, moneyInCents, errors);
+    let candidate = buildRowCandidate(entityType, row, columnMapping, fieldDefaults, tenantId, moneyInCents, errors, skuPool);
 
     if (errors.length === 0) {
       const result = schema.safeParse(candidate);

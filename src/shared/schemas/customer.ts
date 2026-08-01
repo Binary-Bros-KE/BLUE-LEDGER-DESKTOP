@@ -12,6 +12,7 @@ export const customerInputSchema = z.object({
   phone: z.string().trim().min(1, "Phone number is required").max(30),
   customerType: z.enum(customerTypeValues),
   email: optionalText(150),
+  kraPin: optionalText(50),
   physicalAddress: optionalText(500),
   creditLimitCents: z.coerce
     .number()

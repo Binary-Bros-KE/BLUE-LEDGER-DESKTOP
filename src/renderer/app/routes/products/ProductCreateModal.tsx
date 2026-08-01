@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { ImagePlus, Loader2, Package, X } from "lucide-react";
+import { ImagePlus, Loader2, Package, Plus, X } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { CheckboxField, Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
+import { QuickCreateCategoryModal } from "@renderer/shared/components/QuickCreateCategoryModal";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { getDashboardVariant } from "@renderer/shared/lib/dashboard-role";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
@@ -88,13 +89,15 @@ export function ProductCreateModal({
   onClose,
   categories,
   locations,
-  onCreated
+  onCreated,
+  onCategoryCreated
 }: {
   open: boolean;
   onClose: () => void;
   categories: Category[];
   locations: Location[];
   onCreated: (product: Product) => void;
+  onCategoryCreated: (category: Category) => void;
 }): React.JSX.Element {
   const { session } = usePermissions();
   const isSuperAdmin = getDashboardVariant(session) === "superAdmin";
@@ -105,6 +108,7 @@ export function ProductCreateModal({
   const [imageBusy, setImageBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [quickCreateCategoryOpen, setQuickCreateCategoryOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -218,18 +222,19 @@ export function ProductCreateModal({
   }
 
   return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title="New Product"
-      description={
-        isSuperAdmin
-          ? "Choose which storefront this product belongs to, or leave it available to all of them."
-          : "Created for your own storefront."
-      }
-      widthClassName="max-w-2xl"
-    >
-      <form onSubmit={handleSubmit}>
+    <>
+      <Modal
+        open={open}
+        onClose={onClose}
+        title="New Product"
+        description={
+          isSuperAdmin
+            ? "Choose which storefront this product belongs to, or leave it available to all of them."
+            : "Created for your own storefront."
+        }
+        widthClassName="max-w-2xl"
+      >
+        <form onSubmit={handleSubmit}>
         {error && (
           <div className="mb-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
             {error}
@@ -300,12 +305,31 @@ export function ProductCreateModal({
             onChange={(value) => updateField("shortName", value)}
             placeholder="e.g. Coke 500ml"
           />
-          <SelectField
-            label="Category"
-            value={form.categoryId}
-            onChange={(value) => updateField("categoryId", value)}
-            options={[{ value: "", label: "Uncategorized" }, ...categoryOptions]}
-          />
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Category</span>
+              <button
+                type="button"
+                onClick={() => setQuickCreateCategoryOpen(true)}
+                className="flex items-center gap-1 text-[11px] font-extrabold uppercase text-accent hover:underline cursor-pointer"
+              >
+                <Plus className="size-3" aria-hidden="true" />
+                New Category
+              </button>
+            </div>
+            <select
+              value={form.categoryId}
+              onChange={(event) => updateField("categoryId", event.target.value)}
+              className="mt-1.5 h-10 w-full rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+            >
+              <option value="">Uncategorized</option>
+              {categoryOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
           <SelectField
             label="Storefront"
             value={form.storefrontId}
@@ -467,6 +491,17 @@ export function ProductCreateModal({
           </Button>
         </div>
       </form>
-    </Modal>
+      </Modal>
+
+      <QuickCreateCategoryModal
+        open={quickCreateCategoryOpen}
+        onClose={() => setQuickCreateCategoryOpen(false)}
+        onCreated={(category) => {
+          onCategoryCreated(category);
+          updateField("categoryId", category.id);
+          setQuickCreateCategoryOpen(false);
+        }}
+      />
+    </>
   );
 }

@@ -24,6 +24,7 @@ export type SupplierInputFields = {
   phone1: string;
   phone2: string | null;
   email: string | null;
+  kraPin: string | null;
   website: string | null;
   country: string | null;
   county: string | null;

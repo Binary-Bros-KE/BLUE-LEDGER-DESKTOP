@@ -90,6 +90,7 @@ export function CustomerDetailModal({
         <Section title="Contact Information">
           <InfoRow label="Phone" value={customer.phone} />
           <InfoRow label="Email" value={customer.email ?? "—"} />
+          <InfoRow label="KRA PIN" value={customer.kraPin ?? "—"} />
           <InfoRow label="Physical Address" value={customer.physicalAddress ?? "—"} />
         </Section>
 

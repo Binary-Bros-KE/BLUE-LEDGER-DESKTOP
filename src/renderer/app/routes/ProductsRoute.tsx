@@ -540,6 +540,7 @@ export function ProductsRoute(): React.JSX.Element {
         categories={categories}
         locations={locations}
         onCreated={() => void handleProductCreated()}
+        onCategoryCreated={(category) => setCategories((prev) => [...prev, category])}
       />
 
       {editingProduct && (

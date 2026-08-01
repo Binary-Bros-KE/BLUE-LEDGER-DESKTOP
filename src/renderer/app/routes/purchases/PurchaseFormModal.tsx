@@ -9,7 +9,7 @@ import type { Location } from "@shared/types/location";
 import type { Product, ProductListItem } from "@shared/types/product";
 import { PURCHASE_TAX_TYPE_OPTIONS, type Purchase, type PurchaseTaxType } from "@shared/types/purchase";
 import type { Supplier } from "@shared/types/supplier";
-import { QuickCreateProductModal } from "./QuickCreateProductModal";
+import { QuickCreateProductModal } from "@renderer/shared/components/QuickCreateProductModal";
 import { QuickCreateSupplierModal } from "./QuickCreateSupplierModal";
 
 type ItemLine = {

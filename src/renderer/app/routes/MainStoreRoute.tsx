@@ -554,6 +554,7 @@ export function MainStoreRoute(): React.JSX.Element {
         categories={categories}
         locations={locations ?? []}
         onCreated={() => void handleProductCreated()}
+        onCategoryCreated={(category) => setCategories((prev) => [...prev, category])}
       />
     </motion.div>
   );

@@ -1919,6 +1919,16 @@ const migrations = [
       -- a unit tracked at all and there's no safe value to guess on their behalf.
       ALTER TABLE products ADD COLUMN unit_of_measure TEXT;
     `
+  },
+  {
+    version: 50,
+    name: "customer_supplier_kra_pin",
+    sql: `
+      -- Nullable, no default — most existing customers/suppliers were never asked for this, and
+      -- there's no safe value to backfill on their behalf.
+      ALTER TABLE customers ADD COLUMN kra_pin TEXT;
+      ALTER TABLE suppliers ADD COLUMN kra_pin TEXT;
+    `
   }
 ] as const;
 

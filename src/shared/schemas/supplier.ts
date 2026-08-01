@@ -50,6 +50,7 @@ export const supplierInputSchema = z.object({
   phone1: requiredPhone,
   phone2: optionalPhone,
   email: optionalEmail,
+  kraPin: optionalText(50),
   website: optionalWebsite,
   country: optionalText(100),
   county: optionalText(100),

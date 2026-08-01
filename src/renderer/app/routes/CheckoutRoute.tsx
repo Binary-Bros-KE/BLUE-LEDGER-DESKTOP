@@ -30,6 +30,7 @@ import {
 import { Field, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { ProductInfoModal } from "@renderer/shared/components/ProductInfoModal";
+import { QuickCreateCustomerModal } from "@renderer/shared/components/QuickCreateCustomerModal";
 import { ReceiptPreview } from "@renderer/shared/components/ReceiptPreview";
 import { StampBadge } from "@renderer/shared/components/StampBadge";
 import { StorefrontPicker } from "@renderer/shared/components/StorefrontPicker";
@@ -131,6 +132,7 @@ export function CheckoutRoute(): React.JSX.Element {
 
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
+  const [quickCreateCustomerOpen, setQuickCreateCustomerOpen] = useState(false);
 
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
   const [showDeliveryNote, setShowDeliveryNote] = useState(false);
@@ -1201,7 +1203,17 @@ export function CheckoutRoute(): React.JSX.Element {
         description="Search by name or phone — or keep it as a walk-in sale."
         widthClassName="max-w-md"
       >
-        <div className="relative">
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => setQuickCreateCustomerOpen(true)}
+            className="flex items-center gap-1 text-[11px] font-extrabold uppercase text-accent hover:underline cursor-pointer"
+          >
+            <Plus className="size-3" aria-hidden="true" />
+            New Customer
+          </button>
+        </div>
+        <div className="relative mt-1.5">
           <Search
             className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted"
             aria-hidden="true"
@@ -1249,6 +1261,16 @@ export function CheckoutRoute(): React.JSX.Element {
           )}
         </div>
       </Modal>
+
+      <QuickCreateCustomerModal
+        open={quickCreateCustomerOpen}
+        onClose={() => setQuickCreateCustomerOpen(false)}
+        onCreated={(customer) => {
+          setCustomers((prev) => [...prev, customer]);
+          selectCustomerForActiveDraft(customer.id);
+          setQuickCreateCustomerOpen(false);
+        }}
+      />
 
       <Modal
         open={completedSale !== null}

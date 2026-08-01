@@ -70,6 +70,7 @@ export function SupplierDetailModal({
           <InfoRow label="Phone 1" value={supplier.phone1} />
           <InfoRow label="Phone 2" value={supplier.phone2 ?? "—"} />
           <InfoRow label="Email" value={supplier.email ?? "—"} />
+          <InfoRow label="KRA PIN" value={supplier.kraPin ?? "—"} />
           <InfoRow label="Website" value={supplier.website ?? "—"} />
         </Section>
 

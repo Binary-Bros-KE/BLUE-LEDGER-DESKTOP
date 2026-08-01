@@ -29,6 +29,8 @@ import {
 } from "@renderer/shared/components/ExtraChargesSection";
 import { Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
+import { QuickCreateCustomerModal } from "@renderer/shared/components/QuickCreateCustomerModal";
+import { QuickCreateProductModal } from "@renderer/shared/components/QuickCreateProductModal";
 import { ShareModal } from "@renderer/shared/components/ShareModal";
 import { StatementPreview } from "@renderer/shared/components/StatementPreview";
 import { StatTile } from "@renderer/shared/components/StatTile";
@@ -209,6 +211,8 @@ export function InvoicesRoute(): React.JSX.Element {
   // Only ever consulted when session.branch is null (see StorefrontPicker/requireActiveSession).
   const [createStorefrontId, setCreateStorefrontId] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
+  const [quickCreateCustomerOpen, setQuickCreateCustomerOpen] = useState(false);
+  const [quickCreateProductOpen, setQuickCreateProductOpen] = useState(false);
   const [createTransactionType, setCreateTransactionType] = useState<"invoice" | "wholesale_sale">("invoice");
   const [createDueDate, setCreateDueDate] = useState(todayIsoDate());
   const [createNotes, setCreateNotes] = useState("");
@@ -1461,7 +1465,17 @@ export function InvoicesRoute(): React.JSX.Element {
           )}
 
           <div>
-            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Customer</span>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Customer</span>
+              <button
+                type="button"
+                onClick={() => setQuickCreateCustomerOpen(true)}
+                className="flex items-center gap-1 text-[11px] font-extrabold uppercase text-accent hover:underline cursor-pointer"
+              >
+                <Plus className="size-3" aria-hidden="true" />
+                New Customer
+              </button>
+            </div>
             {selectedCreateCustomer ? (
               <div className="mt-1.5 flex items-center justify-between rounded-lg border border-line bg-soft px-3.5 py-2.5">
                 <div>
@@ -1522,7 +1536,17 @@ export function InvoicesRoute(): React.JSX.Element {
           </div>
 
           <div className="mt-4">
-            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Products</span>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Products</span>
+              <button
+                type="button"
+                onClick={() => setQuickCreateProductOpen(true)}
+                className="flex items-center gap-1 text-[11px] font-extrabold uppercase text-accent hover:underline cursor-pointer"
+              >
+                <Plus className="size-3" aria-hidden="true" />
+                New Product
+              </button>
+            </div>
             <div className="relative mt-1.5">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden="true" />
               <input
@@ -1702,6 +1726,28 @@ export function InvoicesRoute(): React.JSX.Element {
           </div>
         </form>
       </Modal>
+
+      <QuickCreateCustomerModal
+        open={quickCreateCustomerOpen}
+        onClose={() => setQuickCreateCustomerOpen(false)}
+        onCreated={(customer) => {
+          setCustomers((prev) => [...prev, customer]);
+          setCreateCustomerId(customer.id);
+          setCustomerSearch("");
+          setQuickCreateCustomerOpen(false);
+        }}
+      />
+
+      <QuickCreateProductModal
+        open={quickCreateProductOpen}
+        onClose={() => setQuickCreateProductOpen(false)}
+        storefrontId={session?.branch ? session.branch.id : createStorefrontId || null}
+        onCreated={(product) => {
+          setProducts((prev) => [...prev, { ...product, categoryName: null, categoryColor: null, totalStock: 0 }]);
+          addCreateLine({ ...product, categoryName: null, categoryColor: null, totalStock: 0 });
+          setQuickCreateProductOpen(false);
+        }}
+      />
     </motion.div>
   );
 }
