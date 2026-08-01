@@ -8,18 +8,26 @@ const quotationCartItemSchema = z.object({
   discountAmountCents: z.coerce.number().int().min(0).max(100_000_000).optional().default(0)
 });
 
-export const quotationCreateSchema = z.object({
-  customerId: z.string().trim().min(1, "Select a customer"),
-  validUntil: z.string().trim().min(1, "Valid-until date is required"),
-  notes: optionalText(1000),
-  items: z.array(quotationCartItemSchema).min(1, "Add at least one product"),
-  serviceCharges: serviceChargesFieldSchema,
-  delivery: deliveryFieldSchema,
-  /** Only ever read (on CREATE) when the signed-in session has no assigned branch (see
-   * sale-service.ts's requireActiveSession) — ignored otherwise, and unused on update (a
-   * quotation's storefront is fixed at creation). */
-  locationId: optionalText(64)
-});
+export const quotationCreateSchema = z
+  .object({
+    customerId: z.string().trim().min(1, "Select a customer"),
+    validUntil: z.string().trim().min(1, "Valid-until date is required"),
+    notes: optionalText(1000),
+    // No .min(1) here — a quotation for pure service/labour work (no physical product involved) is
+    // valid on its own. The refine below is what actually enforces "there must be SOMETHING to
+    // quote", accepting either products or service charges.
+    items: z.array(quotationCartItemSchema),
+    serviceCharges: serviceChargesFieldSchema,
+    delivery: deliveryFieldSchema,
+    /** Only ever read (on CREATE) when the signed-in session has no assigned branch (see
+     * sale-service.ts's requireActiveSession) — ignored otherwise, and unused on update (a
+     * quotation's storefront is fixed at creation). */
+    locationId: optionalText(64)
+  })
+  .refine((value) => value.items.length > 0 || value.serviceCharges.length > 0, {
+    message: "Add at least one product or service charge",
+    path: ["items"]
+  });
 
 export type QuotationCreateInput = z.infer<typeof quotationCreateSchema>;
 

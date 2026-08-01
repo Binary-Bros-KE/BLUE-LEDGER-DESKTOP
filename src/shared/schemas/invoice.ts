@@ -14,22 +14,30 @@ const initialPaymentSchema = z.object({
   reference: optionalText(120)
 });
 
-export const createInvoiceSchema = z.object({
-  customerId: z.string().trim().min(1, "Select a customer"),
-  transactionType: z.enum(["invoice", "wholesale_sale"]),
-  dueDate: z.string().trim().min(1, "Due date is required"),
-  invoiceNotes: optionalText(1000),
-  items: z.array(invoiceCartItemSchema).min(1, "Add at least one product"),
-  initialPayment: initialPaymentSchema
-    .nullable()
-    .optional()
-    .transform((value) => (value === undefined ? null : value)),
-  serviceCharges: serviceChargesFieldSchema,
-  delivery: deliveryFieldSchema,
-  /** Only ever read when the signed-in session has no assigned branch (see
-   * sale-service.ts's requireActiveSession) — ignored otherwise. */
-  locationId: optionalText(64)
-});
+export const createInvoiceSchema = z
+  .object({
+    customerId: z.string().trim().min(1, "Select a customer"),
+    transactionType: z.enum(["invoice", "wholesale_sale"]),
+    dueDate: z.string().trim().min(1, "Due date is required"),
+    invoiceNotes: optionalText(1000),
+    // No .min(1) here — an invoice for pure service/labour work (no physical product involved) is
+    // valid on its own. The refine below is what actually enforces "there must be SOMETHING to
+    // bill", accepting either products or service charges.
+    items: z.array(invoiceCartItemSchema),
+    initialPayment: initialPaymentSchema
+      .nullable()
+      .optional()
+      .transform((value) => (value === undefined ? null : value)),
+    serviceCharges: serviceChargesFieldSchema,
+    delivery: deliveryFieldSchema,
+    /** Only ever read when the signed-in session has no assigned branch (see
+     * sale-service.ts's requireActiveSession) — ignored otherwise. */
+    locationId: optionalText(64)
+  })
+  .refine((value) => value.items.length > 0 || value.serviceCharges.length > 0, {
+    message: "Add at least one product or service charge",
+    path: ["items"]
+  });
 
 export type CreateInvoiceInput = z.infer<typeof createInvoiceSchema>;
 

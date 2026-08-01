@@ -572,8 +572,8 @@ export function QuotationsRoute(): React.JSX.Element {
       setCreateSaving(false);
       return;
     }
-    if (createItems.length === 0) {
-      setCreateError("Add at least one product");
+    if (createItems.length === 0 && createServiceCharges.length === 0) {
+      setCreateError("Add at least one product or service charge");
       setCreateSaving(false);
       return;
     }

@@ -82,13 +82,19 @@ export function LoginRoute(): React.JSX.Element {
         Point of Sale <span className="text-white/20">·</span> POS
       </div>
 
-      {/* max-w caps the gap this justify-between row leaves between the headline and the card —
-          uncapped, that gap just kept growing on a monitor much wider than the ~1440px this was
-          designed around, which is what actually made the screen look sparse/off on a large
-          landscape display (nothing was broken, it just had nothing to stop stretching). */}
-      <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-16">
-        <div className="flex flex-1 flex-col items-start text-left">
-          <h2 className="text-[56px] font-extrabold uppercase leading-[0.95] text-white lg:text-[72px]">
+      {/* max-w caps the gap this justify-between row leaves between the headline and the card on a
+          screen much wider than the ~1440px this was designed around. flex-wrap is the other half
+          of the fix: on a screen NARROWER than that (a small monitor, an unusual resolution, or a
+          window forced into a size the desktop couldn't fully control), the headline and the card
+          no longer have room to sit side by side at their natural sizes — instead of one of them
+          getting silently clipped off the visible screen, they now drop to their own stacked rows,
+          exactly like a normal responsive webpage would. min-w-0 lets the headline's own box shrink
+          instead of forcing the whole row wider than its container; the responsive text-size scale
+          below (36px up to 72px only once there's room) is what stops the headline's own glyphs from
+          demanding more width than a narrow window has to give in the first place. */}
+      <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-x-16 gap-y-10">
+        <div className="min-w-0 flex flex-1 flex-col items-start text-left">
+          <h2 className="text-4xl font-extrabold uppercase leading-[0.95] text-white sm:text-5xl md:text-6xl lg:text-[72px]">
             Track
             <br />
             Sell
@@ -97,7 +103,7 @@ export function LoginRoute(): React.JSX.Element {
           </h2>
         </div>
 
-        <div className="relative flex-none">
+        <div className="relative w-full max-w-[380px] flex-shrink sm:max-w-none sm:flex-none sm:w-[380px]">
           <div
             className="absolute -left-4 -top-4 size-16 rounded-md bg-warning"
             style={{ transform: "rotate(-18deg)" }}
@@ -105,15 +111,15 @@ export function LoginRoute(): React.JSX.Element {
           />
 
           <span
-            className="pointer-events-none absolute -left-[103px] top-8 z-10 size-3 rounded-full border-2 border-white/25 bg-sidebar"
+            className="pointer-events-none absolute -left-[103px] top-8 z-10 size-3 rounded-full border-2 border-white/25 bg-sidebar max-sm:hidden"
             aria-hidden="true"
           />
           <div
-            className="pointer-events-none absolute -left-[97px] bottom-8 top-8 z-10 border-l-2 border-dashed border-white/20"
+            className="pointer-events-none absolute -left-[97px] bottom-8 top-8 z-10 border-l-2 border-dashed border-white/20 max-sm:hidden"
             aria-hidden="true"
           />
           <span
-            className="pointer-events-none absolute -left-[103px] bottom-8 z-10 size-3 rounded-full border-2 border-white/25 bg-sidebar"
+            className="pointer-events-none absolute -left-[103px] bottom-8 z-10 size-3 rounded-full border-2 border-white/25 bg-sidebar max-sm:hidden"
             aria-hidden="true"
           />
 
@@ -121,7 +127,7 @@ export function LoginRoute(): React.JSX.Element {
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3 }}
-            className="relative z-[1] w-[380px] overflow-hidden rounded-2xl bg-white p-8 shadow-soft"
+            className="relative z-[1] w-full overflow-hidden rounded-2xl bg-white p-8 shadow-soft"
           >
             {Array.from({ length: PUNCH_COUNT }).map((_, i) => (
               <span
