@@ -10,6 +10,7 @@ import {
   Loader2,
   Plus,
   Printer,
+  Receipt,
   Search,
   Send,
   Share2,
@@ -33,12 +34,14 @@ import { QuickCreateProductModal } from "@renderer/shared/components/QuickCreate
 import { ShareModal } from "@renderer/shared/components/ShareModal";
 import { StatTile } from "@renderer/shared/components/StatTile";
 import { StorefrontPicker } from "@renderer/shared/components/StorefrontPicker";
+import { TaxBreakdownTable } from "@renderer/shared/components/TaxBreakdownTable";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { computeLinePricing } from "@renderer/shared/lib/cart-pricing";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
+import { computeTaxBreakdown } from "@shared/lib/tax-calculation";
 import {
   ALL_YEARS_VALUE,
   buildAvailableYears,
@@ -47,6 +50,7 @@ import {
   yearFilterOptions
 } from "@renderer/shared/lib/year-filter";
 import { useAppStore } from "@renderer/shared/stores/app-store";
+import { formatDocumentDate } from "@shared/lib/date";
 import type { Customer } from "@shared/types/customer";
 import type { ExportListRequest } from "@shared/types/export";
 import type { PaymentMethod } from "@shared/types/payment-method";
@@ -78,6 +82,11 @@ type CartLine = {
   sku: string;
   quantity: number;
   discountAmountCents: number;
+  /** Cashier-entered price override for this line only (e.g. product is 450, cashier quotes 600) —
+   * never written back to the product's own selling price. Empty string means "use the normal/
+   * wholesale price". Raw text on purpose (see money.ts's own fromCents/toCents split) — converting
+   * on every keystroke like discountAmountCents does would fight the user mid-type. */
+  priceOverride: string;
 };
 
 function statusTone(status: QuotationStatus): "success" | "warning" | "danger" | "neutral" | "accent" {
@@ -92,12 +101,7 @@ function statusLabel(status: QuotationStatus): string {
 }
 
 function formatDate(value: string | null): string {
-  if (!value) return "—";
-  try {
-    return new Date(value).toLocaleDateString();
-  } catch {
-    return value;
-  }
+  return value ? formatDocumentDate(value) : "—";
 }
 
 function todayIsoDate(): string {
@@ -120,6 +124,7 @@ function Th({ children, className }: { children: React.ReactNode; className?: st
 
 export function QuotationsRoute(): React.JSX.Element {
   const currency = useAppStore((state) => state.context?.tenant.currency ?? "");
+  const tenantContext = useAppStore((state) => state.context?.tenant ?? null);
   const { can, session } = usePermissions();
   const canCreate = can("quotations", "create");
   const canEdit = can("quotations", "edit");
@@ -145,6 +150,7 @@ export function QuotationsRoute(): React.JSX.Element {
   const [viewingQuotation, setViewingQuotation] = useState<Quotation | null>(null);
   const [sharing, setSharing] = useState(false);
   const [viewLoading, setViewLoading] = useState(false);
+  const [printingThermal, setPrintingThermal] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createCustomerId, setCreateCustomerId] = useState<string | null>(null);
@@ -274,13 +280,13 @@ export function QuotationsRoute(): React.JSX.Element {
       })),
       stats: summary
         ? [
-            { label: "Total Quotations", value: String(summary.totalQuotations) },
-            { label: "Draft", value: String(summary.draftCount) },
-            { label: "Sent", value: String(summary.sentCount) },
-            { label: "Accepted", value: String(summary.acceptedCount) },
-            { label: "Expired", value: String(summary.expiredCount) },
-            { label: "Converted", value: String(summary.convertedCount) }
-          ]
+          { label: "Total Quotations", value: String(summary.totalQuotations) },
+          { label: "Draft", value: String(summary.draftCount) },
+          { label: "Sent", value: String(summary.sentCount) },
+          { label: "Accepted", value: String(summary.acceptedCount) },
+          { label: "Expired", value: String(summary.expiredCount) },
+          { label: "Converted", value: String(summary.convertedCount) }
+        ]
         : [],
       fileBaseName: `Quotations_${new Date().toISOString().slice(0, 10)}`
     };
@@ -365,6 +371,20 @@ export function QuotationsRoute(): React.JSX.Element {
       if (savedPath) setNotice(`Saved to ${savedPath}`);
     } catch (err) {
       setActionError(getErrorMessage(err, "Failed to generate PDF"));
+    }
+  }
+
+  async function handlePrintThermal(): Promise<void> {
+    if (!viewingQuotation) return;
+    setPrintingThermal(true);
+    setActionError(null);
+    try {
+      const result = await window.blueLedger.printer.printQuotationThermal(viewingQuotation.id);
+      if (!result.success) setActionError(result.message);
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to print quotation"));
+    } finally {
+      setPrintingThermal(false);
     }
   }
 
@@ -497,10 +517,20 @@ export function QuotationsRoute(): React.JSX.Element {
         .map((line) => {
           const product = productById.get(line.productId);
           if (!product) return null;
-          return { line, product, pricing: computeLinePricing(product, line.quantity, line.discountAmountCents) };
+          return {
+            line,
+            product,
+            pricing: computeLinePricing(
+              product,
+              line.quantity,
+              line.discountAmountCents,
+              { vatRatePercent: tenantContext?.vatRatePercent ?? 16, pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true },
+              line.priceOverride.trim() ? toCents(line.priceOverride) : null
+            )
+          };
         })
         .filter((entry): entry is { line: CartLine; product: ProductListItem; pricing: ReturnType<typeof computeLinePricing> } => entry !== null),
-    [createItems, productById]
+    [createItems, productById, tenantContext]
   );
 
   const createTotals = useMemo(() => {
@@ -520,8 +550,8 @@ export function QuotationsRoute(): React.JSX.Element {
       taxAmountCents,
       serviceChargesFeeCents,
       deliveryFeeCents,
-      grandTotalCents:
-        subtotalCents - discountAmountCents + taxAmountCents + serviceChargesFeeCents + deliveryFeeCents
+      // Tax is already inside subtotalCents (prices are tax-inclusive) — never added again here.
+      grandTotalCents: subtotalCents - discountAmountCents + serviceChargesFeeCents + deliveryFeeCents
     };
   }, [createLinePricing, createServiceCharges, createDelivery]);
 
@@ -545,7 +575,10 @@ export function QuotationsRoute(): React.JSX.Element {
       if (existing) {
         return prev.map((line) => (line.productId === product.id ? { ...line, quantity: line.quantity + 1 } : line));
       }
-      return [...prev, { productId: product.id, name: product.name, sku: product.sku, quantity: 1, discountAmountCents: 0 }];
+      return [
+        ...prev,
+        { productId: product.id, name: product.name, sku: product.sku, quantity: 1, discountAmountCents: 0, priceOverride: "" }
+      ];
     });
     setProductSearch("");
   }
@@ -555,10 +588,26 @@ export function QuotationsRoute(): React.JSX.Element {
     setCreateItems((prev) => prev.map((line) => (line.productId === productId ? { ...line, quantity: next } : line)));
   }
 
+  /** Permissive counterpart used only by the free-typing quantity input's onChange — allows 0
+   * mid-edit (see the input's own value prop, which renders "" for 0) so clearing "1" to type "80"
+   * isn't fought by an immediate re-clamp on every keystroke. updateCreateQuantity's own clamp still
+   * applies on blur. */
+  function updateCreateQuantityDraft(productId: string, raw: string): void {
+    const parsed = raw === "" ? 0 : Math.floor(Number(raw));
+    const next = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    setCreateItems((prev) => prev.map((line) => (line.productId === productId ? { ...line, quantity: next } : line)));
+  }
+
   function updateCreateDiscount(productId: string, value: string): void {
     const cents = toCents(value);
     setCreateItems((prev) =>
       prev.map((line) => (line.productId === productId ? { ...line, discountAmountCents: cents } : line))
+    );
+  }
+
+  function updateCreatePriceOverride(productId: string, value: string): void {
+    setCreateItems((prev) =>
+      prev.map((line) => (line.productId === productId ? { ...line, priceOverride: value } : line))
     );
   }
 
@@ -596,7 +645,8 @@ export function QuotationsRoute(): React.JSX.Element {
         items: createItems.map((line) => ({
           productId: line.productId,
           quantity: line.quantity,
-          discountAmountCents: line.discountAmountCents
+          discountAmountCents: line.discountAmountCents,
+          unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined
         })),
         serviceCharges: createServiceCharges.map((charge) => ({
           name: charge.name,
@@ -605,15 +655,15 @@ export function QuotationsRoute(): React.JSX.Element {
         })),
         delivery: createDelivery
           ? {
-              riderId: createDelivery.riderId,
-              recipientName: createDelivery.recipientName,
-              country: createDelivery.country,
-              town: createDelivery.town,
-              physicalAddress: createDelivery.physicalAddress,
-              notes: createDelivery.notes,
-              feeCents: toCents(createDelivery.fee),
-              costCents: toCents(createDelivery.cost)
-            }
+            riderId: createDelivery.riderId,
+            recipientName: createDelivery.recipientName,
+            country: createDelivery.country,
+            town: createDelivery.town,
+            physicalAddress: createDelivery.physicalAddress,
+            notes: createDelivery.notes,
+            feeCents: toCents(createDelivery.fee),
+            costCents: toCents(createDelivery.cost)
+          }
           : null
       });
       setCreateOpen(false);
@@ -659,7 +709,7 @@ export function QuotationsRoute(): React.JSX.Element {
               Price Offers
             </h2>
             <p className="mt-1 text-xs font-semibold text-muted">
-              Prepare quotes for customers, then convert accepted ones straight into a sale or invoice.
+              Prepare quotes for customers. 
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -781,26 +831,20 @@ export function QuotationsRoute(): React.JSX.Element {
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-line">
-              <table className="w-full min-w-[1300px] table-fixed border-collapse text-sm">
+              <table className="w-full table-fixed border-collapse text-sm">
                 <colgroup>
                   <col className="w-[11%]" />
-                  <col className="w-[14%]" />
-                  <col className="w-[11%]" />
                   <col className="w-[11%]" />
                   <col className="w-[10%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[9%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[5%]" />
+                  <col className="w-[5%]" />
                 </colgroup>
                 <thead>
                   <tr className="bg-primary text-white">
                     <Th>Quotation #</Th>
-                    <Th>Customer</Th>
-                    <Th>Storefront</Th>
-                    <Th>Salesperson</Th>
+                    <Th>Salesperson</Th> 
                     <Th>Created</Th>
-                    <Th>Valid Until</Th>
                     <Th className="text-right">Total Amount</Th>
                     <Th>Status</Th>
                     <Th className="text-right">Actions</Th>
@@ -814,16 +858,22 @@ export function QuotationsRoute(): React.JSX.Element {
                       className="cursor-pointer border-t border-line odd:bg-white even:bg-soft/50 hover:bg-soft"
                     >
                       <td className="truncate px-3 py-2.5 text-xs font-bold tabular-nums text-ink">
-                        {quotation.quotationNumber}
-                      </td>
-                      <td className="truncate px-3 py-2.5 font-extrabold">{quotation.customerName}</td>
-                      <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">{quotation.locationName}</td>
-                      <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">{quotation.employeeName}</td>
-                      <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">
-                        {formatDate(quotation.createdAt)}
+                        <div className="flex flex-col">
+                          <span className="text-muted">{quotation.quotationNumber}</span>
+                          <span>{quotation.customerName}</span>
+                        </div>
                       </td>
                       <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">
-                        {formatDate(quotation.validUntil)}
+                        <div className="flex flex-col">
+                          <span>{quotation.employeeName}</span>
+                          <span className="text-xs font-bold text-primary">{quotation.locationName}</span>
+                        </div>
+                      </td>
+                      <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">
+                        <div className="flex flex-col">
+                          <span>CREATED: {formatDate(quotation.createdAt)}</span>
+                          <span>VALID: {formatDate(quotation.validUntil)}</span>
+                        </div>
                       </td>
                       <td className="px-3 py-2.5 text-right text-xs font-bold tabular-nums text-ink">
                         {formatCents(quotation.grandTotalCents)}
@@ -991,10 +1041,6 @@ export function QuotationsRoute(): React.JSX.Element {
                 <span className="font-semibold">Discount</span>
                 <span className="font-bold tabular-nums">-{formatCents(viewingQuotation.discountAmountCents)}</span>
               </div>
-              <div className="flex justify-between text-muted">
-                <span className="font-semibold">Tax</span>
-                <span className="font-bold tabular-nums">{formatCents(viewingQuotation.taxAmountCents)}</span>
-              </div>
               {viewingQuotation.serviceCharges.length > 0 && (
                 <div className="flex justify-between text-muted">
                   <span className="font-semibold">Service Charges</span>
@@ -1014,6 +1060,11 @@ export function QuotationsRoute(): React.JSX.Element {
                 <span>{formatCents(viewingQuotation.grandTotalCents)}</span>
               </div>
             </div>
+
+            <TaxBreakdownTable
+              breakdown={computeTaxBreakdown(viewingQuotation.items)}
+              tenantTaxConfig={{ vatRatePercent: tenantContext?.vatRatePercent ?? 16, pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true }}
+            />
 
             <div className="mt-4 grid grid-cols-3 gap-2">
               <Button
@@ -1041,6 +1092,21 @@ export function QuotationsRoute(): React.JSX.Element {
                 Share
               </Button>
             </div>
+
+            <Button
+              type="button"
+              onClick={() => void handlePrintThermal()}
+              disabled={printingThermal}
+              title="For shops with only a narrow thermal receipt printer — no A4 printer needed."
+              className="mt-2 h-9 w-full border border-line bg-white text-xs text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {printingThermal ? (
+                <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <Receipt className="mr-1.5 size-3.5" aria-hidden="true" />
+              )}
+              Print via Receipt Printer
+            </Button>
 
             <ShareModal
               open={sharing}
@@ -1450,8 +1516,9 @@ export function QuotationsRoute(): React.JSX.Element {
                         <input
                           type="number"
                           min={1}
-                          value={line.quantity}
-                          onChange={(event) => updateCreateQuantity(line.productId, Number(event.target.value))}
+                          value={line.quantity === 0 ? "" : line.quantity}
+                          onChange={(event) => updateCreateQuantityDraft(line.productId, event.target.value)}
+                          onBlur={() => updateCreateQuantity(line.productId, line.quantity)}
                           className="h-8 w-16 rounded-md border border-line text-center text-xs font-bold outline-none focus:border-accent"
                         />
                       </label>
@@ -1493,10 +1560,6 @@ export function QuotationsRoute(): React.JSX.Element {
               <span className="font-semibold">Discount</span>
               <span className="font-bold tabular-nums">-{formatCents(createTotals.discountAmountCents)}</span>
             </div>
-            <div className="flex justify-between text-muted">
-              <span className="font-semibold">Tax</span>
-              <span className="font-bold tabular-nums">{formatCents(createTotals.taxAmountCents)}</span>
-            </div>
             {createTotals.serviceChargesFeeCents > 0 && (
               <div className="flex justify-between text-muted">
                 <span className="font-semibold">Service Charges</span>
@@ -1514,6 +1577,17 @@ export function QuotationsRoute(): React.JSX.Element {
               <span>{formatCents(createTotals.grandTotalCents)}</span>
             </div>
           </div>
+
+          <TaxBreakdownTable
+            breakdown={computeTaxBreakdown(
+              createLinePricing.map((entry) => ({
+                taxType: entry.product.taxType,
+                taxAmountCents: entry.pricing.taxCents,
+                lineTotalCents: entry.pricing.lineTotalCents
+              }))
+            )}
+            tenantTaxConfig={{ vatRatePercent: tenantContext?.vatRatePercent ?? 16, pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true }}
+          />
 
           <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
             <Button type="button" onClick={() => setCreateOpen(false)} className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft">

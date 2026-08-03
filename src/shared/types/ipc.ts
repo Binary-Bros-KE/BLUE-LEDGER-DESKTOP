@@ -18,6 +18,7 @@ import type { Product, ProductListItem, ProductStatus, ProductStockSummary } fro
 import type { ProductSalesHistoryEntry, ProductsPerformanceReport } from "./product-report";
 import type { CustomerPurchaseHistoryEntry, OutstandingInvoicesSummary, TopCustomerRow } from "./customer-report";
 import type { OutstandingPurchasesSummary, SupplierPurchaseHistoryEntry, SupplierSpendRow } from "./supplier-report";
+import type { TaxReport } from "./tax-report";
 import type { PrinterActionResult, PrinterSettings } from "./printer";
 import type { Expense, ExpenseSummary } from "./expense";
 import type { ExportListRequest } from "./export";
@@ -42,6 +43,7 @@ import type { Quotation, QuotationListItem, QuotationStatus, QuotationStockCheck
 import type { Role, RoleListItem, RolePickerItem } from "./role";
 import type { Supplier, SupplierStatus } from "./supplier";
 import type { Rider, RiderStatus } from "./rider";
+import type { DeliveryInput } from "../schemas/charges";
 import type { PendingSaleListItem, Sale, SaleDelivery, SaleListItem } from "./sale";
 import type { SaleReturn } from "./sale-return";
 import type { SaleVoid } from "./sale-void";
@@ -564,6 +566,46 @@ export type IpcInvokeMap = {
     args: [string];
     result: { success: true };
   };
+  "local-purchase:list": {
+    args: [];
+    result: Expense[];
+  };
+  "local-purchase:summary": {
+    args: [];
+    result: ExpenseSummary;
+  };
+  "local-purchase:get": {
+    args: [string];
+    result: Expense;
+  };
+  "local-purchase:create": {
+    args: [Record<string, unknown>];
+    result: Expense;
+  };
+  "local-purchase:update": {
+    args: [string, Record<string, unknown>];
+    result: Expense;
+  };
+  "local-purchase:archive": {
+    args: [string];
+    result: Expense;
+  };
+  "local-purchase:restore": {
+    args: [string];
+    result: Expense;
+  };
+  "local-purchase:delete": {
+    args: [string];
+    result: { id: string };
+  };
+  "local-purchase:pick-attachment": {
+    args: [];
+    result: string | null;
+  };
+  "local-purchase:open-attachment": {
+    args: [string];
+    result: { success: true };
+  };
   "salary:list": {
     args: [];
     result: Salary[];
@@ -756,6 +798,10 @@ export type IpcInvokeMap = {
     args: [string];
     result: PrinterActionResult;
   };
+  "printer:print-invoice-thermal": {
+    args: [string];
+    result: PrinterActionResult;
+  };
   "printer:generate-statement-pdf": {
     args: [string];
     result: string | null;
@@ -769,6 +815,10 @@ export type IpcInvokeMap = {
     result: string | null;
   };
   "printer:print-quotation-document": {
+    args: [string];
+    result: PrinterActionResult;
+  };
+  "printer:print-quotation-thermal": {
     args: [string];
     result: PrinterActionResult;
   };
@@ -810,6 +860,10 @@ export type IpcInvokeMap = {
   };
   "delivery-note:set-delivered": {
     args: [string, boolean];
+    result: SaleDelivery;
+  };
+  "delivery-note:attach-to-sale": {
+    args: [string, DeliveryInput];
     result: SaleDelivery;
   };
   "export:to-pdf": {
@@ -1007,6 +1061,10 @@ export type IpcInvokeMap = {
   "report:supplier-spend-breakdown": {
     args: [DateRangeInput];
     result: SupplierSpendRow[];
+  };
+  "report:tax-breakdown": {
+    args: [DateRangeInput];
+    result: TaxReport;
   };
 };
 
@@ -1276,6 +1334,21 @@ export type BlueLedgerApi = {
     pickAttachment: () => Promise<IpcInvokeMap["expense:pick-attachment"]["result"]>;
     openAttachment: (relativePath: string) => Promise<IpcInvokeMap["expense:open-attachment"]["result"]>;
   };
+  localPurchase: {
+    list: () => Promise<IpcInvokeMap["local-purchase:list"]["result"]>;
+    summary: () => Promise<IpcInvokeMap["local-purchase:summary"]["result"]>;
+    get: (id: string) => Promise<IpcInvokeMap["local-purchase:get"]["result"]>;
+    create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["local-purchase:create"]["result"]>;
+    update: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["local-purchase:update"]["result"]>;
+    archive: (id: string) => Promise<IpcInvokeMap["local-purchase:archive"]["result"]>;
+    restore: (id: string) => Promise<IpcInvokeMap["local-purchase:restore"]["result"]>;
+    delete: (id: string) => Promise<IpcInvokeMap["local-purchase:delete"]["result"]>;
+    pickAttachment: () => Promise<IpcInvokeMap["local-purchase:pick-attachment"]["result"]>;
+    openAttachment: (relativePath: string) => Promise<IpcInvokeMap["local-purchase:open-attachment"]["result"]>;
+  };
   salary: {
     list: () => Promise<IpcInvokeMap["salary:list"]["result"]>;
     get: (id: string) => Promise<IpcInvokeMap["salary:get"]["result"]>;
@@ -1372,12 +1445,16 @@ export type BlueLedgerApi = {
     printInvoiceDocument: (
       saleId: string
     ) => Promise<IpcInvokeMap["printer:print-invoice-document"]["result"]>;
+    printInvoiceThermal: (saleId: string) => Promise<IpcInvokeMap["printer:print-invoice-thermal"]["result"]>;
     generateQuotationPdf: (
       quotationId: string
     ) => Promise<IpcInvokeMap["printer:generate-quotation-pdf"]["result"]>;
     printQuotationDocument: (
       quotationId: string
     ) => Promise<IpcInvokeMap["printer:print-quotation-document"]["result"]>;
+    printQuotationThermal: (
+      quotationId: string
+    ) => Promise<IpcInvokeMap["printer:print-quotation-thermal"]["result"]>;
     generateSalaryPdf: (salaryId: string) => Promise<IpcInvokeMap["printer:generate-salary-pdf"]["result"]>;
     shareSalaryPayslip: (salaryId: string) => Promise<IpcInvokeMap["printer:share-salary-payslip"]["result"]>;
     printDeliveryNote: (
@@ -1407,6 +1484,10 @@ export type BlueLedgerApi = {
       id: string,
       delivered: boolean
     ) => Promise<IpcInvokeMap["delivery-note:set-delivered"]["result"]>;
+    attachToSale: (
+      saleId: string,
+      input: DeliveryInput
+    ) => Promise<IpcInvokeMap["delivery-note:attach-to-sale"]["result"]>;
   };
   export: {
     toPdf: (request: ExportListRequest) => Promise<IpcInvokeMap["export:to-pdf"]["result"]>;
@@ -1499,5 +1580,6 @@ export type BlueLedgerApi = {
     outstandingPurchases: () => Promise<OutstandingPurchasesSummary>;
     supplierPurchaseHistory: (input: { supplierId: string }) => Promise<SupplierPurchaseHistoryEntry[]>;
     supplierSpendBreakdown: (input: DateRangeInput) => Promise<SupplierSpendRow[]>;
+    taxBreakdown: (range: DateRangeInput) => Promise<TaxReport>;
   };
 };

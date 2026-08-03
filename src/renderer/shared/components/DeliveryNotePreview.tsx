@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Download, Loader2, Printer, RotateCcw, RotateCw, Share2 } from "lucide-react";
+import { CheckCircle2, Download, Loader2, Printer, Receipt, RotateCcw, Share2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { ShareModal } from "@renderer/shared/components/ShareModal";
@@ -266,13 +266,13 @@ export function DeliveryNotePreview({
         type="button"
         onClick={() => void handlePrintThermal()}
         disabled={printingThermal}
-        title="For shops with only a narrow thermal receipt printer — prints a rotated strip. Rotate the printed strip 90° once it's out, then tape it to the package."
+        title="For shops with only a narrow thermal receipt printer — no A4 sticker paper needed."
         className="mt-2 h-9 w-full border border-line bg-white text-[11px] text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
       >
         {printingThermal ? (
           <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
         ) : (
-          <RotateCw className="mr-1.5 size-3.5" aria-hidden="true" />
+          <Receipt className="mr-1.5 size-3.5" aria-hidden="true" />
         )}
         Print via Receipt Printer
       </Button>

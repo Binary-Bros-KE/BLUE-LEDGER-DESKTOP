@@ -35,6 +35,8 @@ export const businessProfileInputSchema = z.object({
   ownerName: optionalText(200),
   ownerPhone: optionalText(50),
   ownerEmail: optionalText(),
+  vatRatePercent: z.coerce.number().min(0).max(100),
+  pricesTaxInclusive: z.boolean(),
   receiptHeader: optionalText(500),
   receiptFooter: optionalText(500)
 });

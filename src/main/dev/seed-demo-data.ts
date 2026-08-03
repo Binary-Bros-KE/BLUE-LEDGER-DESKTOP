@@ -355,6 +355,7 @@ export async function seedDemoData(): Promise<void> {
         wholesaleMinQuantity: product.wholesaleMinQuantity ?? 0,
         minimumPriceCents: null,
         taxRate: 16,
+        taxType: "vat",
         reorderLevel: product.reorderLevel,
         trackStock: true,
         allowNegativeStock: false,

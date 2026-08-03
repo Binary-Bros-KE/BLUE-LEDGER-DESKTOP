@@ -22,6 +22,8 @@ import {
 } from "@main/services/sale-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { computeQuotationStatus } from "@shared/lib/quotation";
+import { computeLineTax } from "@shared/lib/tax-calculation";
+import type { ProductTaxType } from "@shared/types/product";
 import {
   convertToInvoiceSchema,
   convertToSaleSchema,
@@ -150,6 +152,7 @@ export function createQuotation(input: unknown): Quotation {
         quantity: item.quantity,
         unitPriceCents: item.unitPriceCents,
         discountAmountCents: item.discountAmountCents,
+        taxType: item.taxType,
         taxAmountCents: item.taxAmountCents,
         lineTotalCents: item.lineTotalCents
       });
@@ -204,6 +207,7 @@ export function updateQuotation(id: string, input: unknown): Quotation {
         quantity: item.quantity,
         unitPriceCents: item.unitPriceCents,
         discountAmountCents: item.discountAmountCents,
+        taxType: item.taxType,
         taxAmountCents: item.taxAmountCents,
         lineTotalCents: item.lineTotalCents
       });
@@ -280,7 +284,11 @@ export function checkQuotationStock(id: string): QuotationStockCheckItem[] {
 }
 
 /** Re-derives a line's discount/tax/total for an overridden (reduced) quantity, keeping the frozen
- * unit price but scaling the discount proportionally and recomputing tax off the product's current rate. */
+ * unit price but scaling the discount proportionally and recomputing tax off the product's current
+ * category/rate (deliberately not the quotation's own frozen tax_type snapshot — an overridden
+ * quantity is treated as a fresh re-price, same as the discount ratio scaling above it). Gross line
+ * price already includes tax — see tax-calculation.ts — so lineTotalCents is just the taxable
+ * amount, never taxable + tax. */
 function repriceLineForQuantity(item: QuotationItemDetailRow, product: ProductRow, quantity: number): PreparedItem {
   const unitPriceCents = item.unit_price_cents;
   const lineSubtotalCents = unitPriceCents * quantity;
@@ -288,15 +296,17 @@ function repriceLineForQuantity(item: QuotationItemDetailRow, product: ProductRo
   const discountRatio = originalSubtotalCents > 0 ? item.discount_amount_cents / originalSubtotalCents : 0;
   const discountAmountCents = Math.min(Math.round(lineSubtotalCents * discountRatio), lineSubtotalCents);
   const taxableCents = lineSubtotalCents - discountAmountCents;
-  const taxAmountCents = Math.round(taxableCents * (product.tax_rate / 100));
+  const taxType = product.tax_type as ProductTaxType;
+  const { taxCents: taxAmountCents } = computeLineTax(taxableCents, taxType, getCurrentTenant());
 
   return {
     product,
     quantity,
     unitPriceCents,
     discountAmountCents,
+    taxType,
     taxAmountCents,
-    lineTotalCents: taxableCents + taxAmountCents
+    lineTotalCents: taxableCents
   };
 }
 
@@ -329,6 +339,7 @@ function buildConversionCart(
       quantity: item.quantity,
       unitPriceCents: item.unit_price_cents,
       discountAmountCents: item.discount_amount_cents,
+      taxType: item.tax_type as ProductTaxType,
       taxAmountCents: item.tax_amount_cents,
       lineTotalCents: item.line_total_cents
     };

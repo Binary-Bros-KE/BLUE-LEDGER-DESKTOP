@@ -73,6 +73,7 @@ export function QuickCreateProductModal({
         buyingPriceCents,
         sellingPriceCents,
         taxRate: 0,
+        taxType: "vat",
         reorderLevel: 0,
         wholesaleMinQuantity: 0,
         trackStock: true,

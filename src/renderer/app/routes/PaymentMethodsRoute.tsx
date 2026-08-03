@@ -264,11 +264,10 @@ export function PaymentMethodsRoute(): React.JSX.Element {
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-line">
-              <table className="w-full min-w-[820px] table-fixed border-collapse text-sm">
+              <table className="w-fulltable-fixed border-collapse text-sm">
                 <colgroup>
                   <col className="w-[22%]" />
                   <col className="w-[16%]" />
-                  <col className="w-[32%]" />
                   <col className="w-[12%]" />
                   <col className="w-[10%]" />
                   <col className="w-[8%]" />
@@ -277,7 +276,6 @@ export function PaymentMethodsRoute(): React.JSX.Element {
                   <tr className="bg-primary text-white">
                     <Th>Name</Th>
                     <Th>Code</Th>
-                    <Th>Description</Th>
                     <Th>Reference</Th>
                     <Th>Status</Th>
                     <Th className="text-right">Actions</Th>
@@ -296,9 +294,6 @@ export function PaymentMethodsRoute(): React.JSX.Element {
                       </td>
                       <td className="truncate px-4 py-3 text-xs font-bold tabular-nums text-muted">
                         {method.code}
-                      </td>
-                      <td className="truncate px-4 py-3 text-xs font-semibold text-muted">
-                        {method.description ?? "—"}
                       </td>
                       <td className="px-4 py-3">
                         <DashedPill tone={method.requiresReference ? "warning" : "neutral"}>

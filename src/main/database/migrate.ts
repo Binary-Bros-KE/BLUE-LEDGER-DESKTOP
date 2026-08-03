@@ -1929,6 +1929,155 @@ const migrations = [
       ALTER TABLE customers ADD COLUMN kra_pin TEXT;
       ALTER TABLE suppliers ADD COLUMN kra_pin TEXT;
     `
+  },
+  {
+    version: 51,
+    name: "held_sales_local_only",
+    sql: `
+      -- Held ("pending") sales are a local checkout-screen convenience — never meant to leave the
+      -- device. Under the old triggers a held sale synced to the cloud like any other row, and since
+      -- this sync system has no delete propagation, deleting an already-synced held sale would leave
+      -- a stale orphan on the cloud forever — so deletePendingSale simply refused, and held sales
+      -- piled up on the checkout screen with no way to clear them. Fix: a sale only ever enqueues to
+      -- the outbox once it stops being "pending" (i.e. once it's actually completed) — a held sale's
+      -- insert/update/delete while still pending never touches sync_outbox at all, exactly like
+      -- printer settings never do. Completing a held sale has always been a fresh INSERT of a brand
+      -- new completed row (see insertCompletedSaleFromCart) with the old pending row hard-deleted
+      -- alongside it (discardResumedSale) — so gating INSERT on sale_status alone is enough to cover
+      -- every real path; the UPDATE trigger only needs the same guard for symmetry/defense.
+      DROP TRIGGER trg_sales_sync_ai;
+      DROP TRIGGER trg_sales_sync_au;
+      DROP TRIGGER trg_sales_sync_ad;
+      DROP TRIGGER trg_sale_items_reenqueue_sale_ai;
+      DROP TRIGGER trg_service_charges_reenqueue_sale_ai;
+      DROP TRIGGER trg_delivery_notes_reenqueue_sale_ai;
+      DROP TRIGGER trg_delivery_notes_reenqueue_sale_au;
+
+      CREATE TRIGGER trg_sales_sync_ai AFTER INSERT ON sales WHEN NEW.sale_status != 'pending' BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'sales', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_sales_sync_au AFTER UPDATE ON sales WHEN NEW.updated_at != OLD.updated_at AND NEW.sale_status != 'pending' BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'sales', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_sales_sync_ad AFTER DELETE ON sales WHEN OLD.sale_status != 'pending' BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'sales', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      CREATE TRIGGER trg_sale_items_reenqueue_sale_ai AFTER INSERT ON sale_items BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), s.tenant_id, (SELECT client_id FROM tenant WHERE id = s.tenant_id), 'sales', s.id, 'upsert', 'push', 'queued', 0, '{}', s.id || ':' || s.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+        FROM sales s WHERE s.id = NEW.sale_id AND s.sale_status != 'pending';
+      END;
+      CREATE TRIGGER trg_service_charges_reenqueue_sale_ai AFTER INSERT ON sale_service_charges WHEN NEW.sale_id IS NOT NULL BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), s.tenant_id, (SELECT client_id FROM tenant WHERE id = s.tenant_id), 'sales', s.id, 'upsert', 'push', 'queued', 0, '{}', s.id || ':' || s.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+        FROM sales s WHERE s.id = NEW.sale_id AND s.sale_status != 'pending';
+      END;
+      CREATE TRIGGER trg_delivery_notes_reenqueue_sale_ai AFTER INSERT ON delivery_notes WHEN NEW.sale_id IS NOT NULL BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), s.tenant_id, (SELECT client_id FROM tenant WHERE id = s.tenant_id), 'sales', s.id, 'upsert', 'push', 'queued', 0, '{}', s.id || ':' || s.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+        FROM sales s WHERE s.id = NEW.sale_id AND s.sale_status != 'pending';
+      END;
+      CREATE TRIGGER trg_delivery_notes_reenqueue_sale_au AFTER UPDATE ON delivery_notes WHEN NEW.sale_id IS NOT NULL AND NEW.is_delivered != OLD.is_delivered BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), s.tenant_id, (SELECT client_id FROM tenant WHERE id = s.tenant_id), 'sales', s.id, 'upsert', 'push', 'queued', 0, '{}', s.id || ':' || s.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+        FROM sales s WHERE s.id = NEW.sale_id AND s.sale_status != 'pending';
+      END;
+
+      -- Undo the damage already done under the old triggers: any held sale sitting in the outbox
+      -- right now (queued/failed, never actually reached the cloud yet) should never go out.
+      DELETE FROM sync_outbox WHERE entity = 'sales' AND status IN ('queued', 'failed')
+        AND entity_id IN (SELECT id FROM sales WHERE sale_status = 'pending');
+    `
+  },
+  {
+    version: 52,
+    name: "held_sale_delivery_draft",
+    sql: `
+      -- A held sale's own delivery info (rider/recipient/address/notes) used to be persisted as a
+      -- REAL delivery_notes row the moment the cart was merely held — which is exactly what caused
+      -- the whole migration-51 mess: resuming/re-holding/completing a held sale discarded that row
+      -- and minted a new one, and a freed-up local number could collide with an already-synced
+      -- orphan. Fix at the root: a held sale now stashes its delivery as a plain JSON draft on the
+      -- sale row itself, with no delivery_note_number allocated until the sale actually completes
+      -- (see sale-service.ts's suspendSale/persistCartExtras split).
+      ALTER TABLE sales ADD COLUMN delivery_draft_json TEXT;
+    `
+  },
+  {
+    version: 53,
+    name: "expense_kind_local_purchases",
+    sql: `
+      -- "Local Purchases" (small day-to-day buys — tape, delivery bags, a pen) reuse the exact same
+      -- expenses table/sync machinery as formal expenses, rather than a whole parallel entity —
+      -- this one column is the only thing distinguishing them. A brand-new dedicated permission
+      -- module ("local_purchases", see shared/types/role.ts) is what actually keeps a cashier from
+      -- ever seeing 'general' rows: every local-purchase-service.ts query filters on this column
+      -- server-side, it isn't a UI-level hide. Existing rows are all real formal expenses.
+      ALTER TABLE expenses ADD COLUMN kind TEXT NOT NULL DEFAULT 'general';
+    `
+  },
+  {
+    version: 54,
+    name: "tenant_vat_settings",
+    sql: `
+      -- Every product picks one of exactly three tax categories (see migration 55): 'vat'
+      -- (standard-rated), 'exempted', 'zero_rated'. The last two are always 0% by definition; this
+      -- is the % applied to 'vat' only, tenant-configurable rather than hardcoded 16 so this app
+      -- doesn't need another migration once it reaches a market with a different VAT rate
+      -- (Uganda/Tanzania 18%, Ethiopia 15%). pricesTaxInclusive exists for the same forward-looking
+      -- reason but only the inclusive (divide) calculation path is actually implemented today.
+      ALTER TABLE tenant ADD COLUMN vat_rate_percent REAL NOT NULL DEFAULT 16;
+      ALTER TABLE tenant ADD COLUMN prices_tax_inclusive INTEGER NOT NULL DEFAULT 1;
+    `
+  },
+  {
+    version: 55,
+    name: "product_tax_type",
+    sql: `
+      -- Replaces the flat tax_rate percentage (still present, no longer consulted by new
+      -- calculation code) with a real category so Exempted and Zero-Rated — both previously
+      -- indistinguishable "tax_rate = 0" — can be reported separately, per KRA's own distinction.
+      -- Backfill is a best-effort default, not a guess at legal correctness: existing tax_rate > 0
+      -- becomes 'vat' (it WAS being taxed), tax_rate = 0 becomes 'zero_rated' (the more common of
+      -- the two zero-tax categories in a general retail catalog) — an admin corrects any product
+      -- that was actually meant to be 'exempted'.
+      ALTER TABLE products ADD COLUMN tax_type TEXT NOT NULL DEFAULT 'vat'
+        CHECK (tax_type IN ('vat', 'exempted', 'zero_rated'));
+      UPDATE products SET tax_type = CASE WHEN tax_rate > 0 THEN 'vat' ELSE 'zero_rated' END;
+    `
+  },
+  {
+    version: 56,
+    name: "line_item_tax_type_snapshot",
+    sql: `
+      -- What tax category actually applied AT THE TIME of this line — a product's own tax_type can
+      -- change later, but a historical sale/quotation/purchase must keep reporting whatever was true
+      -- when it happened. Backfill mirrors migration 55's same product-level default, since every
+      -- existing line item was priced under the old flat-rate model.
+      ALTER TABLE sale_items ADD COLUMN tax_type TEXT NOT NULL DEFAULT 'vat'
+        CHECK (tax_type IN ('vat', 'exempted', 'zero_rated'));
+      ALTER TABLE quotation_items ADD COLUMN tax_type TEXT NOT NULL DEFAULT 'vat'
+        CHECK (tax_type IN ('vat', 'exempted', 'zero_rated'));
+      ALTER TABLE purchase_items ADD COLUMN tax_type TEXT NOT NULL DEFAULT 'vat'
+        CHECK (tax_type IN ('vat', 'exempted', 'zero_rated'));
+
+      UPDATE sale_items SET tax_type = CASE
+        WHEN (SELECT tax_rate FROM products WHERE products.id = sale_items.product_id) > 0 THEN 'vat'
+        ELSE 'zero_rated'
+      END WHERE product_id IN (SELECT id FROM products);
+      UPDATE quotation_items SET tax_type = CASE
+        WHEN (SELECT tax_rate FROM products WHERE products.id = quotation_items.product_id) > 0 THEN 'vat'
+        ELSE 'zero_rated'
+      END WHERE product_id IN (SELECT id FROM products);
+      UPDATE purchase_items SET tax_type = CASE
+        WHEN (SELECT tax_rate FROM products WHERE products.id = purchase_items.product_id) > 0 THEN 'vat'
+        ELSE 'zero_rated'
+      END WHERE product_id IN (SELECT id FROM products);
+    `
   }
 ] as const;
 

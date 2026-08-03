@@ -22,13 +22,21 @@ import {
   type PurchaseItemInput,
   type PurchaseUpdateInput
 } from "@shared/schemas/purchase";
+import { computeLineTax } from "@shared/lib/tax-calculation";
+import type { ProductTaxType } from "@shared/types/product";
 import type { Purchase, PurchaseListItem, PurchasePayment, PurchaseStatus, PurchaseSummary } from "@shared/types/purchase";
+
+/** No longer a client-supplied value (see purchaseCreateSchema) — Purchase.taxType is now a
+ * legacy, unused-going-forward column, kept only so historical POs created before tax became
+ * per-line still have SOMETHING on record. Every new purchase just writes this fixed placeholder. */
+const LEGACY_PURCHASE_TAX_TYPE = "no_vat";
 
 type PreparedPurchaseItem = {
   productId: string;
   orderedQuantity: number;
   unitCostCents: number;
   discountAmountCents: number;
+  taxType: ProductTaxType;
   taxAmountCents: number;
   lineTotalCents: number;
 };
@@ -83,22 +91,29 @@ function assertUniqueSupplierInvoiceNumber(
 }
 
 function prepareCart(tenantId: string, items: PurchaseItemInput[]): PreparedPurchaseCart {
+  const tenantTaxConfig = getCurrentTenant();
+
   const preparedItems: PreparedPurchaseItem[] = items.map((item) => {
     const product = productRepository.findProductRowById(item.productId);
     if (!product || product.tenant_id !== tenantId) {
       throw new Error("One of the selected products was not found");
     }
 
+    // Supplier invoice cost is treated the same as a tax-inclusive retail price — tax is extracted
+    // for reporting, never added on top (see tax-calculation.ts). taxType comes from the line
+    // itself (defaults from the product in the UI, but a real invoice can classify differently).
     const taxableCents = item.orderedQuantity * item.unitCostCents - item.discountAmountCents;
-    const lineTotalCents = taxableCents + item.taxAmountCents;
+    const taxType = item.taxType as ProductTaxType;
+    const { taxCents } = computeLineTax(taxableCents, taxType, tenantTaxConfig);
 
     return {
       productId: product.id,
       orderedQuantity: item.orderedQuantity,
       unitCostCents: item.unitCostCents,
       discountAmountCents: item.discountAmountCents,
-      taxAmountCents: item.taxAmountCents,
-      lineTotalCents
+      taxType,
+      taxAmountCents: taxCents,
+      lineTotalCents: taxableCents
     };
   });
 
@@ -116,7 +131,9 @@ function prepareCart(tenantId: string, items: PurchaseItemInput[]): PreparedPurc
     subtotalCents,
     discountAmountCents,
     taxAmountCents,
-    grandTotalCents: subtotalCents - discountAmountCents + taxAmountCents
+    // Tax is already inside subtotalCents (cost is tax-inclusive) — never added again here, same
+    // fix as sale-service.ts's prepareCart.
+    grandTotalCents: subtotalCents - discountAmountCents
   };
 }
 
@@ -174,7 +191,7 @@ export function createPurchase(input: unknown): Purchase {
       supplierInvoiceNumber: parsed.supplierInvoiceNumber,
       locationId: parsed.locationId,
       status: parsed.intent,
-      taxType: parsed.taxType,
+      taxType: LEGACY_PURCHASE_TAX_TYPE,
       subtotalCents: cart.subtotalCents,
       discountAmountCents: cart.discountAmountCents,
       taxAmountCents: cart.taxAmountCents,
@@ -193,6 +210,7 @@ export function createPurchase(input: unknown): Purchase {
         orderedQuantity: item.orderedQuantity,
         unitCostCents: item.unitCostCents,
         discountAmountCents: item.discountAmountCents,
+        taxType: item.taxType,
         taxAmountCents: item.taxAmountCents,
         lineTotalCents: item.lineTotalCents
       });
@@ -236,7 +254,7 @@ export function updatePurchase(id: string, input: unknown): Purchase {
       supplierId: parsed.supplierId,
       supplierInvoiceNumber: parsed.supplierInvoiceNumber,
       locationId: parsed.locationId,
-      taxType: parsed.taxType,
+      taxType: LEGACY_PURCHASE_TAX_TYPE,
       subtotalCents: cart.subtotalCents,
       discountAmountCents: cart.discountAmountCents,
       taxAmountCents: cart.taxAmountCents,
@@ -254,6 +272,7 @@ export function updatePurchase(id: string, input: unknown): Purchase {
         orderedQuantity: item.orderedQuantity,
         unitCostCents: item.unitCostCents,
         discountAmountCents: item.discountAmountCents,
+        taxType: item.taxType,
         taxAmountCents: item.taxAmountCents,
         lineTotalCents: item.lineTotalCents
       });

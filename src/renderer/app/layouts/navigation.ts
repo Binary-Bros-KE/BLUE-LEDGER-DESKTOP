@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeftRight,
   BarChart3,
+  Banknote,
   Bike,
   Boxes,
   Building2,
@@ -178,6 +179,13 @@ export const navGroups: NavGroup[] = [
         description: "Purchase orders & receiving",
         icon: ShoppingBag,
         permissionModule: "purchases"
+      },
+      {
+        key: "local-purchases",
+        label: "Local Purchases",
+        description: "Small day-to-day buys — tape, pens, delivery bags",
+        icon: Banknote,
+        permissionModule: "local_purchases"
       }
     ]
   },
@@ -229,6 +237,13 @@ export const navGroups: NavGroup[] = [
         label: "Suppliers Report",
         description: "Purchasing & spend by supplier",
         icon: Truck,
+        permissionModule: "reports"
+      },
+      {
+        key: "reports-tax",
+        label: "Tax Report",
+        description: "Tax collected by category, plus top products",
+        icon: Receipt,
         permissionModule: "reports"
       }
     ]

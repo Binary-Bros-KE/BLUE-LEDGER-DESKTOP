@@ -18,8 +18,10 @@ import { readManagedBusinessLogoPreview, readManagedLocationLogoPreview } from "
 import { getSalary } from "@main/services/salary-service";
 import { getCustomerStatement } from "@main/services/statement-service";
 import { PRINTER_SETTINGS_STORAGE_KEY } from "@shared/constants/app";
+import { formatDocumentDate } from "@shared/lib/date";
 import { buildDeliveryNoteViewModel, type DeliveryNoteViewModel } from "@shared/lib/delivery-note";
 import { buildReceiptViewModel, formatReceiptCents, type ReceiptViewModel } from "@shared/lib/receipt";
+import { computeTaxBreakdown, taxBreakdownLabel, type TaxBreakdownEntry } from "@shared/lib/tax-calculation";
 import { printerSettingsSchema } from "@shared/schemas/printer";
 import type { LogoRatio } from "@shared/types/logo";
 import {
@@ -163,11 +165,21 @@ function writeReceiptToPrinter(printerInstance: ThermalPrinter, vm: ReceiptViewM
   if (vm.discountAmountCents > 0) {
     printerInstance.leftRight("Discount", `-${money(vm.discountAmountCents)}`);
   }
-  printerInstance.leftRight("Tax", money(vm.taxAmountCents));
   printerInstance.bold(true);
   printerInstance.leftRight("TOTAL", money(vm.grandTotalCents));
   printerInstance.bold(false);
   printerInstance.drawLine();
+
+  if (vm.taxBreakdown.length > 0) {
+    printerInstance.println("Tax Breakdown");
+    for (const entry of vm.taxBreakdown) {
+      printerInstance.leftRight(
+        taxBreakdownLabel(entry.taxType, { vatRatePercent: vm.vatRatePercent, pricesTaxInclusive: true }),
+        `Net ${money(entry.netCents)} / Tax ${money(entry.taxCents)}`
+      );
+    }
+    printerInstance.drawLine();
+  }
 
   printerInstance.println(`Payment: ${vm.paymentMethodName ?? "-"}`);
   if (vm.paymentReference) printerInstance.println(`Ref: ${vm.paymentReference}`);
@@ -308,6 +320,41 @@ function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/** The tax breakdown table every document template renders below its main totals — tax never
+ * contributes to the total (see tax-calculation.ts), this is the one place it's actually shown, as
+ * required by law. Shared across every template below so the wording/column order never drifts;
+ * each caller supplies its own `money` formatter and `tableClass` (matching whatever CSS class its
+ * own <style> block already defines for a bordered table) so it fits that template's own visual
+ * system. Returns "" when there's nothing to show (should never happen for a real document, but a
+ * defensive empty state is cheap). */
+function buildTaxBreakdownHtml(
+  breakdown: TaxBreakdownEntry[],
+  vatRatePercent: number,
+  money: (cents: number) => string,
+  tableClass: string
+): string {
+  if (breakdown.length === 0) return "";
+  const rows = breakdown
+    .map(
+      (entry) => `
+      <tr>
+        <td>${escapeHtml(taxBreakdownLabel(entry.taxType, { vatRatePercent, pricesTaxInclusive: true }))}</td>
+        <td class="right">${money(entry.netCents)}</td>
+        <td class="right">${money(entry.taxCents)}</td>
+        <td class="right">${money(entry.grossCents)}</td>
+      </tr>`
+    )
+    .join("");
+  return `
+    <p class="tax-breakdown-title">Tax Breakdown</p>
+    <table class="${tableClass}">
+      <thead>
+        <tr><th>Category</th><th class="right">Net</th><th class="right">Tax</th><th class="right">Gross</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
 /** Renders for an actual 80mm thermal roll (full-bleed width, tight padding, bold text — thermal
  * printheads burn regular-weight anti-aliased text too faintly to register reliably) — used ONLY
  * when printing straight to a system/USB thermal printer. The Download PDF / share-link version is a
@@ -320,7 +367,9 @@ function buildReceiptHtml(vm: ReceiptViewModel): string {
     .map(
       (item) => `
       <tr>
-        <td>${escapeHtml(item.name)}<br/><span class="muted">${item.quantity} x ${money(item.unitPriceCents)}</span></td>
+        <td>${escapeHtml(item.name)}</td>
+        <td class="center">${item.quantity}</td>
+        <td class="right">${money(item.unitPriceCents)}</td>
         <td class="right">${money(item.lineTotalCents)}</td>
       </tr>`
     )
@@ -332,17 +381,22 @@ function buildReceiptHtml(vm: ReceiptViewModel): string {
 <meta charset="utf-8" />
 <style>
   * { box-sizing: border-box; }
-  body { font-family: Arial, 'Segoe UI', Helvetica, sans-serif; color: #1c1710; margin: 0; padding: 4px 8px; font-size: 12px; font-weight: 700; }
-  .receipt { max-width: 100%; margin: 0 auto; }
+  body { font-family: Arial, 'Segoe UI', Helvetica, sans-serif; color: #000; margin: 0; padding: 4px 6px; font-size: 11px; font-weight: 700; }
+  .receipt { max-width: 100%; margin: 0 auto; border: 2px solid #000; padding: 8px; }
   h1 { font-size: 14px; text-align: center; margin: 0 0 4px; }
   .center { text-align: center; }
-  .muted { color: #1c1710; font-size: 10.5px; }
-  hr { border: none; border-top: 1px dashed #999; margin: 10px 0; }
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  td { padding: 4px 0; vertical-align: top; }
+  .muted { color: #000; font-size: 10px; }
+  hr { border: none; border-top: 1px dashed #000; margin: 8px 0; }
+  table.items { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 4px; }
+  table.items th, table.items td { border: 1px solid #000; padding: 3px 4px; vertical-align: top; }
+  table.items th { background: #d9d9d9; text-transform: uppercase; font-size: 9px; text-align: left; }
+  .center { text-align: center; }
   .right { text-align: right; white-space: nowrap; }
-  .totals td { padding: 2px 0; }
-  .grand { font-weight: bold; font-size: 13px; }
+  table.totals { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 4px; }
+  table.totals td { border: 1px solid #000; padding: 3px 6px; }
+  table.totals td.label { background: #d9d9d9; font-weight: bold; }
+  table.totals tr.grand td { font-size: 12.5px; font-weight: bold; }
+  .tax-breakdown-title { margin: 6px 0 2px; font-size: 9px; text-transform: uppercase; font-weight: bold; }
 </style>
 </head>
 <body>
@@ -358,15 +412,23 @@ function buildReceiptHtml(vm: ReceiptViewModel): string {
       Cashier: ${escapeHtml(vm.cashierName)} &middot; Branch: ${escapeHtml(vm.branchName)}
       ${vm.customerName ? `<br/>Customer: ${escapeHtml(vm.customerName)}` : ""}
     </p>
-    <hr/>
-    <table>${itemRows}</table>
-    <hr/>
-    <table class="totals">
-      <tr><td>Subtotal</td><td class="right">${money(vm.subtotalCents)}</td></tr>
-      ${vm.discountAmountCents > 0 ? `<tr><td>Discount</td><td class="right">-${money(vm.discountAmountCents)}</td></tr>` : ""}
-      <tr><td>Tax</td><td class="right">${money(vm.taxAmountCents)}</td></tr>
-      <tr class="grand"><td>Total</td><td class="right">${money(vm.grandTotalCents)}</td></tr>
+    <table class="items">
+      <thead>
+        <tr>
+          <th>Item Description</th>
+          <th class="center">Qty</th>
+          <th class="right">Unit Price</th>
+          <th class="right">Sub Total</th>
+        </tr>
+      </thead>
+      <tbody>${itemRows}</tbody>
     </table>
+    <table class="totals">
+      <tr><td class="label">Subtotal</td><td class="right">${money(vm.subtotalCents)}</td></tr>
+      ${vm.discountAmountCents > 0 ? `<tr><td class="label">Discount</td><td class="right">-${money(vm.discountAmountCents)}</td></tr>` : ""}
+      <tr class="grand"><td class="label">Total</td><td class="right">${money(vm.grandTotalCents)}</td></tr>
+    </table>
+    ${buildTaxBreakdownHtml(vm.taxBreakdown, vm.vatRatePercent, (cents) => money(cents), "items")}
     <hr/>
     <p class="muted">
       Payment: ${escapeHtml(vm.paymentMethodName ?? "-")}
@@ -429,6 +491,9 @@ function buildReceiptLetterheadHtml(vm: ReceiptViewModel, logo: DocumentLogo): s
   .payment { margin-top: 20px; }
   .payment p { margin: 2px 0; }
   .footer { margin-top: 32px; text-align: center; color: #83795f; font-size: 11px; }
+  .tax-breakdown-title { margin-top: 20px; font-size: 10px; text-transform: uppercase; color: #83795f; font-weight: bold; }
+  table.tax-breakdown { margin-top: 6px; }
+  table.tax-breakdown th, table.tax-breakdown td { font-size: 12px; }
 </style>
 </head>
 <body>
@@ -480,9 +545,10 @@ function buildReceiptLetterheadHtml(vm: ReceiptViewModel, logo: DocumentLogo): s
     <table class="totals">
       <tr><td>Subtotal</td><td class="right">${money(vm.subtotalCents)}</td></tr>
       ${vm.discountAmountCents > 0 ? `<tr><td>Discount</td><td class="right">-${money(vm.discountAmountCents)}</td></tr>` : ""}
-      <tr><td>Tax</td><td class="right">${money(vm.taxAmountCents)}</td></tr>
       <tr class="grand"><td>Total</td><td class="right">${money(vm.grandTotalCents)}</td></tr>
     </table>
+
+    ${buildTaxBreakdownHtml(vm.taxBreakdown, vm.vatRatePercent, (cents) => money(cents), "tax-breakdown")}
 
     <div class="payment">
       <p class="label" style="font-size:10px;text-transform:uppercase;color:#83795f;font-weight:bold;">Payment</p>
@@ -548,12 +614,7 @@ function transactionTypeLabel(type: Sale["transactionType"]): string {
 }
 
 function formatInvoiceDate(value: string | null): string {
-  if (!value) return "-";
-  try {
-    return new Date(value).toLocaleDateString();
-  } catch {
-    return value;
-  }
+  return formatDocumentDate(value);
 }
 
 type DocumentLogo = { logoDataUrl: string | null; logoRatio: LogoRatio | null };
@@ -565,6 +626,7 @@ type DocumentBusinessInfo = {
   receiptHeader: string | null;
   receiptFooter: string | null;
   currency: string;
+  vatRatePercent: number;
 };
 
 /** Every customer-facing document belongs to a specific storefront, and must show THAT storefront's
@@ -581,7 +643,8 @@ function resolveDocumentBusiness(locationId: string | null, tenantRow: tenantRep
     primaryPhone: locationRow?.phone ?? tenantRow.primary_phone,
     receiptHeader: locationRow?.receipt_header ?? tenantRow.receipt_header,
     receiptFooter: locationRow?.receipt_footer ?? tenantRow.receipt_footer,
-    currency: tenantRow.currency
+    currency: tenantRow.currency,
+    vatRatePercent: tenantRow.vat_rate_percent
   };
 }
 
@@ -608,7 +671,7 @@ async function resolveDocumentLogo(locationId: string | null, tenantRow: tenantR
 }
 
 /** Renders service charges + delivery fee as ordinary rows appended to an invoice/quotation's item
- * table — Discount/Tax show as "-" since these aren't product lines, and the hidden cost never
+ * table — Discount shows as "-" since these aren't product lines, and the hidden cost never
  * appears here (only the customer-facing fee). Shared by buildInvoiceHtml and buildQuotationHtml. */
 function buildExtraChargeRows(
   startIndex: number,
@@ -628,7 +691,6 @@ function buildExtraChargeRows(
         <td class="center">1</td>
         <td class="right">${money(charge.feeCents)}</td>
         <td class="right">-</td>
-        <td class="right">-</td>
         <td class="right">${money(charge.feeCents)}</td>
       </tr>`);
   }
@@ -641,7 +703,6 @@ function buildExtraChargeRows(
         <td>Delivery Fee</td>
         <td class="center">1</td>
         <td class="right">${money(delivery.feeCents)}</td>
-        <td class="right">-</td>
         <td class="right">-</td>
         <td class="right">${money(delivery.feeCents)}</td>
       </tr>`);
@@ -669,7 +730,6 @@ function buildInvoiceHtml(
         <td class="center">${item.quantity}</td>
         <td class="right">${money(item.unitPriceCents)}</td>
         <td class="right">${item.discountAmountCents > 0 ? `-${money(item.discountAmountCents)}` : "-"}</td>
-        <td class="right">${money(item.taxAmountCents)}</td>
         <td class="right">${money(item.lineTotalCents)}</td>
       </tr>`
     )
@@ -716,6 +776,9 @@ function buildInvoiceHtml(
   .totals .balance td { font-size: 15px; font-weight: bold; color: #ad3a29; }
   .notes { margin-top: 24px; padding: 12px; background: #f1ede1; border-radius: 8px; }
   .footer { margin-top: 32px; text-align: center; color: #83795f; font-size: 11px; }
+  .tax-breakdown-title { margin-top: 20px; font-size: 10px; text-transform: uppercase; color: #83795f; font-weight: bold; }
+  table.tax-breakdown { margin-top: 6px; }
+  table.tax-breakdown th, table.tax-breakdown td { font-size: 12px; }
 </style>
 </head>
 <body>
@@ -763,7 +826,6 @@ function buildInvoiceHtml(
           <th class="center">Qty</th>
           <th class="right">Unit Price</th>
           <th class="right">Discount</th>
-          <th class="right">Tax</th>
           <th class="right">Line Total</th>
         </tr>
       </thead>
@@ -773,11 +835,12 @@ function buildInvoiceHtml(
     <table class="totals">
       <tr><td>Subtotal</td><td class="right">${money(sale.subtotalCents)}</td></tr>
       ${sale.discountAmountCents > 0 ? `<tr><td>Discount</td><td class="right">-${money(sale.discountAmountCents)}</td></tr>` : ""}
-      <tr><td>Tax</td><td class="right">${money(sale.taxAmountCents)}</td></tr>
       <tr class="grand"><td>Total</td><td class="right">${money(sale.grandTotalCents)}</td></tr>
       <tr><td>Amount Paid</td><td class="right">${money(sale.amountPaidCents)}</td></tr>
       <tr class="balance"><td>Balance Due</td><td class="right">${money(sale.balanceDueCents)}</td></tr>
     </table>
+
+    ${buildTaxBreakdownHtml(computeTaxBreakdown(sale.items), business.vatRatePercent, (cents) => money(cents), "tax-breakdown")}
 
     ${
       sale.payments.length > 0
@@ -846,6 +909,152 @@ export async function printInvoiceDocument(saleId: string): Promise<PrinterActio
   }
 }
 
+/** Same portrait, bold, bordered style as the compact receipt (buildReceiptHtml) — an invoice's own
+ * narrow-roll counterpart to the A4 letterhead version above. Deliberately a simpler 4-column item
+ * table (no per-item discount/tax columns) to match the receipt's own compact shape; the header
+ * already carries the invoice's own subtotal/discount/tax breakdown in the totals block below. */
+function buildInvoiceThermalHtml(sale: Sale, business: DocumentBusinessInfo): string {
+  const money = (cents: number | null): string => `${business.currency} ${formatReceiptCents(cents)}`;
+
+  const itemRows = sale.items
+    .map(
+      (item) => `
+      <tr>
+        <td>${escapeHtml(item.productName)}</td>
+        <td class="center">${item.quantity}</td>
+        <td class="right">${money(item.unitPriceCents)}</td>
+        <td class="right">${money(item.lineTotalCents)}</td>
+      </tr>`
+    )
+    .join("");
+
+  const extraRows = [
+    ...sale.serviceCharges.map(
+      (charge) => `
+      <tr>
+        <td>${escapeHtml(charge.name)}</td>
+        <td class="center">1</td>
+        <td class="right">${money(charge.feeCents)}</td>
+        <td class="right">${money(charge.feeCents)}</td>
+      </tr>`
+    ),
+    ...(sale.delivery
+      ? [
+          `
+      <tr>
+        <td>Delivery Fee</td>
+        <td class="center">1</td>
+        <td class="right">${money(sale.delivery.feeCents)}</td>
+        <td class="right">${money(sale.delivery.feeCents)}</td>
+      </tr>`
+        ]
+      : [])
+  ].join("");
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Arial, 'Segoe UI', Helvetica, sans-serif; color: #000; margin: 0; padding: 4px 6px; font-size: 11px; font-weight: 700; }
+  .receipt { max-width: 100%; margin: 0 auto; border: 2px solid #000; padding: 8px; }
+  h1 { font-size: 14px; text-align: center; margin: 0 0 4px; }
+  .center { text-align: center; }
+  .muted { color: #000; font-size: 10px; }
+  hr { border: none; border-top: 1px dashed #000; margin: 8px 0; }
+  .doc-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  table.items { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 4px; }
+  table.items th, table.items td { border: 1px solid #000; padding: 3px 4px; vertical-align: top; }
+  table.items th { background: #d9d9d9; text-transform: uppercase; font-size: 9px; text-align: left; }
+  .right { text-align: right; white-space: nowrap; }
+  table.totals { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 4px; }
+  table.totals td { border: 1px solid #000; padding: 3px 6px; }
+  table.totals td.label { background: #d9d9d9; font-weight: bold; }
+  table.totals tr.grand td { font-size: 12.5px; font-weight: bold; }
+  table.totals tr.balance td { color: #ad3a29; }
+  .tax-breakdown-title { margin: 6px 0 2px; font-size: 9px; text-transform: uppercase; font-weight: bold; }
+</style>
+</head>
+<body>
+  <div class="receipt">
+    <h1>${escapeHtml(business.businessName)}</h1>
+    ${business.physicalAddress ? `<p class="center muted">${escapeHtml(business.physicalAddress)}</p>` : ""}
+    ${business.primaryPhone ? `<p class="center muted">${escapeHtml(business.primaryPhone)}</p>` : ""}
+    <p class="center doc-title">Invoice</p>
+    <p class="center muted">${escapeHtml(sale.invoiceNumber ?? "-")} &middot; ${escapeHtml(paymentStatusLabel(sale.paymentStatus))}</p>
+    <hr/>
+    <p class="muted">
+      Bill To: ${escapeHtml(sale.customerName ?? "Walk-in Customer")}<br/>
+      Invoice Date: ${formatInvoiceDate(sale.invoiceDate)}<br/>
+      Due Date: ${formatInvoiceDate(sale.dueDate)}<br/>
+      Storefront: ${escapeHtml(sale.locationName)} &middot; Issued By: ${escapeHtml(sale.employeeName)}
+    </p>
+    <table class="items">
+      <thead>
+        <tr>
+          <th>Item Description</th>
+          <th class="center">Qty</th>
+          <th class="right">Unit Price</th>
+          <th class="right">Sub Total</th>
+        </tr>
+      </thead>
+      <tbody>${itemRows}${extraRows}</tbody>
+    </table>
+    <table class="totals">
+      <tr><td class="label">Subtotal</td><td class="right">${money(sale.subtotalCents)}</td></tr>
+      ${sale.discountAmountCents > 0 ? `<tr><td class="label">Discount</td><td class="right">-${money(sale.discountAmountCents)}</td></tr>` : ""}
+      <tr class="grand"><td class="label">Total</td><td class="right">${money(sale.grandTotalCents)}</td></tr>
+      <tr><td class="label">Amount Paid</td><td class="right">${money(sale.amountPaidCents)}</td></tr>
+      <tr class="balance"><td class="label">Balance Due</td><td class="right">${money(sale.balanceDueCents)}</td></tr>
+    </table>
+    ${buildTaxBreakdownHtml(computeTaxBreakdown(sale.items), business.vatRatePercent, (cents) => money(cents), "items")}
+    ${sale.invoiceNotes ? `<hr/><p class="muted">Notes: ${escapeHtml(sale.invoiceNotes)}</p>` : ""}
+    <hr/>
+    <p class="center muted">${escapeHtml(business.receiptFooter ?? "Thank you for your business!")}</p>
+  </div>
+</body>
+</html>`;
+}
+
+/** Prints the invoice through the configured system/USB thermal printer, straight down the roll —
+ * same pipeline as the compact receipt (see printReceiptToSystemPrinter). */
+export async function printInvoiceViaThermal(saleId: string): Promise<PrinterActionResult> {
+  requirePermission("sales", "view");
+  const settings = loadPrinterSettings();
+  if (!settings.enabled || (requiresExplicitAddress(settings) && !settings.address)) {
+    return { success: false, message: "No printer is configured yet. Set one up in Settings." };
+  }
+  if (settings.connectionType !== "usb") {
+    return {
+      success: false,
+      message: "This backup print needs a printer set up as a Windows/USB printer in Settings (not a raw network/serial connection)."
+    };
+  }
+
+  const { sale, business } = loadReceiptData(saleId);
+  if (!sale.invoiceNumber) {
+    return { success: false, message: "This sale is not an invoice" };
+  }
+
+  const html = buildInvoiceThermalHtml(sale, business);
+  const paperWidthIn = 3.15;
+  const buffer = await renderHtmlToPdfBuffer(html, {
+    pageSize: { width: paperWidthIn, height: 11 },
+    margins: { marginType: "none" }
+  });
+  const tempPath = join(app.getPath("temp"), `blue-ledger-invoice-${randomUUID()}.pdf`);
+  await writeFile(tempPath, buffer);
+  try {
+    await printPdfToPrinter(tempPath, { silent: true, ...(settings.address ? { printer: settings.address } : {}) });
+    return { success: true, message: "Sent to printer" };
+  } catch (err) {
+    return { success: false, message: err instanceof Error ? err.message : "Failed to print invoice" };
+  } finally {
+    await unlink(tempPath).catch(() => {});
+  }
+}
+
 function loadQuotationData(
   quotationId: string
 ): { quotation: Quotation; business: DocumentBusinessInfo } {
@@ -894,7 +1103,6 @@ function buildQuotationHtml(
         <td class="center">${item.quantity}</td>
         <td class="right">${money(item.unitPriceCents)}</td>
         <td class="right">${item.discountAmountCents > 0 ? `-${money(item.discountAmountCents)}` : "-"}</td>
-        <td class="right">${money(item.taxAmountCents)}</td>
         <td class="right">${money(item.lineTotalCents)}</td>
       </tr>`
     )
@@ -931,6 +1139,9 @@ function buildQuotationHtml(
   .signature { flex: 1; }
   .signature .line { border-top: 1px solid #999; margin-top: 40px; padding-top: 4px; font-size: 11px; color: #83795f; }
   .footer { margin-top: 32px; text-align: center; color: #83795f; font-size: 11px; }
+  .tax-breakdown-title { margin-top: 20px; font-size: 10px; text-transform: uppercase; color: #83795f; font-weight: bold; }
+  table.tax-breakdown { margin-top: 6px; }
+  table.tax-breakdown th, table.tax-breakdown td { font-size: 12px; }
 </style>
 </head>
 <body>
@@ -976,7 +1187,6 @@ function buildQuotationHtml(
           <th class="center">Qty</th>
           <th class="right">Unit Price</th>
           <th class="right">Discount</th>
-          <th class="right">Tax</th>
           <th class="right">Line Total</th>
         </tr>
       </thead>
@@ -986,9 +1196,10 @@ function buildQuotationHtml(
     <table class="totals">
       <tr><td>Subtotal</td><td class="right">${money(quotation.subtotalCents)}</td></tr>
       ${quotation.discountAmountCents > 0 ? `<tr><td>Discount</td><td class="right">-${money(quotation.discountAmountCents)}</td></tr>` : ""}
-      <tr><td>Tax</td><td class="right">${money(quotation.taxAmountCents)}</td></tr>
       <tr class="grand"><td>Total</td><td class="right">${money(quotation.grandTotalCents)}</td></tr>
     </table>
+
+    ${buildTaxBreakdownHtml(computeTaxBreakdown(quotation.items), business.vatRatePercent, (cents) => money(cents), "tax-breakdown")}
 
     ${quotation.notes ? `<div class="notes"><strong>Notes</strong><p>${escapeHtml(quotation.notes)}</p></div>` : ""}
 
@@ -1048,6 +1259,145 @@ export async function printQuotationDocument(quotationId: string): Promise<Print
     return { success: true, message: "Sent to printer" };
   } catch (err) {
     return { success: false, message: err instanceof Error ? err.message : "Failed to print quotation" };
+  }
+}
+
+/** Same portrait, bold, bordered style as the compact receipt (buildReceiptHtml) — a quotation's own
+ * narrow-roll counterpart to the A4 letterhead version above. No balance-due row (a quotation is
+ * never a payment record), otherwise the same simplified 4-column item table as the invoice's
+ * thermal version. */
+function buildQuotationThermalHtml(quotation: Quotation, business: DocumentBusinessInfo): string {
+  const money = (cents: number | null): string => `${business.currency} ${formatReceiptCents(cents)}`;
+
+  const itemRows = quotation.items
+    .map(
+      (item) => `
+      <tr>
+        <td>${escapeHtml(item.productName)}</td>
+        <td class="center">${item.quantity}</td>
+        <td class="right">${money(item.unitPriceCents)}</td>
+        <td class="right">${money(item.lineTotalCents)}</td>
+      </tr>`
+    )
+    .join("");
+
+  const extraRows = [
+    ...quotation.serviceCharges.map(
+      (charge) => `
+      <tr>
+        <td>${escapeHtml(charge.name)}</td>
+        <td class="center">1</td>
+        <td class="right">${money(charge.feeCents)}</td>
+        <td class="right">${money(charge.feeCents)}</td>
+      </tr>`
+    ),
+    ...(quotation.delivery
+      ? [
+          `
+      <tr>
+        <td>Delivery Fee</td>
+        <td class="center">1</td>
+        <td class="right">${money(quotation.delivery.feeCents)}</td>
+        <td class="right">${money(quotation.delivery.feeCents)}</td>
+      </tr>`
+        ]
+      : [])
+  ].join("");
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Arial, 'Segoe UI', Helvetica, sans-serif; color: #000; margin: 0; padding: 4px 6px; font-size: 11px; font-weight: 700; }
+  .receipt { max-width: 100%; margin: 0 auto; border: 2px solid #000; padding: 8px; }
+  h1 { font-size: 14px; text-align: center; margin: 0 0 4px; }
+  .center { text-align: center; }
+  .muted { color: #000; font-size: 10px; }
+  hr { border: none; border-top: 1px dashed #000; margin: 8px 0; }
+  .doc-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  table.items { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 4px; }
+  table.items th, table.items td { border: 1px solid #000; padding: 3px 4px; vertical-align: top; }
+  table.items th { background: #d9d9d9; text-transform: uppercase; font-size: 9px; text-align: left; }
+  .right { text-align: right; white-space: nowrap; }
+  table.totals { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 4px; }
+  table.totals td { border: 1px solid #000; padding: 3px 6px; }
+  table.totals td.label { background: #d9d9d9; font-weight: bold; }
+  table.totals tr.grand td { font-size: 12.5px; font-weight: bold; }
+  .tax-breakdown-title { margin: 6px 0 2px; font-size: 9px; text-transform: uppercase; font-weight: bold; }
+</style>
+</head>
+<body>
+  <div class="receipt">
+    <h1>${escapeHtml(business.businessName)}</h1>
+    ${business.physicalAddress ? `<p class="center muted">${escapeHtml(business.physicalAddress)}</p>` : ""}
+    ${business.primaryPhone ? `<p class="center muted">${escapeHtml(business.primaryPhone)}</p>` : ""}
+    <p class="center doc-title">Quotation</p>
+    <p class="center muted">${escapeHtml(quotation.quotationNumber)} &middot; ${escapeHtml(quotationStatusLabel(quotation.status))}</p>
+    <hr/>
+    <p class="muted">
+      Quoted To: ${escapeHtml(quotation.customerName)}<br/>
+      Date Prepared: ${formatInvoiceDate(quotation.createdAt)}<br/>
+      Valid Until: ${formatInvoiceDate(quotation.validUntil)}<br/>
+      Storefront: ${escapeHtml(quotation.locationName)} &middot; Prepared By: ${escapeHtml(quotation.employeeName)}
+    </p>
+    <table class="items">
+      <thead>
+        <tr>
+          <th>Item Description</th>
+          <th class="center">Qty</th>
+          <th class="right">Unit Price</th>
+          <th class="right">Sub Total</th>
+        </tr>
+      </thead>
+      <tbody>${itemRows}${extraRows}</tbody>
+    </table>
+    <table class="totals">
+      <tr><td class="label">Subtotal</td><td class="right">${money(quotation.subtotalCents)}</td></tr>
+      ${quotation.discountAmountCents > 0 ? `<tr><td class="label">Discount</td><td class="right">-${money(quotation.discountAmountCents)}</td></tr>` : ""}
+      <tr class="grand"><td class="label">Total</td><td class="right">${money(quotation.grandTotalCents)}</td></tr>
+    </table>
+    ${buildTaxBreakdownHtml(computeTaxBreakdown(quotation.items), business.vatRatePercent, (cents) => money(cents), "items")}
+    ${quotation.notes ? `<hr/><p class="muted">Notes: ${escapeHtml(quotation.notes)}</p>` : ""}
+    <hr/>
+    <p class="center muted">${escapeHtml(business.receiptFooter ?? "Thank you for considering us!")}</p>
+  </div>
+</body>
+</html>`;
+}
+
+/** Prints the quotation through the configured system/USB thermal printer, straight down the roll —
+ * same pipeline as the compact receipt (see printReceiptToSystemPrinter). */
+export async function printQuotationViaThermal(quotationId: string): Promise<PrinterActionResult> {
+  requirePermission("quotations", "view");
+  const settings = loadPrinterSettings();
+  if (!settings.enabled || (requiresExplicitAddress(settings) && !settings.address)) {
+    return { success: false, message: "No printer is configured yet. Set one up in Settings." };
+  }
+  if (settings.connectionType !== "usb") {
+    return {
+      success: false,
+      message: "This backup print needs a printer set up as a Windows/USB printer in Settings (not a raw network/serial connection)."
+    };
+  }
+
+  const { quotation, business } = loadQuotationData(quotationId);
+  const html = buildQuotationThermalHtml(quotation, business);
+  const paperWidthIn = 3.15;
+  const buffer = await renderHtmlToPdfBuffer(html, {
+    pageSize: { width: paperWidthIn, height: 11 },
+    margins: { marginType: "none" }
+  });
+  const tempPath = join(app.getPath("temp"), `blue-ledger-quotation-${randomUUID()}.pdf`);
+  await writeFile(tempPath, buffer);
+  try {
+    await printPdfToPrinter(tempPath, { silent: true, ...(settings.address ? { printer: settings.address } : {}) });
+    return { success: true, message: "Sent to printer" };
+  } catch (err) {
+    return { success: false, message: err instanceof Error ? err.message : "Failed to print quotation" };
+  } finally {
+    await unlink(tempPath).catch(() => {});
   }
 }
 
@@ -1362,22 +1712,23 @@ function buildDeliveryNoteHtml(vm: DeliveryNoteViewModel, logo: DocumentLogo): s
 </html>`;
 }
 
-/**
- * A backup for shops with only a narrow thermal receipt printer and no pre-printed sticker labels.
- * A thermal roll has no orientation concept — it only prints a fixed-width strip — so this lays the
- * note out at "landscape" proportions (wide x short) and rotates the whole thing 90° before printing.
- * The strip comes out with text running bottom-to-top; physically rotating the printed strip 90°
- * (portrait -> landscape) then reads it right-side-up, ready to stick onto a package with clear tape.
- * Deliberately excludes every fee/cost figure, same as the regular delivery note.
- */
-function buildDeliveryNoteThermalHtml(vm: DeliveryNoteViewModel, logo: DocumentLogo, paperWidthIn: number): string {
+/** One label-then-value pair, stacked vertically — the label small/muted, the value bold and large
+ * enough to actually register on a thermal printhead. Skips entirely when there's nothing to show. */
+function deliveryNoteThermalField(label: string, value: string | null): string {
+  if (!value) return "";
+  return `<p class="field-label">${escapeHtml(label)}</p><p class="field-value">${escapeHtml(value)}</p>`;
+}
+
+/** Same portrait, top-to-bottom, bold/bordered style as the compact receipt (buildReceiptHtml) —
+ * previously this laid the note out "landscape" and rotated it 90° so a thermal roll (which only
+ * ever prints a fixed-width portrait strip) could show it wide, with instructions to physically
+ * rotate the printed strip afterward to read it. In practice that rotation produced broken, faint
+ * text — thermal printheads burn a 90°-rotated glyph unevenly compared to normal upright text — so
+ * this now prints straight down the roll like every other document, no rotation, no aftermarket
+ * paper-turning required. */
+function buildDeliveryNoteThermalHtml(vm: DeliveryNoteViewModel): string {
   const townCountry = [vm.town, vm.country].filter(Boolean).join(", ");
-  // The "true" design is a short, wide landscape strip (stageHeight x stageWidth); rotating it 90°
-  // clockwise around its top-left corner and shifting up by its own height turns that WxH box into an
-  // HxW strip that exactly fills the printer's actual (narrow, tall) page — the standard CSS recipe
-  // for printing landscape content on a portrait-only device.
-  const stageHeight = paperWidthIn;
-  const stageWidth = 11; // generous — the printer driver clips/continues the roll, it doesn't paginate
+  const address = townCountry ? `${vm.deliveryAddress}, ${townCountry}` : vm.deliveryAddress;
 
   return `<!doctype html>
 <html>
@@ -1385,59 +1736,48 @@ function buildDeliveryNoteThermalHtml(vm: DeliveryNoteViewModel, logo: DocumentL
 <meta charset="utf-8" />
 <style>
   * { box-sizing: border-box; }
-  @page { size: ${paperWidthIn}in ${stageWidth}in; margin: 0; }
-  html, body { margin: 0; padding: 0; }
-  body { font-family: Arial, 'Segoe UI', Helvetica, sans-serif; color: #1c1710; font-weight: 700; }
-  .stage {
-    position: absolute; top: 0; left: 0;
-    width: ${stageWidth}in; height: ${stageHeight}in;
-    transform-origin: top left;
-    transform: rotate(90deg) translateY(-100%);
-    padding: 0.12in 0.2in;
-    display: flex; align-items: center; gap: 0.3in;
-  }
-  .col { flex: 1; min-width: 0; }
-  .logo { display: block; height: auto; max-height: 0.45in; width: auto; max-width: 1.1in; object-fit: contain; margin-bottom: 2px; }
-  .business-name { font-size: 13px; font-weight: 700; margin: 0; }
-  .muted { color: #1c1710; font-size: 9px; margin: 1px 0 0; font-weight: 700; }
-  .doc-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 3px; }
-  .field-label { font-size: 8px; text-transform: uppercase; letter-spacing: 0.4px; margin: 0; }
-  .field-value { font-size: 13px; font-weight: 700; margin: 0 0 4px; line-height: 1.2; word-break: break-word; }
-  .recipient .field-value { font-size: 17px; }
-  .divider { width: 1px; align-self: stretch; background: #1c1710; opacity: 0.25; }
+  body { font-family: Arial, 'Segoe UI', Helvetica, sans-serif; color: #000; margin: 0; padding: 4px 6px; font-size: 11px; font-weight: 700; }
+  .receipt { max-width: 100%; margin: 0 auto; border: 2px solid #000; padding: 8px; }
+  h1 { font-size: 14px; text-align: center; margin: 0 0 4px; }
+  .center { text-align: center; }
+  .muted { color: #000; font-size: 10px; }
+  hr { border: none; border-top: 1px dashed #000; margin: 8px 0; }
+  .doc-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  .section-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; margin: 0 0 4px; }
+  .field-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.4px; margin: 6px 0 0; }
+  .field-value { font-size: 14px; font-weight: 700; margin: 1px 0 0; line-height: 1.25; word-break: break-word; }
 </style>
 </head>
 <body>
-  <div class="stage">
-    <div class="col" style="flex: 0 0 1.3in;">
-      ${logo.logoDataUrl ? `<img src="${logo.logoDataUrl}" class="logo" alt="" />` : ""}
-      <p class="business-name">${escapeHtml(vm.businessName)}</p>
-      ${vm.businessPhone ? `<p class="muted">${escapeHtml(vm.businessPhone)}</p>` : ""}
-      <p class="doc-title" style="margin-top: 6px;">Delivery Note</p>
-      <p class="muted">${escapeHtml(vm.deliveryNoteNumber)}</p>
-    </div>
-    <div class="divider"></div>
-    <div class="col recipient">
-      <p class="field-label">Deliver To</p>
-      <p class="field-value">${escapeHtml(vm.recipientName)}</p>
-      <p class="field-label">Address</p>
-      <p class="field-value">${escapeHtml(vm.deliveryAddress)}${townCountry ? `, ${escapeHtml(townCountry)}` : ""}</p>
-      ${vm.deliveryNotes ? `<p class="field-label">Notes</p><p class="field-value">${escapeHtml(vm.deliveryNotes)}</p>` : ""}
-    </div>
-    <div class="divider"></div>
-    <div class="col" style="flex: 0 0 1.8in;">
-      <p class="field-label">Rider</p>
-      <p class="field-value">${escapeHtml(vm.riderName ?? "Not assigned")}</p>
-      ${vm.riderPhone ? `<p class="field-label">Phone</p><p class="field-value">${escapeHtml(vm.riderPhone)}</p>` : ""}
-      <p class="muted" style="margin-top: 6px;">${escapeHtml(vm.sourceDocumentLabel)}: ${escapeHtml(vm.sourceDocumentNumber ?? "-")}</p>
-    </div>
+  <div class="receipt">
+    <h1>${escapeHtml(vm.businessName)}</h1>
+    ${vm.businessPhone ? `<p class="center muted">${escapeHtml(vm.businessPhone)}</p>` : ""}
+    <p class="center doc-title">Delivery Note</p>
+    <p class="center muted">${escapeHtml(vm.deliveryNoteNumber)}</p>
+    <hr/>
+    <p class="section-label">Deliver To</p>
+    ${deliveryNoteThermalField("Recipient", vm.recipientName)}
+    ${deliveryNoteThermalField("Address", address)}
+    ${deliveryNoteThermalField("Notes", vm.deliveryNotes)}
+    <hr/>
+    <p class="section-label">Rider</p>
+    ${deliveryNoteThermalField("Name", vm.riderName ?? "Not assigned")}
+    ${deliveryNoteThermalField("Phone", vm.riderPhone)}
+    ${deliveryNoteThermalField("Vehicle", vm.riderVehicleDescription)}
+    <hr/>
+    <p class="muted">
+      ${escapeHtml(vm.sourceDocumentLabel)}: ${escapeHtml(vm.sourceDocumentNumber ?? "-")}<br/>
+      ${escapeHtml(vm.dateLabel)}
+    </p>
   </div>
 </body>
 </html>`;
 }
 
 /** Prints the delivery note through the configured system/USB thermal printer via the same
- * pdf-to-printer pipeline used for compact receipts, using the rotated layout above. */
+ * pdf-to-printer pipeline used for compact receipts, straight down the roll like every other
+ * document — no logo (matches the compact receipt, which is text-only for the same reason: a
+ * thermal printhead burns a photo/logo far too faint to be worth the space). */
 export async function printDeliveryNoteViaThermal(deliveryNoteId: string): Promise<PrinterActionResult> {
   requirePermission("sales", "view");
   const settings = loadPrinterSettings();
@@ -1451,14 +1791,12 @@ export async function printDeliveryNoteViaThermal(deliveryNoteId: string): Promi
     };
   }
 
-  const { vm, locationId } = loadDeliveryNoteData(deliveryNoteId);
-  const tenantRow = tenantRepository.findTenantRow();
-  const logo = tenantRow ? await resolveDocumentLogo(locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
+  const { vm } = loadDeliveryNoteData(deliveryNoteId);
   // Matches the same fixed 80mm-roll page size the compact receipt print already uses (see
   // printReceiptToSystemPrinter) — there's no per-tenant physical-paper-width setting in this app;
   // `settings.paperWidth` is the thermal-printer character width, an unrelated unit.
   const paperWidthIn = 3.15;
-  const html = buildDeliveryNoteThermalHtml(vm, logo, paperWidthIn);
+  const html = buildDeliveryNoteThermalHtml(vm);
   const buffer = await renderHtmlToPdfBuffer(html, {
     pageSize: { width: paperWidthIn, height: 11 },
     margins: { marginType: "none" }
@@ -1467,7 +1805,7 @@ export async function printDeliveryNoteViaThermal(deliveryNoteId: string): Promi
   await writeFile(tempPath, buffer);
   try {
     await printPdfToPrinter(tempPath, { silent: true, ...(settings.address ? { printer: settings.address } : {}) });
-    return { success: true, message: "Sent to the receipt printer — rotate the printed strip 90° once it's out." };
+    return { success: true, message: "Sent to printer" };
   } catch (err) {
     return { success: false, message: err instanceof Error ? err.message : "Failed to print delivery note" };
   } finally {

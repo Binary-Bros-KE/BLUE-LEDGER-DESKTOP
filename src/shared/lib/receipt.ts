@@ -1,3 +1,5 @@
+import { formatDocumentDateTime } from "@shared/lib/date";
+import { computeTaxBreakdown, type TaxBreakdownEntry } from "@shared/lib/tax-calculation";
 import type { Sale } from "@shared/types/sale";
 
 /** Formats integer cents for a receipt, e.g. 25050 -> "250.50". Usable from both main and renderer. */
@@ -30,7 +32,11 @@ export type ReceiptViewModel = {
   extraLines: ReceiptLineItem[];
   subtotalCents: number;
   discountAmountCents: number;
+  /** Reporting-only — already included in subtotalCents (prices are tax-inclusive), never added
+   * into grandTotalCents. See taxBreakdown for the printable category breakdown. */
   taxAmountCents: number;
+  taxBreakdown: TaxBreakdownEntry[];
+  vatRatePercent: number;
   grandTotalCents: number;
   paymentMethodName: string | null;
   paymentReference: string | null;
@@ -45,6 +51,7 @@ export type ReceiptBusinessInfo = {
   receiptHeader: string | null;
   receiptFooter: string | null;
   currency: string;
+  vatRatePercent: number;
 };
 
 export function buildReceiptViewModel(sale: Sale, business: ReceiptBusinessInfo): ReceiptViewModel {
@@ -56,7 +63,7 @@ export function buildReceiptViewModel(sale: Sale, business: ReceiptBusinessInfo)
     receiptFooter: business.receiptFooter,
     currency: business.currency,
     receiptNumber: sale.receiptNumber,
-    dateLabel: new Date(sale.completedAt ?? sale.createdAt).toLocaleString(),
+    dateLabel: formatDocumentDateTime(sale.completedAt ?? sale.createdAt),
     cashierName: sale.employeeName,
     branchName: sale.locationName,
     customerName: sale.customerName,
@@ -87,6 +94,8 @@ export function buildReceiptViewModel(sale: Sale, business: ReceiptBusinessInfo)
     subtotalCents: sale.subtotalCents,
     discountAmountCents: sale.discountAmountCents,
     taxAmountCents: sale.taxAmountCents,
+    taxBreakdown: computeTaxBreakdown(sale.items),
+    vatRatePercent: business.vatRatePercent,
     grandTotalCents: sale.grandTotalCents,
     paymentMethodName: sale.paymentMethodName,
     paymentReference: sale.paymentReference,

@@ -5,6 +5,7 @@ import { ShareModal } from "@renderer/shared/components/ShareModal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { buildReceiptViewModel, formatReceiptCents } from "@shared/lib/receipt";
+import { taxBreakdownLabel } from "@shared/lib/tax-calculation";
 import type { Location } from "@shared/types/location";
 import type { Sale } from "@shared/types/sale";
 import type { TenantContext } from "@shared/types/tenant";
@@ -42,7 +43,8 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
     primaryPhone: location?.phone ?? tenant.primaryPhone,
     receiptHeader: location?.receiptHeader ?? tenant.receiptHeader,
     receiptFooter: location?.receiptFooter ?? tenant.receiptFooter,
-    currency: tenant.currency
+    currency: tenant.currency,
+    vatRatePercent: tenant.vatRatePercent
   });
 
   const money = (cents: number | null): string => `${vm.currency} ${formatReceiptCents(cents)}`;
@@ -101,7 +103,7 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
         </div>
       )}
 
-      <div className="mx-auto max-w-xs rounded-lg border border-dashed border-line bg-soft/40 p-4 font-mono text-xs text-ink">
+      <div className="mx-auto max-w-xs border-2 border-ink bg-white p-3 font-mono text-xs text-ink">
         <div className="text-center">
           <p className="text-sm font-extrabold">{vm.businessName}</p>
           {vm.physicalAddress && <p className="text-[10px] text-muted">{vm.physicalAddress}</p>}
@@ -124,42 +126,75 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
           )}
         </p>
 
-        <div className="my-2 border-t border-dashed border-line" />
-        <div className="space-y-1.5">
-          {[...vm.items, ...vm.extraLines].map((item, index) => (
-            <div key={index} className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="truncate font-bold">{item.name}</p>
-                <p className="text-[10px] text-muted">
-                  {item.quantity} x {money(item.unitPriceCents)}
-                </p>
-              </div>
-              <p className="flex-none font-bold">{money(item.lineTotalCents)}</p>
-            </div>
-          ))}
-        </div>
+        <table className="mt-2 w-full border-collapse text-[10px]">
+          <thead>
+            <tr>
+              <th className="border border-ink bg-soft px-1.5 py-1 text-left font-extrabold uppercase">Item</th>
+              <th className="border border-ink bg-soft px-1.5 py-1 text-center font-extrabold uppercase">Qty</th>
+              <th className="border border-ink bg-soft px-1.5 py-1 text-right font-extrabold uppercase">Price</th>
+              <th className="border border-ink bg-soft px-1.5 py-1 text-right font-extrabold uppercase">Sub Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...vm.items, ...vm.extraLines].map((item, index) => (
+              <tr key={index}>
+                <td className="border border-ink px-1.5 py-1 font-bold">{item.name}</td>
+                <td className="border border-ink px-1.5 py-1 text-center">{item.quantity}</td>
+                <td className="border border-ink px-1.5 py-1 text-right">{money(item.unitPriceCents)}</td>
+                <td className="border border-ink px-1.5 py-1 text-right font-bold">{money(item.lineTotalCents)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
 
-        <div className="my-2 border-t border-dashed border-line" />
-        <div className="space-y-1">
-          <div className="flex justify-between">
-            <span>Subtotal</span>
-            <span>{money(vm.subtotalCents)}</span>
-          </div>
-          {vm.discountAmountCents > 0 && (
-            <div className="flex justify-between">
-              <span>Discount</span>
-              <span>-{money(vm.discountAmountCents)}</span>
-            </div>
-          )}
-          <div className="flex justify-between">
-            <span>Tax</span>
-            <span>{money(vm.taxAmountCents)}</span>
-          </div>
-          <div className="flex justify-between text-sm font-extrabold">
-            <span>Total</span>
-            <span>{money(vm.grandTotalCents)}</span>
-          </div>
-        </div>
+        <table className="mt-2 w-full border-collapse text-[11px]">
+          <tbody>
+            <tr>
+              <td className="border border-ink bg-soft px-1.5 py-1 font-bold">Subtotal</td>
+              <td className="border border-ink px-1.5 py-1 text-right">{money(vm.subtotalCents)}</td>
+            </tr>
+            {vm.discountAmountCents > 0 && (
+              <tr>
+                <td className="border border-ink bg-soft px-1.5 py-1 font-bold">Discount</td>
+                <td className="border border-ink px-1.5 py-1 text-right">-{money(vm.discountAmountCents)}</td>
+              </tr>
+            )}
+            <tr>
+              <td className="border border-ink bg-soft px-1.5 py-1 text-sm font-extrabold">Total</td>
+              <td className="border border-ink px-1.5 py-1 text-right text-sm font-extrabold">{money(vm.grandTotalCents)}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        {vm.taxBreakdown.length > 0 && (
+          <table className="mt-2 w-full border-collapse text-[10px]">
+            <thead>
+              <tr>
+                <th className="border border-ink bg-soft px-1.5 py-1 text-left font-extrabold uppercase" colSpan={4}>
+                  Tax Breakdown
+                </th>
+              </tr>
+              <tr>
+                <th className="border border-ink bg-soft px-1.5 py-1 text-left font-bold uppercase">Category</th>
+                <th className="border border-ink bg-soft px-1.5 py-1 text-right font-bold uppercase">Net</th>
+                <th className="border border-ink bg-soft px-1.5 py-1 text-right font-bold uppercase">Tax</th>
+                <th className="border border-ink bg-soft px-1.5 py-1 text-right font-bold uppercase">Gross</th>
+              </tr>
+            </thead>
+            <tbody>
+              {vm.taxBreakdown.map((entry) => (
+                <tr key={entry.taxType}>
+                  <td className="border border-ink px-1.5 py-1 font-bold">
+                    {taxBreakdownLabel(entry.taxType, { vatRatePercent: vm.vatRatePercent, pricesTaxInclusive: true })}
+                  </td>
+                  <td className="border border-ink px-1.5 py-1 text-right">{money(entry.netCents)}</td>
+                  <td className="border border-ink px-1.5 py-1 text-right">{money(entry.taxCents)}</td>
+                  <td className="border border-ink px-1.5 py-1 text-right">{money(entry.grossCents)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
 
         <div className="my-2 border-t border-dashed border-line" />
         <p className="text-[10px] leading-relaxed text-muted">

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { optionalText } from "@shared/schemas/common";
-import { UNIT_OF_MEASURE_OPTIONS } from "@shared/types/product";
+import { TAX_TYPE_OPTIONS, UNIT_OF_MEASURE_OPTIONS } from "@shared/types/product";
 
 const nullableId = z
   .string()
@@ -11,6 +11,7 @@ const nullableId = z
   .transform((value) => (value ? value : null));
 
 const unitOfMeasureValues = UNIT_OF_MEASURE_OPTIONS.map((option) => option.value) as [string, ...string[]];
+const taxTypeValues = TAX_TYPE_OPTIONS.map((option) => option.value) as [string, ...string[]];
 // Nullable/optional on purpose — bulk-imported or legacy products may never have this set.
 const nullableUnitOfMeasure = z
   .enum(unitOfMeasureValues)
@@ -54,6 +55,10 @@ export const productCreateSchema = z.object({
   wholesaleMinQuantity: z.coerce.number().int().min(0).max(1_000_000),
   minimumPriceCents: nullablePriceCents,
   taxRate: z.coerce.number().min(0).max(100),
+  // Defaults to "vat" when absent (e.g. bulk import — see import-service.ts, no column maps to this
+  // field yet, Phase 1) rather than being required, since most retail goods are standard-rated and
+  // an admin can correct any that aren't after the fact.
+  taxType: z.enum(taxTypeValues).default("vat"),
   reorderLevel: z.coerce.number().int().min(0).max(1_000_000),
   trackStock: z.boolean(),
   allowNegativeStock: z.boolean(),

@@ -63,19 +63,15 @@ export function findSupplierByBusinessNameRow(
     .get(...params) as SupplierRow | undefined;
 }
 
-export function findSupplierByCodeRow(tenantId: string, supplierCode: string): SupplierRow | undefined {
-  return getDatabase()
-    .prepare("SELECT * FROM suppliers WHERE tenant_id = ? AND supplier_code = ?")
-    .get(tenantId, supplierCode) as SupplierRow | undefined;
-}
-
-export function findMaxSupplierCodeRow(tenantId: string): string | null {
-  const row = getDatabase()
-    .prepare(
-      "SELECT MAX(supplier_code) as maxCode FROM suppliers WHERE tenant_id = ? AND supplier_code LIKE 'SUP-%'"
-    )
-    .get(tenantId) as { maxCode: string | null };
-  return row.maxCode;
+/** ALL existing supplier codes for this tenant — see generateDocumentNumber's own doc comment for
+ * why this can't be a plain SQL MAX() once codes are device-tagged (lexicographic string
+ * comparison would pick the wrong one once tagged and untagged codes are mixed). */
+export function findMaxSupplierCodeRow(tenantId: string): string[] {
+  return (
+    getDatabase()
+      .prepare("SELECT supplier_code FROM suppliers WHERE tenant_id = ? AND supplier_code LIKE 'SUP-%'")
+      .all(tenantId) as Array<{ supplier_code: string }>
+  ).map((row) => row.supplier_code);
 }
 
 export function insertSupplierRow(

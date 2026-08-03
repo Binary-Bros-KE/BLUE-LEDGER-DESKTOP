@@ -20,14 +20,16 @@ function generateExpenseNumber(tenantId: string): string {
   });
 }
 
-function assertCategoryExists(tenantId: string, categoryId: string): void {
+// Exported for local-purchase-service.ts to reuse verbatim — same table, same validation rules,
+// just a different `kind` and permission module gating who can call in.
+export function assertCategoryExists(tenantId: string, categoryId: string): void {
   const row = expenseCategoryRepository.findExpenseCategoryRowById(categoryId);
   if (!row || row.tenant_id !== tenantId) {
     throw new Error("Expense category not found");
   }
 }
 
-function assertStorefrontBelongsToTenant(tenantId: string, storefrontId: string): void {
+export function assertStorefrontBelongsToTenant(tenantId: string, storefrontId: string): void {
   const row = locationRepository.findLocationRowById(storefrontId);
   if (!row || row.tenant_id !== tenantId) {
     throw new Error("Selected storefront was not found");
@@ -36,14 +38,14 @@ function assertStorefrontBelongsToTenant(tenantId: string, storefrontId: string)
 
 /** A branch-scoped caller (a Manager) can only ever record or edit an expense against THEIR OWN
  * storefront — never a different one. Only Super Admin (no branch assigned) can pick freely. */
-function assertExpenseStorefrontAssignmentAllowed(storefrontId: string, branchScope: string | null): void {
+export function assertExpenseStorefrontAssignmentAllowed(storefrontId: string, branchScope: string | null): void {
   if (!branchScope) return;
   if (storefrontId !== branchScope) {
     throw new Error("You can only record expenses for your own storefront");
   }
 }
 
-function assertValidPaymentMethod(tenantId: string, input: ExpenseInput): void {
+export function assertValidPaymentMethod(tenantId: string, input: ExpenseInput): void {
   const method = paymentMethodRepository.findPaymentMethodRowById(input.paymentMethodId);
   if (!method || method.tenant_id !== tenantId) {
     throw new Error("Payment method not found");
@@ -91,16 +93,20 @@ export function listExpenses(): Expense[] {
   requirePermission("expenses", "view");
   const { tenantId } = getCurrentTenant();
   const locationId = getCurrentBranchScope();
-  return expenseRepository.findAllExpenseDetailRows(tenantId, locationId).map(expenseRepository.mapExpenseDetailRow);
+  // Unfiltered (null kind) deliberately — whoever holds "expenses" needs full financial visibility,
+  // including local purchases, not just formal ones. Local Purchases' own view is the narrow one.
+  return expenseRepository
+    .findAllExpenseDetailRows(tenantId, locationId, null)
+    .map(expenseRepository.mapExpenseDetailRow);
 }
 
 export function getExpenseSummary(): ExpenseSummary {
   requirePermission("expenses", "view");
   const { tenantId } = getCurrentTenant();
   const locationId = getCurrentBranchScope();
-  const totals = expenseRepository.findExpenseSummaryRow(tenantId, locationId);
+  const totals = expenseRepository.findExpenseSummaryRow(tenantId, locationId, null);
   const byCategory = expenseRepository
-    .findExpenseCategoryBreakdownRows(tenantId, locationId)
+    .findExpenseCategoryBreakdownRows(tenantId, locationId, null)
     .map(expenseRepository.mapExpenseCategoryBreakdownRow);
 
   return {
@@ -133,6 +139,7 @@ export function createExpense(input: unknown): Expense {
     ...parsed,
     id: `expense_${randomUUID()}`,
     tenantId,
+    kind: "general",
     expenseNumber: generateExpenseNumber(tenantId),
     createdBy: employeeId
   });

@@ -47,6 +47,7 @@ export type QuotationItemRow = {
   quantity: number;
   unit_price_cents: number;
   discount_amount_cents: number;
+  tax_type: string;
   tax_amount_cents: number;
   line_total_cents: number;
   created_at: string;
@@ -192,6 +193,7 @@ export function insertQuotationItemRow(input: {
   quantity: number;
   unitPriceCents: number;
   discountAmountCents: number;
+  taxType: string;
   taxAmountCents: number;
   lineTotalCents: number;
 }): QuotationItemRow {
@@ -202,9 +204,9 @@ export function insertQuotationItemRow(input: {
       `
       INSERT INTO quotation_items (
         id, quotation_id, product_id, quantity, unit_price_cents,
-        discount_amount_cents, tax_amount_cents, line_total_cents, created_at
+        discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
     )
     .run(
@@ -214,6 +216,7 @@ export function insertQuotationItemRow(input: {
       input.quantity,
       input.unitPriceCents,
       input.discountAmountCents,
+      input.taxType,
       input.taxAmountCents,
       input.lineTotalCents,
       now
@@ -335,6 +338,7 @@ export function mapQuotationItemDetailRow(row: QuotationItemDetailRow): Quotatio
     quantity: row.quantity,
     unitPriceCents: row.unit_price_cents,
     discountAmountCents: row.discount_amount_cents,
+    taxType: row.tax_type as QuotationItem["taxType"],
     taxAmountCents: row.tax_amount_cents,
     lineTotalCents: row.line_total_cents,
     createdAt: row.created_at

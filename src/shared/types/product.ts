@@ -32,6 +32,20 @@ export const UNIT_OF_MEASURE_OPTIONS = [
 
 export type UnitOfMeasure = (typeof UNIT_OF_MEASURE_OPTIONS)[number]["value"];
 
+/** Exactly three categories, not a free-form rate — lets Exempted and Zero-Rated be reported
+ * separately even though both currently mean "0% tax" (they're legally distinct in Kenya's VAT Act,
+ * and KRA reporting expects them apart). "vat" is the only one with a nonzero rate, and that rate is
+ * the TENANT's own configured `vatRatePercent` (see shared/types/tenant.ts) — never hardcoded here,
+ * since this app is headed for other East African markets with their own rates. Label omits the
+ * actual percentage on purpose (it's tenant-specific) — append it at render time. */
+export const TAX_TYPE_OPTIONS = [
+  { value: "vat", label: "Standard (VAT)" },
+  { value: "exempted", label: "Exempted" },
+  { value: "zero_rated", label: "Zero-Rated" }
+] as const;
+
+export type ProductTaxType = (typeof TAX_TYPE_OPTIONS)[number]["value"];
+
 export type ProductStatus = "active" | "inactive";
 
 export type ProductSyncStatus = "pending" | "synced" | "syncing" | "error";
@@ -60,6 +74,7 @@ export type ProductInputFields = {
   wholesaleMinQuantity: number;
   minimumPriceCents: number | null;
   taxRate: number;
+  taxType: ProductTaxType;
   reorderLevel: number;
   trackStock: boolean;
   allowNegativeStock: boolean;

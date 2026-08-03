@@ -232,6 +232,7 @@ export function insertInvoiceFromCart(input: {
         quantity: item.quantity,
         unitPriceCents: item.unitPriceCents,
         discountAmountCents: item.discountAmountCents,
+        taxType: item.taxType,
         taxAmountCents: item.taxAmountCents,
         lineTotalCents: item.lineTotalCents
       });

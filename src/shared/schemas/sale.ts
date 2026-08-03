@@ -5,7 +5,11 @@ import { optionalText } from "@shared/schemas/common";
 const saleCartItemSchema = z.object({
   productId: z.string().trim().min(1),
   quantity: z.coerce.number().int().positive("Quantity must be greater than 0"),
-  discountAmountCents: z.coerce.number().int().min(0).max(100_000_000).optional().default(0)
+  discountAmountCents: z.coerce.number().int().min(0).max(100_000_000).optional().default(0),
+  /** Cashier-entered price override for this line only — never written back to the product's own
+   * sellingPriceCents. Omitted (not just 0) means "use the product's normal/wholesale price", so
+   * this can't be used to accidentally zero out a price. See prepareCart in sale-service.ts. */
+  unitPriceCents: z.coerce.number().int().positive().max(100_000_000).optional()
 });
 
 /** Shared by suspend (hold the cart) and checkout (hold + pay) — a resumed sale carries its id along.

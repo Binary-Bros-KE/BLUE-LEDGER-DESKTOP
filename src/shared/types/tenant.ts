@@ -60,6 +60,8 @@ export type BusinessProfile = {
   ownerName: string | null;
   ownerPhone: string | null;
   ownerEmail: string | null;
+  vatRatePercent: number;
+  pricesTaxInclusive: boolean;
   receiptHeader: string | null;
   receiptFooter: string | null;
 };
@@ -113,6 +115,10 @@ export type TenantContext = {
   receiptHeader: string | null;
   receiptFooter: string | null;
   currency: Currency;
+  /** This tenant's own tax regime — see shared/lib/tax-calculation.ts's TenantTaxConfig, which this
+   * shape satisfies directly. */
+  vatRatePercent: number;
+  pricesTaxInclusive: boolean;
   /** True once this install has a real license key from the cloud registry — App.tsx gates the
    * entire app on this, before even the employee login screen. False means "freshly installed,
    * never activated" (licenseKey is still null). */

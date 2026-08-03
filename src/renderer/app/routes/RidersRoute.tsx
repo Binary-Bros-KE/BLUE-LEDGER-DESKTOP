@@ -234,7 +234,7 @@ export function RidersRoute(): React.JSX.Element {
               Delivery Riders
             </h2>
             <p className="mt-1 text-xs font-semibold text-muted">
-              Couriers who can be assigned to a sale, invoice, or quotation's delivery.
+              Couriers who can be assigned to a Deliveries.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -341,23 +341,19 @@ export function RidersRoute(): React.JSX.Element {
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-line">
-              <table className="w-full min-w-[860px] table-fixed border-collapse text-sm">
+              <table className="w-full table-fixed border-collapse text-sm">
                 <colgroup>
                   <col className="w-[20%]" />
                   <col className="w-[15%]" />
-                  <col className="w-[15%]" />
                   <col className="w-[17%]" />
-                  <col className="w-[18%]" />
-                  <col className="w-[7%]" />
-                  <col className="w-[8%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[10%]" />
                 </colgroup>
                 <thead>
                   <tr className="bg-primary text-white">
                     <Th>Name</Th>
                     <Th>Phone</Th>
-                    <Th>Alt Phone</Th>
                     <Th>Company</Th>
-                    <Th>Vehicle</Th>
                     <Th>Status</Th>
                     <Th className="text-right">Actions</Th>
                   </tr>
@@ -366,16 +362,24 @@ export function RidersRoute(): React.JSX.Element {
                   {(filteredRiders ?? []).map((rider) => (
                     <tr key={rider.id} className="border-t border-line odd:bg-white even:bg-soft/50">
                       <td className="truncate px-4 py-3 font-extrabold">{rider.name}</td>
-                      <td className="truncate px-4 py-3 text-xs font-semibold text-muted">{rider.phone}</td>
                       <td className="truncate px-4 py-3 text-xs font-semibold text-muted">
-                        {rider.altPhone ?? "—"}
+                        <div className="flex flex-col gap-0.5">
+                          <span>
+                            {rider.phone}
+                          </span>
+                          <span>
+                            {rider.altPhone ?? "—"}
+                          </span>
+                        </div>
                       </td>
+
                       <td className="truncate px-4 py-3 text-xs font-semibold text-muted">
-                        {rider.company ?? "—"}
+                        <div className="flex flex-col gap-0.5">
+                        <span>{rider.company ?? "—"}</span> 
+                        <span>{rider.vehicleDescription ?? "—"}</span> 
+                        </div>
                       </td>
-                      <td className="truncate px-4 py-3 text-xs font-semibold text-muted">
-                        {rider.vehicleDescription ?? "—"}
-                      </td>
+
                       <td className="px-4 py-3">
                         <DashedPill tone={rider.status === "active" ? "success" : "neutral"}>
                           {rider.status === "active" ? "Active" : "Inactive"}

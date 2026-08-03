@@ -294,7 +294,7 @@ export function MainStoreRoute(): React.JSX.Element {
               Main Store
             </h2>
             <p className="mt-1 text-xs font-semibold text-muted">
-              Every product's Main Store holding and each storefront's own shelf stock, at a glance.
+              Every product's Main Store holding.
             </p>
           </div>
           <div className="flex items-center gap-2">

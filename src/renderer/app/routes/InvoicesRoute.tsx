@@ -12,6 +12,7 @@ import {
   Package,
   Plus,
   Printer,
+  Receipt,
   Search,
   Share2,
   Wallet,
@@ -35,12 +36,14 @@ import { ShareModal } from "@renderer/shared/components/ShareModal";
 import { StatementPreview } from "@renderer/shared/components/StatementPreview";
 import { StatTile } from "@renderer/shared/components/StatTile";
 import { StorefrontPicker } from "@renderer/shared/components/StorefrontPicker";
+import { TaxBreakdownTable } from "@renderer/shared/components/TaxBreakdownTable";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { computeLinePricing } from "@renderer/shared/lib/cart-pricing";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
+import { computeTaxBreakdown } from "@shared/lib/tax-calculation";
 import {
   ALL_YEARS_VALUE,
   buildAvailableYears,
@@ -49,6 +52,7 @@ import {
   yearFilterOptions
 } from "@renderer/shared/lib/year-filter";
 import { useAppStore } from "@renderer/shared/stores/app-store";
+import { formatDocumentDate, formatDocumentDateTime } from "@shared/lib/date";
 import type { Customer } from "@shared/types/customer";
 import type { ExportListRequest } from "@shared/types/export";
 import type { InvoiceListItem, InvoiceSummary } from "@shared/types/invoice";
@@ -73,7 +77,6 @@ const FILTER_TABS: Array<{ value: FilterTab; label: string }> = [
   { value: "overdue", label: "Overdue" },
   { value: "paid", label: "Paid" },
   { value: "cancelled", label: "Cancelled" },
-  { value: "recent", label: "Recently Created" }
 ];
 
 type SortKey = "invoiceNumber" | "customerName" | "invoiceDate" | "dueDate" | "grandTotalCents" | "balanceDueCents";
@@ -84,6 +87,11 @@ type CartLine = {
   sku: string;
   quantity: number;
   discountAmountCents: number;
+  /** Cashier-entered price override for this line only (e.g. product is 450, cashier charges 600)
+   * — never written back to the product's own selling price. Empty string means "use the normal/
+   * wholesale price". Raw text on purpose (see money.ts's own fromCents/toCents split) — converting
+   * on every keystroke like discountAmountCents does would fight the user mid-type. */
+  priceOverride: string;
 };
 
 function statusTone(status: PaymentStatus): "success" | "warning" | "danger" | "neutral" | "accent" {
@@ -103,21 +111,11 @@ function transactionTypeLabel(type: TransactionType): string {
 }
 
 function formatDate(value: string | null): string {
-  if (!value) return "—";
-  try {
-    return new Date(value).toLocaleDateString();
-  } catch {
-    return value;
-  }
+  return value ? formatDocumentDate(value) : "—";
 }
 
 function formatDateTime(value: string | null): string {
-  if (!value) return "—";
-  try {
-    return new Date(value).toLocaleString();
-  } catch {
-    return value;
-  }
+  return value ? formatDocumentDateTime(value) : "—";
 }
 
 function todayIsoDate(): string {
@@ -177,6 +175,7 @@ export function InvoicesRoute(): React.JSX.Element {
 
   const [viewingSale, setViewingSale] = useState<Sale | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
+  const [printingThermal, setPrintingThermal] = useState(false);
   const [sharing, setSharing] = useState(false);
 
   const [viewingDelivery, setViewingDelivery] = useState<{
@@ -344,12 +343,12 @@ export function InvoicesRoute(): React.JSX.Element {
       })),
       stats: summary
         ? [
-            { label: "Total Outstanding", value: `${currency} ${formatCents(summary.totalOutstandingCents)}` },
-            { label: "Total Overdue", value: `${currency} ${formatCents(summary.totalOverdueCents)}` },
-            { label: "Total Paid", value: `${currency} ${formatCents(summary.totalPaidCents)}` },
-            { label: "Total Invoices", value: String(summary.totalInvoices) },
-            { label: "Total Invoice Value", value: `${currency} ${formatCents(summary.totalInvoiceValueCents)}` }
-          ]
+          { label: "Total Outstanding", value: `${currency} ${formatCents(summary.totalOutstandingCents)}` },
+          { label: "Total Overdue", value: `${currency} ${formatCents(summary.totalOverdueCents)}` },
+          { label: "Total Paid", value: `${currency} ${formatCents(summary.totalPaidCents)}` },
+          { label: "Total Invoices", value: String(summary.totalInvoices) },
+          { label: "Total Invoice Value", value: `${currency} ${formatCents(summary.totalInvoiceValueCents)}` }
+        ]
         : [],
       fileBaseName: `Invoices_${new Date().toISOString().slice(0, 10)}`
     };
@@ -536,6 +535,20 @@ export function InvoicesRoute(): React.JSX.Element {
     }
   }
 
+  async function handlePrintThermal(): Promise<void> {
+    if (!viewingSale) return;
+    setPrintingThermal(true);
+    setActionError(null);
+    try {
+      const result = await window.blueLedger.printer.printInvoiceThermal(viewingSale.id);
+      if (!result.success) setActionError(result.message);
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to print invoice"));
+    } finally {
+      setPrintingThermal(false);
+    }
+  }
+
   const filteredCustomers = useMemo(() => {
     const active = customers.filter((customer) => customer.status === "active");
     const term = customerSearch.trim().toLowerCase();
@@ -577,10 +590,20 @@ export function InvoicesRoute(): React.JSX.Element {
         .map((line) => {
           const product = productById.get(line.productId);
           if (!product) return null;
-          return { line, product, pricing: computeLinePricing(product, line.quantity, line.discountAmountCents) };
+          return {
+            line,
+            product,
+            pricing: computeLinePricing(
+              product,
+              line.quantity,
+              line.discountAmountCents,
+              { vatRatePercent: tenantContext?.vatRatePercent ?? 16, pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true },
+              line.priceOverride.trim() ? toCents(line.priceOverride) : null
+            )
+          };
         })
         .filter((entry): entry is { line: CartLine; product: ProductListItem; pricing: ReturnType<typeof computeLinePricing> } => entry !== null),
-    [createItems, productById]
+    [createItems, productById, tenantContext]
   );
 
   const createTotals = useMemo(() => {
@@ -600,8 +623,8 @@ export function InvoicesRoute(): React.JSX.Element {
       taxAmountCents,
       serviceChargesFeeCents,
       deliveryFeeCents,
-      grandTotalCents:
-        subtotalCents - discountAmountCents + taxAmountCents + serviceChargesFeeCents + deliveryFeeCents
+      // Tax is already inside subtotalCents (prices are tax-inclusive) — never added again here.
+      grandTotalCents: subtotalCents - discountAmountCents + serviceChargesFeeCents + deliveryFeeCents
     };
   }, [createLinePricing, createServiceCharges, createDelivery]);
 
@@ -632,7 +655,10 @@ export function InvoicesRoute(): React.JSX.Element {
       if (existing) {
         return prev.map((line) => (line.productId === product.id ? { ...line, quantity: line.quantity + 1 } : line));
       }
-      return [...prev, { productId: product.id, name: product.name, sku: product.sku, quantity: 1, discountAmountCents: 0 }];
+      return [
+        ...prev,
+        { productId: product.id, name: product.name, sku: product.sku, quantity: 1, discountAmountCents: 0, priceOverride: "" }
+      ];
     });
     setProductSearch("");
   }
@@ -642,10 +668,26 @@ export function InvoicesRoute(): React.JSX.Element {
     setCreateItems((prev) => prev.map((line) => (line.productId === productId ? { ...line, quantity: next } : line)));
   }
 
+  /** Permissive counterpart used only by the free-typing quantity input's onChange — allows 0
+   * mid-edit (see the input's own value prop, which renders "" for 0) so clearing "1" to type "80"
+   * isn't fought by an immediate re-clamp on every keystroke. updateCreateQuantity's own clamp still
+   * applies on blur. */
+  function updateCreateQuantityDraft(productId: string, raw: string): void {
+    const parsed = raw === "" ? 0 : Math.floor(Number(raw));
+    const next = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    setCreateItems((prev) => prev.map((line) => (line.productId === productId ? { ...line, quantity: next } : line)));
+  }
+
   function updateCreateDiscount(productId: string, value: string): void {
     const cents = toCents(value);
     setCreateItems((prev) =>
       prev.map((line) => (line.productId === productId ? { ...line, discountAmountCents: cents } : line))
+    );
+  }
+
+  function updateCreatePriceOverride(productId: string, value: string): void {
+    setCreateItems((prev) =>
+      prev.map((line) => (line.productId === productId ? { ...line, priceOverride: value } : line))
     );
   }
 
@@ -684,7 +726,8 @@ export function InvoicesRoute(): React.JSX.Element {
         items: createItems.map((line) => ({
           productId: line.productId,
           quantity: line.quantity,
-          discountAmountCents: line.discountAmountCents
+          discountAmountCents: line.discountAmountCents,
+          unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined
         })),
         serviceCharges: createServiceCharges.map((charge) => ({
           name: charge.name,
@@ -693,23 +736,23 @@ export function InvoicesRoute(): React.JSX.Element {
         })),
         delivery: createDelivery
           ? {
-              riderId: createDelivery.riderId,
-              recipientName: createDelivery.recipientName,
-              country: createDelivery.country,
-              town: createDelivery.town,
-              physicalAddress: createDelivery.physicalAddress,
-              notes: createDelivery.notes,
-              feeCents: toCents(createDelivery.fee),
-              costCents: toCents(createDelivery.cost)
-            }
+            riderId: createDelivery.riderId,
+            recipientName: createDelivery.recipientName,
+            country: createDelivery.country,
+            town: createDelivery.town,
+            physicalAddress: createDelivery.physicalAddress,
+            notes: createDelivery.notes,
+            feeCents: toCents(createDelivery.fee),
+            costCents: toCents(createDelivery.cost)
+          }
           : null,
         initialPayment:
           includeInitialPayment && initialPaymentMethodId && initialPaymentCents > 0
             ? {
-                paymentMethodId: initialPaymentMethodId,
-                amountCents: initialPaymentCents,
-                reference: initialPaymentReference
-              }
+              paymentMethodId: initialPaymentMethodId,
+              amountCents: initialPaymentCents,
+              reference: initialPaymentReference
+            }
             : null
       });
       setCreateOpen(false);
@@ -753,7 +796,7 @@ export function InvoicesRoute(): React.JSX.Element {
               Billing &amp; Receivables
             </h2>
             <p className="mt-1 text-xs font-semibold text-muted">
-              Wholesale invoices and credit sales — track balances and collect payments over time.
+              Wholesale invoices and credit sales.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -785,7 +828,7 @@ export function InvoicesRoute(): React.JSX.Element {
         )}
 
         {summary && (
-          <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-3"> 
             <StatTile
               icon={Wallet}
               label="Total Outstanding"
@@ -798,19 +841,8 @@ export function InvoicesRoute(): React.JSX.Element {
               value={`${currency} ${formatCents(summary.totalOverdueCents)}`}
               tone="danger"
             />
-            <StatTile
-              icon={CheckCircle2}
-              label="Total Paid"
-              value={`${currency} ${formatCents(summary.totalPaidCents)}`}
-              tone="success"
-            />
+
             <StatTile icon={FileText} label="Total Invoices" value={String(summary.totalInvoices)} tone="accent" />
-            <StatTile
-              icon={FileText}
-              label="Total Invoice Value"
-              value={`${currency} ${formatCents(summary.totalInvoiceValueCents)}`}
-              tone="warning"
-            />
           </div>
         )}
 
@@ -875,33 +907,23 @@ export function InvoicesRoute(): React.JSX.Element {
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-line">
-              <table className="w-full min-w-[1300px] table-fixed border-collapse text-sm">
+              <table className="w-full table-fixed border-collapse text-sm">
                 <colgroup>
-                  <col className="w-[10%]" />
-                  <col className="w-[13%]" />
-                  <col className="w-[10%]" />
+                  <col className="w-[7%]" />
                   <col className="w-[9%]" />
-                  <col className="w-[9%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[9%]" />
+                  <col className="w-[5%]" />
+                  <col className="w-[5%]" />
+                  <col className="w-[5%]" />
+                  <col className="w-[5%]" />
+                  <col className="w-[5%]" />
                 </colgroup>
                 <thead>
                   <tr className="bg-primary text-white">
                     <Th onClick={() => toggleSort("invoiceNumber")} active={sortKey === "invoiceNumber"} direction={sortDir}>
                       Invoice #
                     </Th>
-                    <Th onClick={() => toggleSort("customerName")} active={sortKey === "customerName"} direction={sortDir}>
-                      Customer
-                    </Th>
-                    <Th>Type</Th>
                     <Th onClick={() => toggleSort("invoiceDate")} active={sortKey === "invoiceDate"} direction={sortDir}>
                       Issued
-                    </Th>
-                    <Th onClick={() => toggleSort("dueDate")} active={sortKey === "dueDate"} direction={sortDir}>
-                      Due
                     </Th>
                     <Th onClick={() => toggleSort("grandTotalCents")} active={sortKey === "grandTotalCents"} direction={sortDir} className="text-right">
                       Amount
@@ -919,18 +941,25 @@ export function InvoicesRoute(): React.JSX.Element {
                     <tr key={invoice.id} className="border-t border-line odd:bg-white even:bg-soft/50">
 
                       <td className="truncate px-3 py-2.5 text-xs font-bold tabular-nums text-ink">
-                        {invoice.invoiceNumber}
+                        <div className="flex flex-col gap-0.5">
+                          <span className="truncate font-bold text-muted">
+                            {invoice.invoiceNumber}
+                          </span>
+                          <span>
+                            {invoice.customerName ?? "—"}
+                          </span>
+                          <span className="text-primary">
+                            {invoice.locationName ?? "—"}
+                          </span>
+                        </div>
                       </td>
-                      <td className="truncate px-3 py-2.5 font-extrabold">{invoice.customerName ?? "—"}</td>
                       <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">
-                        {transactionTypeLabel(invoice.transactionType)}
+                        <div className="flex flex-col gap-0.5">
+                          <span>ISSUE: {formatDate(invoice.invoiceDate)}</span>
+                          <span className="text-warning font-bold">DUE: {formatDate(invoice.dueDate)}</span>
+                        </div>
                       </td>
-                      <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">
-                        {formatDate(invoice.invoiceDate)}
-                      </td>
-                      <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">
-                        {formatDate(invoice.dueDate)}
-                      </td>
+
                       <td className="px-3 py-2.5 text-right text-xs font-bold tabular-nums text-ink">
                         {formatCents(invoice.grandTotalCents)}
                       </td>
@@ -1106,10 +1135,6 @@ export function InvoicesRoute(): React.JSX.Element {
                 <span className="font-semibold">Discount</span>
                 <span className="font-bold tabular-nums">-{formatCents(viewingSale.discountAmountCents)}</span>
               </div>
-              <div className="flex justify-between text-muted">
-                <span className="font-semibold">Tax</span>
-                <span className="font-bold tabular-nums">{formatCents(viewingSale.taxAmountCents)}</span>
-              </div>
               {viewingSale.serviceCharges.length > 0 && (
                 <div className="flex justify-between text-muted">
                   <span className="font-semibold">Service Charges</span>
@@ -1137,6 +1162,11 @@ export function InvoicesRoute(): React.JSX.Element {
                 <span>{formatCents(viewingSale.balanceDueCents)}</span>
               </div>
             </div>
+
+            <TaxBreakdownTable
+              breakdown={computeTaxBreakdown(viewingSale.items)}
+              tenantTaxConfig={{ vatRatePercent: tenantContext?.vatRatePercent ?? 16, pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true }}
+            />
 
             <div className="mt-4">
               <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Payment History</p>
@@ -1205,6 +1235,21 @@ export function InvoicesRoute(): React.JSX.Element {
                 Share
               </Button>
             </div>
+
+            <Button
+              type="button"
+              onClick={() => void handlePrintThermal()}
+              disabled={printingThermal}
+              title="For shops with only a narrow thermal receipt printer — no A4 printer needed."
+              className="mt-2 h-9 w-full border border-line bg-white text-xs text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {printingThermal ? (
+                <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <Receipt className="mr-1.5 size-3.5" aria-hidden="true" />
+              )}
+              Print via Receipt Printer
+            </Button>
 
             <ShareModal
               open={sharing}
@@ -1598,9 +1643,25 @@ export function InvoicesRoute(): React.JSX.Element {
                         <input
                           type="number"
                           min={1}
-                          value={line.quantity}
-                          onChange={(event) => updateCreateQuantity(line.productId, Number(event.target.value))}
+                          value={line.quantity === 0 ? "" : line.quantity}
+                          onChange={(event) => updateCreateQuantityDraft(line.productId, event.target.value)}
+                          onBlur={() => updateCreateQuantity(line.productId, line.quantity)}
                           className="h-8 w-16 rounded-md border border-line text-center text-xs font-bold outline-none focus:border-accent"
+                        />
+                      </label>
+                      <label
+                        className="flex items-center gap-1.5 text-[11px] font-bold text-muted"
+                        title="Override this line's unit price for this document only — the product's own price is never changed"
+                      >
+                        Price
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={line.priceOverride}
+                          onChange={(event) => updateCreatePriceOverride(line.productId, event.target.value)}
+                          placeholder={fromCents(pricing.unitPriceCents)}
+                          className="h-8 w-20 rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
                         />
                       </label>
                       <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted">
@@ -1677,10 +1738,6 @@ export function InvoicesRoute(): React.JSX.Element {
               <span className="font-semibold">Discount</span>
               <span className="font-bold tabular-nums">-{formatCents(createTotals.discountAmountCents)}</span>
             </div>
-            <div className="flex justify-between text-muted">
-              <span className="font-semibold">Tax</span>
-              <span className="font-bold tabular-nums">{formatCents(createTotals.taxAmountCents)}</span>
-            </div>
             {createTotals.serviceChargesFeeCents > 0 && (
               <div className="flex justify-between text-muted">
                 <span className="font-semibold">Service Charges</span>
@@ -1710,6 +1767,17 @@ export function InvoicesRoute(): React.JSX.Element {
               </>
             )}
           </div>
+
+          <TaxBreakdownTable
+            breakdown={computeTaxBreakdown(
+              createLinePricing.map((entry) => ({
+                taxType: entry.product.taxType,
+                taxAmountCents: entry.pricing.taxCents,
+                lineTotalCents: entry.pricing.lineTotalCents
+              }))
+            )}
+            tenantTaxConfig={{ vatRatePercent: tenantContext?.vatRatePercent ?? 16, pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true }}
+          />
 
           <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
             <Button

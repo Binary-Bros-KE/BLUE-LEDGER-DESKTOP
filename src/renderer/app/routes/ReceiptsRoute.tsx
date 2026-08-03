@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Ban, Eye, Layers, Loader2, Package, ReceiptText, Search, Undo2, Wallet } from "lucide-react";
+import { Ban, Eye, Layers, Loader2, Package, PackagePlus, ReceiptText, Search, Undo2, Wallet } from "lucide-react";
+import { AttachDeliveryModal } from "@renderer/shared/components/AttachDeliveryModal";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { DeliveryNotePreview } from "@renderer/shared/components/DeliveryNotePreview";
@@ -22,6 +23,7 @@ import {
   yearFilterOptions
 } from "@renderer/shared/lib/year-filter";
 import { useAppStore } from "@renderer/shared/stores/app-store";
+import { formatDocumentDateTime } from "@shared/lib/date";
 import type { ExportListRequest } from "@shared/types/export";
 import type { Sale, SaleDelivery, SaleListItem } from "@shared/types/sale";
 import type { SaleReturn } from "@shared/types/sale-return";
@@ -36,12 +38,7 @@ function Th({ children, className }: { children: React.ReactNode; className?: st
 }
 
 function formatDate(value: string | null): string {
-  if (!value) return "—";
-  try {
-    return new Date(value).toLocaleString();
-  } catch {
-    return value;
-  }
+  return value ? formatDocumentDateTime(value) : "—";
 }
 
 function statusLabel(status: SaleStatusEntry | undefined): string {
@@ -112,6 +109,7 @@ export function ReceiptsRoute(): React.JSX.Element {
     saleId: string;
   } | null>(null);
   const [deliveryLoading, setDeliveryLoading] = useState(false);
+  const [attachingDeliverySale, setAttachingDeliverySale] = useState<SaleListItem | null>(null);
 
   const [returnModalSale, setReturnModalSale] = useState<Sale | null>(null);
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
@@ -589,22 +587,18 @@ export function ReceiptsRoute(): React.JSX.Element {
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-line">
-              <table className="w-full min-w-[980px] table-fixed border-collapse text-sm">
+              <table className="w-full  table-fixed border-collapse text-sm">
                 <colgroup>
                   <col className="w-[12%]" />
-                  <col className="w-[14%]" />
-                  <col className="w-[15%]" />
                   <col className="w-[13%]" />
+                  <col className="w-[4%]" />
+                  <col className="w-[7%]" />
+                  <col className="w-[5%]" />
                   <col className="w-[8%]" />
-                  <col className="w-[11%]" />
-                  <col className="w-[13%]" />
-                  <col className="w-[14%]" />
                 </colgroup>
                 <thead>
                   <tr className="bg-primary text-white">
                     <Th>Receipt</Th>
-                    <Th>Date</Th>
-                    <Th>Customer</Th>
                     <Th>Cashier</Th>
                     <Th>Items</Th>
                     <Th>Total</Th>
@@ -618,13 +612,20 @@ export function ReceiptsRoute(): React.JSX.Element {
                     return (
                       <tr key={sale.id} className="border-t border-line odd:bg-white even:bg-soft/50">
                         <td className="truncate px-4 py-3 text-xs font-bold tabular-nums text-muted">
-                          {sale.receiptNumber ?? "—"}
+                          <div>
+                          <span>{sale.receiptNumber ?? "—"}</span>
+                          <span className="block text-[10px] font-normal text-muted">
+                            {formatDate(sale.completedAt)}
+                          </span>
+                          <span className="text-ink font-bold">{sale.customerName ?? "Walk-in"}</span>
+                          </div>
                         </td>
                         <td className="truncate px-4 py-3 text-xs font-semibold text-muted">
-                          {formatDate(sale.completedAt)}
-                        </td>
-                        <td className="truncate px-4 py-3 font-extrabold">{sale.customerName ?? "Walk-in"}</td>
-                        <td className="truncate px-4 py-3 text-xs font-semibold text-muted">{sale.employeeName}</td>
+                          <div className="flex flex-col gap-0.5">
+                            <span>{sale.employeeName}</span>
+                            <span className="text-xs font-bold text-warning">{sale.locationName}</span>
+                          </div>
+                          </td>
                         <td className="px-4 py-3 text-xs font-bold tabular-nums text-muted">{sale.itemCount}</td>
                         <td className="px-4 py-3 text-xs font-bold tabular-nums text-ink">
                           {formatCents(sale.grandTotalCents)}
@@ -644,7 +645,7 @@ export function ReceiptsRoute(): React.JSX.Element {
                             {status?.rejectedReturn && <DashedPill tone="neutral">Return Rejected</DashedPill>}
                             {sale.hasDeliveryNote && (
                               <DashedPill tone={sale.deliveryIsDelivered ? "success" : "warning"}>
-                                {sale.deliveryIsDelivered ? "Delivered" : "Pending Delivery"}
+                                {sale.deliveryIsDelivered ? "Delivered" : "Pending"}
                               </DashedPill>
                             )}
                           </div>
@@ -669,6 +670,17 @@ export function ReceiptsRoute(): React.JSX.Element {
                                 className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-primary cursor-pointer"
                               >
                                 <Package className="size-3.5" aria-hidden="true" />
+                              </button>
+                            )}
+                            {!sale.hasDeliveryNote && canRequest && (
+                              <button
+                                type="button"
+                                onClick={() => setAttachingDeliverySale(sale)}
+                                aria-label={`Attach delivery for ${sale.receiptNumber ?? ""}`}
+                                title="Attach Delivery"
+                                className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-primary cursor-pointer"
+                              >
+                                <PackagePlus className="size-3.5" aria-hidden="true" />
                               </button>
                             )}
                           </div>
@@ -759,6 +771,19 @@ export function ReceiptsRoute(): React.JSX.Element {
           />
         ) : null}
       </Modal>
+
+      {attachingDeliverySale && (
+        <AttachDeliveryModal
+          saleId={attachingDeliverySale.id}
+          customerName={attachingDeliverySale.customerName}
+          onClose={() => setAttachingDeliverySale(null)}
+          onAttached={() => {
+            setAttachingDeliverySale(null);
+            showSuccessToast("Delivery attached");
+            void loadAll();
+          }}
+        />
+      )}
 
       <Modal
         open={returnModalSale !== null}

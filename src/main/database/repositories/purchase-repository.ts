@@ -76,6 +76,7 @@ export type PurchaseItemRow = {
   remaining_quantity: number;
   unit_cost_cents: number;
   discount_amount_cents: number;
+  tax_type: string;
   tax_amount_cents: number;
   line_total_cents: number;
   created_at: string;
@@ -419,6 +420,7 @@ export function insertPurchaseItemRow(input: {
   orderedQuantity: number;
   unitCostCents: number;
   discountAmountCents: number;
+  taxType: string;
   taxAmountCents: number;
   lineTotalCents: number;
 }): PurchaseItemRow {
@@ -429,9 +431,9 @@ export function insertPurchaseItemRow(input: {
       `
       INSERT INTO purchase_items (
         id, purchase_id, product_id, ordered_quantity, received_quantity, unit_cost_cents,
-        discount_amount_cents, tax_amount_cents, line_total_cents, created_at, updated_at
+        discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
     `
     )
     .run(
@@ -441,6 +443,7 @@ export function insertPurchaseItemRow(input: {
       input.orderedQuantity,
       input.unitCostCents,
       input.discountAmountCents,
+      input.taxType,
       input.taxAmountCents,
       input.lineTotalCents,
       now,
@@ -559,6 +562,7 @@ export function mapPurchaseItemDetailRow(row: PurchaseItemDetailRow): PurchaseIt
     remainingQuantity: row.remaining_quantity,
     unitCostCents: row.unit_cost_cents,
     discountAmountCents: row.discount_amount_cents,
+    taxType: row.tax_type as PurchaseItem["taxType"],
     taxAmountCents: row.tax_amount_cents,
     lineTotalCents: row.line_total_cents,
     createdAt: row.created_at,

@@ -1,3 +1,5 @@
+import type { ProductTaxType } from "./product";
+
 export type PurchaseId = string;
 export type PurchaseItemId = string;
 
@@ -53,6 +55,10 @@ export type PurchaseItem = {
   remainingQuantity: number;
   unitCostCents: number;
   discountAmountCents: number;
+  /** Per-line, defaulting from the product's own category when added to the cart but editable —
+   * unlike the deprecated header-level Purchase.taxType below, a real supplier invoice routinely
+   * mixes zero-rated and taxable lines in one order. */
+  taxType: ProductTaxType;
   taxAmountCents: number;
   lineTotalCents: number;
   createdAt: string;
@@ -71,6 +77,9 @@ export type Purchase = {
   locationId: string;
   locationName: string;
   status: PurchaseStatus;
+  /** Legacy whole-order tag — kept only for historical POs created before tax became a per-line
+   * (item.taxType) attribute; never written by the create/update form anymore. Derive a real
+   * category breakdown from `items` instead of reading this for anything new. */
   taxType: PurchaseTaxType;
   subtotalCents: number;
   discountAmountCents: number;

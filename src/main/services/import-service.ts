@@ -146,6 +146,16 @@ function normalizeForMatch(raw: string): string {
   return raw.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+/** See the "Tax Rate" import field's own comment at its call site — this file has no separate
+ * mappable tax-category column, so the category is inferred from whatever's in that one cell. */
+function inferProductTaxTypeFromImportCell(raw: string, numericValue: number): "vat" | "exempted" | "zero_rated" {
+  const normalized = raw.trim().toLowerCase();
+  if (normalized.includes("exempt")) return "exempted";
+  if (normalized.includes("zero")) return "zero_rated";
+  if (isBlank(raw) || numericValue > 0) return "vat";
+  return "zero_rated";
+}
+
 /** Whether a REQUIRED-but-unmapped field is still OK to proceed with, because every row will fall
  * back to a fixed default value instead (see buildRowCandidate's own "blank" branches below) — used
  * by resolveImportRows' upfront mapping check, which otherwise blocked the whole file before any
@@ -210,6 +220,14 @@ function buildRowCandidate(
           const value = parseNumber(raw);
           if (value === null) errors.push(`${field.label} must be a number`);
           else candidate[field.key] = value;
+        }
+        // No separate mappable column for tax CATEGORY (vat/exempted/zero_rated) — this file's own
+        // "Tax Rate" column is the only signal available, so the category is inferred from it: a
+        // keyword in the cell wins outright, otherwise a nonzero rate (or a blank cell) means
+        // standard-rated (the real-world majority), and an explicit zero with no keyword falls back
+        // to zero-rated — see product_tax_type migration's own identical default reasoning.
+        if (field.key === "taxRate" && entityType === "products") {
+          candidate.taxType = inferProductTaxTypeFromImportCell(raw, candidate.taxRate as number);
         }
         break;
       }

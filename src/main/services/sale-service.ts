@@ -19,7 +19,9 @@ import {
   type CheckoutInput,
   type SaleCartInput
 } from "@shared/schemas/sale";
+import { computeLineTax } from "@shared/lib/tax-calculation";
 import { isStorefrontType, type LocationType } from "@shared/types/location";
+import type { ProductTaxType } from "@shared/types/product";
 import type { PendingSaleListItem, Sale, SaleListItem } from "@shared/types/sale";
 import type { ProductRow } from "@main/database/repositories/product-repository";
 
@@ -28,6 +30,7 @@ export type PreparedItem = {
   quantity: number;
   unitPriceCents: number;
   discountAmountCents: number;
+  taxType: ProductTaxType;
   taxAmountCents: number;
   lineTotalCents: number;
 };
@@ -105,6 +108,8 @@ export function prepareCart(
   items: SaleCartInput["items"],
   extras?: PreparedCartExtras
 ): PreparedCart {
+  const tenantTaxConfig = getCurrentTenant();
+
   let subtotalCents = 0;
   let discountAmountCents = 0;
   let taxAmountCents = 0;
@@ -122,9 +127,12 @@ export function prepareCart(
       product.wholesale_price_cents !== null &&
       product.wholesale_min_quantity > 0 &&
       item.quantity >= product.wholesale_min_quantity;
-    const unitPriceCents = useWholesale
-      ? (product.wholesale_price_cents as number)
-      : product.selling_price_cents;
+    // A cashier-entered override replaces the derived price outright for this line only — it's
+    // never written back to the product's own selling_price_cents. Everything downstream (discount
+    // clamping against minimum_price_cents, tax, line total) runs off this same value either way,
+    // so an override needs no special-casing beyond picking the starting number.
+    const unitPriceCents =
+      item.unitPriceCents ?? (useWholesale ? (product.wholesale_price_cents as number) : product.selling_price_cents);
 
     const lineSubtotalCents = unitPriceCents * item.quantity;
     if (item.discountAmountCents > lineSubtotalCents) {
@@ -136,9 +144,13 @@ export function prepareCart(
       throw new Error(`Discount for "${product.name}" would drop it below its minimum price`);
     }
 
+    // The gross line price ALREADY includes tax (product prices are tax-inclusive) — tax is
+    // extracted from it for reporting via computeLineTax, never added on top. lineTotalCents is
+    // just the gross amount actually charged; taxAmountCents is purely informational and never
+    // contributes to any total (see grandTotalCents below).
     const taxableCents = lineSubtotalCents - item.discountAmountCents;
-    const lineTaxCents = Math.round(taxableCents * (product.tax_rate / 100));
-    const lineTotalCents = taxableCents + lineTaxCents;
+    const { taxCents: lineTaxCents } = computeLineTax(taxableCents, product.tax_type as ProductTaxType, tenantTaxConfig);
+    const lineTotalCents = taxableCents;
 
     subtotalCents += lineSubtotalCents;
     discountAmountCents += item.discountAmountCents;
@@ -149,6 +161,7 @@ export function prepareCart(
       quantity: item.quantity,
       unitPriceCents,
       discountAmountCents: item.discountAmountCents,
+      taxType: product.tax_type as ProductTaxType,
       taxAmountCents: lineTaxCents,
       lineTotalCents
     };
@@ -164,26 +177,24 @@ export function prepareCart(
     subtotalCents,
     discountAmountCents,
     taxAmountCents,
-    grandTotalCents: subtotalCents - discountAmountCents + taxAmountCents + extraFeesCents,
+    // Tax is a reporting figure ONLY — it's already inside subtotalCents (prices are
+    // tax-inclusive), so it must never be added again here. This is the actual fix: before, this
+    // line silently inflated every sale's total by its own tax amount.
+    grandTotalCents: subtotalCents - discountAmountCents + extraFeesCents,
     serviceCharges,
     delivery
   };
 }
 
-/** Persists a cart's service charges + delivery (if any) against a sale or quotation — shared by every
- * cart-insertion site (checkout, suspend, invoice, quotation-create) so charge persistence can never
- * drift between them the way buildConversionCart's duplicated totals math once could have. Exactly
- * one of saleId/quotationId is provided, matching the sale_service_charges/delivery_notes CHECK
- * constraint. */
-export function persistCartExtras(
+function persistServiceCharges(
   tenantId: string,
   target: { saleId: string; quotationId?: undefined } | { saleId?: undefined; quotationId: string },
-  cart: PreparedCart
+  serviceCharges: PreparedCart["serviceCharges"]
 ): void {
   const saleId = target.saleId ?? null;
   const quotationId = target.quotationId ?? null;
 
-  for (const charge of cart.serviceCharges) {
+  for (const charge of serviceCharges) {
     serviceChargeRepository.insertServiceChargeRow({
       tenantId,
       saleId,
@@ -193,8 +204,25 @@ export function persistCartExtras(
       costCents: charge.costCents
     });
   }
+}
+
+/** Persists a cart's service charges + delivery (if any) against a sale or quotation — shared by every
+ * cart-insertion site that represents a REAL, final document (checkout, invoice, quotation-create).
+ * Deliberately NOT used for a merely-held sale (see suspendSale) — a delivery note number is only
+ * ever minted once something has actually been sold, not just parked in a draft; a held sale's own
+ * delivery info is stashed as a plain draft on the sale row itself instead (delivery_draft_json),
+ * with no number allocated until/unless it's completed. Exactly one of saleId/quotationId is
+ * provided, matching the sale_service_charges/delivery_notes CHECK constraint. */
+export function persistCartExtras(
+  tenantId: string,
+  target: { saleId: string; quotationId?: undefined } | { saleId?: undefined; quotationId: string },
+  cart: PreparedCart
+): void {
+  persistServiceCharges(tenantId, target, cart.serviceCharges);
 
   if (cart.delivery) {
+    const saleId = target.saleId ?? null;
+    const quotationId = target.quotationId ?? null;
     deliveryNoteRepository.insertDeliveryNoteRow({
       tenantId,
       deliveryNoteNumber: generateDeliveryNoteNumber(tenantId),
@@ -302,7 +330,11 @@ export function suspendSale(input: unknown): { id: string } {
       amountReceivedCents: null,
       changeGivenCents: null,
       notes: parsed.notes,
-      completedAt: null
+      completedAt: null,
+      // No delivery_notes row (and no number allocated) while merely held — see persistCartExtras'
+      // own doc comment for why. Just the raw cart input, stashed for the Checkout screen to
+      // restore on resume.
+      deliveryDraftJson: cart.delivery ? JSON.stringify(cart.delivery) : null
     });
 
     for (const item of cart.items) {
@@ -313,12 +345,13 @@ export function suspendSale(input: unknown): { id: string } {
         quantity: item.quantity,
         unitPriceCents: item.unitPriceCents,
         discountAmountCents: item.discountAmountCents,
+        taxType: item.taxType,
         taxAmountCents: item.taxAmountCents,
         lineTotalCents: item.lineTotalCents
       });
     }
 
-    persistCartExtras(tenantId, { saleId }, cart);
+    persistServiceCharges(tenantId, { saleId }, cart.serviceCharges);
 
     return { id: saleId };
   });
@@ -333,12 +366,6 @@ export function deletePendingSale(id: string): { id: string } {
   }
   if (row.sale_status !== "pending") {
     throw new Error("Only pending sales can be deleted");
-  }
-  // Cloud sync has no delete propagation — a held sale already synced would leave a stale copy on
-  // the cloud/other devices forever if hard-deleted here. A pending (held) sale is rarely synced
-  // in practice, but if it has been, this stops it rather than silently orphaning the cloud copy.
-  if (row.sync_status !== "pending") {
-    throw new Error("This held sale has already synced to the cloud and can't be deleted.");
   }
 
   runInTransaction(() => {
@@ -412,6 +439,7 @@ export function insertCompletedSaleFromCart(input: {
         quantity: item.quantity,
         unitPriceCents: item.unitPriceCents,
         discountAmountCents: item.discountAmountCents,
+        taxType: item.taxType,
         taxAmountCents: item.taxAmountCents,
         lineTotalCents: item.lineTotalCents
       });

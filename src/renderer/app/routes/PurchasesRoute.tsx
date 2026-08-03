@@ -36,13 +36,11 @@ import type { Product, ProductListItem } from "@shared/types/product";
 import {
   PURCHASE_PAYMENT_STATUS_OPTIONS,
   PURCHASE_STATUS_OPTIONS,
-  PURCHASE_TAX_TYPE_OPTIONS,
   type Purchase,
   type PurchaseListItem,
   type PurchasePaymentStatus,
   type PurchaseStatus,
-  type PurchaseSummary,
-  type PurchaseTaxType
+  type PurchaseSummary
 } from "@shared/types/purchase";
 import type { Supplier } from "@shared/types/supplier";
 import { PurchaseDetailModal } from "./purchases/PurchaseDetailModal";
@@ -50,7 +48,6 @@ import { PurchaseFormModal } from "./purchases/PurchaseFormModal";
 
 type StatusFilter = "all" | PurchaseStatus;
 type PaymentStatusFilter = "all" | PurchasePaymentStatus;
-type TaxTypeFilter = "all" | PurchaseTaxType;
 
 function statusLabel(status: PurchaseStatus): string {
   return PURCHASE_STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status;
@@ -107,7 +104,6 @@ export function PurchasesRoute(): React.JSX.Element {
   const [supplierFilter, setSupplierFilter] = useState("");
   const [locationFilter, setLocationFilter] = useState("");
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<PaymentStatusFilter>("all");
-  const [taxTypeFilter, setTaxTypeFilter] = useState<TaxTypeFilter>("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [yearFilter, setYearFilter] = useState<string>(String(currentYear()));
@@ -171,9 +167,6 @@ export function PurchasesRoute(): React.JSX.Element {
     if (paymentStatusFilter !== "all") {
       list = list.filter((purchase) => purchase.paymentStatus === paymentStatusFilter);
     }
-    if (taxTypeFilter !== "all") {
-      list = list.filter((purchase) => purchase.taxType === taxTypeFilter);
-    }
     if (dateFrom) {
       const fromTime = new Date(dateFrom).getTime();
       list = list.filter((purchase) => new Date(purchase.createdAt).getTime() >= fromTime);
@@ -201,7 +194,6 @@ export function PurchasesRoute(): React.JSX.Element {
     supplierFilter,
     locationFilter,
     paymentStatusFilter,
-    taxTypeFilter,
     dateFrom,
     dateTo,
     yearFilter,
@@ -213,7 +205,6 @@ export function PurchasesRoute(): React.JSX.Element {
     const filterParts: string[] = [];
     if (statusFilter !== "all") filterParts.push(`Status: ${statusLabel(statusFilter)}`);
     if (paymentStatusFilter !== "all") filterParts.push(`Payment Status: ${paymentStatusFilter}`);
-    if (taxTypeFilter !== "all") filterParts.push(`Tax Type: ${taxTypeFilter}`);
     if (supplierFilter) {
       filterParts.push(`Supplier: ${suppliers.find((s) => s.id === supplierFilter)?.businessName ?? supplierFilter}`);
     }
@@ -252,13 +243,13 @@ export function PurchasesRoute(): React.JSX.Element {
       })),
       stats: summary
         ? [
-            { label: "Total Purchases", value: String(summary.totalPurchases) },
-            { label: "Draft", value: String(summary.draftCount) },
-            { label: "Ordered", value: String(summary.orderedCount) },
-            { label: "Partially Received", value: String(summary.partiallyReceivedCount) },
-            { label: "Received", value: String(summary.receivedCount) },
-            { label: "Outstanding Payments", value: formatCents(summary.outstandingSupplierPaymentsCents ?? 0) }
-          ]
+          { label: "Total Purchases", value: String(summary.totalPurchases) },
+          { label: "Draft", value: String(summary.draftCount) },
+          { label: "Ordered", value: String(summary.orderedCount) },
+          { label: "Partially Received", value: String(summary.partiallyReceivedCount) },
+          { label: "Received", value: String(summary.receivedCount) },
+          { label: "Outstanding Payments", value: formatCents(summary.outstandingSupplierPaymentsCents ?? 0) }
+        ]
         : [],
       fileBaseName: `Purchases_${new Date().toISOString().slice(0, 10)}`
     };
@@ -267,7 +258,6 @@ export function PurchasesRoute(): React.JSX.Element {
     summary,
     statusFilter,
     paymentStatusFilter,
-    taxTypeFilter,
     supplierFilter,
     locationFilter,
     dateFrom,
@@ -284,7 +274,6 @@ export function PurchasesRoute(): React.JSX.Element {
     setSupplierFilter("");
     setLocationFilter("");
     setPaymentStatusFilter("all");
-    setTaxTypeFilter("all");
     setDateFrom("");
     setDateTo("");
   }
@@ -380,7 +369,7 @@ export function PurchasesRoute(): React.JSX.Element {
               Purchase Orders
             </h2>
             <p className="mt-1 text-xs font-semibold text-muted">
-              Order stock from suppliers, then receive it in to update inventory automatically.
+              Order stock from suppliers.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -449,12 +438,6 @@ export function PurchasesRoute(): React.JSX.Element {
               ...locations.map((location) => ({ value: location.id, label: location.locationName }))
             ]}
           />
-          <SelectField
-            label="Tax Type"
-            value={taxTypeFilter}
-            onChange={(value) => setTaxTypeFilter(value as TaxTypeFilter)}
-            options={[{ value: "all", label: "All Tax Types" }, ...PURCHASE_TAX_TYPE_OPTIONS]}
-          />
           <label className="block">
             <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">From Date</span>
             <input
@@ -509,13 +492,11 @@ export function PurchasesRoute(): React.JSX.Element {
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-line">
-              <table className="w-full min-w-[1300px] table-fixed border-collapse text-sm">
+              <table className="w-full table-fixed border-collapse text-sm">
                 <colgroup>
                   <col className="w-[10%]" />
-                  <col className="w-[16%]" />
-                  <col className="w-[12%]" />
-                  <col className="w-[12%]" />
-                  <col className="w-[12%]" />
+                  <col className="w-[20%]" />
+                  <col className="w-[10%]" />
                   <col className="w-[10%]" />
                   <col className="w-[10%]" />
                   <col className="w-[9%]" />
@@ -526,8 +507,6 @@ export function PurchasesRoute(): React.JSX.Element {
                   <tr className="bg-primary text-white">
                     <Th>PO #</Th>
                     <Th>Supplier</Th>
-                    <Th>Supplier Invoice #</Th>
-                    <Th>Destination</Th>
                     <Th>Status</Th>
                     <Th className="text-right">Total Amount</Th>
                     <Th>Payment Status</Th>
@@ -546,12 +525,15 @@ export function PurchasesRoute(): React.JSX.Element {
                       <td className="truncate px-3 py-2.5 text-xs font-bold tabular-nums text-ink">
                         {purchase.purchaseNumber}
                       </td>
-                      <td className="truncate px-3 py-2.5 font-extrabold">{purchase.supplierName}</td>
-                      <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">
-                        {purchase.supplierInvoiceNumber ?? "—"}
-                      </td>
-                      <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">
-                        {purchase.locationName}
+                      <td className="truncate px-3 py-2.5 font-extrabold">
+                        <div className="flex flex-col gap-0.5">
+                          <span>
+                            {purchase.supplierName}
+                          </span>
+                          <span className="text-xs font-semibold text-primary/80">
+                            {purchase.locationName}
+                          </span>
+                        </div>
                       </td>
                       <td className="px-3 py-2.5">
                         <DashedPill tone={statusTone(purchase.status)}>{statusLabel(purchase.status)}</DashedPill>

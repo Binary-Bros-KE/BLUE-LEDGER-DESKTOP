@@ -1,16 +1,22 @@
 import { randomUUID } from "node:crypto";
 import * as supplierRepository from "@main/database/repositories/supplier-repository";
 import { requirePermission } from "@main/services/auth-service";
+import { generateDocumentNumber } from "@main/services/document-number-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { supplierInputSchema } from "@shared/schemas/supplier";
 import type { Supplier, SupplierStatus } from "@shared/types/supplier";
 
-/** SUP-000001, SUP-000002, ... — generated once at creation and never editable afterward. */
+/** SUP-D1-000001, SUP-D1-000002, ... — generated once at creation and never editable afterward.
+ * Device-tagged (see generateDocumentNumber's own doc comment) — two offline devices independently
+ * incrementing a plain local max used to be able to mint the exact same code for two different real
+ * suppliers; the device tag makes that structurally impossible. */
 function generateSupplierCode(tenantId: string): string {
-  const maxCode = supplierRepository.findMaxSupplierCodeRow(tenantId);
-  const currentNumber = maxCode ? Number(maxCode.slice("SUP-".length)) : 0;
-  const nextNumber = Number.isFinite(currentNumber) ? currentNumber + 1 : 1;
-  return `SUP-${String(nextNumber).padStart(6, "0")}`;
+  return generateDocumentNumber({
+    tenantId,
+    prefix: "SUP",
+    digits: 6,
+    existingNumbers: supplierRepository.findMaxSupplierCodeRow(tenantId)
+  });
 }
 
 function assertUniqueBusinessName(tenantId: string, businessName: string, excludeId?: string): void {
@@ -48,19 +54,11 @@ export function createSupplier(input: unknown): Supplier {
 
   assertUniqueBusinessName(tenantId, parsed.businessName);
 
-  let supplierCode = generateSupplierCode(tenantId);
-  // Defensive: guards against a code collision (e.g. a prior row deleted mid-sequence some other
-  // way) rather than trusting sequential generation alone, per the "code hasn't been used" requirement.
-  while (supplierRepository.findSupplierByCodeRow(tenantId, supplierCode)) {
-    const nextNumber = Number(supplierCode.slice("SUP-".length)) + 1;
-    supplierCode = `SUP-${String(nextNumber).padStart(6, "0")}`;
-  }
-
   const row = supplierRepository.insertSupplierRow({
     ...parsed,
     id: `supplier_${randomUUID()}`,
     tenantId,
-    supplierCode
+    supplierCode: generateSupplierCode(tenantId)
   });
   return supplierRepository.mapSupplierRow(row);
 }

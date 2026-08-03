@@ -45,6 +45,8 @@ type FormState = {
   ownerName: string;
   ownerPhone: string;
   ownerEmail: string;
+  vatRatePercent: string;
+  pricesTaxInclusive: boolean;
 };
 
 function toFormState(record: TenantRecord): FormState {
@@ -66,7 +68,9 @@ function toFormState(record: TenantRecord): FormState {
     currency: record.currency,
     ownerName: record.ownerName ?? "",
     ownerPhone: record.ownerPhone ?? "",
-    ownerEmail: record.ownerEmail ?? ""
+    ownerEmail: record.ownerEmail ?? "",
+    vatRatePercent: String(record.vatRatePercent),
+    pricesTaxInclusive: record.pricesTaxInclusive
   };
 }
 
@@ -141,7 +145,8 @@ export function BusinessProfileRoute(): React.JSX.Element {
     try {
       const updated = await window.blueLedger.tenant.updateProfile({
         ...form,
-        businessLogoRatio: form.businessLogoRatio || null
+        businessLogoRatio: form.businessLogoRatio || null,
+        vatRatePercent: Number(form.vatRatePercent) || 0
       });
       setProfile(updated);
       setForm(toFormState(updated));
@@ -295,6 +300,30 @@ export function BusinessProfileRoute(): React.JSX.Element {
             onChange={(value) => updateField("kraPin", value)}
             placeholder="e.g. A012345678Z"
           />
+        </FormSection>
+
+        <FormSection title="Tax Settings">
+          <Field
+            label="Standard (VAT) Rate (%)"
+            type="number"
+            value={form.vatRatePercent}
+            onChange={(value) => updateField("vatRatePercent", value)}
+            placeholder="16"
+          />
+          <SelectField
+            label="Product prices are"
+            value={form.pricesTaxInclusive ? "inclusive" : "exclusive"}
+            onChange={(value) => updateField("pricesTaxInclusive", value === "inclusive")}
+            options={[
+              { value: "inclusive", label: "Inclusive of tax (Kenya's norm)" },
+              { value: "exclusive", label: "Exclusive of tax" }
+            ]}
+          />
+          <p className="text-xs font-semibold text-muted sm:col-span-2">
+            Every product picks one of three tax categories — Standard (this rate), Exempted, or
+            Zero-Rated — from its own edit screen. Exclusive pricing is stored for a future market
+            that needs it; only inclusive pricing is fully supported today.
+          </p>
         </FormSection>
 
         <FormSection title="Contact">

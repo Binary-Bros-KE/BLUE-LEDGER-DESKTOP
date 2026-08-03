@@ -253,7 +253,7 @@ export function ProductsRoute(): React.JSX.Element {
             <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Products</p>
             <h2 className="mt-1 text-xl font-extrabold">Product catalog</h2>
             <p className="mt-1 text-xs font-semibold text-muted">
-              Master catalog — stock balances are tracked per location in Inventory.
+              Master catalog.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -403,11 +403,9 @@ export function ProductsRoute(): React.JSX.Element {
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-line">
-              <table className="w-full min-w-[900px] table-fixed border-collapse text-sm">
+              <table className="w-full table-fixed border-collapse text-sm">
                 <colgroup>
-                  <col className="w-12" />
                   <col className="w-[31%]" />
-                  <col className="w-[17%]" />
                   <col className="w-[11%]" />
                   <col className="w-[9%]" />
                   <col className="w-[9%]" />
@@ -415,9 +413,7 @@ export function ProductsRoute(): React.JSX.Element {
                 </colgroup>
                 <thead>
                   <tr className="bg-primary text-white">
-                    <Th>{null}</Th>
                     <Th>Product</Th>
-                    <Th>Category</Th>
                     <Th className="text-right">Price</Th>
                     <Th className="text-right">Stock</Th>
                     <Th>Status</Th>
@@ -427,17 +423,6 @@ export function ProductsRoute(): React.JSX.Element {
                 <tbody>
                   {(filteredProducts ?? []).map((product) => (
                     <tr key={product.id} className="border-t border-line odd:bg-white even:bg-soft/50">
-                      <td className="px-2 py-3 text-center">
-                        <button
-                          type="button"
-                          onClick={() => setInfoProduct(product)}
-                          aria-label={`View details for ${product.name}`}
-                          title="Product details"
-                          className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-primary cursor-pointer"
-                        >
-                          <Info className="size-3.5" aria-hidden="true" />
-                        </button>
-                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
                           <ProductThumbnail imagePath={product.imagePath} />
@@ -446,12 +431,13 @@ export function ProductsRoute(): React.JSX.Element {
                               {product.name}
                             </p>
                             <p className="truncate text-xs tabular-nums text-muted">{product.sku}</p>
+                            <span className="truncate px-4 py-3 text-sm font-semibold text-muted">
+                        {product.categoryName ?? "Uncategorized"}
+                            </span>
                           </div>
                         </div>
                       </td>
-                      <td className="truncate px-4 py-3 text-sm font-semibold text-muted">
-                        {product.categoryName ?? "Uncategorized"}
-                      </td>
+
                       <td className="px-4 py-3 text-right text-sm font-bold tabular-nums">
                         {currency} {formatCents(product.sellingPriceCents)}
                       </td>
@@ -499,7 +485,16 @@ export function ProductsRoute(): React.JSX.Element {
                             >
                               <Pencil className="size-3.5" aria-hidden="true" />
                             </button>
-                          )}
+                          )} 
+                          <button
+                            type="button"
+                            onClick={() => setInfoProduct(product)}
+                            aria-label={`View details for ${product.name}`}
+                            title="Product details"
+                            className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-primary cursor-pointer"
+                          >
+                            <Info className="size-3.5" aria-hidden="true" />
+                          </button>
                           {canEdit && (
                             <button
                               type="button"

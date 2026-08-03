@@ -1,11 +1,8 @@
 import { z } from "zod";
 import { optionalText } from "@shared/schemas/common";
-import { PURCHASE_TAX_TYPE_OPTIONS, type PurchaseTaxType } from "@shared/types/purchase";
+import { TAX_TYPE_OPTIONS } from "@shared/types/product";
 
-const taxTypeValues = PURCHASE_TAX_TYPE_OPTIONS.map((option) => option.value) as [
-  PurchaseTaxType,
-  ...PurchaseTaxType[]
-];
+const productTaxTypeValues = TAX_TYPE_OPTIONS.map((option) => option.value) as [string, ...string[]];
 
 const cents = z.coerce.number().int().min(0).max(1_000_000_000);
 
@@ -14,7 +11,10 @@ export const purchaseItemInputSchema = z.object({
   orderedQuantity: z.coerce.number().int().positive("Quantity must be greater than 0"),
   unitCostCents: cents,
   discountAmountCents: cents.optional().default(0),
-  taxAmountCents: cents.optional().default(0)
+  // Defaults to "vat" only as a last resort (e.g. a very old client build that never sends it) —
+  // the UI always pre-fills this from the product's own category. Tax is computed server-side from
+  // this + the line's own cost, never taken as a client-supplied amount (see purchase-service.ts).
+  taxType: z.enum(productTaxTypeValues).default("vat")
 });
 
 export type PurchaseItemInput = z.infer<typeof purchaseItemInputSchema>;
@@ -23,7 +23,6 @@ export const purchaseCreateSchema = z.object({
   supplierId: z.string().trim().min(1, "Select a supplier"),
   supplierInvoiceNumber: optionalText(100),
   locationId: z.string().trim().min(1, "Select a destination location"),
-  taxType: z.enum(taxTypeValues),
   notes: optionalText(1000),
   attachmentPath: optionalText(500),
   items: z.array(purchaseItemInputSchema).min(1, "Add at least one product"),

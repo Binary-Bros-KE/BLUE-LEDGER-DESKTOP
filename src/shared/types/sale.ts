@@ -1,3 +1,6 @@
+import type { DeliveryInput } from "@shared/schemas/charges";
+import type { ProductTaxType } from "@shared/types/product";
+
 export type SaleId = string;
 export type SaleItemId = string;
 
@@ -85,6 +88,9 @@ export type SaleItem = {
   quantity: number;
   unitPriceCents: number;
   discountAmountCents: number;
+  /** What tax category actually applied at sale time — a snapshot, since a product's own category
+   * can change later but a historical sale must keep reporting whatever was true when it happened. */
+  taxType: ProductTaxType;
   taxAmountCents: number;
   lineTotalCents: number;
   createdAt: string;
@@ -128,7 +134,13 @@ export type Sale = {
   lastSyncedAt: string | null;
   items: SaleItem[];
   serviceCharges: SaleServiceCharge[];
+  /** A REAL, numbered delivery note — only ever set once a sale has actually completed. */
   delivery: SaleDelivery | null;
+  /** Delivery info entered while this sale was only HELD, before any number was allocated — see
+   * suspendSale in sale-service.ts. Only ever set while saleStatus is "pending"; a completed sale
+   * has this null and its real delivery (if any) in `delivery` instead. Exists purely so the
+   * Checkout screen can restore the rider/recipient/address fields when resuming a held cart. */
+  deliveryDraft: DeliveryInput | null;
 };
 
 /** Lightweight row for the "Resume Sale" picker — no line items, just enough to identify the held sale. */

@@ -1,5 +1,6 @@
 import { getDatabase } from "@main/database/connection";
 import { computePaymentStatus } from "@shared/lib/invoice";
+import type { DeliveryInput } from "@shared/schemas/charges";
 import type { InvoiceListItem, InvoiceSummary } from "@shared/types/invoice";
 import type {
   PaymentStatus,
@@ -41,6 +42,8 @@ export type SaleRow = {
   balance_due_cents: number;
   invoice_notes: string | null;
   payments: string;
+  /** JSON-serialized DeliveryInput, or null — see Sale["deliveryDraft"]'s own doc comment. */
+  delivery_draft_json: string | null;
   completed_at: string | null;
   created_at: string;
   updated_at: string;
@@ -63,6 +66,7 @@ export type SaleItemRow = {
   quantity: number;
   unit_price_cents: number;
   discount_amount_cents: number;
+  tax_type: string;
   tax_amount_cents: number;
   line_total_cents: number;
   created_at: string;
@@ -403,6 +407,10 @@ export function insertSaleRow(input: {
   changeGivenCents: number | null;
   notes: string | null;
   completedAt: string | null;
+  /** JSON-serialized DeliveryInput for a held sale's own delivery draft, or null — see
+   * Sale["deliveryDraft"]'s own doc comment. Always null for a completed sale (its delivery, if
+   * any, is a real numbered row instead — see persistCartExtras). */
+  deliveryDraftJson?: string | null;
 }): SaleRow {
   const now = new Date().toISOString();
 
@@ -418,9 +426,10 @@ export function insertSaleRow(input: {
         id, tenant_id, receipt_number, location_id, employee_id, customer_id, sale_status,
         subtotal_cents, discount_amount_cents, tax_amount_cents, grand_total_cents,
         payment_method_id, payment_reference, amount_received_cents, change_given_cents,
-        notes, completed_at, created_at, updated_at, sync_status, amount_paid_cents, balance_due_cents
+        notes, completed_at, created_at, updated_at, sync_status, amount_paid_cents, balance_due_cents,
+        delivery_draft_json
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
     `
     )
     .run(
@@ -444,7 +453,8 @@ export function insertSaleRow(input: {
       now,
       now,
       amountPaidCents,
-      balanceDueCents
+      balanceDueCents,
+      input.deliveryDraftJson ?? null
     );
 
   const row = findSaleRowById(input.id);
@@ -461,6 +471,7 @@ export function insertSaleItemRow(input: {
   quantity: number;
   unitPriceCents: number;
   discountAmountCents: number;
+  taxType: string;
   taxAmountCents: number;
   lineTotalCents: number;
 }): SaleItemRow {
@@ -471,9 +482,9 @@ export function insertSaleItemRow(input: {
       `
       INSERT INTO sale_items (
         id, sale_id, product_id, quantity, unit_price_cents,
-        discount_amount_cents, tax_amount_cents, line_total_cents, created_at
+        discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
     )
     .run(
@@ -483,6 +494,7 @@ export function insertSaleItemRow(input: {
       input.quantity,
       input.unitPriceCents,
       input.discountAmountCents,
+      input.taxType,
       input.taxAmountCents,
       input.lineTotalCents,
       now
@@ -635,6 +647,7 @@ export function mapSaleItemDetailRow(row: SaleItemDetailRow): SaleItem {
     quantity: row.quantity,
     unitPriceCents: row.unit_price_cents,
     discountAmountCents: row.discount_amount_cents,
+    taxType: row.tax_type as SaleItem["taxType"],
     taxAmountCents: row.tax_amount_cents,
     lineTotalCents: row.line_total_cents,
     createdAt: row.created_at
@@ -698,7 +711,8 @@ export function mapSaleDetailRow(
     lastSyncedAt: row.last_synced_at,
     items,
     serviceCharges,
-    delivery
+    delivery,
+    deliveryDraft: row.delivery_draft_json ? (JSON.parse(row.delivery_draft_json) as DeliveryInput) : null
   };
 }
 

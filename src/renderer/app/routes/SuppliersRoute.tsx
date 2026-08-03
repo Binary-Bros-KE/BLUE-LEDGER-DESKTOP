@@ -327,7 +327,7 @@ export function SuppliersRoute(): React.JSX.Element {
               Supplier Directory
             </h2>
             <p className="mt-1 text-xs font-semibold text-muted">
-              The master list of businesses you purchase from — used throughout Purchases and inventory.
+              The master list of businesses you purchase from.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -443,13 +443,10 @@ export function SuppliersRoute(): React.JSX.Element {
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-line">
-              <table className="w-full min-w-[1000px] table-fixed border-collapse text-sm">
+              <table className="w-full  table-fixed border-collapse text-sm">
                 <colgroup>
                   <col className="w-[11%]" />
                   <col className="w-[19%]" />
-                  <col className="w-[15%]" />
-                  <col className="w-[12%]" />
-                  <col className="w-[13%]" />
                   <col className="w-[11%]" />
                   <col className="w-[9%]" />
                   <col className="w-[10%]" />
@@ -458,9 +455,6 @@ export function SuppliersRoute(): React.JSX.Element {
                   <tr className="bg-primary text-white">
                     <Th>Code</Th>
                     <Th>Business Name</Th>
-                    <Th>Contact Person</Th>
-                    <Th>Phone</Th>
-                    <Th>Payment Option</Th>
                     <Th>Credit Limit</Th>
                     <Th>Status</Th>
                     <Th className="text-right">Actions</Th>
@@ -472,13 +466,18 @@ export function SuppliersRoute(): React.JSX.Element {
                       <td className="truncate px-4 py-3 text-xs font-bold tabular-nums text-muted">
                         {supplier.supplierCode}
                       </td>
-                      <td className="truncate px-4 py-3 font-extrabold">{supplier.businessName}</td>
-                      <td className="truncate px-4 py-3 text-xs font-semibold text-muted">
-                        {supplier.contactPerson ?? "—"}
-                      </td>
-                      <td className="truncate px-4 py-3 text-xs font-semibold text-muted">{supplier.phone1}</td>
-                      <td className="px-4 py-3">
-                        <DashedPill tone="accent">{paymentOptionLabel(supplier.paymentOption)}</DashedPill>
+                      <td className="truncate px-4 py-3 font-extrabold">
+                        <div className="flex flex-col gap-0.5">
+                          <span>
+                            {supplier.businessName}
+                          </span>
+                          <span className="text-xs font-semibold text-muted">
+                            {supplier.contactPerson ?? "—"}
+                          </span>
+                          <span className="text-xs font-semibold text-muted">
+                            {supplier.phone1}
+                          </span>
+                        </div>
                       </td>
                       <td className="truncate px-4 py-3 text-xs font-bold tabular-nums text-muted">
                         {formatCents(supplier.creditLimitCents)}

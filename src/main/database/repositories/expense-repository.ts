@@ -3,6 +3,7 @@ import type { ExpenseInput } from "@shared/schemas/expense";
 import type {
   Expense,
   ExpenseCategoryBreakdown,
+  ExpenseKind,
   ExpenseStatus,
   ExpenseSyncStatus,
   RecurrenceFrequency
@@ -11,6 +12,7 @@ import type {
 export type ExpenseRow = {
   id: string;
   tenant_id: string;
+  kind: string;
   expense_number: string;
   expense_date: string;
   category_id: string;
@@ -46,8 +48,17 @@ export type ExpenseDetailRow = ExpenseRow & {
  * super-admin with no assigned branch); otherwise general expenses with no storefront (head-office
  * costs) are always included alongside the caller's own branch, the same way storefront-less
  * products are visible everywhere.
+ *
+ * Pass null for kind to see every row regardless of kind (the Expenses tab's own view — a
+ * manager/admin needs full financial visibility across both formal expenses AND local purchases);
+ * pass a specific kind to filter to just that (Local Purchases' own view, which must never leak a
+ * 'general' row to whoever's calling it).
  */
-export function findAllExpenseDetailRows(tenantId: string, locationId: string | null): ExpenseDetailRow[] {
+export function findAllExpenseDetailRows(
+  tenantId: string,
+  locationId: string | null,
+  kind: ExpenseKind | null
+): ExpenseDetailRow[] {
   return getDatabase()
     .prepare(
       `
@@ -63,10 +74,11 @@ export function findAllExpenseDetailRows(tenantId: string, locationId: string | 
       LEFT JOIN locations l ON l.id = e.storefront_id
       LEFT JOIN employees emp ON emp.id = e.created_by
       WHERE e.tenant_id = ? AND (? IS NULL OR e.storefront_id = ? OR e.storefront_id IS NULL)
+        AND (? IS NULL OR e.kind = ?)
       ORDER BY e.created_at DESC
     `
     )
-    .all(tenantId, locationId, locationId) as ExpenseDetailRow[];
+    .all(tenantId, locationId, locationId, kind, kind) as ExpenseDetailRow[];
 }
 
 export type ExpenseSummaryRow = {
@@ -75,7 +87,11 @@ export type ExpenseSummaryRow = {
   total_cents: number;
 };
 
-export function findExpenseSummaryRow(tenantId: string, locationId: string | null): ExpenseSummaryRow {
+export function findExpenseSummaryRow(
+  tenantId: string,
+  locationId: string | null,
+  kind: ExpenseKind | null
+): ExpenseSummaryRow {
   return getDatabase()
     .prepare(
       `
@@ -85,9 +101,10 @@ export function findExpenseSummaryRow(tenantId: string, locationId: string | nul
         COALESCE(SUM(amount_cents), 0) AS total_cents
       FROM expenses
       WHERE tenant_id = ? AND status = 'active' AND (? IS NULL OR storefront_id = ? OR storefront_id IS NULL)
+        AND (? IS NULL OR kind = ?)
     `
     )
-    .get(tenantId, locationId, locationId) as ExpenseSummaryRow;
+    .get(tenantId, locationId, locationId, kind, kind) as ExpenseSummaryRow;
 }
 
 export type ExpenseCategoryBreakdownRow = {
@@ -98,7 +115,8 @@ export type ExpenseCategoryBreakdownRow = {
 
 export function findExpenseCategoryBreakdownRows(
   tenantId: string,
-  locationId: string | null
+  locationId: string | null,
+  kind: ExpenseKind | null
 ): ExpenseCategoryBreakdownRow[] {
   return getDatabase()
     .prepare(
@@ -107,11 +125,12 @@ export function findExpenseCategoryBreakdownRows(
       FROM expenses e
       JOIN expense_categories ec ON ec.id = e.category_id
       WHERE e.tenant_id = ? AND e.status = 'active' AND (? IS NULL OR e.storefront_id = ? OR e.storefront_id IS NULL)
+        AND (? IS NULL OR e.kind = ?)
       GROUP BY ec.id, ec.name
       ORDER BY total_cents DESC
     `
     )
-    .all(tenantId, locationId, locationId) as ExpenseCategoryBreakdownRow[];
+    .all(tenantId, locationId, locationId, kind, kind) as ExpenseCategoryBreakdownRow[];
 }
 
 export function mapExpenseCategoryBreakdownRow(row: ExpenseCategoryBreakdownRow): ExpenseCategoryBreakdown {
@@ -127,6 +146,16 @@ export function findMaxExpenseNumberRow(tenantId: string): string[] {
   return (
     getDatabase()
       .prepare("SELECT expense_number FROM expenses WHERE tenant_id = ? AND expense_number LIKE 'EXP-%'")
+      .all(tenantId) as Array<{ expense_number: string }>
+  ).map((row) => row.expense_number);
+}
+
+/** Local purchases share the same expense_number column but their own "LP-" prefix/namespace, so a
+ * quick glance at the number alone already tells a formal expense apart from a local purchase. */
+export function findMaxLocalPurchaseNumberRow(tenantId: string): string[] {
+  return (
+    getDatabase()
+      .prepare("SELECT expense_number FROM expenses WHERE tenant_id = ? AND expense_number LIKE 'LP-%'")
       .all(tenantId) as Array<{ expense_number: string }>
   ).map((row) => row.expense_number);
 }
@@ -157,7 +186,13 @@ export function findExpenseDetailRowById(id: string): ExpenseDetailRow | undefin
 }
 
 export function insertExpenseRow(
-  input: ExpenseInput & { id: string; tenantId: string; expenseNumber: string; createdBy: string | null }
+  input: ExpenseInput & {
+    id: string;
+    tenantId: string;
+    kind: ExpenseKind;
+    expenseNumber: string;
+    createdBy: string | null;
+  }
 ): ExpenseRow {
   const now = new Date().toISOString();
 
@@ -165,16 +200,17 @@ export function insertExpenseRow(
     .prepare(
       `
       INSERT INTO expenses (
-        id, tenant_id, expense_number, expense_date, category_id, amount_cents, paid_by,
+        id, tenant_id, kind, expense_number, expense_date, category_id, amount_cents, paid_by,
         payment_method_id, storefront_id, reference, description, attachment_path, status,
         created_by, created_at, updated_at, sync_status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
     `
     )
     .run(
       input.id,
       input.tenantId,
+      input.kind,
       input.expenseNumber,
       input.expenseDate,
       input.categoryId,
@@ -273,6 +309,7 @@ export function mapExpenseDetailRow(row: ExpenseDetailRow): Expense {
   return {
     id: row.id,
     tenantId: row.tenant_id,
+    kind: row.kind as ExpenseKind,
     expenseNumber: row.expense_number,
     expenseDate: row.expense_date,
     categoryId: row.category_id,

@@ -3,7 +3,8 @@ import { Loader2, Package } from "lucide-react";
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
-import type { ProductListItem, ProductStockSummary } from "@shared/types/product";
+import { useAppStore } from "@renderer/shared/stores/app-store";
+import { TAX_TYPE_OPTIONS, type ProductListItem, type ProductStockSummary } from "@shared/types/product";
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }): React.JSX.Element {
   return (
@@ -20,6 +21,7 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }): R
  * breakdown `ProductDetailModal` shows — that one stays reserved for roles with real inventory
  * access. Shared between Checkout and the Products list. */
 export function ProductInfoModal({ product, onClose }: { product: ProductListItem; onClose: () => void }): React.JSX.Element {
+  const vatRatePercent = useAppStore((state) => state.context?.tenant.vatRatePercent ?? 16);
   const [summary, setSummary] = useState<ProductStockSummary | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -103,7 +105,14 @@ export function ProductInfoModal({ product, onClose }: { product: ProductListIte
               }
             />
             <InfoRow label="Minimum Price" value={product.minimumPriceCents !== null ? formatCents(product.minimumPriceCents) : "—"} />
-            <InfoRow label="Tax Rate" value={`${product.taxRate}%`} />
+            <InfoRow
+              label="Tax"
+              value={
+                product.taxType === "vat"
+                  ? `${TAX_TYPE_OPTIONS.find((o) => o.value === "vat")?.label} (${vatRatePercent}%)`
+                  : (TAX_TYPE_OPTIONS.find((o) => o.value === product.taxType)?.label ?? product.taxType)
+              }
+            />
           </div>
         </div>
 

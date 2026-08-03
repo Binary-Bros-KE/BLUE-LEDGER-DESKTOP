@@ -34,6 +34,7 @@ import { QuickCreateCustomerModal } from "@renderer/shared/components/QuickCreat
 import { ReceiptPreview } from "@renderer/shared/components/ReceiptPreview";
 import { StampBadge } from "@renderer/shared/components/StampBadge";
 import { StorefrontPicker } from "@renderer/shared/components/StorefrontPicker";
+import { TaxBreakdownTable } from "@renderer/shared/components/TaxBreakdownTable";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { computeLinePricing, type LinePricing } from "@renderer/shared/lib/cart-pricing";
 import { cn } from "@renderer/shared/lib/cn";
@@ -41,6 +42,7 @@ import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useAppStore } from "@renderer/shared/stores/app-store";
+import { computeTaxBreakdown } from "@shared/lib/tax-calculation";
 import type { Customer } from "@shared/types/customer";
 import type { LocationStockLevel } from "@shared/types/inventory";
 import type { MpesaTransactionStatus } from "@shared/types/mpesa";
@@ -56,6 +58,10 @@ type CartLine = {
   /** Raw text the cashier typed (currency units, e.g. "250.00"), not cents — converted only at the
    * pricing/submission boundary, so the input never fights the user mid-type. */
   discount: string;
+  /** Cashier-entered price override for this line only (e.g. product is 450, cashier charges 600)
+   * — never written back to the product's own selling price. Empty string means "use the normal/
+   * wholesale price", same convention as `discount`. */
+  priceOverride: string;
 };
 
 type DraftStatus = "draft" | "suspended";
@@ -89,11 +95,6 @@ const MPESA_FRIENDLY_MESSAGES: Record<MpesaTransactionStatus, string> = {
 function mpesaFriendlyMessage(status: MpesaTransactionStatus): string {
   return MPESA_FRIENDLY_MESSAGES[status];
 }
-
-const BARCODE_STYLE = {
-  backgroundImage:
-    "repeating-linear-gradient(90deg, var(--color-ink) 0px, var(--color-ink) 2px, transparent 2px, transparent 5px)"
-};
 
 export function CheckoutRoute(): React.JSX.Element {
   const currency = useAppStore((state) => state.context?.tenant.currency ?? "");
@@ -176,7 +177,12 @@ export function CheckoutRoute(): React.JSX.Element {
                 name: item.productName,
                 sku: item.sku,
                 quantity: item.quantity,
-                discount: fromCents(item.discountAmountCents)
+                discount: fromCents(item.discountAmountCents),
+                // Deliberately NOT restored from the held sale's own frozen unit price — resuming a
+                // held cart always re-prices from the product's current live data (same as it always
+                // has), and a markup is a fresh, per-checkout cashier decision, not a sticky
+                // attribute of the held draft.
+                priceOverride: ""
               })),
               serviceCharges: full.serviceCharges.map((charge) => ({
                 key: charge.id,
@@ -184,17 +190,19 @@ export function CheckoutRoute(): React.JSX.Element {
                 fee: fromCents(charge.feeCents),
                 cost: fromCents(charge.costCents)
               })),
-              delivery: full.delivery
+              // A held sale never has a real (numbered) delivery attached — see suspendSale in
+              // sale-service.ts — so this restores from the plain draft it stashed instead.
+              delivery: full.deliveryDraft
                 ? {
-                    riderId: full.delivery.riderId,
-                    recipientName: full.delivery.recipientName,
-                    country: full.delivery.country ?? "",
-                    town: full.delivery.town ?? "",
-                    physicalAddress: full.delivery.physicalAddress,
-                    notes: full.delivery.notes ?? "",
-                    fee: fromCents(full.delivery.feeCents),
-                    cost: fromCents(full.delivery.costCents)
-                  }
+                  riderId: full.deliveryDraft.riderId,
+                  recipientName: full.deliveryDraft.recipientName,
+                  country: full.deliveryDraft.country ?? "",
+                  town: full.deliveryDraft.town ?? "",
+                  physicalAddress: full.deliveryDraft.physicalAddress,
+                  notes: full.deliveryDraft.notes ?? "",
+                  fee: fromCents(full.deliveryDraft.feeCents),
+                  cost: fromCents(full.deliveryDraft.costCents)
+                }
                 : null,
               createdAt: new Date(full.createdAt).getTime()
             };
@@ -288,7 +296,13 @@ export function CheckoutRoute(): React.JSX.Element {
     for (const line of items) {
       const product = productById.get(line.productId);
       if (!product) continue;
-      const pricing = computeLinePricing(product, line.quantity, toCents(line.discount));
+      const pricing = computeLinePricing(
+        product,
+        line.quantity,
+        toCents(line.discount),
+        { vatRatePercent: tenantContext?.vatRatePercent ?? 16, pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true },
+        line.priceOverride.trim() ? toCents(line.priceOverride) : null
+      );
       subtotalCents += pricing.lineSubtotalCents;
       discountAmountCents += pricing.discountAmountCents;
       taxAmountCents += pricing.taxCents;
@@ -305,7 +319,9 @@ export function CheckoutRoute(): React.JSX.Element {
       taxAmountCents,
       serviceChargesFeeCents,
       deliveryFeeCents,
-      grandTotalCents: subtotalCents - discountAmountCents + taxAmountCents + serviceChargesFeeCents + deliveryFeeCents
+      // Tax is already inside subtotalCents (prices are tax-inclusive) — never added again here,
+      // see cart-pricing.ts's own doc comment.
+      grandTotalCents: subtotalCents - discountAmountCents + serviceChargesFeeCents + deliveryFeeCents
     };
   }
 
@@ -457,12 +473,12 @@ export function CheckoutRoute(): React.JSX.Element {
     const existing = draft.items.find((line) => line.productId === product.id);
     const items = existing
       ? draft.items.map((line) =>
-          line.productId === product.id ? { ...line, quantity: line.quantity + 1 } : line
-        )
+        line.productId === product.id ? { ...line, quantity: line.quantity + 1 } : line
+      )
       : [
-          ...draft.items,
-          { productId: product.id, name: product.name, sku: product.sku, quantity: 1, discount: "0.00" }
-        ];
+        ...draft.items,
+        { productId: product.id, name: product.name, sku: product.sku, quantity: 1, discount: "0.00", priceOverride: "" }
+      ];
     return { ...draft, items };
   }
 
@@ -516,9 +532,27 @@ export function CheckoutRoute(): React.JSX.Element {
     );
   }
 
+  /** Permissive counterpart used only by the free-typing quantity input's onChange — allows 0
+   * mid-edit (see the input's own value prop, which renders "" for 0) so clearing "1" to type "80"
+   * isn't fought by an immediate re-clamp on every keystroke. updateQuantity's own clamp still
+   * applies on blur and to the +/- buttons, which never need this leniency. */
+  function updateQuantityDraft(productId: string, raw: string): void {
+    const parsed = raw === "" ? 0 : Math.floor(Number(raw));
+    const nextQuantity = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    updateActiveItems((items) =>
+      items.map((line) => (line.productId === productId ? { ...line, quantity: nextQuantity } : line))
+    );
+  }
+
   function updateDiscount(productId: string, value: string): void {
     updateActiveItems((items) =>
       items.map((line) => (line.productId === productId ? { ...line, discount: value } : line))
+    );
+  }
+
+  function updatePriceOverride(productId: string, value: string): void {
+    updateActiveItems((items) =>
+      items.map((line) => (line.productId === productId ? { ...line, priceOverride: value } : line))
     );
   }
 
@@ -571,15 +605,15 @@ export function CheckoutRoute(): React.JSX.Element {
       })),
       delivery: draft.delivery
         ? {
-            riderId: draft.delivery.riderId,
-            recipientName: draft.delivery.recipientName,
-            country: draft.delivery.country,
-            town: draft.delivery.town,
-            physicalAddress: draft.delivery.physicalAddress,
-            notes: draft.delivery.notes,
-            feeCents: toCents(draft.delivery.fee),
-            costCents: toCents(draft.delivery.cost)
-          }
+          riderId: draft.delivery.riderId,
+          recipientName: draft.delivery.recipientName,
+          country: draft.delivery.country,
+          town: draft.delivery.town,
+          physicalAddress: draft.delivery.physicalAddress,
+          notes: draft.delivery.notes,
+          feeCents: toCents(draft.delivery.fee),
+          costCents: toCents(draft.delivery.cost)
+        }
         : null
     };
   }
@@ -629,7 +663,8 @@ export function CheckoutRoute(): React.JSX.Element {
         items: activeDraft.items.map((line) => ({
           productId: line.productId,
           quantity: line.quantity,
-          discountAmountCents: toCents(line.discount)
+          discountAmountCents: toCents(line.discount),
+          unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined
         })),
         ...buildExtrasPayload(activeDraft),
         locationId: session && !session.branch ? storefrontId : undefined
@@ -668,7 +703,8 @@ export function CheckoutRoute(): React.JSX.Element {
         items: activeDraft.items.map((line) => ({
           productId: line.productId,
           quantity: line.quantity,
-          discountAmountCents: toCents(line.discount)
+          discountAmountCents: toCents(line.discount),
+          unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined
         })),
         ...buildExtrasPayload(activeDraft),
         paymentMethodId,
@@ -778,13 +814,13 @@ export function CheckoutRoute(): React.JSX.Element {
             </div>
           </label>
 
-          <div className="mt-4 grid max-h-[640px] grid-cols-2 gap-3 overflow-y-auto pr-1 sm:grid-cols-3">
+          <div className="mt-4 flex max-h-[1640px] flex-col gap-2 overflow-y-auto pr-1">
             {products === null ? (
-              <div className="col-span-full flex min-h-[200px] items-center justify-center text-muted">
+              <div className="flex min-h-[200px] items-center justify-center text-muted">
                 <Loader2 className="size-6 animate-spin" aria-hidden="true" />
               </div>
             ) : filteredProducts.length === 0 ? (
-              <div className="col-span-full flex min-h-[160px] flex-col items-center justify-center rounded-lg border border-dashed border-line bg-soft/60 p-8 text-center">
+              <div className="flex min-h-[160px] flex-col items-center justify-center rounded-lg border border-dashed border-line bg-soft/60 p-8 text-center">
                 <Search className="size-6 text-muted" aria-hidden="true" />
                 <p className="mt-3 text-sm font-bold text-ink">No products match your search</p>
               </div>
@@ -905,7 +941,7 @@ export function CheckoutRoute(): React.JSX.Element {
                     </div>
                   </div>
 
-                  <div className="mt-3 max-h-[260px] space-y-2 overflow-y-auto pr-1">
+                  <div className="mt-3 space-y-2 pr-1">
                     {totals.lines.length === 0 ? (
                       <div className="flex min-h-[100px] flex-col items-center justify-center rounded-lg border border-dashed border-line bg-soft/60 p-6 text-center">
                         <p className="text-xs font-bold text-muted">Search and add products to this sale</p>
@@ -945,8 +981,9 @@ export function CheckoutRoute(): React.JSX.Element {
                               <input
                                 type="number"
                                 min={1}
-                                value={line.quantity}
-                                onChange={(event) => updateQuantity(line.productId, Number(event.target.value))}
+                                value={line.quantity === 0 ? "" : line.quantity}
+                                onChange={(event) => updateQuantityDraft(line.productId, event.target.value)}
+                                onBlur={() => updateQuantity(line.productId, line.quantity)}
                                 className="h-7 w-12 rounded-md border border-line text-center text-xs font-bold outline-none focus:border-accent"
                               />
                               <button
@@ -958,6 +995,21 @@ export function CheckoutRoute(): React.JSX.Element {
                               </button>
                             </div>
                             <div className="flex items-center gap-2">
+                              <label
+                                className="flex items-center gap-1 text-[10px] font-bold text-muted"
+                                title="Override this line's unit price for this sale only — the product's own price is never changed"
+                              >
+                                Price
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={line.priceOverride}
+                                  onChange={(event) => updatePriceOverride(line.productId, event.target.value)}
+                                  placeholder={fromCents(pricing.unitPriceCents)}
+                                  className="h-7 w-16 rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
+                                />
+                              </label>
                               <label className="flex items-center gap-1 text-[10px] font-bold text-muted">
                                 Disc.
                                 <input
@@ -1012,10 +1064,6 @@ export function CheckoutRoute(): React.JSX.Element {
                       <span className="font-semibold">Discount</span>
                       <span className="font-bold tabular-nums">-{formatCents(totals.discountAmountCents)}</span>
                     </div>
-                    <div className="flex items-center justify-between text-muted">
-                      <span className="font-semibold">Tax</span>
-                      <span className="font-bold tabular-nums">{formatCents(totals.taxAmountCents)}</span>
-                    </div>
                     {totals.serviceChargesFeeCents > 0 && (
                       <div className="flex items-center justify-between text-muted">
                         <span className="font-semibold">Service Charges</span>
@@ -1029,6 +1077,17 @@ export function CheckoutRoute(): React.JSX.Element {
                       </div>
                     )}
                   </div>
+
+                  <TaxBreakdownTable
+                    breakdown={computeTaxBreakdown(
+                      totals.lines.map(({ product, pricing }) => ({
+                        taxType: product.taxType,
+                        taxAmountCents: pricing.taxCents,
+                        lineTotalCents: pricing.lineTotalCents
+                      }))
+                    )}
+                    tenantTaxConfig={{ vatRatePercent: tenantContext?.vatRatePercent ?? 16, pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true }}
+                  />
 
                   <div className="mt-3">
                     <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">
@@ -1362,19 +1421,11 @@ function ProductCard({
   const outOfStock = product.trackStock && stock <= 0 && !product.allowNegativeStock;
 
   return (
-    <div className="flex flex-col rounded-xl border border-line bg-white p-3 shadow-soft transition hover:shadow-md">
-      <div className="flex items-start justify-between gap-2">
-        <button
-          type="button"
-          onClick={() => setShowInfo(true)}
-          aria-label={`View details for ${product.name}`}
-          className="grid size-6 flex-none place-items-center rounded-md text-muted transition hover:bg-soft hover:text-primary cursor-pointer"
-        >
-          <Info className="size-3.5" aria-hidden="true" />
-        </button>
-        <div className="h-4 flex-1 rounded-sm opacity-70" style={BARCODE_STYLE} aria-hidden="true" />
+    <div className="flex flex-col gap-3 rounded-xl border-2 border-gray-400 bg-white p-2.5 shadow-soft transition hover:shadow-md">
+      <div className="flex items-center gap-3">
+
         <div
-          className="grid size-9 flex-none place-items-center overflow-hidden rounded-lg"
+          className="grid size-10 flex-none place-items-center overflow-hidden rounded-lg"
           style={{ backgroundColor: imageUrl ? undefined : (product.categoryColor ?? "#83795f") }}
         >
           {imageUrl ? (
@@ -1383,23 +1434,37 @@ function ProductCard({
             <Package className="size-4 text-white/90" aria-hidden="true" />
           )}
         </div>
+        <p className="text-sm font-extrabold leading-snug text-ink">{product.name}</p>
       </div>
+      <div className="flex justify-between gap-2 items-center">
+        <button
+          type="button"
+          onClick={() => setShowInfo(true)}
+          aria-label={`View details for ${product.name}`}
+          className="grid size-8 flex-none place-items-center rounded-md text-muted transition hover:bg-soft hover:text-primary cursor-pointer"
+        >
+          <Info className="size-4" aria-hidden="true" />
+        </button>
 
-      {showInfo && <ProductInfoModal product={product} onClose={() => setShowInfo(false)} />}
+        <div className="flex flex-col items-center gap-3">
+          {showInfo && <ProductInfoModal product={product} onClose={() => setShowInfo(false)} />}
 
-      <p className="mt-2.5 line-clamp-2 text-sm font-extrabold leading-snug text-ink">{product.name}</p>
-      <p className="mt-1 text-lg font-extrabold tabular-nums text-ink">
-        {currency} {formatCents(product.sellingPriceCents)}
-      </p>
-      {product.wholesalePriceCents !== null && product.wholesaleMinQuantity > 0 && (
-        <p className="text-[10px] font-bold text-teal">
-          Bulk {product.wholesaleMinQuantity}+ @ {currency} {formatCents(product.wholesalePriceCents)}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] font-bold text-muted">
+            <span>{product.sku}</span>
+            {product.trackStock && <span className={cn(outOfStock && "text-danger")}>Stock: {stock}</span>}
+            {product.wholesalePriceCents !== null && product.wholesaleMinQuantity > 0 && (
+              <span className="text-teal">
+                Bulk {product.wholesaleMinQuantity}+ @ {currency} {formatCents(product.wholesalePriceCents)}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <p className="flex-none text-lg font-extrabold tabular-nums text-warning">
+          {currency} {formatCents(product.sellingPriceCents)}
         </p>
-      )}
-
-      <div className="mt-2 flex items-center justify-between text-[10px] font-bold text-muted">
-        <span className="truncate">{product.sku}</span>
-        {product.trackStock && <span className={cn(outOfStock && "text-danger")}>Stock: {stock}</span>}
       </div>
 
       <button
@@ -1407,7 +1472,7 @@ function ProductCard({
         onClick={onAdd}
         disabled={outOfStock}
         className={cn(
-          "mt-2.5 flex h-8 items-center justify-center gap-1.5 rounded-lg text-[11px] font-extrabold uppercase tracking-wide transition",
+          "flex h-9 flex-none items-center justify-center gap-1.5 rounded-lg px-3.5 text-[11px] font-extrabold uppercase tracking-wide transition",
           outOfStock ? "cursor-not-allowed bg-soft text-muted" : "cursor-pointer bg-teal text-white hover:brightness-110"
         )}
       >
@@ -1416,7 +1481,7 @@ function ProductCard({
         ) : (
           <>
             <Plus className="size-3.5" aria-hidden="true" />
-            Add to Cart
+            Add To Order
           </>
         )}
       </button>

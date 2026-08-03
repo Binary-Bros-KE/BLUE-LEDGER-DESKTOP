@@ -175,7 +175,7 @@ export function StockLedgerRoute(): React.JSX.Element {
               Stock Ledger
             </h2>
             <p className="mt-1 text-xs font-semibold text-muted">
-              Every stock movement across every product — transfers, purchases, sales, damage, and adjustments.
+              Every stock movement across every product.
             </p>
           </div>
           {canExport && exportRequest && <ExportMenu request={exportRequest} />}
@@ -274,15 +274,14 @@ export function StockLedgerRoute(): React.JSX.Element {
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-line">
-              <table className="w-full min-w-[1000px] table-fixed border-collapse text-sm">
+              <table className="w-full table-fixed border-collapse text-sm">
                 <colgroup>
-                  <col className="w-[14%]" />
-                  <col className="w-[24%]" />
-                  <col className="w-[16%]" />
-                  <col className="w-[14%]" />
-                  <col className="w-[10%]" />
                   <col className="w-[12%]" />
+                  <col className="w-[20%]" />
+                  <col className="w-[10%]" /> 
                   <col className="w-[10%]" />
+                  <col className="w-[5%]" />
+                  <col className="w-[12%]" />
                 </colgroup>
                 <thead>
                   <tr className="bg-primary text-white">
@@ -292,7 +291,6 @@ export function StockLedgerRoute(): React.JSX.Element {
                     <Th>Type</Th>
                     <Th className="text-right">Change</Th>
                     <Th className="text-right">Value</Th>
-                    <Th>Notes</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -301,8 +299,8 @@ export function StockLedgerRoute(): React.JSX.Element {
                       <td className="px-3 py-2.5 text-xs tabular-nums text-muted">
                         {format(new Date(movement.createdAt), "MMM d, yyyy · HH:mm")}
                       </td>
-                      <td className="truncate px-3 py-2.5">
-                        <p className="truncate font-bold text-ink">{movement.productName}</p>
+                      <td className="px-3 py-2.5">
+                        <p className="font-bold text-ink">{movement.productName}</p>
                         <p className="text-[11px] text-muted">{movement.sku}</p>
                       </td>
                       <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">{movement.locationName}</td>
@@ -322,9 +320,6 @@ export function StockLedgerRoute(): React.JSX.Element {
                       </td>
                       <td className="px-3 py-2.5 text-right text-xs font-bold tabular-nums text-ink">
                         {currency} {formatCents(movement.valueCents)}
-                      </td>
-                      <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">
-                        {movement.notes ?? "—"}
                       </td>
                     </tr>
                   ))}

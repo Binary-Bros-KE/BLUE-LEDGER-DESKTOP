@@ -378,6 +378,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       wholesaleMinQuantity: p.wholesaleMinQuantity,
       minimumPriceCents: p.minimumPriceCents,
       taxRate: p.taxRate,
+      taxType: p.taxType,
       reorderLevel: p.reorderLevel,
       trackStock: p.trackStock,
       allowNegativeStock: p.allowNegativeStock,
@@ -590,6 +591,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       quantity: number;
       unit_price_cents: number;
       discount_amount_cents: number;
+      tax_type: string;
       tax_amount_cents: number;
       line_total_cents: number;
       created_at: string;
@@ -600,6 +602,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       quantity: i.quantity,
       unitPriceCents: i.unit_price_cents,
       discountAmountCents: i.discount_amount_cents,
+      taxType: i.tax_type,
       taxAmountCents: i.tax_amount_cents,
       lineTotalCents: i.line_total_cents,
       createdAt: i.created_at
@@ -685,6 +688,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
     if (!row) return null;
     return {
       id: row.id,
+      kind: row.kind,
       expenseNumber: row.expense_number,
       expenseDate: row.expense_date,
       categoryId: row.category_id,
@@ -815,6 +819,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       quantity: number;
       unit_price_cents: number;
       discount_amount_cents: number;
+      tax_type: string;
       tax_amount_cents: number;
       line_total_cents: number;
       created_at: string;
@@ -825,6 +830,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       quantity: i.quantity,
       unitPriceCents: i.unit_price_cents,
       discountAmountCents: i.discount_amount_cents,
+      taxType: i.tax_type,
       taxAmountCents: i.tax_amount_cents,
       lineTotalCents: i.line_total_cents,
       createdAt: i.created_at
@@ -894,6 +900,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       received_quantity: number;
       unit_cost_cents: number;
       discount_amount_cents: number;
+      tax_type: string;
       tax_amount_cents: number;
       line_total_cents: number;
       created_at: string;
@@ -906,6 +913,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       receivedQuantity: i.received_quantity,
       unitCostCents: i.unit_cost_cents,
       discountAmountCents: i.discount_amount_cents,
+      taxType: i.tax_type,
       taxAmountCents: i.tax_amount_cents,
       lineTotalCents: i.line_total_cents,
       createdAt: i.created_at,
@@ -954,10 +962,14 @@ function enqueueUnsyncedRows(): void {
   const now = new Date().toISOString();
 
   for (const entity of SYNC_ENTITIES) {
+    // A held ("pending") sale's sync_status is permanently 'pending' by design — it never syncs
+    // (see migration 51) — so without this exclusion, this generic self-healing sweep would
+    // re-discover it every single cycle and enqueue it anyway, defeating the trigger-level guard.
+    const extraCondition = entity === "sales" ? " AND sale_status != 'pending'" : "";
     const rows = db
       .prepare(
         `SELECT id, tenant_id FROM ${entity}
-         WHERE sync_status != 'synced'
+         WHERE sync_status != 'synced'${extraCondition}
            AND id NOT IN (SELECT entity_id FROM sync_outbox WHERE entity = ? AND status IN ('queued', 'failed', 'conflict'))`
       )
       .all(entity) as Array<{ id: string; tenant_id: string }>;
@@ -1213,6 +1225,11 @@ type ColumnMap = {
    * employees, payment_methods, expense_categories, locations) — the incoming value is resolved
    * through resolveRef() before use, in case it was reconciled under a different local id. */
   refEntity?: SyncEntity;
+  /** Fallback for a NOT NULL column when an older device's payload was built before this field
+   * existed (so the key is simply absent, not explicitly null). SQLite only applies a column's own
+   * DEFAULT when the column is omitted from the INSERT — an explicit NULL bind still violates NOT
+   * NULL — so without this the older payload would throw here instead of falling back. */
+  default?: SQLInputValue;
 };
 type EntityApplyConfig = {
   table: string;
@@ -1327,6 +1344,7 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       { local: "wholesale_min_quantity", cloud: "wholesaleMinQuantity" },
       { local: "minimum_price_cents", cloud: "minimumPriceCents" },
       { local: "tax_rate", cloud: "taxRate" },
+      { local: "tax_type", cloud: "taxType", default: "vat" },
       { local: "reorder_level", cloud: "reorderLevel" },
       { local: "track_stock", cloud: "trackStock", type: "bool" },
       { local: "allow_negative_stock", cloud: "allowNegativeStock", type: "bool" },
@@ -1439,6 +1457,7 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
   expenses: {
     table: "expenses",
     columns: [
+      { local: "kind", cloud: "kind", default: "general" },
       { local: "expense_number", cloud: "expenseNumber" },
       { local: "expense_date", cloud: "expenseDate" },
       { local: "category_id", cloud: "categoryId", refEntity: "expense_categories" },
@@ -1503,7 +1522,7 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
 };
 
 function toLocalValue(value: unknown, col: ColumnMap): SQLInputValue {
-  if (value === null || value === undefined) return null;
+  if (value === null || value === undefined) return col.default ?? null;
   if (col.type === "bool") return value ? 1 : 0;
   if (col.type === "json") return JSON.stringify(value);
   if (col.refEntity) return resolveRefOrNull(col.refEntity, value) as SQLInputValue;
@@ -1793,6 +1812,17 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
   const localUpdatedAt = row.localUpdatedAt as string;
   const localCreatedAt = (row.localCreatedAt as string | null) ?? localUpdatedAt;
 
+  // A held ("pending") sale is local-only by design (see migration 51) — no device running current
+  // code ever pushes one. Pulling one down here always means a stale device (still on pre-1.0.9
+  // code) is still pushing every hold, exactly the bug migration 51 was meant to end. Refusing to
+  // materialize it locally stops that stale device's junk from re-appearing as a phantom "held
+  // sale" on every OTHER device's Checkout screen on every sync cycle — it doesn't fix the source
+  // (the stale device itself needs updating), but it stops the symptom from spreading.
+  if (row.saleStatus === "pending") {
+    console.warn(`[sync] ignored a 'pending' sale pulled from the cloud (${id}) — held sales are local-only; source device is likely still running old code`);
+    return;
+  }
+
   const existing = db.prepare("SELECT updated_at FROM sales WHERE id = ?").get(id) as
     | { updated_at: string }
     | undefined;
@@ -1856,8 +1886,8 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
     const items = (row.items as Array<Record<string, unknown>>) ?? [];
     for (const item of items) {
       db.prepare(
-        `INSERT INTO sale_items (id, sale_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_amount_cents, line_total_cents, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO sale_items (id, sale_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         item.id as string,
         id,
@@ -1865,6 +1895,9 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         item.quantity as number,
         item.unitPriceCents as number,
         (item.discountAmountCents as number | undefined) ?? 0,
+        // Older device's payload predates this field entirely — see toLocalValue's own comment on
+        // the same class of issue for header-level columns.
+        (item.taxType as string | undefined) ?? "vat",
         (item.taxAmountCents as number | undefined) ?? 0,
         item.lineTotalCents as number,
         item.createdAt as string
@@ -1891,32 +1924,84 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
     db.prepare("DELETE FROM delivery_notes WHERE sale_id = ?").run(id);
     const delivery = row.delivery as Record<string, unknown> | null;
     if (delivery) {
-      db.prepare(
-        `INSERT INTO delivery_notes (
-          id, tenant_id, delivery_note_number, sale_id, quotation_id, rider_id, recipient_name,
-          country, town, physical_address, notes, fee_cents, cost_cents, is_delivered, delivered_at,
-          created_at, updated_at, sync_status
-        ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')`
-      ).run(
-        delivery.id as string,
-        localTenantId,
-        delivery.deliveryNoteNumber as string,
-        id,
-        delivery.riderId as string | null,
-        delivery.recipientName as string,
-        delivery.country as string | null,
-        delivery.town as string | null,
-        delivery.physicalAddress as string,
-        delivery.notes as string | null,
-        delivery.feeCents as number,
-        (delivery.costCents as number | undefined) ?? 0,
-        delivery.isDelivered ? 1 : 0,
-        delivery.deliveredAt as string | null,
-        delivery.createdAt as string,
-        delivery.updatedAt as string
-      );
+      insertPulledDeliveryNote(db, {
+        id: delivery.id as string,
+        tenantId: localTenantId,
+        deliveryNoteNumber: delivery.deliveryNoteNumber as string,
+        saleId: id,
+        riderId: delivery.riderId as string | null,
+        recipientName: delivery.recipientName as string,
+        country: delivery.country as string | null,
+        town: delivery.town as string | null,
+        physicalAddress: delivery.physicalAddress as string,
+        notes: delivery.notes as string | null,
+        feeCents: delivery.feeCents as number,
+        costCents: (delivery.costCents as number | undefined) ?? 0,
+        isDelivered: delivery.isDelivered ? 1 : 0,
+        deliveredAt: delivery.deliveredAt as string | null,
+        createdAt: delivery.createdAt as string,
+        updatedAt: delivery.updatedAt as string
+      });
     }
   });
+}
+
+/** Inserts one pulled delivery note. Deliberately strict — a UNIQUE(tenant_id, delivery_note_number)
+ * collision here throws and the whole sale/quotation retries next cycle, same as any other pull
+ * failure. An earlier version of this function silently swallowed that collision (reasoning: it can
+ * only mean a stale pre-migration-51 duplicate, so drop the dead one and keep going) — that reasoning
+ * was wrong in practice: it couldn't distinguish "this is provably dead orphaned data" from "this is
+ * a real, currently-relevant delivery," and ended up silently dropping delivery notes off genuine
+ * sales on other devices. The actual fix for the historical duplicates is a one-time cleanup of the
+ * cloud data itself (purging leftover `saleStatus = 'pending'` rows — see the held-sales cleanup),
+ * not leniency in the pull path. */
+function insertPulledDeliveryNote(
+  db: ReturnType<typeof getDatabase>,
+  fields: {
+    id: string;
+    tenantId: string;
+    deliveryNoteNumber: string;
+    saleId: string | null;
+    quotationId?: string | null;
+    riderId: string | null;
+    recipientName: string;
+    country: string | null;
+    town: string | null;
+    physicalAddress: string;
+    notes: string | null;
+    feeCents: number;
+    costCents: number;
+    isDelivered: number;
+    deliveredAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+  }
+): void {
+  db.prepare(
+    `INSERT INTO delivery_notes (
+      id, tenant_id, delivery_note_number, sale_id, quotation_id, rider_id, recipient_name,
+      country, town, physical_address, notes, fee_cents, cost_cents, is_delivered, delivered_at,
+      created_at, updated_at, sync_status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')`
+  ).run(
+    fields.id,
+    fields.tenantId,
+    fields.deliveryNoteNumber,
+    fields.saleId,
+    fields.quotationId ?? null,
+    fields.riderId,
+    fields.recipientName,
+    fields.country,
+    fields.town,
+    fields.physicalAddress,
+    fields.notes,
+    fields.feeCents,
+    fields.costCents,
+    fields.isDelivered,
+    fields.deliveredAt,
+    fields.createdAt,
+    fields.updatedAt
+  );
 }
 
 /** Shared header-upsert for the other three BESPOKE_APPLY_ENTITIES (quotations/purchases/
@@ -2031,8 +2116,8 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
     const items = (row.items as Array<Record<string, unknown>>) ?? [];
     for (const item of items) {
       db.prepare(
-        `INSERT INTO quotation_items (id, quotation_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_amount_cents, line_total_cents, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO quotation_items (id, quotation_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         item.id as string,
         id,
@@ -2040,6 +2125,7 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
         item.quantity as number,
         item.unitPriceCents as number,
         (item.discountAmountCents as number | undefined) ?? 0,
+        (item.taxType as string | undefined) ?? "vat",
         (item.taxAmountCents as number | undefined) ?? 0,
         item.lineTotalCents as number,
         item.createdAt as string
@@ -2066,30 +2152,25 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
     db.prepare("DELETE FROM delivery_notes WHERE quotation_id = ?").run(id);
     const delivery = row.delivery as Record<string, unknown> | null;
     if (delivery) {
-      db.prepare(
-        `INSERT INTO delivery_notes (
-          id, tenant_id, delivery_note_number, sale_id, quotation_id, rider_id, recipient_name,
-          country, town, physical_address, notes, fee_cents, cost_cents, is_delivered, delivered_at,
-          created_at, updated_at, sync_status
-        ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')`
-      ).run(
-        delivery.id as string,
-        localTenantId,
-        delivery.deliveryNoteNumber as string,
-        id,
-        delivery.riderId as string | null,
-        delivery.recipientName as string,
-        delivery.country as string | null,
-        delivery.town as string | null,
-        delivery.physicalAddress as string,
-        delivery.notes as string | null,
-        delivery.feeCents as number,
-        (delivery.costCents as number | undefined) ?? 0,
-        delivery.isDelivered ? 1 : 0,
-        delivery.deliveredAt as string | null,
-        delivery.createdAt as string,
-        delivery.updatedAt as string
-      );
+      insertPulledDeliveryNote(db, {
+        id: delivery.id as string,
+        tenantId: localTenantId,
+        deliveryNoteNumber: delivery.deliveryNoteNumber as string,
+        saleId: null,
+        quotationId: id,
+        riderId: delivery.riderId as string | null,
+        recipientName: delivery.recipientName as string,
+        country: delivery.country as string | null,
+        town: delivery.town as string | null,
+        physicalAddress: delivery.physicalAddress as string,
+        notes: delivery.notes as string | null,
+        feeCents: delivery.feeCents as number,
+        costCents: (delivery.costCents as number | undefined) ?? 0,
+        isDelivered: delivery.isDelivered ? 1 : 0,
+        deliveredAt: delivery.deliveredAt as string | null,
+        createdAt: delivery.createdAt as string,
+        updatedAt: delivery.updatedAt as string
+      });
     }
   });
 }
@@ -2132,8 +2213,8 @@ function applyPurchasePulledRow(row: Record<string, unknown>, force: boolean): v
     const items = (row.items as Array<Record<string, unknown>>) ?? [];
     for (const item of items) {
       db.prepare(
-        `INSERT INTO purchase_items (id, purchase_id, product_id, ordered_quantity, received_quantity, unit_cost_cents, discount_amount_cents, tax_amount_cents, line_total_cents, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO purchase_items (id, purchase_id, product_id, ordered_quantity, received_quantity, unit_cost_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         item.id as string,
         id,
@@ -2142,6 +2223,7 @@ function applyPurchasePulledRow(row: Record<string, unknown>, force: boolean): v
         (item.receivedQuantity as number | undefined) ?? 0,
         item.unitCostCents as number,
         (item.discountAmountCents as number | undefined) ?? 0,
+        (item.taxType as string | undefined) ?? "vat",
         (item.taxAmountCents as number | undefined) ?? 0,
         item.lineTotalCents as number,
         item.createdAt as string,

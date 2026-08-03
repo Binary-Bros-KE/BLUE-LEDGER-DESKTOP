@@ -1,5 +1,13 @@
 export type ExpenseId = string;
 
+/** "general" = a formal expense (rent, wifi, salaries paid as a cash expense entry, etc.) — visible
+ * only to whoever holds "expenses" permission. "local_purchase" = a small day-to-day buy (tape,
+ * delivery bags, a pen) — visible to whoever holds the separate, narrower "local_purchases"
+ * permission (typically Cashiers), who never get "expenses" itself. Decided entirely by which
+ * service function/permission path created the row — never a user-editable form field, so a cashier
+ * has no way to mislabel a local purchase into the general list or vice versa. */
+export type ExpenseKind = "general" | "local_purchase";
+
 export const EXPENSE_STATUS_OPTIONS = [
   { value: "active", label: "Active" },
   { value: "archived", label: "Archived" }
@@ -39,6 +47,7 @@ export type ExpenseInputFields = {
 export type Expense = ExpenseInputFields & {
   id: ExpenseId;
   tenantId: string;
+  kind: ExpenseKind;
   /** Auto-generated at creation (e.g. EXP-000001). */
   expenseNumber: string;
   categoryName: string;

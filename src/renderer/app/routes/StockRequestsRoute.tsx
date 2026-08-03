@@ -200,6 +200,16 @@ export function StockRequestsRoute(): React.JSX.Element {
     setCreateItems((prev) => prev.map((item) => (item.productId === productId ? { ...item, quantity: next } : item)));
   }
 
+  /** Permissive counterpart used only by the free-typing quantity input's onChange — allows 0
+   * mid-edit (see the input's own value prop, which renders "" for 0) so clearing "1" to type "80"
+   * isn't fought by an immediate re-clamp on every keystroke. updateDraftItemQuantity's own clamp
+   * still applies on blur. */
+  function updateDraftItemQuantityDraft(productId: string, raw: string): void {
+    const parsed = raw === "" ? 0 : Math.floor(Number(raw));
+    const next = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    setCreateItems((prev) => prev.map((item) => (item.productId === productId ? { ...item, quantity: next } : item)));
+  }
+
   function removeDraftItem(productId: string): void {
     setCreateItems((prev) => prev.filter((item) => item.productId !== productId));
   }
@@ -328,8 +338,8 @@ export function StockRequestsRoute(): React.JSX.Element {
             </h2>
             <p className="mt-1 text-xs font-semibold text-muted">
               {canApprove
-                ? "Every storefront's request for stock from Main Store — approve to ship and record it, or reject with a reason."
-                : "Request stock from Main Store for your storefront, and track approval status."}
+                ? "Every storefront's request for stock from Main Store."
+                : "Request stock from Main Store for your storefront."}
             </p>
           </div>
           {canCreate && (
@@ -446,24 +456,20 @@ export function StockRequestsRoute(): React.JSX.Element {
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-line">
-              <table className="w-full min-w-[900px] table-fixed border-collapse text-sm">
+              <table className="w-full table-fixed border-collapse text-sm">
                 <colgroup>
-                  <col className="w-[12%]" />
-                  <col className="w-[16%]" />
+                  <col className="w-[18%]" /> 
                   <col className="w-[15%]" />
-                  <col className="w-[14%]" />
-                  <col className="w-[11%]" />
-                  <col className="w-[15%]" />
-                  <col className="w-[17%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[10%]" />
                 </colgroup>
                 <thead>
                   <tr className="bg-primary text-white">
                     <Th>Request #</Th>
                     <Th>Storefront</Th>
-                    <Th>Requested By</Th>
                     <Th>Items</Th>
                     <Th>Status</Th>
-                    <Th>Requested At</Th>
                     <Th className="text-right">Actions</Th>
                   </tr>
                 </thead>
@@ -471,21 +477,28 @@ export function StockRequestsRoute(): React.JSX.Element {
                   {(filteredRequests ?? []).map((request) => (
                     <tr key={request.id} className="border-t border-line odd:bg-white even:bg-soft/50">
                       <td className="truncate px-4 py-3 text-xs font-bold tabular-nums text-muted">
-                        {request.requestNumber}
+                        <div className="flex flex-col gap-0.5">
+                          <span>
+                            {request.requestNumber}
+                          </span>
+                          <span>
+                            {formatDateTime(request.requestedAt)}
+                          </span>
+                        </div>
                       </td>
-                      <td className="truncate px-4 py-3 font-extrabold">{request.storefrontName}</td>
-                      <td className="truncate px-4 py-3 text-xs font-semibold text-muted">
-                        {request.requestedByName}
+                      <td className="truncate px-4 py-3 font-extrabold">
+                        <div className="flex flex-col gap-0.5">
+                          <span>{request.requestedByName}</span>
+                          <span>{request.storefrontName}</span>
+                        </div>
                       </td>
+          
                       <td className="px-4 py-3 text-xs font-bold tabular-nums text-muted">
                         {request.itemCount} item{request.itemCount === 1 ? "" : "s"} ·{" "}
                         {request.totalQuantityRequested} unit{request.totalQuantityRequested === 1 ? "" : "s"}
                       </td>
                       <td className="px-4 py-3">
                         <DashedPill tone={statusTone(request.status)}>{request.status}</DashedPill>
-                      </td>
-                      <td className="truncate px-4 py-3 text-xs font-semibold text-muted">
-                        {formatDateTime(request.requestedAt)}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-2">
@@ -607,8 +620,9 @@ export function StockRequestsRoute(): React.JSX.Element {
                     <input
                       type="number"
                       min={1}
-                      value={item.quantity}
-                      onChange={(event) => updateDraftItemQuantity(item.productId, Number(event.target.value))}
+                      value={item.quantity === 0 ? "" : item.quantity}
+                      onChange={(event) => updateDraftItemQuantityDraft(item.productId, event.target.value)}
+                      onBlur={() => updateDraftItemQuantity(item.productId, item.quantity)}
                       aria-label={`Quantity for ${item.productName}`}
                       className="h-8 w-16 rounded-md border border-line px-2 text-center text-sm font-extrabold tabular-nums text-ink outline-none focus:border-accent"
                     />

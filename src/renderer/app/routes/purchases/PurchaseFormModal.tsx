@@ -5,10 +5,12 @@ import { Field, SelectField, TextAreaField } from "@renderer/shared/components/f
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
+import { computeLineTax, type TenantTaxConfig } from "@shared/lib/tax-calculation";
 import type { Location } from "@shared/types/location";
-import type { Product, ProductListItem } from "@shared/types/product";
-import { PURCHASE_TAX_TYPE_OPTIONS, type Purchase, type PurchaseTaxType } from "@shared/types/purchase";
+import { TAX_TYPE_OPTIONS, type Product, type ProductListItem, type ProductTaxType } from "@shared/types/product";
+import type { Purchase } from "@shared/types/purchase";
 import type { Supplier } from "@shared/types/supplier";
+import { useAppStore } from "@renderer/shared/stores/app-store";
 import { QuickCreateProductModal } from "@renderer/shared/components/QuickCreateProductModal";
 import { QuickCreateSupplierModal } from "./QuickCreateSupplierModal";
 
@@ -19,7 +21,9 @@ type ItemLine = {
   orderedQuantity: number;
   unitCostCents: number;
   discountAmountCents: number;
-  taxAmountCents: number;
+  /** Defaults from the product's own category when added, but a real supplier invoice can
+   * classify a line differently — editable per line, unlike the old whole-order dropdown. */
+  taxType: ProductTaxType;
 };
 
 function emptyItemLine(product: Product | ProductListItem): ItemLine {
@@ -30,12 +34,18 @@ function emptyItemLine(product: Product | ProductListItem): ItemLine {
     orderedQuantity: 1,
     unitCostCents: product.buyingPriceCents,
     discountAmountCents: 0,
-    taxAmountCents: 0
+    taxType: product.taxType
   };
 }
 
+/** Cost is already tax-inclusive (same convention as sale-service.ts) — tax is extracted for
+ * reporting, never added on top, so this is just the taxable (net-of-discount) amount. */
 function lineTotalCents(line: ItemLine): number {
-  return line.orderedQuantity * line.unitCostCents - line.discountAmountCents + line.taxAmountCents;
+  return line.orderedQuantity * line.unitCostCents - line.discountAmountCents;
+}
+
+function lineTaxCents(line: ItemLine, tenantTaxConfig: TenantTaxConfig): number {
+  return computeLineTax(lineTotalCents(line), line.taxType, tenantTaxConfig).taxCents;
 }
 
 export function PurchaseFormModal({
@@ -59,11 +69,13 @@ export function PurchaseFormModal({
   onProductCreated: (product: Product) => void;
   onSaved: () => Promise<void>;
 }): React.JSX.Element {
+  const tenantTaxConfig = useAppStore(
+    (state) => state.context?.tenant ?? { vatRatePercent: 16, pricesTaxInclusive: true }
+  );
   const [supplierId, setSupplierId] = useState<string | null>(null);
   const [supplierSearch, setSupplierSearch] = useState("");
   const [locationId, setLocationId] = useState("");
   const [supplierInvoiceNumber, setSupplierInvoiceNumber] = useState("");
-  const [taxType, setTaxType] = useState<PurchaseTaxType>("no_vat");
   const [notes, setNotes] = useState("");
   const [attachmentPath, setAttachmentPath] = useState<string | null>(null);
   const [attachmentBusy, setAttachmentBusy] = useState(false);
@@ -82,7 +94,6 @@ export function PurchaseFormModal({
       setSupplierId(editingPurchase.supplierId);
       setLocationId(editingPurchase.locationId);
       setSupplierInvoiceNumber(editingPurchase.supplierInvoiceNumber ?? "");
-      setTaxType(editingPurchase.taxType);
       setNotes(editingPurchase.notes ?? "");
       setAttachmentPath(editingPurchase.attachmentPath);
       setItems(
@@ -93,14 +104,13 @@ export function PurchaseFormModal({
           orderedQuantity: item.orderedQuantity,
           unitCostCents: item.unitCostCents,
           discountAmountCents: item.discountAmountCents,
-          taxAmountCents: item.taxAmountCents
+          taxType: item.taxType
         }))
       );
     } else {
       setSupplierId(null);
       setLocationId("");
       setSupplierInvoiceNumber("");
-      setTaxType("no_vat");
       setNotes("");
       setAttachmentPath(null);
       setItems([]);
@@ -137,15 +147,16 @@ export function PurchaseFormModal({
     for (const item of items) {
       subtotalCents += item.orderedQuantity * item.unitCostCents;
       discountAmountCents += item.discountAmountCents;
-      taxAmountCents += item.taxAmountCents;
+      taxAmountCents += lineTaxCents(item, tenantTaxConfig);
     }
     return {
       subtotalCents,
       discountAmountCents,
       taxAmountCents,
-      grandTotalCents: subtotalCents - discountAmountCents + taxAmountCents
+      // Tax is already inside subtotalCents (cost is tax-inclusive) — never added again here.
+      grandTotalCents: subtotalCents - discountAmountCents
     };
-  }, [items]);
+  }, [items, tenantTaxConfig]);
 
   function addItemLine(product: ProductListItem): void {
     setItems((prev) => {
@@ -206,7 +217,6 @@ export function PurchaseFormModal({
       supplierId,
       supplierInvoiceNumber,
       locationId,
-      taxType,
       notes,
       attachmentPath,
       items: items.map((item) => ({
@@ -214,7 +224,7 @@ export function PurchaseFormModal({
         orderedQuantity: item.orderedQuantity,
         unitCostCents: item.unitCostCents,
         discountAmountCents: item.discountAmountCents,
-        taxAmountCents: item.taxAmountCents
+        taxType: item.taxType
       })),
       intent
     };
@@ -321,12 +331,6 @@ export function PurchaseFormModal({
                 ...locations.map((location) => ({ value: location.id, label: location.locationName }))
               ]}
             />
-            <SelectField
-              label="Tax Type"
-              value={taxType}
-              onChange={(value) => setTaxType(value as PurchaseTaxType)}
-              options={PURCHASE_TAX_TYPE_OPTIONS}
-            />
             <Field
               label="Supplier Invoice Number"
               value={supplierInvoiceNumber}
@@ -401,12 +405,23 @@ export function PurchaseFormModal({
                         <input
                           type="number"
                           min={1}
-                          value={line.orderedQuantity}
-                          onChange={(event) =>
+                          // Renders "" instead of 0 while the field is mid-edit (cleared to type a new
+                          // number) — a controlled input forced back to a number on every keystroke
+                          // fights the user's own deletion, making it impossible to clear "1" and type
+                          // "80" (see money.ts's own fromCents/toCents split for the same lesson
+                          // applied to price fields). The clamp back to a minimum of 1 only happens on
+                          // blur, once the user is done typing.
+                          value={line.orderedQuantity === 0 ? "" : line.orderedQuantity}
+                          onChange={(event) => {
+                            const raw = event.target.value;
+                            const parsed = raw === "" ? 0 : Math.floor(Number(raw));
                             updateItemLine(line.productId, {
-                              orderedQuantity: Math.max(1, Math.floor(Number(event.target.value) || 1))
-                            })
-                          }
+                              orderedQuantity: Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
+                            });
+                          }}
+                          onBlur={() => {
+                            if (line.orderedQuantity <= 0) updateItemLine(line.productId, { orderedQuantity: 1 });
+                          }}
                           className="mt-1 h-8 w-full rounded-md border border-line px-1.5 text-center text-xs font-bold outline-none focus:border-accent"
                         />
                       </label>
@@ -438,20 +453,24 @@ export function PurchaseFormModal({
                       </label>
                       <label className="block">
                         <span className="text-[10px] font-bold uppercase text-muted">Tax</span>
-                        <input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={fromCents(line.taxAmountCents) || "0.00"}
+                        <select
+                          value={line.taxType}
                           onChange={(event) =>
-                            updateItemLine(line.productId, { taxAmountCents: toCents(event.target.value) })
+                            updateItemLine(line.productId, { taxType: event.target.value as ProductTaxType })
                           }
-                          className="mt-1 h-8 w-full rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
-                        />
+                          className="mt-1 h-8 w-full rounded-md border border-line px-1 text-center text-xs font-bold outline-none focus:border-accent"
+                        >
+                          {TAX_TYPE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.value === "vat" ? `VAT (${tenantTaxConfig.vatRatePercent}%)` : option.label}
+                            </option>
+                          ))}
+                        </select>
                       </label>
                     </div>
-                    <div className="mt-2 flex justify-end text-sm font-extrabold text-ink">
-                      {formatCents(lineTotalCents(line))}
+                    <div className="mt-2 flex items-center justify-between text-xs font-semibold text-muted">
+                      <span>Tax (included): {formatCents(lineTaxCents(line, tenantTaxConfig))}</span>
+                      <span className="text-sm font-extrabold text-ink">{formatCents(lineTotalCents(line))}</span>
                     </div>
                   </div>
                 ))
@@ -511,7 +530,7 @@ export function PurchaseFormModal({
               <span className="font-bold tabular-nums">-{formatCents(totals.discountAmountCents)}</span>
             </div>
             <div className="flex justify-between text-muted">
-              <span className="font-semibold">Tax</span>
+              <span className="font-semibold">Tax (included in Total)</span>
               <span className="font-bold tabular-nums">{formatCents(totals.taxAmountCents)}</span>
             </div>
             <div className="flex justify-between text-base font-extrabold text-ink">

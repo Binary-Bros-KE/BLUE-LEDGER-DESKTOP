@@ -222,7 +222,7 @@ export function CustomersRoute(): React.JSX.Element {
               Customer Directory
             </h2>
             <p className="mt-1 text-xs font-semibold text-muted">
-              Save returning customers for faster checkout, or leave sales anonymous for walk-ins.
+              Save returning customers for faster checkout.
             </p>
           </div>
           <div className="flex items-center gap-2">

@@ -74,6 +74,7 @@ const DEFAULT_SYSTEM_ROLES: Array<{
         "riders",
         "expenses",
         "expense_categories",
+        "local_purchases",
         "salaries",
         "reports",
         "employees",
@@ -100,7 +101,11 @@ const DEFAULT_SYSTEM_ROLES: Array<{
       payment_methods: ["view"],
       stock_transfers: ["view"],
       salaries: ["view"],
-      stock_requests: ["view", "create"]
+      stock_requests: ["view", "create"],
+      // Small day-to-day buys (tape, delivery bags) — deliberately NOT "expenses" itself, which stays
+      // Manager/Super Admin only (rent, wifi, salary-as-expense entries, etc.). See
+      // local-purchase-service.ts for why this is safe: it's a hard, query-level filter, not a UI hide.
+      local_purchases: ["view", "create", "edit", "delete"]
     }
   },
   {
@@ -413,6 +418,35 @@ export function ensureRidersPermission(tenantId: string): void {
       roleName: role.roleName,
       description: role.description,
       permissions: { ...role.permissions, riders: grant },
+      updatedBy: null
+    });
+  }
+}
+
+/**
+ * Retroactively grants "local_purchases" permissions (Manager: full CRUD+export, Cashier: CRUD) to
+ * system roles seeded before this module existed — new installs get it for free via
+ * DEFAULT_SYSTEM_ROLES. Deliberately does NOT touch "expenses"/"expense_categories" — the whole
+ * point is a cashier gets this without ever getting those. Safe every boot: a no-op once a role's
+ * stored permissions already include local_purchases.
+ */
+export function ensureLocalPurchasesPermission(tenantId: string): void {
+  const defaultsByName = new Map(
+    DEFAULT_SYSTEM_ROLES.map((role) => [role.roleName, role.permissions.local_purchases])
+  );
+
+  for (const row of roleRepository.findAllRoleRows(tenantId)) {
+    if (!row.is_system_role) continue;
+    const grant = defaultsByName.get(row.role_name);
+    if (!grant || grant.length === 0) continue;
+
+    const role = roleRepository.mapRoleRow(row);
+    if (role.permissions.local_purchases) continue;
+
+    roleRepository.updateRoleRow(row.id, {
+      roleName: role.roleName,
+      description: role.description,
+      permissions: { ...role.permissions, local_purchases: grant },
       updatedBy: null
     });
   }

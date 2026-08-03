@@ -8,9 +8,10 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { getDashboardVariant } from "@renderer/shared/lib/dashboard-role";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { toCents } from "@renderer/shared/lib/money";
+import { useAppStore } from "@renderer/shared/stores/app-store";
 import type { Category } from "@shared/types/category";
 import { isStorefrontType, type Location } from "@shared/types/location";
-import { UNIT_OF_MEASURE_OPTIONS, type Product } from "@shared/types/product";
+import { TAX_TYPE_OPTIONS, UNIT_OF_MEASURE_OPTIONS, type Product, type ProductTaxType } from "@shared/types/product";
 
 type FormState = {
   sku: string;
@@ -27,7 +28,7 @@ type FormState = {
   wholesalePrice: string;
   wholesaleMinQuantity: string;
   minimumPrice: string;
-  taxRate: string;
+  taxType: ProductTaxType;
   reorderLevel: string;
   trackStock: boolean;
   allowNegativeStock: boolean;
@@ -50,7 +51,7 @@ function emptyForm(): FormState {
     wholesalePrice: "",
     wholesaleMinQuantity: "0",
     minimumPrice: "",
-    taxRate: "0",
+    taxType: "vat",
     reorderLevel: "0",
     trackStock: true,
     allowNegativeStock: false,
@@ -101,6 +102,7 @@ export function ProductCreateModal({
 }): React.JSX.Element {
   const { session } = usePermissions();
   const isSuperAdmin = getDashboardVariant(session) === "superAdmin";
+  const vatRatePercent = useAppStore((state) => state.context?.tenant.vatRatePercent ?? 16);
 
   const [form, setForm] = useState<FormState>(() => emptyForm());
   const [openingStock, setOpeningStock] = useState<Record<string, string>>({});
@@ -206,7 +208,11 @@ export function ProductCreateModal({
         wholesalePriceCents: form.wholesalePrice.trim() ? toCents(form.wholesalePrice) : null,
         wholesaleMinQuantity: Number(form.wholesaleMinQuantity) || 0,
         minimumPriceCents: form.minimumPrice.trim() ? toCents(form.minimumPrice) : null,
-        taxRate: Number(form.taxRate) || 0,
+        // taxRate is no longer the calculation driver (see tax-calculation.ts) — kept in sync with
+        // taxType purely for any old code/report still reading it directly, never dropped from the
+        // schema outright.
+        taxRate: form.taxType === "vat" ? vatRatePercent : 0,
+        taxType: form.taxType,
         reorderLevel: Number(form.reorderLevel) || 0,
         trackStock: form.trackStock,
         allowNegativeStock: form.allowNegativeStock,
@@ -409,12 +415,14 @@ export function ProductCreateModal({
         <div className="mt-5 border-t border-line pt-5">
           <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Stock Settings</p>
           <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-3">
-            <Field
-              label="Tax Rate (%)"
-              type="number"
-              value={form.taxRate}
-              onChange={(value) => updateField("taxRate", value)}
-              placeholder="0"
+            <SelectField
+              label="Tax"
+              value={form.taxType}
+              onChange={(value) => updateField("taxType", value as ProductTaxType)}
+              options={TAX_TYPE_OPTIONS.map((option) => ({
+                value: option.value,
+                label: option.value === "vat" ? `${option.label} (${vatRatePercent}%)` : option.label
+              }))}
             />
             <Field
               label="Reorder Level"

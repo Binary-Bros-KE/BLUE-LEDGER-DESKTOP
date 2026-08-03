@@ -1,15 +1,21 @@
 import { randomUUID } from "node:crypto";
 import * as customerRepository from "@main/database/repositories/customer-repository";
 import { getCurrentBranchScope, requirePermission } from "@main/services/auth-service";
+import { generateDocumentNumber } from "@main/services/document-number-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { customerInputSchema } from "@shared/schemas/customer";
 import type { Customer, CustomerStatus } from "@shared/types/customer";
 
+/** Device-tagged (e.g. "CUST-D1-00042") — see generateDocumentNumber's own doc comment. Two
+ * offline devices independently incrementing a plain local max used to be able to mint the exact
+ * same code for two different real customers; the device tag makes that structurally impossible. */
 function generateCustomerCode(tenantId: string): string {
-  const maxCode = customerRepository.findMaxCustomerCodeRow(tenantId);
-  const currentNumber = maxCode ? Number(maxCode.slice("CUST-".length)) : 0;
-  const nextNumber = Number.isFinite(currentNumber) ? currentNumber + 1 : 1;
-  return `CUST-${String(nextNumber).padStart(5, "0")}`;
+  return generateDocumentNumber({
+    tenantId,
+    prefix: "CUST",
+    digits: 5,
+    existingNumbers: customerRepository.findMaxCustomerCodeRow(tenantId)
+  });
 }
 
 function assertUniquePhone(tenantId: string, phone: string, excludeId?: string): void {

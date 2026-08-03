@@ -60,13 +60,15 @@ export function findCustomerByPhoneRow(
     .get(...params) as CustomerRow | undefined;
 }
 
-export function findMaxCustomerCodeRow(tenantId: string): string | null {
-  const row = getDatabase()
-    .prepare(
-      "SELECT MAX(customer_code) as maxCode FROM customers WHERE tenant_id = ? AND customer_code LIKE 'CUST-%'"
-    )
-    .get(tenantId) as { maxCode: string | null };
-  return row.maxCode;
+/** ALL existing customer codes for this tenant — see generateDocumentNumber's own doc comment for
+ * why this can't be a plain SQL MAX() once codes are device-tagged (lexicographic string
+ * comparison would pick the wrong one once tagged and untagged codes are mixed). */
+export function findMaxCustomerCodeRow(tenantId: string): string[] {
+  return (
+    getDatabase()
+      .prepare("SELECT customer_code FROM customers WHERE tenant_id = ? AND customer_code LIKE 'CUST-%'")
+      .all(tenantId) as Array<{ customer_code: string }>
+  ).map((row) => row.customer_code);
 }
 
 export function insertCustomerRow(

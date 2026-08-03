@@ -179,6 +179,18 @@ const api: BlueLedgerApi = {
     pickAttachment: () => invoke("expense:pick-attachment"),
     openAttachment: (relativePath) => invoke("expense:open-attachment", relativePath)
   },
+  localPurchase: {
+    list: () => invoke("local-purchase:list"),
+    summary: () => invoke("local-purchase:summary"),
+    get: (id) => invoke("local-purchase:get", id),
+    create: (input) => invoke("local-purchase:create", input),
+    update: (id, input) => invoke("local-purchase:update", id, input),
+    archive: (id) => invoke("local-purchase:archive", id),
+    restore: (id) => invoke("local-purchase:restore", id),
+    delete: (id) => invoke("local-purchase:delete", id),
+    pickAttachment: () => invoke("local-purchase:pick-attachment"),
+    openAttachment: (relativePath) => invoke("local-purchase:open-attachment", relativePath)
+  },
   salary: {
     list: () => invoke("salary:list"),
     get: (id) => invoke("salary:get", id),
@@ -240,8 +252,10 @@ const api: BlueLedgerApi = {
     generateReceiptPdf: (saleId) => invoke("printer:generate-receipt-pdf", saleId),
     generateInvoicePdf: (saleId) => invoke("printer:generate-invoice-pdf", saleId),
     printInvoiceDocument: (saleId) => invoke("printer:print-invoice-document", saleId),
+    printInvoiceThermal: (saleId) => invoke("printer:print-invoice-thermal", saleId),
     generateQuotationPdf: (quotationId) => invoke("printer:generate-quotation-pdf", quotationId),
     printQuotationDocument: (quotationId) => invoke("printer:print-quotation-document", quotationId),
+    printQuotationThermal: (quotationId) => invoke("printer:print-quotation-thermal", quotationId),
     generateSalaryPdf: (salaryId) => invoke("printer:generate-salary-pdf", salaryId),
     shareSalaryPayslip: (salaryId) => invoke("printer:share-salary-payslip", salaryId),
     printDeliveryNote: (deliveryNoteId) => invoke("printer:print-delivery-note", deliveryNoteId),
@@ -257,7 +271,8 @@ const api: BlueLedgerApi = {
     get: (id) => invoke("delivery-note:get", id),
     getForSale: (saleId) => invoke("delivery-note:get-for-sale", saleId),
     getForQuotation: (quotationId) => invoke("delivery-note:get-for-quotation", quotationId),
-    setDelivered: (id, delivered) => invoke("delivery-note:set-delivered", id, delivered)
+    setDelivered: (id, delivered) => invoke("delivery-note:set-delivered", id, delivered),
+    attachToSale: (saleId, input) => invoke("delivery-note:attach-to-sale", saleId, input)
   },
   export: {
     toPdf: (request) => invoke("export:to-pdf", request),
@@ -325,7 +340,8 @@ const api: BlueLedgerApi = {
     outstandingInvoices: () => invoke("report:outstanding-invoices"),
     outstandingPurchases: () => invoke("report:outstanding-purchases"),
     supplierPurchaseHistory: (input) => invoke("report:supplier-purchase-history", input),
-    supplierSpendBreakdown: (input) => invoke("report:supplier-spend-breakdown", input)
+    supplierSpendBreakdown: (input) => invoke("report:supplier-spend-breakdown", input),
+    taxBreakdown: (range) => invoke("report:tax-breakdown", range)
   }
 };
 

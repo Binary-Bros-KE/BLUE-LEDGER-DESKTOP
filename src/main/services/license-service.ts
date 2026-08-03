@@ -40,6 +40,8 @@ type CloudBusinessProfileFields = {
   physicalAddress: string | null;
   ownerPhone: string | null;
   ownerEmail: string | null;
+  vatRatePercent: number;
+  pricesTaxInclusive: boolean;
   /** When the CLOUD last received a business-profile push, from any device — compared against this
    * device's own local `business_profile_updated_at` before ever overwriting anything, so a
    * dashboard-side (or another device's) edit only wins if it's genuinely newer. */
@@ -271,6 +273,8 @@ export async function checkInWithServer(): Promise<void> {
           physicalAddress: result.physicalAddress,
           ownerPhone: result.ownerPhone,
           ownerEmail: result.ownerEmail,
+          vatRatePercent: result.vatRatePercent,
+          pricesTaxInclusive: result.pricesTaxInclusive,
           businessProfileUpdatedAt: result.businessProfileUpdatedAt
         });
       }
@@ -314,6 +318,8 @@ export async function pushProfileToServer(profile: {
   physicalAddress: string | null;
   ownerPhone: string | null;
   ownerEmail: string | null;
+  vatRatePercent: number;
+  pricesTaxInclusive: boolean;
 }): Promise<void> {
   const tenantRow = tenantRepository.findTenantRow();
   if (!tenantRow?.license_key) return;
@@ -341,7 +347,9 @@ export async function pushProfileToServer(profile: {
         cityTown: profile.cityTown,
         physicalAddress: profile.physicalAddress,
         ownerPhone: profile.ownerPhone,
-        ownerEmail: profile.ownerEmail
+        ownerEmail: profile.ownerEmail,
+        vatRatePercent: profile.vatRatePercent,
+        pricesTaxInclusive: profile.pricesTaxInclusive
       }),
       signal: AbortSignal.timeout(8_000)
     });

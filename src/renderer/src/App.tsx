@@ -16,6 +16,7 @@ import { ExpensesRoute } from "@renderer/app/routes/ExpensesRoute";
 import { ImportRoute } from "@renderer/app/routes/ImportRoute";
 import { InvoicesRoute } from "@renderer/app/routes/InvoicesRoute";
 import { LicenseBlockedRoute } from "@renderer/app/routes/LicenseBlockedRoute";
+import { LocalPurchasesRoute } from "@renderer/app/routes/LocalPurchasesRoute";
 import { LoginRoute } from "@renderer/app/routes/LoginRoute";
 import { MainStoreRoute } from "@renderer/app/routes/MainStoreRoute";
 import { PaymentMethodsRoute } from "@renderer/app/routes/PaymentMethodsRoute";
@@ -26,6 +27,7 @@ import { InventoryReportRoute } from "@renderer/app/routes/InventoryReportRoute"
 import { ProductsReportRoute } from "@renderer/app/routes/ProductsReportRoute";
 import { CustomersReportRoute } from "@renderer/app/routes/CustomersReportRoute";
 import { SuppliersReportRoute } from "@renderer/app/routes/SuppliersReportRoute";
+import { TaxReportRoute } from "@renderer/app/routes/TaxReportRoute";
 import { ProductsRoute } from "@renderer/app/routes/ProductsRoute";
 import { PurchasesRoute } from "@renderer/app/routes/PurchasesRoute";
 import { QuotationsRoute } from "@renderer/app/routes/QuotationsRoute";
@@ -137,6 +139,8 @@ export function App(): React.JSX.Element {
         <RidersRoute />
       ) : activeNavKey === "purchases" ? (
         <PurchasesRoute />
+      ) : activeNavKey === "local-purchases" ? (
+        <LocalPurchasesRoute />
       ) : activeNavKey === "expenses" ? (
         <ExpensesRoute />
       ) : activeNavKey === "checkout" ? (
@@ -161,6 +165,8 @@ export function App(): React.JSX.Element {
         <CustomersReportRoute />
       ) : activeNavKey === "reports-suppliers" ? (
         <SuppliersReportRoute />
+      ) : activeNavKey === "reports-tax" ? (
+        <TaxReportRoute />
       ) : activeNavKey === "settings" ? (
         <SettingsRoute />
       ) : activeNavKey === "sync" ? (

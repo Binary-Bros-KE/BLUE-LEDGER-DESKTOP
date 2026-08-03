@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { X } from "lucide-react";
@@ -19,17 +18,6 @@ export function Modal({
   widthClassName?: string;
   children: React.ReactNode;
 }): React.JSX.Element | null {
-  useEffect(() => {
-    if (!open) return undefined;
-
-    function handleKeyDown(event: KeyboardEvent): void {
-      if (event.key === "Escape") onClose();
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
-
   return createPortal(
     <AnimatePresence>
       {open && (
@@ -38,7 +26,6 @@ export function Modal({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.15 }}
-          onClick={onClose}
           className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-6"
         >
           <motion.div
@@ -46,7 +33,6 @@ export function Modal({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.98 }}
             transition={{ duration: 0.18, ease: [0.4, 0, 0.2, 1] }}
-            onClick={(event) => event.stopPropagation()}
             className={cn(
               "max-h-[88vh] w-full overflow-y-auto rounded-lg border border-line bg-white p-6 shadow-soft",
               widthClassName ?? "max-w-lg"

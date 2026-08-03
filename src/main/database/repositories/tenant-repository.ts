@@ -32,6 +32,8 @@ export type TenantRow = {
   owner_name: string | null;
   owner_phone: string | null;
   owner_email: string | null;
+  vat_rate_percent: number;
+  prices_tax_inclusive: number;
   receipt_header: string | null;
   receipt_footer: string | null;
   license_key: string | null;
@@ -115,6 +117,8 @@ export function updateTenantProfileRow(input: BusinessProfileInput): TenantRow {
         owner_name = ?,
         owner_phone = ?,
         owner_email = ?,
+        vat_rate_percent = ?,
+        prices_tax_inclusive = ?,
         receipt_header = ?,
         receipt_footer = ?,
         sync_status = 'pending',
@@ -142,6 +146,8 @@ export function updateTenantProfileRow(input: BusinessProfileInput): TenantRow {
       input.ownerName,
       input.ownerPhone,
       input.ownerEmail,
+      input.vatRatePercent,
+      input.pricesTaxInclusive ? 1 : 0,
       input.receiptHeader,
       input.receiptFooter,
       now,
@@ -262,6 +268,8 @@ export function mapTenantRow(row: TenantRow, appVersion: string): TenantRecord {
     ownerName: row.owner_name,
     ownerPhone: row.owner_phone,
     ownerEmail: row.owner_email,
+    vatRatePercent: row.vat_rate_percent,
+    pricesTaxInclusive: Boolean(row.prices_tax_inclusive),
     receiptHeader: row.receipt_header,
     receiptFooter: row.receipt_footer,
     licenseKey: row.license_key,
@@ -473,6 +481,8 @@ export function applyBusinessProfileFromCloudRow(input: {
   physicalAddress: string | null;
   ownerPhone: string | null;
   ownerEmail: string | null;
+  vatRatePercent: number;
+  pricesTaxInclusive: boolean;
   businessProfileUpdatedAt: string;
 }): void {
   getDatabase()
@@ -495,6 +505,8 @@ export function applyBusinessProfileFromCloudRow(input: {
         physical_address = ?,
         owner_phone = ?,
         owner_email = ?,
+        vat_rate_percent = ?,
+        prices_tax_inclusive = ?,
         business_profile_updated_at = ?
       WHERE id = (SELECT id FROM tenant ORDER BY created_at LIMIT 1)
     `
@@ -516,6 +528,8 @@ export function applyBusinessProfileFromCloudRow(input: {
       input.physicalAddress,
       input.ownerPhone,
       input.ownerEmail,
+      input.vatRatePercent,
+      input.pricesTaxInclusive ? 1 : 0,
       input.businessProfileUpdatedAt
     );
 }

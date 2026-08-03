@@ -171,11 +171,11 @@ export function TransactionsRoute(): React.JSX.Element {
       })),
       stats: summary
         ? [
-            { label: "Transactions", value: String(summary.count) },
-            { label: "Money In", value: formatCents(summary.moneyInCents) },
-            { label: "Money Out", value: formatCents(summary.moneyOutCents) },
-            { label: "Net Movement", value: formatCents(summary.netCents) }
-          ]
+          { label: "Transactions", value: String(summary.count) },
+          { label: "Money In", value: formatCents(summary.moneyInCents) },
+          { label: "Money Out", value: formatCents(summary.moneyOutCents) },
+          { label: "Net Movement", value: formatCents(summary.netCents) }
+        ]
         : [],
       fileBaseName: `Transactions_${dateFrom}_to_${dateTo}`
     };
@@ -210,7 +210,7 @@ export function TransactionsRoute(): React.JSX.Element {
               Every Payment, In One Place
             </h2>
             <p className="mt-1 text-xs font-semibold text-muted">
-              Search by transaction code to confirm whether — and when — a payment actually went through.
+              Search by transaction code to confirm  payments.
             </p>
           </div>
           {canExport && exportRequest && <ExportMenu request={exportRequest} />}
@@ -287,7 +287,6 @@ export function TransactionsRoute(): React.JSX.Element {
 
         <div className="mt-3 flex flex-wrap items-end gap-3">
           <label className="block">
-            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Payment Method</span>
             <select
               value={paymentMethodFilter}
               onChange={(event) => setPaymentMethodFilter(event.target.value)}
@@ -302,7 +301,6 @@ export function TransactionsRoute(): React.JSX.Element {
             </select>
           </label>
           <label className="block">
-            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Cashier</span>
             <select
               value={cashierFilter}
               onChange={(event) => setCashierFilter(event.target.value)}
@@ -318,7 +316,6 @@ export function TransactionsRoute(): React.JSX.Element {
           </label>
           {isSuperAdmin && (
             <label className="block">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Storefront</span>
               <select
                 value={locationFilter}
                 onChange={(event) => setLocationFilter(event.target.value)}
@@ -365,12 +362,9 @@ export function TransactionsRoute(): React.JSX.Element {
                 <thead>
                   <tr className="bg-primary text-white">
                     <th className="whitespace-nowrap px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">In/Out</th>
-                    <th className="whitespace-nowrap px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Time</th>
                     <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Transaction Code</th>
                     <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Party</th>
                     <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Storefront</th>
-                    <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Payment Method</th>
-                    <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Processed By</th>
                     <th className="whitespace-nowrap px-4 py-2.5 text-right text-[10px] font-extrabold uppercase tracking-wider">Amount</th>
                     <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Status</th>
                   </tr>
@@ -381,8 +375,19 @@ export function TransactionsRoute(): React.JSX.Element {
                       <td className="px-4 py-2.5">
                         <DashedPill tone={row.direction === "in" ? "success" : "danger"}>{row.direction === "in" ? "IN" : "OUT"}</DashedPill>
                       </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-xs font-semibold text-muted">{formatDateTime(row.occurredAt)}</td>
-                      <td className="break-all px-4 py-2.5 font-bold text-ink">{row.transactionCode}</td>
+                      <td className="break-all px-4 py-2.5 font-bold text-ink">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[10px] font-extrabold uppercase tracking-wide text-muted/70">
+                            {row.paymentMethodName ?? "—"}
+                          </span>
+                          <span>
+                            {row.transactionCode}
+                          </span>
+                          <span className="text-[10px] font-bold uppercase text-warning">
+                            {formatDateTime(row.occurredAt)}
+                          </span>
+                        </div>
+                      </td>
                       <td className="px-4 py-2.5 text-xs font-semibold text-muted">
                         {row.partyName ? (
                           <>
@@ -393,9 +398,16 @@ export function TransactionsRoute(): React.JSX.Element {
                           "—"
                         )}
                       </td>
-                      <td className="px-4 py-2.5 text-xs font-semibold text-muted">{row.locationName}</td>
-                      <td className="px-4 py-2.5 text-xs font-semibold text-muted">{row.paymentMethodName ?? "—"}</td>
-                      <td className="px-4 py-2.5 text-xs font-semibold text-muted">{row.processedByName}</td>
+                      <td className="px-4 py-2.5 text-xs font-semibold text-muted">
+                        <div className="flex flex-col gap-0.5">
+                          <span>
+                            {row.processedByName}
+                          </span>
+                          <span className="text-[10px] font-bold uppercase tracking-wide text-primary/70">
+                            {row.locationName}
+                          </span>
+                        </div>
+                      </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-right font-bold tabular-nums text-ink">
                         {formatCents(row.amountCents)}
                       </td>

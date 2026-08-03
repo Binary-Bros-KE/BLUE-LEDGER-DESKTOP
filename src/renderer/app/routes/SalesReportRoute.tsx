@@ -9,8 +9,10 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { taxBreakdownLabel } from "@shared/lib/tax-calculation";
 import { useUiStore } from "@renderer/shared/stores/ui-store";
 import type { ReportExportRequest, ReportExportSection } from "@shared/types/report-export";
+import type { TaxReport } from "@shared/types/tax-report";
 import type {
   CancelledPurchasesReport,
   DateRangeInput,
@@ -32,6 +34,7 @@ import { RevenueExpenseBreakdown } from "./reports/RevenueExpenseBreakdown";
 import { defaultAnchorForMode, rangeForAnchor, shiftAnchor, todayIso, trendWindowInputForMode } from "./reports/salesReportDate";
 import { SalesModeSelector } from "./reports/SalesModeSelector";
 import { SalesReportNotes } from "./reports/SalesReportNotes";
+import { TaxBreakdownReportSection } from "./reports/TaxBreakdownReportSection";
 import { TransactionsList } from "./reports/TransactionsList";
 import { VoidsAndReturnsSection } from "./reports/VoidsAndReturnsSection";
 
@@ -119,6 +122,7 @@ export function SalesReportRoute(): React.JSX.Element {
   const [byEmployee, setByEmployee] = useState<SalesByEmployeeRow[]>([]);
   const [byPaymentMethod, setByPaymentMethod] = useState<SalesByPaymentMethodRow[]>([]);
   const [cancelledPurchases, setCancelledPurchases] = useState<CancelledPurchasesReport | null>(null);
+  const [taxReport, setTaxReport] = useState<TaxReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -126,8 +130,16 @@ export function SalesReportRoute(): React.JSX.Element {
     setLoading(true);
     setError(null);
     try {
-      const [overviewResult, transactionsResult, trendResult, storefrontResult, employeeResult, paymentResult, cancelledPurchasesResult] =
-        await Promise.all([
+      const [
+        overviewResult,
+        transactionsResult,
+        trendResult,
+        storefrontResult,
+        employeeResult,
+        paymentResult,
+        cancelledPurchasesResult,
+        taxReportResult
+      ] = await Promise.all([
           window.blueLedger.report.salesFinancialOverview(range),
           window.blueLedger.report.salesTransactions(range),
           window.blueLedger.report.salesTrendWindow(trend),
@@ -135,6 +147,7 @@ export function SalesReportRoute(): React.JSX.Element {
           window.blueLedger.report.salesByEmployee(range),
           window.blueLedger.report.salesByPaymentMethod(range),
           window.blueLedger.report.cancelledPurchases(range),
+          window.blueLedger.report.taxBreakdown(range),
         ]);
       setOverview(overviewResult);
       setTransactions(transactionsResult);
@@ -143,6 +156,7 @@ export function SalesReportRoute(): React.JSX.Element {
       setByEmployee(employeeResult);
       setByPaymentMethod(paymentResult);
       setCancelledPurchases(cancelledPurchasesResult);
+      setTaxReport(taxReportResult);
     } catch (err) {
       setError(getErrorMessage(err, "Failed to load the sales report"));
     } finally {
@@ -490,7 +504,24 @@ export function SalesReportRoute(): React.JSX.Element {
           documents: String(party.documentCount),
           balance: money(party.balanceCents)
         }))
-      }
+      },
+      taxReport !== null &&
+        taxReport.byCategory.length > 0 && {
+          type: "table",
+          title: "Tax Breakdown",
+          columns: [
+            { key: "category", header: "Category" },
+            { key: "net", header: "Net", align: "right" },
+            { key: "tax", header: "Tax", align: "right" },
+            { key: "gross", header: "Gross", align: "right" }
+          ],
+          rows: taxReport.byCategory.map((entry) => ({
+            category: taxBreakdownLabel(entry.taxType, { vatRatePercent: taxReport.vatRatePercent, pricesTaxInclusive: true }),
+            net: money(entry.netCents),
+            tax: money(entry.taxCents),
+            gross: money(entry.grossCents)
+          }))
+        }
     ];
     const sections = rawSections.filter((section): section is ReportExportSection => Boolean(section));
 
@@ -501,7 +532,7 @@ export function SalesReportRoute(): React.JSX.Element {
       sections,
       fileBaseName: `SalesReport_${resolvedRange.startDate}_to_${resolvedRange.endDate}`
     };
-  }, [overview, transactions, byStorefront, byEmployee, byPaymentMethod, resolvedRange]);
+  }, [overview, transactions, byStorefront, byEmployee, byPaymentMethod, taxReport, resolvedRange]);
 
   return (
     <motion.div
@@ -693,6 +724,8 @@ export function SalesReportRoute(): React.JSX.Element {
               expectedProfitCents={overview.expectedProfitCents}
             />
           )}
+
+          {taxReport && <TaxBreakdownReportSection report={taxReport} />}
 
           <SalesReportNotes />
         </div>

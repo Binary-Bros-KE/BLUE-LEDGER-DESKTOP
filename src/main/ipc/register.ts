@@ -88,7 +88,9 @@ import {
   printDeliveryNote,
   printDeliveryNoteViaThermal,
   printInvoiceDocument,
+  printInvoiceViaThermal,
   printQuotationDocument,
+  printQuotationViaThermal,
   printReceipt,
   printStatementDocument,
   savePrinterSettings,
@@ -96,6 +98,7 @@ import {
   testPrinterConnection
 } from "@main/services/printer-service";
 import {
+  attachDeliveryToSale,
   getDeliveryNote,
   getDeliveryNoteForQuotation,
   getDeliveryNoteForSale,
@@ -201,6 +204,16 @@ import {
   updateExpense
 } from "@main/services/expense-service";
 import {
+  archiveLocalPurchase,
+  createLocalPurchase,
+  deleteLocalPurchase,
+  getLocalPurchase,
+  getLocalPurchaseSummary,
+  listLocalPurchases,
+  restoreLocalPurchase,
+  updateLocalPurchase
+} from "@main/services/local-purchase-service";
+import {
   approveSaleReturn,
   getSaleReturn,
   listSaleReturns,
@@ -257,6 +270,7 @@ import {
 } from "@main/services/report-service";
 import { getInventoryReportData } from "@main/services/inventory-report-service";
 import { getProductSalesHistory, getProductsPerformanceReport } from "@main/services/product-report-service";
+import { getTaxReport } from "@main/services/tax-report-service";
 import { getCustomerPurchaseHistory, getOutstandingInvoices, getTopCustomers } from "@main/services/customer-report-service";
 import {
   getOutstandingPurchases,
@@ -525,6 +539,20 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.expenseOpenAttachment, (_event, relativePath: string) =>
     openManagedExpenseAttachment(relativePath).then(() => ({ success: true as const }))
   );
+  ipcMain.handle(ipcChannels.localPurchaseList, () => listLocalPurchases());
+  ipcMain.handle(ipcChannels.localPurchaseSummary, () => getLocalPurchaseSummary());
+  ipcMain.handle(ipcChannels.localPurchaseGet, (_event, id: string) => getLocalPurchase(id));
+  ipcMain.handle(ipcChannels.localPurchaseCreate, (_event, input: unknown) => createLocalPurchase(input));
+  ipcMain.handle(ipcChannels.localPurchaseUpdate, (_event, id: string, input: unknown) =>
+    updateLocalPurchase(id, input)
+  );
+  ipcMain.handle(ipcChannels.localPurchaseArchive, (_event, id: string) => archiveLocalPurchase(id));
+  ipcMain.handle(ipcChannels.localPurchaseRestore, (_event, id: string) => restoreLocalPurchase(id));
+  ipcMain.handle(ipcChannels.localPurchaseDelete, (_event, id: string) => deleteLocalPurchase(id));
+  ipcMain.handle(ipcChannels.localPurchasePickAttachment, () => pickAndStoreExpenseAttachment());
+  ipcMain.handle(ipcChannels.localPurchaseOpenAttachment, (_event, relativePath: string) =>
+    openManagedExpenseAttachment(relativePath).then(() => ({ success: true as const }))
+  );
   ipcMain.handle(ipcChannels.salaryList, () => listSalaries());
   ipcMain.handle(ipcChannels.salaryGet, (_event, id: string) => getSalary(id));
   ipcMain.handle(ipcChannels.salaryCreate, (_event, input: unknown) => createSalary(input));
@@ -599,11 +627,17 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.printerPrintInvoiceDocument, (_event, saleId: string) =>
     printInvoiceDocument(saleId)
   );
+  ipcMain.handle(ipcChannels.printerPrintInvoiceThermal, (_event, saleId: string) =>
+    printInvoiceViaThermal(saleId)
+  );
   ipcMain.handle(ipcChannels.printerGenerateQuotationPdf, (_event, quotationId: string) =>
     generateQuotationPdf(quotationId)
   );
   ipcMain.handle(ipcChannels.printerPrintQuotationDocument, (_event, quotationId: string) =>
     printQuotationDocument(quotationId)
+  );
+  ipcMain.handle(ipcChannels.printerPrintQuotationThermal, (_event, quotationId: string) =>
+    printQuotationViaThermal(quotationId)
   );
   ipcMain.handle(ipcChannels.printerGenerateSalaryPdf, (_event, salaryId: string) => generateSalaryPdf(salaryId));
   ipcMain.handle(ipcChannels.printerShareSalaryPayslip, (_event, salaryId: string) =>
@@ -632,6 +666,9 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.deliveryNoteSetDelivered, (_event, id: string, delivered: boolean) =>
     setDeliveryNoteDelivered(id, delivered)
+  );
+  ipcMain.handle(ipcChannels.deliveryNoteAttachToSale, (_event, saleId: string, input: unknown) =>
+    attachDeliveryToSale(saleId, input)
   );
   ipcMain.handle(ipcChannels.exportToPdf, (_event, request: ExportListRequest) => exportListToPdf(request));
   ipcMain.handle(ipcChannels.exportToCsv, (_event, request: ExportListRequest) => exportListToCsv(request));
@@ -704,4 +741,5 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.reportOutstandingPurchases, () => getOutstandingPurchases());
   ipcMain.handle(ipcChannels.reportSupplierPurchaseHistory, (_event, input: unknown) => getSupplierPurchaseHistory(input));
   ipcMain.handle(ipcChannels.reportSupplierSpendBreakdown, (_event, input: unknown) => getSupplierSpendBreakdown(input));
+  ipcMain.handle(ipcChannels.reportTaxBreakdown, (_event, range: unknown) => getTaxReport(range));
 }

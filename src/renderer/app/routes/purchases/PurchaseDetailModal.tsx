@@ -3,18 +3,16 @@ import { format } from "date-fns";
 import { Ban, CheckCircle2, Loader2, Package, Paperclip, Send, Wallet } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import { Field, SelectField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
+import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, toCents } from "@renderer/shared/lib/money";
+import type { ExportListRequest } from "@shared/types/export";
 import type { PaymentMethod } from "@shared/types/payment-method";
-import {
-  PURCHASE_STATUS_OPTIONS,
-  PURCHASE_TAX_TYPE_OPTIONS,
-  type Purchase,
-  type PurchasePaymentStatus,
-  type PurchaseStatus
-} from "@shared/types/purchase";
+import { TAX_TYPE_OPTIONS } from "@shared/types/product";
+import { PURCHASE_STATUS_OPTIONS, type Purchase, type PurchaseItem, type PurchasePaymentStatus, type PurchaseStatus } from "@shared/types/purchase";
 
 function formatDate(value: string | null, pattern = "MMM d, yyyy · HH:mm"): string {
   if (!value) return "—";
@@ -37,8 +35,13 @@ function statusTone(status: PurchaseStatus): "success" | "warning" | "danger" | 
   return "neutral";
 }
 
-function taxTypeLabel(value: string): string {
-  return PURCHASE_TAX_TYPE_OPTIONS.find((option) => option.value === value)?.label ?? value;
+/** Derived from the order's own lines, not a stored header value — a real supplier invoice
+ * routinely mixes zero-rated and taxable items (see purchase_items.tax_type, per-line). */
+function taxTypeLabel(items: PurchaseItem[]): string {
+  const distinctTypes = new Set(items.map((item) => item.taxType));
+  if (distinctTypes.size > 1) return "Mixed Tax";
+  const [only] = distinctTypes;
+  return TAX_TYPE_OPTIONS.find((option) => option.value === only)?.label ?? "—";
 }
 
 function paymentStatusTone(status: PurchasePaymentStatus): "success" | "warning" | "neutral" {
@@ -62,6 +65,9 @@ export function PurchaseDetailModal({
   onEdit: () => void;
   onChanged: () => Promise<void>;
 }): React.JSX.Element {
+  const { can } = usePermissions();
+  const canExport = can("purchases", "export");
+
   const [receivingQuantities, setReceivingQuantities] = useState<Record<string, string>>({});
   const [receiveSaving, setReceiveSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -90,8 +96,66 @@ export function PurchaseDetailModal({
   const balanceDueCents = purchase.grandTotalCents - purchase.amountPaidCents;
   const canReceive = purchase.status === "ordered" || purchase.status === "partially_received";
 
+  /** Same generic ExportListRequest/ExportMenu every list page already uses (Receipts, Invoices,
+   * Quotations, the Purchases list itself) — just scoped to this one purchase's own line items
+   * instead of a filtered list of documents, so "print a single purchase" gets PDF/Excel/CSV for
+   * free instead of a bespoke one-off template. */
+  const exportRequest = useMemo<ExportListRequest>(
+    () => ({
+      module: "purchases",
+      title: `Purchase Order ${purchase.purchaseNumber}`,
+      subtitle: `${purchase.supplierName} · ${purchase.locationName} · ${statusLabel(purchase.status)}`,
+      columns: [
+        { key: "product", header: "Product" },
+        { key: "sku", header: "SKU" },
+        { key: "ordered", header: "Ordered Qty", align: "right" },
+        { key: "received", header: "Received Qty", align: "right" },
+        { key: "unitCost", header: "Unit Cost", align: "right" },
+        { key: "discount", header: "Discount", align: "right" },
+        { key: "tax", header: "Tax", align: "right" },
+        { key: "lineTotal", header: "Line Total", align: "right" }
+      ],
+      rows: purchase.items.map((item) => ({
+        product: item.productName,
+        sku: item.sku,
+        ordered: String(item.orderedQuantity),
+        received: String(item.receivedQuantity),
+        unitCost: formatCents(item.unitCostCents),
+        discount: formatCents(item.discountAmountCents),
+        tax: formatCents(item.taxAmountCents),
+        lineTotal: formatCents(item.lineTotalCents)
+      })),
+      stats: [
+        { label: "Supplier Invoice #", value: purchase.supplierInvoiceNumber ?? "—" },
+        { label: "Ordered", value: formatDate(purchase.orderedAt) },
+        { label: "Received", value: formatDate(purchase.receivedAt) },
+        { label: "Subtotal", value: formatCents(purchase.subtotalCents) },
+        { label: "Discount", value: formatCents(purchase.discountAmountCents) },
+        { label: "Tax", value: formatCents(purchase.taxAmountCents) },
+        { label: "Total", value: formatCents(purchase.grandTotalCents) },
+        { label: "Amount Paid", value: formatCents(purchase.amountPaidCents) }
+      ],
+      fileBaseName: `Purchase-${purchase.purchaseNumber}`
+    }),
+    [purchase]
+  );
+
   function updateReceivingQuantity(itemId: string, value: string): void {
     setReceivingQuantities((prev) => ({ ...prev, [itemId]: value }));
+  }
+
+  /** Fills every still-outstanding line's "Receive Today" field with its own full remaining
+   * quantity — for the common case of a delivery that arrived complete, so the user doesn't have
+   * to type the same remaining number into every row by hand before hitting Receive Goods. */
+  function handleReceiveAll(): void {
+    setActionError(null);
+    setReceivingQuantities((prev) => {
+      const next = { ...prev };
+      for (const item of purchase.items) {
+        if (item.remainingQuantity > 0) next[item.id] = String(item.remainingQuantity);
+      }
+      return next;
+    });
   }
 
   async function handleReceiveGoods(): Promise<void> {
@@ -217,12 +281,21 @@ export function PurchaseDetailModal({
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-2">
-          <DashedPill tone={statusTone(purchase.status)}>{statusLabel(purchase.status)}</DashedPill>
-          <DashedPill tone="accent">{taxTypeLabel(purchase.taxType)}</DashedPill>
-          <DashedPill tone={paymentStatusTone(purchase.paymentStatus)}>
-            {purchase.paymentStatus === "partially_paid" ? "Partially Paid" : purchase.paymentStatus}
-          </DashedPill>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <DashedPill tone={statusTone(purchase.status)}>{statusLabel(purchase.status)}</DashedPill>
+            <DashedPill tone="accent">{taxTypeLabel(purchase.items)}</DashedPill>
+            <DashedPill tone={paymentStatusTone(purchase.paymentStatus)}>
+              {purchase.paymentStatus === "partially_paid" ? "Partially Paid" : purchase.paymentStatus}
+            </DashedPill>
+          </div>
+          {canExport && (
+            <ExportMenu
+              request={exportRequest}
+              selectableFields
+              defaultCheckedKeys={["product", "sku", "ordered", "received"]}
+            />
+          )}
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
@@ -253,7 +326,18 @@ export function PurchaseDetailModal({
         </div>
 
         <div className="mt-5">
-          <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Products</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Products</p>
+            {canReceive && canEdit && (
+              <button
+                type="button"
+                onClick={handleReceiveAll}
+                className="text-[11px] font-extrabold uppercase text-accent hover:underline cursor-pointer"
+              >
+                Receive All
+              </button>
+            )}
+          </div>
           <div className="mt-2 overflow-x-auto rounded-lg border border-line">
             <table className="w-full min-w-[640px] table-fixed border-collapse text-sm">
               <thead>
@@ -348,7 +432,7 @@ export function PurchaseDetailModal({
             <span className="font-bold tabular-nums">-{formatCents(purchase.discountAmountCents)}</span>
           </div>
           <div className="flex justify-between text-muted">
-            <span className="font-semibold">Tax</span>
+            <span className="font-semibold">Tax (included in Total)</span>
             <span className="font-bold tabular-nums">{formatCents(purchase.taxAmountCents)}</span>
           </div>
           <div className="flex justify-between text-base font-extrabold text-ink">

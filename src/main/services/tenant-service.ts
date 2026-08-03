@@ -40,6 +40,8 @@ function toTenantContext(row: tenantRepository.TenantRow): TenantContext {
     receiptHeader: row.receipt_header,
     receiptFooter: row.receipt_footer,
     currency: row.currency as Currency,
+    vatRatePercent: row.vat_rate_percent,
+    pricesTaxInclusive: Boolean(row.prices_tax_inclusive),
     activated: row.license_key !== null,
     licenseStatus: row.license_status as LicenseStatus,
     nextDueDate: row.next_due_date,
@@ -143,7 +145,9 @@ export function updateTenantProfile(input: unknown): TenantRecord {
     cityTown: parsed.cityTown,
     physicalAddress: parsed.physicalAddress,
     ownerPhone: parsed.ownerPhone,
-    ownerEmail: parsed.ownerEmail
+    ownerEmail: parsed.ownerEmail,
+    vatRatePercent: parsed.vatRatePercent,
+    pricesTaxInclusive: parsed.pricesTaxInclusive
   });
 
   return tenantRepository.mapTenantRow(row, app.getVersion());

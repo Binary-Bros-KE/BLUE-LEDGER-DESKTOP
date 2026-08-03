@@ -1,3 +1,4 @@
+import type { ProductTaxType } from "./product";
 import type { SaleDelivery, SaleServiceCharge } from "./sale";
 
 export type QuotationId = string;
@@ -25,6 +26,7 @@ export type QuotationItem = {
   quantity: number;
   unitPriceCents: number;
   discountAmountCents: number;
+  taxType: ProductTaxType;
   taxAmountCents: number;
   lineTotalCents: number;
   createdAt: string;
