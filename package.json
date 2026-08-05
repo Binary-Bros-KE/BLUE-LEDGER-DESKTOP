@@ -1,6 +1,6 @@
 {
   "name": "blue-ledger-desktop",
-  "version": "1.0.10",
+  "version": "1.1.0",
   "description": "Offline-first multi-tenant POS desktop client for Blue Ledger.",
   "main": "./out/main/index.js",
   "scripts": {
@@ -10,6 +10,7 @@
     "preview": "electron-vite preview",
     "package": "npm run build && electron-builder --dir",
     "dist:win": "npm run build && electron-builder --win",
+    "dist:mac": "npm run build && electron-builder --mac",
     "lint": "eslint .",
     "format": "prettier --write ."
   },
@@ -67,7 +68,7 @@
     "asar": false,
     "appId": "com.blueledger.desktop",
     "productName": "Blue Ledger POS",
-    "icon": "resources/icons/BLUE_LEDGER.png",
+    "icon": "resources/icons/BLUE_LEDGER_1024.png",
     "directories": {
       "buildResources": "resources",
       "output": "release"
@@ -88,7 +89,10 @@
     ],
     "win": {
       "target": [
-        "nsis"
+        {
+          "target": "nsis",
+          "arch": ["x64", "ia32"]
+        }
       ],
       "artifactName": "Blue-Ledger-POS-${version}-${arch}.${ext}"
     },
@@ -97,6 +101,18 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["x64", "arm64"] },
+        { "target": "zip", "arch": ["x64", "arm64"] }
+      ],
+      "category": "public.app-category.business",
+      "artifactName": "Blue-Ledger-POS-${version}-${arch}.${ext}",
+      "identity": null
+    },
+    "dmg": {
+      "artifactName": "Blue-Ledger-POS-${version}-${arch}.${ext}"
     }
   }
 }

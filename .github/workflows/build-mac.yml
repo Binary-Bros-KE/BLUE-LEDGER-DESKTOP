@@ -1,0 +1,36 @@
+name: Build Mac (unsigned)
+
+# Manual only — a macOS runner costs 10x the Actions minutes of Linux/Windows, and this repo ships
+# several times a day, so auto-building on every push to main would burn through the minutes budget
+# fast. Trigger it by hand from the Actions tab whenever a Mac-ready release is needed.
+on:
+  workflow_dispatch:
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build
+      - name: Build unsigned .dmg + .zip (x64 + arm64)
+        # identity: null in package.json's build.mac config already disables signing; this env var
+        # is belt-and-suspenders so electron-builder never even attempts to discover a keychain
+        # identity on the runner (there isn't one — this is an unsigned build, see build-mac note in
+        # package.json). Clients will see a Gatekeeper "unidentified developer" warning on first
+        # launch and need to right-click → Open once, or run `xattr -cr /Applications/Blue\ Ledger\ POS.app`.
+        run: npx electron-builder --mac
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Upload .dmg/.zip + latest-mac.yml to VPS releases
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "release/*.dmg,release/*.zip,release/latest-mac.yml"
+          target: "~/BLUE-LEDGER-SERVER/releases/"
+          strip_components: 1
