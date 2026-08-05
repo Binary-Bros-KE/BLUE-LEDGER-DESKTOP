@@ -402,15 +402,18 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
     if (!row) return null;
     return {
       id: row.id,
-      productId: row.product_id,
-      locationId: row.location_id,
+      // stock_movements has no APPLY_CONFIG entry (see refColumnsFor's bespokeColumns map), so
+      // unlike every generic-path entity it never got alias-translation on push for free — fixed
+      // here directly rather than bending it into that machinery for just one entity.
+      productId: resolveCloudRef("products", row.product_id),
+      locationId: resolveCloudRef("locations", row.location_id),
       movementType: row.movement_type,
       quantityChange: row.quantity_change,
       referenceType: row.reference_type,
       referenceId: row.reference_id,
       performedBy: row.performed_by,
       notes: row.notes,
-      allocationStorefrontId: row.allocation_storefront_id,
+      allocationStorefrontId: resolveCloudRef("locations", row.allocation_storefront_id),
       allocationExplicit: Boolean(row.allocation_explicit),
       localCreatedAt: row.created_at,
       // Immutable — no separate updated_at column locally; its "last updated" IS its creation time.
@@ -471,7 +474,10 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       reviewedAt: row.reviewed_at,
       items: itemRows.map((i) => ({
         id: i.id,
-        productId: i.product_id,
+        // Alias-translate before push — see resolveRef's pull-side counterpart in the apply
+        // functions below for the full reasoning (a natural-key merge on "products" can supersede
+        // this device's own local id with a different cloud id at any time).
+        productId: resolveCloudRef("products", i.product_id),
         quantityRequested: i.quantity_requested,
         createdAt: i.created_at
       })),
@@ -598,7 +604,10 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
     }>;
     const items = itemRows.map((i) => ({
       id: i.id,
-      productId: i.product_id,
+      // Alias-translate before push — see resolveRef's pull-side counterpart in the apply
+      // functions below for the full reasoning (a natural-key merge on "products" can supersede
+      // this device's own local id with a different cloud id at any time).
+      productId: resolveCloudRef("products", i.product_id),
       quantity: i.quantity,
       unitPriceCents: i.unit_price_cents,
       discountAmountCents: i.discount_amount_cents,
@@ -621,7 +630,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       ? {
           id: deliveryRow.id,
           deliveryNoteNumber: deliveryRow.delivery_note_number,
-          riderId: deliveryRow.rider_id,
+          riderId: resolveCloudRef("riders", deliveryRow.rider_id),
           recipientName: deliveryRow.recipient_name,
           country: deliveryRow.country,
           town: deliveryRow.town,
@@ -796,7 +805,10 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       items: itemRows.map((i) => ({
         id: i.id,
         saleItemId: i.sale_item_id,
-        productId: i.product_id,
+        // Alias-translate before push — see resolveRef's pull-side counterpart in the apply
+        // functions below for the full reasoning (a natural-key merge on "products" can supersede
+        // this device's own local id with a different cloud id at any time).
+        productId: resolveCloudRef("products", i.product_id),
         quantity: i.quantity,
         unitPriceCents: i.unit_price_cents,
         lineTotalCents: i.line_total_cents,
@@ -826,7 +838,10 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
     }>;
     const items = itemRows.map((i) => ({
       id: i.id,
-      productId: i.product_id,
+      // Alias-translate before push — see resolveRef's pull-side counterpart in the apply
+      // functions below for the full reasoning (a natural-key merge on "products" can supersede
+      // this device's own local id with a different cloud id at any time).
+      productId: resolveCloudRef("products", i.product_id),
       quantity: i.quantity,
       unitPriceCents: i.unit_price_cents,
       discountAmountCents: i.discount_amount_cents,
@@ -849,7 +864,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       ? {
           id: deliveryRow.id,
           deliveryNoteNumber: deliveryRow.delivery_note_number,
-          riderId: deliveryRow.rider_id,
+          riderId: resolveCloudRef("riders", deliveryRow.rider_id),
           recipientName: deliveryRow.recipient_name,
           country: deliveryRow.country,
           town: deliveryRow.town,
@@ -908,7 +923,10 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
     }>;
     const items = itemRows.map((i) => ({
       id: i.id,
-      productId: i.product_id,
+      // Alias-translate before push — see resolveRef's pull-side counterpart in the apply
+      // functions below for the full reasoning (a natural-key merge on "products" can supersede
+      // this device's own local id with a different cloud id at any time).
+      productId: resolveCloudRef("products", i.product_id),
       orderedQuantity: i.ordered_quantity,
       receivedQuantity: i.received_quantity,
       unitCostCents: i.unit_cost_cents,
@@ -1249,7 +1267,7 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
   categories: {
     table: "categories",
     columns: [
-      { local: "parent_id", cloud: "parentId" },
+      { local: "parent_id", cloud: "parentId", refEntity: "categories" },
       { local: "name", cloud: "name" },
       { local: "description", cloud: "description" },
       { local: "color", cloud: "color" },
@@ -1335,7 +1353,7 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       { local: "name", cloud: "name" },
       { local: "short_name", cloud: "shortName" },
       { local: "description", cloud: "description" },
-      { local: "category_id", cloud: "categoryId" },
+      { local: "category_id", cloud: "categoryId", refEntity: "categories" },
       { local: "storefront_id", cloud: "storefrontId", refEntity: "locations" },
       { local: "unit_of_measure", cloud: "unitOfMeasure" },
       { local: "buying_price_cents", cloud: "buyingPriceCents" },
@@ -1448,7 +1466,7 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
     table: "main_store_allocations",
     naturalKey: { local: "bucket_key", cloud: "bucketKey" },
     columns: [
-      { local: "product_id", cloud: "productId" },
+      { local: "product_id", cloud: "productId", refEntity: "products" },
       { local: "storefront_id", cloud: "storefrontId", refEntity: "locations" },
       { local: "quantity", cloud: "quantity" },
       { local: "bucket_key", cloud: "bucketKey" }
@@ -1509,7 +1527,7 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
   sale_voids: {
     table: "sale_voids",
     columns: [
-      { local: "sale_id", cloud: "saleId" },
+      { local: "sale_id", cloud: "saleId", refEntity: "sales" },
       { local: "status", cloud: "status" },
       { local: "reason", cloud: "reason" },
       { local: "notes", cloud: "notes" },
@@ -1773,7 +1791,11 @@ const SALE_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: Syn
   { local: "receipt_number", cloud: "receiptNumber" },
   { local: "location_id", cloud: "locationId", refEntity: "locations" },
   { local: "employee_id", cloud: "employeeId", refEntity: "employees" },
-  { local: "customer_id", cloud: "customerId" },
+  // Missing this tag (unlike location_id/employee_id right above) meant customer_id was pushed AND
+  // pulled 100% raw, with zero alias/existence protection — the real cause behind a rash of
+  // permanently FK-failing sales for a customer id that no longer exists anywhere in the cloud
+  // (deleted, or never actually synced). Every other refEntity column here was already safe.
+  { local: "customer_id", cloud: "customerId", refEntity: "customers" },
   { local: "sale_status", cloud: "saleStatus" },
   { local: "subtotal_cents", cloud: "subtotalCents" },
   { local: "discount_amount_cents", cloud: "discountAmountCents" },
@@ -1891,7 +1913,11 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
       ).run(
         item.id as string,
         id,
-        item.productId as string,
+        // NOT NULL — a natural-key merge on "products" may have superseded this device's own row
+        // under a different cloud id (see resolveRefOrNull's own doc comment on the same class of
+        // issue for header-level refs); resolveRef translates through that alias if one exists, and
+        // otherwise passes the raw id through unchanged so the existing cross-page retry still works.
+        resolveRef("products", item.productId) as string,
         item.quantity as number,
         item.unitPriceCents as number,
         (item.discountAmountCents as number | undefined) ?? 0,
@@ -1929,7 +1955,7 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         tenantId: localTenantId,
         deliveryNoteNumber: delivery.deliveryNoteNumber as string,
         saleId: id,
-        riderId: delivery.riderId as string | null,
+        riderId: resolveRefOrNull("riders", delivery.riderId) as string | null,
         recipientName: delivery.recipientName as string,
         country: delivery.country as string | null,
         town: delivery.town as string | null,
@@ -2087,7 +2113,8 @@ function upsertDocumentHeader(
 
 const QUOTATION_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity }> = [
   { local: "quotation_number", cloud: "quotationNumber" },
-  { local: "customer_id", cloud: "customerId" },
+  // Same missing-tag bug as SALE_HEADER_COLUMNS' customer_id above — fixed identically.
+  { local: "customer_id", cloud: "customerId", refEntity: "customers" },
   { local: "location_id", cloud: "locationId", refEntity: "locations" },
   { local: "employee_id", cloud: "employeeId", refEntity: "employees" },
   { local: "status", cloud: "status" },
@@ -2097,7 +2124,7 @@ const QUOTATION_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?
   { local: "grand_total_cents", cloud: "grandTotalCents" },
   { local: "valid_until", cloud: "validUntil" },
   { local: "notes", cloud: "notes" },
-  { local: "converted_sale_id", cloud: "convertedSaleId" },
+  { local: "converted_sale_id", cloud: "convertedSaleId", refEntity: "sales" },
   { local: "converted_at", cloud: "convertedAt" }
 ];
 
@@ -2121,7 +2148,7 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
       ).run(
         item.id as string,
         id,
-        item.productId as string,
+        resolveRef("products", item.productId) as string,
         item.quantity as number,
         item.unitPriceCents as number,
         (item.discountAmountCents as number | undefined) ?? 0,
@@ -2158,7 +2185,7 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
         deliveryNoteNumber: delivery.deliveryNoteNumber as string,
         saleId: null,
         quotationId: id,
-        riderId: delivery.riderId as string | null,
+        riderId: resolveRefOrNull("riders", delivery.riderId) as string | null,
         recipientName: delivery.recipientName as string,
         country: delivery.country as string | null,
         town: delivery.town as string | null,
@@ -2177,7 +2204,8 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
 
 const PURCHASE_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity }> = [
   { local: "purchase_number", cloud: "purchaseNumber" },
-  { local: "supplier_id", cloud: "supplierId" },
+  // Same missing-tag bug as SALE_HEADER_COLUMNS' customer_id — fixed identically.
+  { local: "supplier_id", cloud: "supplierId", refEntity: "suppliers" },
   { local: "supplier_invoice_number", cloud: "supplierInvoiceNumber" },
   { local: "location_id", cloud: "locationId", refEntity: "locations" },
   { local: "status", cloud: "status" },
@@ -2218,7 +2246,7 @@ function applyPurchasePulledRow(row: Record<string, unknown>, force: boolean): v
       ).run(
         item.id as string,
         id,
-        item.productId as string,
+        resolveRef("products", item.productId) as string,
         item.orderedQuantity as number,
         (item.receivedQuantity as number | undefined) ?? 0,
         item.unitCostCents as number,
@@ -2234,7 +2262,7 @@ function applyPurchasePulledRow(row: Record<string, unknown>, force: boolean): v
 }
 
 const SALE_RETURN_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity }> = [
-  { local: "sale_id", cloud: "saleId" },
+  { local: "sale_id", cloud: "saleId", refEntity: "sales" },
   { local: "status", cloud: "status" },
   { local: "reason", cloud: "reason" },
   { local: "notes", cloud: "notes" },
@@ -2261,7 +2289,7 @@ function applySaleReturnPulledRow(row: Record<string, unknown>, force: boolean):
         item.id as string,
         id,
         item.saleItemId as string,
-        item.productId as string,
+        resolveRef("products", item.productId) as string,
         item.quantity as number,
         item.unitPriceCents as number,
         item.lineTotalCents as number,
@@ -2303,7 +2331,9 @@ function applyStockMovementPulledRow(row: Record<string, unknown>): void {
     if (alreadyApplied) return;
 
     const localTenantId = tenantRepository.findTenantRow()!.id;
-    const productId = row.productId as string;
+    // NOT NULL — same alias-translation reasoning as sale_items.product_id above; stock_movements
+    // has no APPLY_CONFIG entry at all, so unlike every other entity it never got this for free.
+    const productId = resolveRef("products", row.productId) as string;
     const locationId = resolveRef("locations", row.locationId) as string;
     const quantityChange = row.quantityChange as number;
     // Kept only as historical/audit context on the ledger row itself — no longer replayed into
@@ -2379,7 +2409,13 @@ function applyStockRequestPulledRow(row: Record<string, unknown>, force: boolean
       db.prepare(
         `INSERT INTO stock_request_items (id, stock_request_id, product_id, quantity_requested, created_at)
          VALUES (?, ?, ?, ?, ?)`
-      ).run(item.id as string, id, item.productId as string, item.quantityRequested as number, item.createdAt as string);
+      ).run(
+        item.id as string,
+        id,
+        resolveRef("products", item.productId) as string,
+        item.quantityRequested as number,
+        item.createdAt as string
+      );
     }
   });
 }
