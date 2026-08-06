@@ -1,6 +1,7 @@
 import { getDatabase } from "@main/database/connection";
 import type { EmployeeCreateInput, EmployeeUpdateInput } from "@shared/schemas/employee";
 import type { Employee, EmployeeListItem, EmployeeStatus, EmployeeSyncStatus, Gender } from "@shared/types/employee";
+import type { SalaryLineItem } from "@shared/types/salary";
 
 export type EmployeeRow = {
   id: string;
@@ -33,6 +34,9 @@ export type EmployeeRow = {
   last_synced_at: string | null;
   photo_path: string | null;
   synced_updated_at: string | null;
+  default_basic_salary_cents: number | null;
+  default_allowances_json: string;
+  default_deductions_json: string;
 };
 
 export type EmployeeListRow = EmployeeRow & {
@@ -121,9 +125,10 @@ export function insertEmployeeRow(
       INSERT INTO employees (
         id, tenant_id, employee_code, first_name, middle_name, last_name, gender, date_of_birth,
         phone, alternative_phone, email, branch_id, department, job_title, hire_date, role_id,
-        pin_hash, username, password_hash, status, photo_path, created_at, updated_at, created_by, sync_status
+        pin_hash, username, password_hash, status, photo_path, default_basic_salary_cents,
+        default_allowances_json, default_deductions_json, created_at, updated_at, created_by, sync_status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
     `
     )
     .run(
@@ -148,6 +153,9 @@ export function insertEmployeeRow(
       input.passwordHash,
       input.status,
       input.photoPath,
+      input.defaultBasicSalaryCents,
+      JSON.stringify(input.defaultAllowances),
+      JSON.stringify(input.defaultDeductions),
       now,
       now,
       input.createdBy
@@ -189,6 +197,9 @@ export function updateEmployeeRow(
         password_hash = ?,
         status = ?,
         photo_path = ?,
+        default_basic_salary_cents = ?,
+        default_allowances_json = ?,
+        default_deductions_json = ?,
         sync_status = 'pending',
         updated_at = ?
       WHERE id = ?
@@ -214,6 +225,9 @@ export function updateEmployeeRow(
       input.passwordHash,
       input.status,
       input.photoPath,
+      input.defaultBasicSalaryCents,
+      JSON.stringify(input.defaultAllowances),
+      JSON.stringify(input.defaultDeductions),
       now,
       id
     );
@@ -263,6 +277,15 @@ export function recordSuccessfulLoginRow(id: string, loginAt: string): void {
     .run(loginAt, id);
 }
 
+function parseSalaryLineItems(raw: string): SalaryLineItem[] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as SalaryLineItem[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 export function mapEmployeeRow(row: EmployeeRow): Employee {
   return {
     id: row.id,
@@ -293,7 +316,10 @@ export function mapEmployeeRow(row: EmployeeRow): Employee {
     createdBy: row.created_by,
     syncStatus: row.sync_status as EmployeeSyncStatus,
     lastSyncedAt: row.last_synced_at,
-    photoPath: row.photo_path
+    photoPath: row.photo_path,
+    defaultBasicSalaryCents: row.default_basic_salary_cents,
+    defaultAllowances: parseSalaryLineItems(row.default_allowances_json),
+    defaultDeductions: parseSalaryLineItems(row.default_deductions_json)
   };
 }
 

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { optionalText } from "@shared/schemas/common";
+import { salaryLineItemSchema } from "@shared/schemas/salary";
 import { EMPLOYEE_STATUS_OPTIONS, GENDER_OPTIONS, type EmployeeStatus, type Gender } from "@shared/types/employee";
 
 const employeeStatusValues = EMPLOYEE_STATUS_OPTIONS.map((option) => option.value) as [
@@ -50,7 +51,17 @@ const employeeBaseFields = {
   roleId: nullableId,
   username: optionalText(50),
   status: z.enum(employeeStatusValues),
-  photoPath: optionalText(500)
+  photoPath: optionalText(500),
+  defaultBasicSalaryCents: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(1_000_000_000)
+    .nullable()
+    .optional()
+    .transform((value) => value ?? null),
+  defaultAllowances: z.array(salaryLineItemSchema).optional().default([]),
+  defaultDeductions: z.array(salaryLineItemSchema).optional().default([])
 };
 
 export const employeeCreateSchema = z

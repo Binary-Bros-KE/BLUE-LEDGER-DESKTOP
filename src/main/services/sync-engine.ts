@@ -569,6 +569,14 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       username: e.username,
       status: e.status,
       lastLogin: e.lastLogin,
+      defaultBasicSalaryCents: e.defaultBasicSalaryCents,
+      // Cloud/Prisma field names carry the "Json" suffix (matching Salary.allowancesJson's own
+      // established precedent) even though the local domain field doesn't — Prisma's upsert()
+      // rejects any unrecognized key in its data object outright, which is exactly what "Invalid
+      // `prisma.employee.upsert()` invocation" meant here: these were pushed as bare
+      // defaultAllowances/defaultDeductions, which don't exist as columns on the Employee model.
+      defaultAllowancesJson: e.defaultAllowances,
+      defaultDeductionsJson: e.defaultDeductions,
       // Now sent (read from the RAW row, not `e` — mapEmployeeRow deliberately keeps these out of
       // the domain type for every OTHER local use, e.g. never rendered in the UI). A device that
       // never sees this employee's real secret can't let them log in with their existing PIN after
@@ -1477,7 +1485,16 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       { local: "username", cloud: "username" },
       { local: "status", cloud: "status" },
       { local: "pin_hash", cloud: "pinHash" },
-      { local: "password_hash", cloud: "passwordHash" }
+      { local: "password_hash", cloud: "passwordHash" },
+      { local: "default_basic_salary_cents", cloud: "defaultBasicSalaryCents" },
+      // default: "[]" (a pre-stringified string, not a JS array) — toLocalValue's null/undefined
+      // branch returns col.default as-is, BEFORE the type:"json" branch would normally stringify it,
+      // so this must already be the exact TEXT this NOT NULL column expects. Needed so an older
+      // device's payload that predates this feature (missing these keys entirely) doesn't crash
+      // trying to bind undefined into a NOT NULL column — same bug class as
+      // [[project_syncedat_update_propagation_bug]]'s sibling issues this session.
+      { local: "default_allowances_json", cloud: "defaultAllowancesJson", type: "json", default: "[]" },
+      { local: "default_deductions_json", cloud: "defaultDeductionsJson", type: "json", default: "[]" }
     ]
   },
   roles: {

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, Plus, Search, X } from "lucide-react";
+import { Loader2, Search } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
+import { LineItemEditor, toLineDrafts, toLineItems, type LineDraft } from "@renderer/shared/components/LineItemEditor";
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
@@ -12,90 +13,6 @@ import type { Salary } from "@shared/types/salary";
 function currentPayPeriod(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-}
-
-type LineDraft = { key: string; name: string; amount: string };
-
-function emptyLine(): LineDraft {
-  return { key: crypto.randomUUID(), name: "", amount: "" };
-}
-
-function LineItemEditor({
-  title,
-  addLabel,
-  lines,
-  onChange
-}: {
-  title: string;
-  addLabel: string;
-  lines: LineDraft[];
-  onChange: (lines: LineDraft[]) => void;
-}): React.JSX.Element {
-  function updateLine(key: string, patch: Partial<LineDraft>): void {
-    onChange(lines.map((line) => (line.key === key ? { ...line, ...patch } : line)));
-  }
-
-  function removeLine(key: string): void {
-    onChange(lines.filter((line) => line.key !== key));
-  }
-
-  function addLine(): void {
-    onChange([...lines, emptyLine()]);
-  }
-
-  return (
-    <div>
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">{title}</span>
-        <button
-          type="button"
-          onClick={addLine}
-          className="flex items-center gap-1 text-[11px] font-extrabold uppercase text-accent hover:underline cursor-pointer"
-        >
-          <Plus className="size-3" aria-hidden="true" />
-          {addLabel}
-        </button>
-      </div>
-      {lines.length === 0 ? (
-        <p className="mt-1.5 text-xs font-semibold text-muted">None added.</p>
-      ) : (
-        <div className="mt-1.5 space-y-2">
-          {lines.map((line) => (
-            <div key={line.key} className="flex items-center gap-2">
-              <input
-                type="text"
-                value={line.name}
-                onChange={(event) => updateLine(line.key, { name: event.target.value })}
-                placeholder="e.g. Transport Allowance"
-                className="h-9 flex-1 rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
-              />
-              <input
-                type="number"
-                min={0}
-                step="0.01"
-                value={line.amount}
-                onChange={(event) => updateLine(line.key, { amount: event.target.value })}
-                placeholder="0.00"
-                className="h-9 w-28 flex-none rounded-lg border border-line bg-white px-2 text-right text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
-              />
-              <button
-                type="button"
-                onClick={() => removeLine(line.key)}
-                aria-label="Remove"
-                className="grid size-9 flex-none place-items-center rounded-lg border border-line text-muted hover:bg-danger-soft hover:text-danger cursor-pointer"
-              >
-                <X className="size-3.5" aria-hidden="true" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function toLineDrafts(items: Array<{ name: string; amountCents: number }>): LineDraft[] {
-  return items.map((item) => ({ key: crypto.randomUUID(), name: item.name, amount: fromCents(item.amountCents) }));
 }
 
 export function SalaryFormModal({
@@ -130,12 +47,18 @@ export function SalaryFormModal({
   useEffect(() => {
     if (!open) return;
     if (completingDraft) {
+      const employee = employees.find((candidate) => candidate.id === completingDraft.employeeId) ?? null;
       setEmployeeId(completingDraft.employeeId);
       setEmployeeSearch("");
       setPayPeriod(completingDraft.payPeriod);
-      setBasicSalary("");
-      setAllowanceLines([]);
-      setDeductionLines(toLineDrafts(completingDraft.deductions));
+      // Same pre-fill as picking a fresh employee below — this path just never went through that
+      // click handler, since the employee here is already locked in from the draft itself.
+      setBasicSalary(employee?.defaultBasicSalaryCents != null ? fromCents(employee.defaultBasicSalaryCents) : "");
+      setAllowanceLines(toLineDrafts(employee?.defaultAllowances ?? []));
+      // The draft's own deductions (e.g. the advance already recorded) come first and are never
+      // dropped — the employee's saved default deductions are appended alongside them, not in
+      // place of them.
+      setDeductionLines([...toLineDrafts(completingDraft.deductions), ...toLineDrafts(employee?.defaultDeductions ?? [])]);
       setPaymentMethodId("");
       setReference("");
       setNotes(completingDraft.notes ?? "");
@@ -152,7 +75,7 @@ export function SalaryFormModal({
     setReference("");
     setNotes("");
     setError(null);
-  }, [open, completingDraft]);
+  }, [open, completingDraft, employees]);
 
   const activeEmployees = useMemo(() => employees.filter((employee) => employee.status === "active"), [employees]);
   const selectedEmployee = activeEmployees.find((employee) => employee.id === employeeId) ?? null;
@@ -172,12 +95,6 @@ export function SalaryFormModal({
     [paymentMethods]
   );
   const selectedPaymentMethod = activePaymentMethods.find((method) => method.id === paymentMethodId) ?? null;
-
-  function toLineItems(lines: LineDraft[]): Array<{ name: string; amountCents: number }> {
-    return lines
-      .filter((line) => line.name.trim() !== "" && toCents(line.amount) > 0)
-      .map((line) => ({ name: line.name.trim(), amountCents: toCents(line.amount) }));
-  }
 
   const allowanceItems = toLineItems(allowanceLines);
   const deductionItems = toLineItems(deductionLines);
@@ -283,6 +200,19 @@ export function SalaryFormModal({
                       onClick={() => {
                         setEmployeeId(employee.id);
                         setEmployeeSearch("");
+                        // A starting point only — the employee's own saved defaults, never touched
+                        // by editing/removing a line here. Only seeds fields that are still at their
+                        // untouched "just opened the form" state, so re-picking a different employee
+                        // after already typing something never silently clobbers it.
+                        if (basicSalary === "" && employee.defaultBasicSalaryCents !== null) {
+                          setBasicSalary(fromCents(employee.defaultBasicSalaryCents));
+                        }
+                        if (allowanceLines.length === 0 && employee.defaultAllowances.length > 0) {
+                          setAllowanceLines(toLineDrafts(employee.defaultAllowances));
+                        }
+                        if (deductionLines.length === 0 && employee.defaultDeductions.length > 0) {
+                          setDeductionLines(toLineDrafts(employee.defaultDeductions));
+                        }
                       }}
                       className="flex w-full items-center justify-between px-3.5 py-2 text-left text-sm hover:bg-soft cursor-pointer"
                     >

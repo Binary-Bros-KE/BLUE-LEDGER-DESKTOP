@@ -228,13 +228,15 @@ export function SettingsRoute(): React.JSX.Element {
                 type="number"
                 value={form.paperWidth}
                 onChange={(value) => updateField("paperWidth", value)}
-                placeholder="70"
+                placeholder="49"
                 className="mt-4 max-w-[220px]"
               />
               <p className="mt-1.5 text-[11px] font-semibold text-muted">
-                Controls how wide receipts/invoices/quotations print on a USB thermal printer. If text looks
-                shrunk or doesn&rsquo;t fill the roll, increase this a little at a time and reprint until it fills
-                the paper — the exact right number varies by printer model.
+                Controls how wide receipts/invoices/quotations print on a USB thermal printer. Content prints
+                at its true size (not shrunk to fit), so setting this too high cuts off the right edge instead
+                of just looking narrow. Increase it one step at a time and reprint — the moment anything on
+                the right (a column, a total) gets cut off, back off to the last value that printed cleanly.
+                The exact right number varies by printer model.
               </p>
 
               <div className="mt-4">

@@ -1,3 +1,5 @@
+import type { SalaryLineItem } from "@shared/types/salary";
+
 export type EmployeeId = string;
 
 export const EMPLOYEE_STATUS_OPTIONS = [
@@ -37,6 +39,11 @@ export type EmployeeInputFields = {
   username: string | null;
   status: EmployeeStatus;
   photoPath: string | null;
+  /** A starting point for the Process Salary form only — never read anywhere else. Editing/removing
+   * a line while processing a salary changes just that one payslip, never these saved defaults. */
+  defaultBasicSalaryCents: number | null;
+  defaultAllowances: SalaryLineItem[];
+  defaultDeductions: SalaryLineItem[];
 };
 
 /**

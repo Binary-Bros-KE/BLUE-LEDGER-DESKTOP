@@ -7,11 +7,13 @@ import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import { Field, SelectField } from "@renderer/shared/components/form-fields";
+import { LineItemEditor, toLineDrafts, toLineItems, type LineDraft } from "@renderer/shared/components/LineItemEditor";
 import { Modal } from "@renderer/shared/components/Modal";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getDashboardVariant } from "@renderer/shared/lib/dashboard-role";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { fromCents, toCents } from "@renderer/shared/lib/money";
 import {
   EMPLOYEE_STATUS_OPTIONS,
   GENDER_OPTIONS,
@@ -43,6 +45,9 @@ type FormState = {
   confirmPin: string;
   password: string;
   photoPath: string | null;
+  defaultBasicSalary: string;
+  defaultAllowanceLines: LineDraft[];
+  defaultDeductionLines: LineDraft[];
 };
 
 const emptyForm: FormState = {
@@ -65,7 +70,10 @@ const emptyForm: FormState = {
   pin: "",
   confirmPin: "",
   password: "",
-  photoPath: null
+  photoPath: null,
+  defaultBasicSalary: "",
+  defaultAllowanceLines: [],
+  defaultDeductionLines: []
 };
 
 function toFormState(employee: EmployeeListItem): FormState {
@@ -89,7 +97,10 @@ function toFormState(employee: EmployeeListItem): FormState {
     pin: "",
     confirmPin: "",
     password: "",
-    photoPath: employee.photoPath
+    photoPath: employee.photoPath,
+    defaultBasicSalary: fromCents(employee.defaultBasicSalaryCents),
+    defaultAllowanceLines: toLineDrafts(employee.defaultAllowances),
+    defaultDeductionLines: toLineDrafts(employee.defaultDeductions)
   };
 }
 
@@ -301,7 +312,10 @@ export function EmployeesRoute(): React.JSX.Element {
       pin: form.pin,
       confirmPin: form.confirmPin,
       password: form.password,
-      photoPath: form.photoPath
+      photoPath: form.photoPath,
+      defaultBasicSalaryCents: form.defaultBasicSalary.trim() === "" ? null : toCents(form.defaultBasicSalary),
+      defaultAllowances: toLineItems(form.defaultAllowanceLines),
+      defaultDeductions: toLineItems(form.defaultDeductionLines)
     };
 
     try {
@@ -752,6 +766,39 @@ export function EmployeesRoute(): React.JSX.Element {
                 value={form.status}
                 onChange={(value) => updateField("status", value as EmployeeStatus)}
                 options={EMPLOYEE_STATUS_OPTIONS}
+              />
+            </div>
+          </div>
+
+          <div className="mt-5 border-t border-line pt-5">
+            <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Default Compensation</p>
+            <p className="mt-1 text-[11px] font-semibold text-muted">
+              Optional — pre-fills the Process Salary form when this employee is selected. Any line can still be
+              edited or removed while processing a specific salary without changing what&rsquo;s saved here.
+            </p>
+            <div className="mt-3">
+              <Field
+                label="Default Basic Salary"
+                type="number"
+                value={form.defaultBasicSalary}
+                onChange={(value) => updateField("defaultBasicSalary", value)}
+                placeholder="0.00"
+              />
+            </div>
+            <div className="mt-4">
+              <LineItemEditor
+                title="Default Allowances"
+                addLabel="Add Allowance"
+                lines={form.defaultAllowanceLines}
+                onChange={(lines) => updateField("defaultAllowanceLines", lines)}
+              />
+            </div>
+            <div className="mt-4">
+              <LineItemEditor
+                title="Default Deductions"
+                addLabel="Add Deduction"
+                lines={form.defaultDeductionLines}
+                onChange={(lines) => updateField("defaultDeductionLines", lines)}
               />
             </div>
           </div>

@@ -266,7 +266,15 @@ async function printReceiptToSystemPrinter(vm: ReceiptViewModel, settings: Print
   const tempPath = join(app.getPath("temp"), `blue-ledger-receipt-${randomUUID()}.pdf`);
   await writeFile(tempPath, buffer);
   try {
-    await printPdfToPrinter(tempPath, { silent: true, ...(settings.address ? { printer: settings.address } : {}) });
+    // `scale: "noscale"` is the actual fix for the blank-space-above-content bug, not the page
+    // height computed above — pdf-to-printer (SumatraPDF under the hood) defaults to "fit" when no
+    // scale is given, which CENTERS our short custom-size PDF page within whatever paper length the
+    // Windows printer driver has configured, regardless of the PDF's own declared page size. Since
+    // the roll only physically feeds/cuts near where content ends, that centering shows up as a
+    // large blank gap before the content with the content itself pushed toward the bottom. noscale
+    // prints the PDF at its own true size with no repositioning — recommended by SumatraPDF's own
+    // maintainers specifically for continuous-roll/thermal printers.
+    await printPdfToPrinter(tempPath, { silent: true, scale: "noscale", ...(settings.address ? { printer: settings.address } : {}) });
   } finally {
     await unlink(tempPath).catch(() => {});
   }
@@ -400,8 +408,8 @@ function buildReceiptHtml(vm: ReceiptViewModel): string {
 <meta charset="utf-8" />
 <style>
   * { box-sizing: border-box; }
-  body { font-family: Arial, 'Segoe UI', Helvetica, sans-serif; color: #000; margin: 0; padding: 4px 6px; font-size: 11px; font-weight: 700; }
-  .receipt { max-width: 100%; margin: 0 auto; border: 2px solid #000; padding: 8px; }
+  body { font-family: Arial, 'Segoe UI', Helvetica, sans-serif; color: #000; margin: 0; padding: 1px 2px; font-size: 11px; font-weight: 700; }
+  .receipt { max-width: 100%; margin: 0 auto; border: 2px solid #000; padding: 3px; }
   h1 { font-size: 14px; text-align: center; margin: 0 0 4px; }
   .center { text-align: center; }
   .muted { color: #000; font-size: 10px; }
@@ -609,24 +617,28 @@ async function renderHtmlToPdfBuffer(
  * printing a huge blank gap before the content — one that grows worse the wider the page gets,
  * since a wider page reflows the SAME content into fewer/shorter lines (exactly what got reported).
  *
- * Fix: create the hidden render window at the TARGET print width in CSS px (96px/in — matching
- * printToPDF's own device-independent-pixel assumption) so on-screen reflow matches what will
- * actually print, measure the real rendered height via scrollHeight, then generate the PDF at
- * exactly that height (plus a small pad so nothing right at the bottom edge clips). */
+ * Fix: measure the real rendered content height, then generate the PDF at exactly that height. The
+ * FIRST attempt at this sized the hidden BrowserWindow itself to the target width in pixels
+ * (`width: Math.round(widthIn * 96)`) hoping on-screen layout would then match what printToPDF
+ * renders — it didn't: Windows' own window sizing doesn't translate 1:1 into CSS layout pixels (DPI
+ * scaling, `useContentSize` quirks on a window that's never shown), and the mismatch grew WORSE the
+ * wider the target width, up to genuinely under-measuring a long receipt's height enough to spill
+ * it onto a second physical print. Fixed properly here by forcing the width via CSS `in` units
+ * instead — an absolute, DPI-independent unit (1in is ALWAYS exactly 96px by the CSS spec, on any
+ * display) that both this on-screen measurement pass and printToPDF's own internal print-layout
+ * pass interpret identically, with no OS window-sizing step in between to drift. */
 async function renderThermalHtmlToPdfBuffer(html: string, widthIn: number): Promise<Buffer> {
-  const widthPx = Math.round(widthIn * 96);
-  const win = new BrowserWindow({ show: false, width: widthPx, height: 100, useContentSize: true });
+  const sizedHtml = html.replace("<head>", `<head><style>html, body { width: ${widthIn}in !important; }</style>`);
+  const win = new BrowserWindow({ show: false });
   try {
-    await win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(html).toString("base64")}`);
+    await win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(sizedHtml).toString("base64")}`);
     const contentHeightPx = (await win.webContents.executeJavaScript("document.documentElement.scrollHeight")) as number;
-    // Floor of widthIn (not just 1in) is deliberate: a short receipt (few items, no delivery/tax
-    // breakdown) can genuinely render shorter than it is wide, especially at a wider paperWidth
-    // setting — producing a page that's WIDER than it is TALL. That landscape-shaped page is what
-    // caused a real sideways print: something downstream in the Windows print pipeline auto-rotates
-    // to best-fit the printer based on the PDF's own page aspect ratio, regardless of the explicit
-    // `landscape: false` passed to printToPDF below. A continuous roll never needs a landscape page —
-    // guaranteeing height >= width keeps every thermal document portrait-shaped no matter how short.
-    const heightIn = Math.max(widthIn + 0.1, contentHeightPx / 96 + 0.1);
+    // Padded by 0.25in (not a token 0.1in) deliberately: under-measuring even slightly means real
+    // content overflows onto a second physical print (the exact regression this fix addresses), so
+    // this errs generous — a little extra blank paper is a far smaller cost than a split receipt.
+    // Floor of widthIn (not just some small minimum) guarantees the page is never wider than it is
+    // tall — a landscape-shaped page is what caused an earlier, separate sideways-print bug.
+    const heightIn = Math.max(widthIn + 0.25, contentHeightPx / 96 + 0.25);
     return await win.webContents.printToPDF({
       printBackground: true,
       landscape: false,
@@ -943,11 +955,10 @@ function buildInvoiceHtml(
       <tr class="balance"><td>Balance Due</td><td class="right">${money(sale.balanceDueCents)}</td></tr>
     </table>
 
-    ${buildTaxBreakdownHtml(computeTaxBreakdown(sale.items), business.vatRatePercent, (cents) => money(cents), "tax-breakdown")}
-
     ${
       sale.payments.length > 0
-        ? `<table>
+        ? `<p class="tax-breakdown-title">Payments Made</p>
+    <table>
       <thead>
         <tr><th>Date</th><th>Method</th><th>Reference</th><th>Received By</th><th class="right">Amount</th></tr>
       </thead>
@@ -955,6 +966,8 @@ function buildInvoiceHtml(
     </table>`
         : ""
     }
+
+    ${buildTaxBreakdownHtml(computeTaxBreakdown(sale.items), business.vatRatePercent, (cents) => money(cents), "tax-breakdown")}
 
     ${sale.invoiceNotes ? `<div class="notes"><strong>Notes</strong><p>${escapeHtml(sale.invoiceNotes)}</p></div>` : ""}
 
@@ -1062,8 +1075,8 @@ function buildInvoiceThermalHtml(sale: Sale, business: DocumentBusinessInfo): st
 <meta charset="utf-8" />
 <style>
   * { box-sizing: border-box; }
-  body { font-family: Arial, 'Segoe UI', Helvetica, sans-serif; color: #000; margin: 0; padding: 4px 6px; font-size: 11px; font-weight: 700; }
-  .receipt { max-width: 100%; margin: 0 auto; border: 2px solid #000; padding: 8px; }
+  body { font-family: Arial, 'Segoe UI', Helvetica, sans-serif; color: #000; margin: 0; padding: 1px 2px; font-size: 11px; font-weight: 700; }
+  .receipt { max-width: 100%; margin: 0 auto; border: 2px solid #000; padding: 3px; }
   h1 { font-size: 14px; text-align: center; margin: 0 0 4px; }
   .center { text-align: center; }
   .muted { color: #000; font-size: 10px; }
@@ -1147,7 +1160,9 @@ export async function printInvoiceViaThermal(saleId: string): Promise<PrinterAct
   const tempPath = join(app.getPath("temp"), `blue-ledger-invoice-${randomUUID()}.pdf`);
   await writeFile(tempPath, buffer);
   try {
-    await printPdfToPrinter(tempPath, { silent: true, ...(settings.address ? { printer: settings.address } : {}) });
+    // See printReceiptToSystemPrinter's own comment — noscale is the real fix for the blank-space
+    // bug, not the page height above.
+    await printPdfToPrinter(tempPath, { silent: true, scale: "noscale", ...(settings.address ? { printer: settings.address } : {}) });
     return { success: true, message: "Sent to printer" };
   } catch (err) {
     return { success: false, message: err instanceof Error ? err.message : "Failed to print invoice" };
@@ -1423,8 +1438,8 @@ function buildQuotationThermalHtml(quotation: Quotation, business: DocumentBusin
 <meta charset="utf-8" />
 <style>
   * { box-sizing: border-box; }
-  body { font-family: Arial, 'Segoe UI', Helvetica, sans-serif; color: #000; margin: 0; padding: 4px 6px; font-size: 11px; font-weight: 700; }
-  .receipt { max-width: 100%; margin: 0 auto; border: 2px solid #000; padding: 8px; }
+  body { font-family: Arial, 'Segoe UI', Helvetica, sans-serif; color: #000; margin: 0; padding: 1px 2px; font-size: 11px; font-weight: 700; }
+  .receipt { max-width: 100%; margin: 0 auto; border: 2px solid #000; padding: 3px; }
   h1 { font-size: 14px; text-align: center; margin: 0 0 4px; }
   .center { text-align: center; }
   .muted { color: #000; font-size: 10px; }
@@ -1501,7 +1516,9 @@ export async function printQuotationViaThermal(quotationId: string): Promise<Pri
   const tempPath = join(app.getPath("temp"), `blue-ledger-quotation-${randomUUID()}.pdf`);
   await writeFile(tempPath, buffer);
   try {
-    await printPdfToPrinter(tempPath, { silent: true, ...(settings.address ? { printer: settings.address } : {}) });
+    // See printReceiptToSystemPrinter's own comment — noscale is the real fix for the blank-space
+    // bug, not the page height above.
+    await printPdfToPrinter(tempPath, { silent: true, scale: "noscale", ...(settings.address ? { printer: settings.address } : {}) });
     return { success: true, message: "Sent to printer" };
   } catch (err) {
     return { success: false, message: err instanceof Error ? err.message : "Failed to print quotation" };
@@ -1845,8 +1862,8 @@ function buildDeliveryNoteThermalHtml(vm: DeliveryNoteViewModel): string {
 <meta charset="utf-8" />
 <style>
   * { box-sizing: border-box; }
-  body { font-family: Arial, 'Segoe UI', Helvetica, sans-serif; color: #000; margin: 0; padding: 4px 6px; font-size: 11px; font-weight: 700; }
-  .receipt { max-width: 100%; margin: 0 auto; border: 2px solid #000; padding: 8px; }
+  body { font-family: Arial, 'Segoe UI', Helvetica, sans-serif; color: #000; margin: 0; padding: 1px 2px; font-size: 11px; font-weight: 700; }
+  .receipt { max-width: 100%; margin: 0 auto; border: 2px solid #000; padding: 3px; }
   h1 { font-size: 14px; text-align: center; margin: 0 0 4px; }
   .center { text-align: center; }
   .muted { color: #000; font-size: 10px; }
@@ -1906,7 +1923,9 @@ export async function printDeliveryNoteViaThermal(deliveryNoteId: string): Promi
   const tempPath = join(app.getPath("temp"), `blue-ledger-delivery-note-${randomUUID()}.pdf`);
   await writeFile(tempPath, buffer);
   try {
-    await printPdfToPrinter(tempPath, { silent: true, ...(settings.address ? { printer: settings.address } : {}) });
+    // See printReceiptToSystemPrinter's own comment — noscale is the real fix for the blank-space
+    // bug, not the page height above.
+    await printPdfToPrinter(tempPath, { silent: true, scale: "noscale", ...(settings.address ? { printer: settings.address } : {}) });
     return { success: true, message: "Sent to printer" };
   } catch (err) {
     return { success: false, message: err instanceof Error ? err.message : "Failed to print delivery note" };

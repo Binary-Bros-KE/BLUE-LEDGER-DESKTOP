@@ -2183,6 +2183,22 @@ const migrations = [
         FROM stock_receipts sr WHERE sr.id = NEW.stock_receipt_id;
       END;
     `
+  },
+  {
+    version: 60,
+    name: "employee_default_compensation",
+    sql: `
+      -- Lets an employee's usual pay be saved once and reused every time a salary is processed for
+      -- them, instead of re-typing it each pay period. Purely a starting point for the Process
+      -- Salary form (SalaryFormModal) — never read anywhere else, and editing/removing a line there
+      -- only affects that one salary's own allowances_json/deductions_json, never these defaults.
+      -- default_basic_salary_cents is nullable (an employee with no saved default just gets a blank
+      -- field, same as today); the JSON columns default to '[]' so every existing employee row gets
+      -- a valid, parseable value without a separate backfill step.
+      ALTER TABLE employees ADD COLUMN default_basic_salary_cents INTEGER;
+      ALTER TABLE employees ADD COLUMN default_allowances_json TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE employees ADD COLUMN default_deductions_json TEXT NOT NULL DEFAULT '[]';
+    `
   }
 ] as const;
 

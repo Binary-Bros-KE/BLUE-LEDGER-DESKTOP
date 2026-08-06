@@ -31,11 +31,13 @@ export const DEFAULT_PRINTER_SETTINGS: PrinterSettings = {
   connectionType: "network",
   address: "",
   printerType: "epson",
-  // Was 48 — bumped now that this setting is actually wired into the thermal print pipeline's page
-  // width (see printer-service.ts's resolveThermalPageWidthIn). 70 is the client's own confirmed
-  // sweet spot on a real 80mm-roll printer, found by comparing against another POS's own receipts
-  // printed on the same printer/roll.
-  paperWidth: 70,
+  // Was 48, briefly bumped to 70 — but that number was found while printing still used SumatraPDF's
+  // default "fit" scaling (silently shrinking an oversized page to fit the real printable area,
+  // masking how wide 70 actually was). Once printing switched to `scale: "noscale"` (needed to fix a
+  // separate blank-space bug — see printPdfToPrinter's own call-site comments), wider values clipped
+  // content off the right edge. 49 is the client's own re-tested clean value under noscale — still
+  // worth testing per-printer since the true printable width varies by model.
+  paperWidth: 49,
   autoPrintOnSale: true
 };
 
