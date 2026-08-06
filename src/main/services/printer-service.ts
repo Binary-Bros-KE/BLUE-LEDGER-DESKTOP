@@ -9,12 +9,18 @@ import { getDatabase } from "@main/database/connection";
 import * as deliveryNoteRepository from "@main/database/repositories/delivery-note-repository";
 import * as employeeRepository from "@main/database/repositories/employee-repository";
 import * as locationRepository from "@main/database/repositories/location-repository";
+import * as productRepository from "@main/database/repositories/product-repository";
 import * as quotationRepository from "@main/database/repositories/quotation-repository";
 import * as saleRepository from "@main/database/repositories/sale-repository";
 import * as serviceChargeRepository from "@main/database/repositories/service-charge-repository";
+import * as stockReceiptRepository from "@main/database/repositories/stock-receipt-repository";
 import * as tenantRepository from "@main/database/repositories/tenant-repository";
 import { requirePermission } from "@main/services/auth-service";
-import { readManagedBusinessLogoPreview, readManagedLocationLogoPreview } from "@main/services/image-service";
+import {
+  readManagedBusinessLogoPreview,
+  readManagedLocationLogoPreview,
+  readManagedProductImagePreview
+} from "@main/services/image-service";
 import { getSalary } from "@main/services/salary-service";
 import { getCustomerStatement } from "@main/services/statement-service";
 import { PRINTER_SETTINGS_STORAGE_KEY } from "@shared/constants/app";
@@ -111,7 +117,23 @@ function buildPrinter(settings: PrinterSettings): ThermalPrinter {
   });
 }
 
-function loadReceiptData(saleId: string): { sale: Sale; business: Parameters<typeof buildReceiptViewModel>[1] } {
+/** Converts the "Paper Width (characters per line)" setting into a physical PDF page width for the
+ * thermal HTML->PDF print pipeline (receipt/invoice/quotation/delivery-note-via-thermal). Chromium's
+ * printToPDF has no notion of "characters," only physical page dimensions — every one of those print
+ * paths used to hardcode a fixed 3.15in (80mm) page regardless of this setting, which is exactly why
+ * changing it never visibly changed anything. Anchored so the default (48 chars) maps to that same
+ * 3.15in, preserving today's output for anyone who's never touched the setting; increasing/decreasing
+ * it now scales the page width proportionally, giving a real, working lever to match whatever a
+ * specific printer's actual printable width turns out to be — this varies by model/brand even among
+ * printers nominally on the same 80mm roll (many only print ~72mm of it), so a single hardcoded
+ * "correct" value can't fit every printer; the user dials it in by trial and error instead. */
+function resolveThermalPageWidthIn(paperWidth: number): number {
+  const BASELINE_CHARS = 48;
+  const BASELINE_WIDTH_IN = 3.15;
+  return (paperWidth / BASELINE_CHARS) * BASELINE_WIDTH_IN;
+}
+
+function loadReceiptData(saleId: string): { sale: Sale; business: DocumentBusinessInfo } {
   const saleRow = saleRepository.findSaleDetailRowById(saleId);
   if (!saleRow) {
     throw new Error("Sale not found");
@@ -235,19 +257,16 @@ async function printHtmlViaSystemPrinter(html: string, fileLabel: string): Promi
   }
 }
 
-async function printReceiptToSystemPrinter(vm: ReceiptViewModel, deviceName: string): Promise<void> {
+async function printReceiptToSystemPrinter(vm: ReceiptViewModel, settings: PrinterSettings): Promise<void> {
   const html = buildReceiptHtml(vm);
-  // Matches the Aclas driver's own reported page size (80(72.1)x297mm) — without an explicit narrow
-  // pageSize, printToPDF defaults to a full Letter page, which the thermal driver can't reconcile
-  // with an 80mm roll and simply prints blank.
-  const buffer = await renderHtmlToPdfBuffer(html, {
-    pageSize: { width: 3.15, height: 11.69 },
-    margins: { marginType: "none" }
-  });
+  // Width itself is user-configurable via the Paper Width setting (see resolveThermalPageWidthIn);
+  // height is measured from the actual rendered content (see renderThermalHtmlToPdfBuffer) rather
+  // than a fixed guess, so there's no oversized blank gap before the printed content.
+  const buffer = await renderThermalHtmlToPdfBuffer(html, resolveThermalPageWidthIn(settings.paperWidth));
   const tempPath = join(app.getPath("temp"), `blue-ledger-receipt-${randomUUID()}.pdf`);
   await writeFile(tempPath, buffer);
   try {
-    await printPdfToPrinter(tempPath, { silent: true, ...(deviceName ? { printer: deviceName } : {}) });
+    await printPdfToPrinter(tempPath, { silent: true, ...(settings.address ? { printer: settings.address } : {}) });
   } finally {
     await unlink(tempPath).catch(() => {});
   }
@@ -294,7 +313,7 @@ export async function printReceipt(saleId: string): Promise<PrinterActionResult>
 
   if (settings.connectionType === "usb") {
     try {
-      await printReceiptToSystemPrinter(viewModel, settings.address);
+      await printReceiptToSystemPrinter(viewModel, settings);
       return { success: true, message: "Receipt sent to printer" };
     } catch (err) {
       console.error("[printer] printReceipt (usb) failed", err);
@@ -582,6 +601,43 @@ async function renderHtmlToPdfBuffer(
   }
 }
 
+/** Renders HTML to a PDF sized EXACTLY to its own content, for continuous-roll thermal printing.
+ * Every thermal document used to pass a generic fixed page height (11in/11.69in, picked as a
+ * generous ceiling so nothing would ever clip) — but nothing ever trimmed that back down to the
+ * actual content height, so a receipt/invoice/quotation that only needed 4in left ~7in of blank
+ * page. The Windows driver then centers/pads that short content within the declared page length,
+ * printing a huge blank gap before the content — one that grows worse the wider the page gets,
+ * since a wider page reflows the SAME content into fewer/shorter lines (exactly what got reported).
+ *
+ * Fix: create the hidden render window at the TARGET print width in CSS px (96px/in — matching
+ * printToPDF's own device-independent-pixel assumption) so on-screen reflow matches what will
+ * actually print, measure the real rendered height via scrollHeight, then generate the PDF at
+ * exactly that height (plus a small pad so nothing right at the bottom edge clips). */
+async function renderThermalHtmlToPdfBuffer(html: string, widthIn: number): Promise<Buffer> {
+  const widthPx = Math.round(widthIn * 96);
+  const win = new BrowserWindow({ show: false, width: widthPx, height: 100, useContentSize: true });
+  try {
+    await win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(html).toString("base64")}`);
+    const contentHeightPx = (await win.webContents.executeJavaScript("document.documentElement.scrollHeight")) as number;
+    // Floor of widthIn (not just 1in) is deliberate: a short receipt (few items, no delivery/tax
+    // breakdown) can genuinely render shorter than it is wide, especially at a wider paperWidth
+    // setting — producing a page that's WIDER than it is TALL. That landscape-shaped page is what
+    // caused a real sideways print: something downstream in the Windows print pipeline auto-rotates
+    // to best-fit the printer based on the PDF's own page aspect ratio, regardless of the explicit
+    // `landscape: false` passed to printToPDF below. A continuous roll never needs a landscape page —
+    // guaranteeing height >= width keeps every thermal document portrait-shaped no matter how short.
+    const heightIn = Math.max(widthIn + 0.1, contentHeightPx / 96 + 0.1);
+    return await win.webContents.printToPDF({
+      printBackground: true,
+      landscape: false,
+      pageSize: { width: widthIn, height: heightIn },
+      margins: { marginType: "none" }
+    });
+  } finally {
+    win.destroy();
+  }
+}
+
 /** Renders the receipt to PDF and prompts the user for a save location. Returns the saved path, or null if cancelled. */
 export async function generateReceiptPdf(saleId: string): Promise<string | null> {
   requirePermission("sales", "view");
@@ -625,6 +681,16 @@ type DocumentBusinessInfo = {
   primaryPhone: string | null;
   receiptHeader: string | null;
   receiptFooter: string | null;
+  /** Invoices/quotations used to just borrow receiptFooter (and had no header at all) — these give
+   * each document type its own. */
+  invoiceHeader: string | null;
+  invoiceFooter: string | null;
+  quotationHeader: string | null;
+  quotationFooter: string | null;
+  /** Per-line product photos on the downloaded/printed PDF only — see this storefront setting's own
+   * doc comment in shared/types/location.ts for why this can never reach the Share app. */
+  showProductImagesOnInvoices: boolean;
+  showProductImagesOnQuotations: boolean;
   currency: string;
   vatRatePercent: number;
 };
@@ -643,6 +709,14 @@ function resolveDocumentBusiness(locationId: string | null, tenantRow: tenantRep
     primaryPhone: locationRow?.phone ?? tenantRow.primary_phone,
     receiptHeader: locationRow?.receipt_header ?? tenantRow.receipt_header,
     receiptFooter: locationRow?.receipt_footer ?? tenantRow.receipt_footer,
+    invoiceHeader: locationRow?.invoice_header ?? tenantRow.invoice_header,
+    invoiceFooter: locationRow?.invoice_footer ?? tenantRow.invoice_footer,
+    quotationHeader: locationRow?.quotation_header ?? tenantRow.quotation_header,
+    quotationFooter: locationRow?.quotation_footer ?? tenantRow.quotation_footer,
+    // No tenant-level fallback for these two — a boolean toggle has no sensible "unset" default to
+    // fall back to beyond off, unlike the header/footer text fields above.
+    showProductImagesOnInvoices: Boolean(locationRow?.show_product_images_on_invoices),
+    showProductImagesOnQuotations: Boolean(locationRow?.show_product_images_on_quotations),
     currency: tenantRow.currency,
     vatRatePercent: tenantRow.vat_rate_percent
   };
@@ -670,6 +744,23 @@ async function resolveDocumentLogo(locationId: string | null, tenantRow: tenantR
   return { logoDataUrl: null, logoRatio: null };
 }
 
+/** Data URLs for each item's product photo, keyed by product id — resolved once per document build
+ * so buildInvoiceHtml/buildQuotationHtml can stay synchronous (same reason resolveDocumentLogo is
+ * called ahead of time by every caller instead of from inside the builder). Only worth calling when
+ * the storefront's own toggle is on; returns an empty map instantly otherwise. Skips any item whose
+ * product has no image_path, or whose stored file no longer reads cleanly. */
+async function resolveItemProductImages(items: Array<{ productId: string }>): Promise<Map<string, string>> {
+  const images = new Map<string, string>();
+  for (const item of items) {
+    if (images.has(item.productId)) continue;
+    const product = productRepository.findProductRowById(item.productId);
+    if (!product?.image_path) continue;
+    const dataUrl = await readManagedProductImagePreview(product.image_path);
+    if (dataUrl) images.set(item.productId, dataUrl);
+  }
+  return images;
+}
+
 /** Renders service charges + delivery fee as ordinary rows appended to an invoice/quotation's item
  * table — Discount shows as "-" since these aren't product lines, and the hidden cost never
  * appears here (only the customer-facing fee). Shared by buildInvoiceHtml and buildQuotationHtml. */
@@ -695,7 +786,9 @@ function buildExtraChargeRows(
       </tr>`);
   }
 
-  if (delivery) {
+  // A seller who absorbs the delivery cost themselves charges the customer nothing for it — skip
+  // the row entirely rather than print "Delivery Fee: 0.00".
+  if (delivery && delivery.feeCents > 0) {
     index += 1;
     rows.push(`
       <tr>
@@ -716,23 +809,30 @@ function buildExtraChargeRows(
 function buildInvoiceHtml(
   sale: Sale,
   business: DocumentBusinessInfo,
-  logo: DocumentLogo
+  logo: DocumentLogo,
+  productImages: Map<string, string>
 ): string {
   const money = (cents: number | null): string =>
     `${business.currency} ${formatReceiptCents(cents)}`;
 
   const itemRows = sale.items
-    .map(
-      (item, index) => `
+    .map((item, index) => {
+      const imageUrl = productImages.get(item.productId);
+      return `
       <tr>
         <td>${index + 1}</td>
-        <td>${escapeHtml(item.productName)}<div class="muted">${escapeHtml(item.sku)}</div></td>
+        <td>
+          <div class="item-cell">
+            ${imageUrl ? `<img src="${imageUrl}" class="item-thumb" alt="" />` : ""}
+            <div>${escapeHtml(item.productName)}<div class="muted">${escapeHtml(item.sku)}</div></div>
+          </div>
+        </td>
         <td class="center">${item.quantity}</td>
         <td class="right">${money(item.unitPriceCents)}</td>
         <td class="right">${item.discountAmountCents > 0 ? `-${money(item.discountAmountCents)}` : "-"}</td>
         <td class="right">${money(item.lineTotalCents)}</td>
-      </tr>`
-    )
+      </tr>`;
+    })
     .join("") + buildExtraChargeRows(sale.items.length, sale.serviceCharges, sale.delivery, money);
 
   const paymentRows = sale.payments
@@ -779,6 +879,8 @@ function buildInvoiceHtml(
   .tax-breakdown-title { margin-top: 20px; font-size: 10px; text-transform: uppercase; color: #83795f; font-weight: bold; }
   table.tax-breakdown { margin-top: 6px; }
   table.tax-breakdown th, table.tax-breakdown td { font-size: 12px; }
+  .item-cell { display: flex; align-items: center; gap: 8px; }
+  .item-thumb { width: 96px; height: 96px; object-fit: contain; border-radius: 4px; flex: none; background: #f1ede1; }
 </style>
 </head>
 <body>
@@ -789,6 +891,7 @@ function buildInvoiceHtml(
         <p class="business-name">${escapeHtml(business.businessName)}</p>
         ${business.physicalAddress ? `<p class="muted">${escapeHtml(business.physicalAddress)}</p>` : ""}
         ${business.primaryPhone ? `<p class="muted">${escapeHtml(business.primaryPhone)}</p>` : ""}
+        ${business.invoiceHeader ? `<p class="muted">${escapeHtml(business.invoiceHeader)}</p>` : ""}
       </div>
       <div>
         <p class="invoice-title">INVOICE</p>
@@ -855,7 +958,7 @@ function buildInvoiceHtml(
 
     ${sale.invoiceNotes ? `<div class="notes"><strong>Notes</strong><p>${escapeHtml(sale.invoiceNotes)}</p></div>` : ""}
 
-    <div class="footer">${escapeHtml(business.receiptFooter ?? "Thank you for your business!")}</div>
+    <div class="footer">${escapeHtml(business.invoiceFooter ?? "Thank you for your business!")}</div>
   </div>
 </body>
 </html>`;
@@ -870,7 +973,8 @@ export async function generateInvoicePdf(saleId: string): Promise<string | null>
   }
   const tenantRow = tenantRepository.findTenantRow();
   const logo = tenantRow ? await resolveDocumentLogo(sale.locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
-  const html = buildInvoiceHtml(sale, business, logo);
+  const productImages = business.showProductImagesOnInvoices ? await resolveItemProductImages(sale.items) : new Map();
+  const html = buildInvoiceHtml(sale, business, logo, productImages);
   const buffer = await renderHtmlToPdfBuffer(html);
 
   const result = await dialog.showSaveDialog({
@@ -899,7 +1003,8 @@ export async function printInvoiceDocument(saleId: string): Promise<PrinterActio
 
   const tenantRow = tenantRepository.findTenantRow();
   const logo = tenantRow ? await resolveDocumentLogo(sale.locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
-  const html = buildInvoiceHtml(sale, business, logo);
+  const productImages = business.showProductImagesOnInvoices ? await resolveItemProductImages(sale.items) : new Map();
+  const html = buildInvoiceHtml(sale, business, logo, productImages);
 
   try {
     await printHtmlViaSystemPrinter(html, "invoice");
@@ -938,7 +1043,7 @@ function buildInvoiceThermalHtml(sale: Sale, business: DocumentBusinessInfo): st
         <td class="right">${money(charge.feeCents)}</td>
       </tr>`
     ),
-    ...(sale.delivery
+    ...(sale.delivery && sale.delivery.feeCents > 0
       ? [
           `
       <tr>
@@ -1011,7 +1116,7 @@ function buildInvoiceThermalHtml(sale: Sale, business: DocumentBusinessInfo): st
     ${buildTaxBreakdownHtml(computeTaxBreakdown(sale.items), business.vatRatePercent, (cents) => money(cents), "items")}
     ${sale.invoiceNotes ? `<hr/><p class="muted">Notes: ${escapeHtml(sale.invoiceNotes)}</p>` : ""}
     <hr/>
-    <p class="center muted">${escapeHtml(business.receiptFooter ?? "Thank you for your business!")}</p>
+    <p class="center muted">${escapeHtml(business.invoiceFooter ?? "Thank you for your business!")}</p>
   </div>
 </body>
 </html>`;
@@ -1038,11 +1143,7 @@ export async function printInvoiceViaThermal(saleId: string): Promise<PrinterAct
   }
 
   const html = buildInvoiceThermalHtml(sale, business);
-  const paperWidthIn = 3.15;
-  const buffer = await renderHtmlToPdfBuffer(html, {
-    pageSize: { width: paperWidthIn, height: 11 },
-    margins: { marginType: "none" }
-  });
+  const buffer = await renderThermalHtmlToPdfBuffer(html, resolveThermalPageWidthIn(settings.paperWidth));
   const tempPath = join(app.getPath("temp"), `blue-ledger-invoice-${randomUUID()}.pdf`);
   await writeFile(tempPath, buffer);
   try {
@@ -1090,22 +1191,29 @@ function quotationStatusLabel(status: Quotation["status"]): string {
 function buildQuotationHtml(
   quotation: Quotation,
   business: DocumentBusinessInfo,
-  logo: DocumentLogo
+  logo: DocumentLogo,
+  productImages: Map<string, string>
 ): string {
   const money = (cents: number | null): string => `${business.currency} ${formatReceiptCents(cents)}`;
 
   const itemRows = quotation.items
-    .map(
-      (item, index) => `
+    .map((item, index) => {
+      const imageUrl = productImages.get(item.productId);
+      return `
       <tr>
         <td>${index + 1}</td>
-        <td>${escapeHtml(item.productName)}<div class="muted">${escapeHtml(item.sku)}</div></td>
+        <td>
+          <div class="item-cell">
+            ${imageUrl ? `<img src="${imageUrl}" class="item-thumb" alt="" />` : ""}
+            <div>${escapeHtml(item.productName)}<div class="muted">${escapeHtml(item.sku)}</div></div>
+          </div>
+        </td>
         <td class="center">${item.quantity}</td>
         <td class="right">${money(item.unitPriceCents)}</td>
         <td class="right">${item.discountAmountCents > 0 ? `-${money(item.discountAmountCents)}` : "-"}</td>
         <td class="right">${money(item.lineTotalCents)}</td>
-      </tr>`
-    )
+      </tr>`;
+    })
     .join("") + buildExtraChargeRows(quotation.items.length, quotation.serviceCharges, quotation.delivery, money);
 
   return `<!doctype html>
@@ -1142,6 +1250,8 @@ function buildQuotationHtml(
   .tax-breakdown-title { margin-top: 20px; font-size: 10px; text-transform: uppercase; color: #83795f; font-weight: bold; }
   table.tax-breakdown { margin-top: 6px; }
   table.tax-breakdown th, table.tax-breakdown td { font-size: 12px; }
+  .item-cell { display: flex; align-items: center; gap: 8px; }
+  .item-thumb { width: 96px; height: 96px; object-fit: contain; border-radius: 4px; flex: none; background: #f1ede1; }
 </style>
 </head>
 <body>
@@ -1152,6 +1262,7 @@ function buildQuotationHtml(
         <p class="business-name">${escapeHtml(business.businessName)}</p>
         ${business.physicalAddress ? `<p class="muted">${escapeHtml(business.physicalAddress)}</p>` : ""}
         ${business.primaryPhone ? `<p class="muted">${escapeHtml(business.primaryPhone)}</p>` : ""}
+        ${business.quotationHeader ? `<p class="muted">${escapeHtml(business.quotationHeader)}</p>` : ""}
       </div>
       <div>
         <p class="doc-title">QUOTATION</p>
@@ -1217,7 +1328,7 @@ function buildQuotationHtml(
       </div>
     </div>
 
-    <div class="footer">${escapeHtml(business.receiptFooter ?? "Thank you for considering us!")}</div>
+    <div class="footer">${escapeHtml(business.quotationFooter ?? "Thank you for considering us!")}</div>
   </div>
 </body>
 </html>`;
@@ -1229,7 +1340,8 @@ export async function generateQuotationPdf(quotationId: string): Promise<string 
   const { quotation, business } = loadQuotationData(quotationId);
   const tenantRow = tenantRepository.findTenantRow();
   const logo = tenantRow ? await resolveDocumentLogo(quotation.locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
-  const html = buildQuotationHtml(quotation, business, logo);
+  const productImages = business.showProductImagesOnQuotations ? await resolveItemProductImages(quotation.items) : new Map();
+  const html = buildQuotationHtml(quotation, business, logo, productImages);
   const buffer = await renderHtmlToPdfBuffer(html);
 
   const result = await dialog.showSaveDialog({
@@ -1252,7 +1364,8 @@ export async function printQuotationDocument(quotationId: string): Promise<Print
   const { quotation, business } = loadQuotationData(quotationId);
   const tenantRow = tenantRepository.findTenantRow();
   const logo = tenantRow ? await resolveDocumentLogo(quotation.locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
-  const html = buildQuotationHtml(quotation, business, logo);
+  const productImages = business.showProductImagesOnQuotations ? await resolveItemProductImages(quotation.items) : new Map();
+  const html = buildQuotationHtml(quotation, business, logo, productImages);
 
   try {
     await printHtmlViaSystemPrinter(html, "quotation");
@@ -1291,7 +1404,7 @@ function buildQuotationThermalHtml(quotation: Quotation, business: DocumentBusin
         <td class="right">${money(charge.feeCents)}</td>
       </tr>`
     ),
-    ...(quotation.delivery
+    ...(quotation.delivery && quotation.delivery.feeCents > 0
       ? [
           `
       <tr>
@@ -1361,7 +1474,7 @@ function buildQuotationThermalHtml(quotation: Quotation, business: DocumentBusin
     ${buildTaxBreakdownHtml(computeTaxBreakdown(quotation.items), business.vatRatePercent, (cents) => money(cents), "items")}
     ${quotation.notes ? `<hr/><p class="muted">Notes: ${escapeHtml(quotation.notes)}</p>` : ""}
     <hr/>
-    <p class="center muted">${escapeHtml(business.receiptFooter ?? "Thank you for considering us!")}</p>
+    <p class="center muted">${escapeHtml(business.quotationFooter ?? "Thank you for considering us!")}</p>
   </div>
 </body>
 </html>`;
@@ -1384,11 +1497,7 @@ export async function printQuotationViaThermal(quotationId: string): Promise<Pri
 
   const { quotation, business } = loadQuotationData(quotationId);
   const html = buildQuotationThermalHtml(quotation, business);
-  const paperWidthIn = 3.15;
-  const buffer = await renderHtmlToPdfBuffer(html, {
-    pageSize: { width: paperWidthIn, height: 11 },
-    margins: { marginType: "none" }
-  });
+  const buffer = await renderThermalHtmlToPdfBuffer(html, resolveThermalPageWidthIn(settings.paperWidth));
   const tempPath = join(app.getPath("temp"), `blue-ledger-quotation-${randomUUID()}.pdf`);
   await writeFile(tempPath, buffer);
   try {
@@ -1792,15 +1901,8 @@ export async function printDeliveryNoteViaThermal(deliveryNoteId: string): Promi
   }
 
   const { vm } = loadDeliveryNoteData(deliveryNoteId);
-  // Matches the same fixed 80mm-roll page size the compact receipt print already uses (see
-  // printReceiptToSystemPrinter) — there's no per-tenant physical-paper-width setting in this app;
-  // `settings.paperWidth` is the thermal-printer character width, an unrelated unit.
-  const paperWidthIn = 3.15;
   const html = buildDeliveryNoteThermalHtml(vm);
-  const buffer = await renderHtmlToPdfBuffer(html, {
-    pageSize: { width: paperWidthIn, height: 11 },
-    margins: { marginType: "none" }
-  });
+  const buffer = await renderThermalHtmlToPdfBuffer(html, resolveThermalPageWidthIn(settings.paperWidth));
   const tempPath = join(app.getPath("temp"), `blue-ledger-delivery-note-${randomUUID()}.pdf`);
   await writeFile(tempPath, buffer);
   try {
@@ -1846,6 +1948,190 @@ export async function generateDeliveryNotePdf(deliveryNoteId: string): Promise<s
   const result = await dialog.showSaveDialog({
     title: "Save Delivery Note",
     defaultPath: `${vm.deliveryNoteNumber}.pdf`,
+    filters: [{ name: "PDF", extensions: ["pdf"] }]
+  });
+  if (result.canceled || !result.filePath) {
+    return null;
+  }
+
+  await writeFile(result.filePath, buffer);
+  return result.filePath;
+}
+
+type StockReceiptDocumentViewModel = {
+  receiptNumber: string;
+  locationName: string;
+  allocationStorefrontName: string | null;
+  receivedByName: string;
+  notes: string | null;
+  createdAt: string;
+  items: Array<{
+    productName: string;
+    sku: string;
+    quantityReceived: number;
+    previousQuantity: number;
+    newQuantity: number;
+  }>;
+};
+
+function loadStockReceiptData(stockReceiptId: string): { vm: StockReceiptDocumentViewModel; locationId: string } {
+  const row = stockReceiptRepository.findStockReceiptRowById(stockReceiptId);
+  if (!row) {
+    throw new Error("Goods received note not found");
+  }
+  const items = stockReceiptRepository.findStockReceiptItemRows(stockReceiptId);
+
+  return {
+    vm: {
+      receiptNumber: row.receipt_number,
+      locationName: row.location_name,
+      allocationStorefrontName: row.allocation_storefront_name,
+      receivedByName: row.received_by_name,
+      notes: row.notes,
+      createdAt: row.created_at,
+      items: items.map((item) => ({
+        productName: item.product_name,
+        sku: item.sku,
+        quantityReceived: item.quantity_received,
+        previousQuantity: item.previous_quantity,
+        newQuantity: item.new_quantity
+      }))
+    },
+    locationId: row.location_id
+  };
+}
+
+/** A plain A4 portrait table document — deliberately not one of the three types (receipts/invoices/
+ * quotations) with tenant-configurable custom headers/footers, since a Goods Received Note is an
+ * internal stock record, not a customer-facing document. Explicit `@page { size: A4 portrait }`
+ * per this feature's own requirement that it never print landscape like the wide item tables
+ * elsewhere in this file sometimes do. */
+function buildStockReceiptHtml(vm: StockReceiptDocumentViewModel, business: DocumentBusinessInfo, logo: DocumentLogo): string {
+  const itemRows = vm.items
+    .map(
+      (item, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${escapeHtml(item.productName)}<div class="muted">${escapeHtml(item.sku)}</div></td>
+        <td class="center">${item.quantityReceived}</td>
+        <td class="right">${item.previousQuantity}</td>
+        <td class="right">${item.newQuantity}</td>
+      </tr>`
+    )
+    .join("");
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  * { box-sizing: border-box; }
+  @page { size: A4 portrait; margin: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #1c1710; margin: 0; padding: 48px; font-size: 13px; }
+  .sheet { max-width: 720px; margin: 0 auto; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #061e64; padding-bottom: 16px; }
+  .logo { display: block; height: auto; max-height: 64px; width: auto; max-width: 220px; object-fit: contain; margin-bottom: 8px; }
+  .business-name { font-size: 20px; font-weight: bold; color: #061e64; margin: 0; }
+  .muted { color: #666; font-size: 11px; }
+  .doc-title { font-size: 24px; font-weight: bold; text-align: right; color: #061e64; margin: 0; letter-spacing: 1px; }
+  .meta { display: flex; justify-content: space-between; margin-top: 20px; gap: 24px; }
+  .meta-block p { margin: 2px 0; }
+  .meta-block .label { font-size: 10px; text-transform: uppercase; color: #83795f; font-weight: bold; }
+  table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+  th { text-align: left; font-size: 10px; text-transform: uppercase; color: #83795f; border-bottom: 2px solid #ddd5c2; padding: 6px 4px; }
+  td { padding: 8px 4px; border-bottom: 1px solid #eee; vertical-align: top; }
+  .center { text-align: center; }
+  .right { text-align: right; white-space: nowrap; }
+  .notes { margin-top: 24px; padding: 12px; background: #f1ede1; border-radius: 8px; }
+  .footer { margin-top: 32px; text-align: center; color: #83795f; font-size: 11px; }
+</style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="header">
+      <div>
+        ${logo.logoDataUrl ? `<img src="${logo.logoDataUrl}" class="logo" alt="" />` : ""}
+        <p class="business-name">${escapeHtml(business.businessName)}</p>
+        ${business.physicalAddress ? `<p class="muted">${escapeHtml(business.physicalAddress)}</p>` : ""}
+        ${business.primaryPhone ? `<p class="muted">${escapeHtml(business.primaryPhone)}</p>` : ""}
+      </div>
+      <div>
+        <p class="doc-title">GOODS RECEIVED</p>
+        <p class="muted" style="text-align:right;">${escapeHtml(vm.receiptNumber)}</p>
+      </div>
+    </div>
+
+    <div class="meta">
+      <div class="meta-block">
+        <p class="label">Received Into</p>
+        <p><strong>${escapeHtml(vm.locationName)}</strong></p>
+        ${vm.allocationStorefrontName ? `<p class="label" style="margin-top:10px;">Earmarked For</p><p>${escapeHtml(vm.allocationStorefrontName)}</p>` : ""}
+      </div>
+      <div class="meta-block">
+        <p class="label">Received By</p>
+        <p>${escapeHtml(vm.receivedByName)}</p>
+        <p class="label" style="margin-top:10px;">Date</p>
+        <p>${formatInvoiceDate(vm.createdAt)}</p>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Product</th>
+          <th class="center">Qty Received</th>
+          <th class="right">Stock Before</th>
+          <th class="right">Stock After</th>
+        </tr>
+      </thead>
+      <tbody>${itemRows}</tbody>
+    </table>
+
+    ${vm.notes ? `<div class="notes"><strong>Notes</strong><p>${escapeHtml(vm.notes)}</p></div>` : ""}
+
+    <div class="footer">Internal stock record — generated by Blue Ledger POS</div>
+  </div>
+</body>
+</html>`;
+}
+
+export async function printStockReceipt(stockReceiptId: string): Promise<PrinterActionResult> {
+  requirePermission("inventory", "view");
+  const { vm, locationId } = loadStockReceiptData(stockReceiptId);
+  const tenantRow = tenantRepository.findTenantRow();
+  if (!tenantRow) {
+    throw new Error("Business profile not found");
+  }
+  const business = resolveDocumentBusiness(locationId, tenantRow);
+  const logo = await resolveDocumentLogo(locationId, tenantRow);
+  const html = buildStockReceiptHtml(vm, business, logo);
+
+  try {
+    await printHtmlViaSystemPrinter(html, "stock-receipt");
+    return { success: true, message: "Sent to printer" };
+  } catch (err) {
+    return { success: false, message: err instanceof Error ? err.message : "Failed to print goods received note" };
+  }
+}
+
+/** Renders the goods received note to PDF and prompts the user for a save location. Returns the
+ * saved path, or null if cancelled. */
+export async function generateStockReceiptPdf(stockReceiptId: string): Promise<string | null> {
+  requirePermission("inventory", "view");
+  const { vm, locationId } = loadStockReceiptData(stockReceiptId);
+  const tenantRow = tenantRepository.findTenantRow();
+  if (!tenantRow) {
+    throw new Error("Business profile not found");
+  }
+  const business = resolveDocumentBusiness(locationId, tenantRow);
+  const logo = await resolveDocumentLogo(locationId, tenantRow);
+  const html = buildStockReceiptHtml(vm, business, logo);
+  const buffer = await renderHtmlToPdfBuffer(html);
+
+  const result = await dialog.showSaveDialog({
+    title: "Save Goods Received Note",
+    defaultPath: `${vm.receiptNumber}.pdf`,
     filters: [{ name: "PDF", extensions: ["pdf"] }]
   });
   if (result.canceled || !result.filePath) {

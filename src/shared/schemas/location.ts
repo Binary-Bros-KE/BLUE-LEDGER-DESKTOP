@@ -40,6 +40,12 @@ export const locationInputSchema = z.object({
   description: optionalText(1000),
   receiptHeader: optionalText(500),
   receiptFooter: optionalText(500),
+  invoiceHeader: optionalText(500),
+  invoiceFooter: optionalText(500),
+  quotationHeader: optionalText(500),
+  quotationFooter: optionalText(500),
+  showProductImagesOnInvoices: z.boolean().optional().default(false),
+  showProductImagesOnQuotations: z.boolean().optional().default(false),
   canReceiveStock: z.boolean(),
   canSellStock: z.boolean(),
   canTransferStock: z.boolean()

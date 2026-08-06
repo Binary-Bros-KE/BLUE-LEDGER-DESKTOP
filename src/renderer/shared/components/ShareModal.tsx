@@ -54,7 +54,7 @@ export function ShareModal({
   const [customerEmail, setCustomerEmail] = useState("");
   const [recipient, setRecipient] = useState("");
   const [includeDelivery, setIncludeDelivery] = useState(true);
-  const [includeWhatsappPreview, setIncludeWhatsappPreview] = useState(true);
+  const [includeWhatsappPreview, setIncludeWhatsappPreview] = useState(false);
   const [sending, setSending] = useState(false);
 
   function handleIncludeDeliveryChange(checked: boolean): void {

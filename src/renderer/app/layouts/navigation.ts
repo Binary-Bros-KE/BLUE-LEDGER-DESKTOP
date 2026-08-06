@@ -14,6 +14,7 @@ import {
   FolderTree,
   LayoutDashboard,
   Package,
+  PackageCheck,
   PackagePlus,
   Receipt,
   ReceiptText,
@@ -165,6 +166,13 @@ export const navGroups: NavGroup[] = [
         description: "Request stock from Main Store",
         icon: PackagePlus,
         permissionModule: "stock_requests"
+      },
+      {
+        key: "goods-received",
+        label: "Goods Received",
+        description: "Bulk-receive many products in one batch",
+        icon: PackageCheck,
+        permissionModule: "inventory"
       },
       {
         key: "suppliers",

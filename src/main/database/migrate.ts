@@ -2078,6 +2078,111 @@ const migrations = [
         ELSE 'zero_rated'
       END WHERE product_id IN (SELECT id FROM products);
     `
+  },
+  {
+    version: 57,
+    name: "locally_sourced_sale_items",
+    sql: `
+      -- A shop that doesn't stock something a customer wants sometimes buys it from another shop
+      -- on the spot, then sells it through as a normal sale line. These three columns are what let
+      -- Checkout capture that: the toggle, what was actually paid for it, and who it was bought
+      -- from — the sale/receipt itself needs nothing else, it's still a completely ordinary sale.
+      ALTER TABLE sale_items ADD COLUMN is_locally_sourced INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE sale_items ADD COLUMN local_cost_cents INTEGER;
+      ALTER TABLE sale_items ADD COLUMN local_supplier_id TEXT REFERENCES suppliers(id);
+    `
+  },
+  {
+    version: 58,
+    name: "invoice_quotation_branding",
+    sql: `
+      -- Invoices/quotations used to just borrow the receipt footer (no header of their own at all) —
+      -- these give each document type its own header/footer, same per-storefront-overrides-tenant-
+      -- default pattern already used for receipt_header/receipt_footer. The two image toggles are
+      -- per-storefront only (no tenant-level default — there's no UI for one, same as the existing
+      -- receipt_header/receipt_footer tenant columns, which exist purely as a resolveDocumentBusiness
+      -- fallback for the no-location-assigned case, not something actually configured anywhere).
+      ALTER TABLE tenant ADD COLUMN invoice_header TEXT;
+      ALTER TABLE tenant ADD COLUMN invoice_footer TEXT;
+      ALTER TABLE tenant ADD COLUMN quotation_header TEXT;
+      ALTER TABLE tenant ADD COLUMN quotation_footer TEXT;
+
+      ALTER TABLE locations ADD COLUMN invoice_header TEXT;
+      ALTER TABLE locations ADD COLUMN invoice_footer TEXT;
+      ALTER TABLE locations ADD COLUMN quotation_header TEXT;
+      ALTER TABLE locations ADD COLUMN quotation_footer TEXT;
+      ALTER TABLE locations ADD COLUMN show_product_images_on_invoices INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE locations ADD COLUMN show_product_images_on_quotations INTEGER NOT NULL DEFAULT 0;
+    `
+  },
+  {
+    version: 59,
+    name: "stock_receipts",
+    sql: `
+      -- Bulk "receive many products in one go" — same header + line-items shape as every other
+      -- multi-line document in this app (purchases, stock_requests), not a generic grouping tag on
+      -- stock_movements, specifically so a reprint months later shows exactly what was true at the
+      -- moment of receiving (previous_quantity/new_quantity are frozen per line, never recomputed).
+      -- allocation_storefront_id is only meaningful when location_id is the tenant's Main Store —
+      -- same "one bucket for the whole batch" simplification the single-item Receive tab already
+      -- makes, just applied at the header instead of per item.
+      CREATE TABLE stock_receipts (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        receipt_number TEXT NOT NULL,
+        location_id TEXT NOT NULL,
+        allocation_storefront_id TEXT,
+        received_by TEXT NOT NULL,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        synced_updated_at TEXT,
+        UNIQUE (tenant_id, receipt_number),
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (location_id) REFERENCES locations(id),
+        FOREIGN KEY (allocation_storefront_id) REFERENCES locations(id),
+        FOREIGN KEY (received_by) REFERENCES employees(id)
+      );
+
+      CREATE INDEX idx_stock_receipts_tenant_created ON stock_receipts(tenant_id, created_at);
+      CREATE INDEX idx_stock_receipts_location ON stock_receipts(location_id);
+
+      CREATE TABLE stock_receipt_items (
+        id TEXT PRIMARY KEY,
+        stock_receipt_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        quantity_received INTEGER NOT NULL,
+        previous_quantity INTEGER NOT NULL,
+        new_quantity INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (stock_receipt_id) REFERENCES stock_receipts(id),
+        FOREIGN KEY (product_id) REFERENCES products(id)
+      );
+
+      CREATE INDEX idx_stock_receipt_items_receipt ON stock_receipt_items(stock_receipt_id);
+      CREATE INDEX idx_stock_receipt_items_product ON stock_receipt_items(product_id);
+
+      -- Same sync-outbox trigger shape as stock_requests (a brand-new table, so these ride the
+      -- create migration itself instead of a separate later one). No AFTER UPDATE trigger: a stock
+      -- receipt is create-only by design ("frozen at moment of receiving" — no edit/approve flow
+      -- exists), so updated_at never changes after insert. AFTER DELETE is included defensively even
+      -- though no delete function exists today, matching every other document entity's own trigger set.
+      CREATE TRIGGER trg_stock_receipts_sync_ai AFTER INSERT ON stock_receipts BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'stock_receipts', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_stock_receipts_sync_ad AFTER DELETE ON stock_receipts BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'stock_receipts', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_stock_receipt_items_reenqueue_ai AFTER INSERT ON stock_receipt_items BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), sr.tenant_id, (SELECT client_id FROM tenant WHERE id = sr.tenant_id), 'stock_receipts', sr.id, 'upsert', 'push', 'queued', 0, '{}', sr.id || ':' || sr.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+        FROM stock_receipts sr WHERE sr.id = NEW.stock_receipt_id;
+      END;
+    `
   }
 ] as const;
 

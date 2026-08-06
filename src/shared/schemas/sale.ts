@@ -9,7 +9,13 @@ const saleCartItemSchema = z.object({
   /** Cashier-entered price override for this line only — never written back to the product's own
    * sellingPriceCents. Omitted (not just 0) means "use the product's normal/wholesale price", so
    * this can't be used to accidentally zero out a price. See prepareCart in sale-service.ts. */
-  unitPriceCents: z.coerce.number().int().positive().max(100_000_000).optional()
+  unitPriceCents: z.coerce.number().int().positive().max(100_000_000).optional(),
+  /** See SaleItem's own doc comment (shared/types/sale.ts) — bought from another shop on the spot
+   * rather than pulled from this shop's stock. localCostCents/localSupplierId are only meaningful
+   * when this is true; prepareCart in sale-service.ts ignores them otherwise. */
+  isLocallySourced: z.coerce.boolean().optional().default(false),
+  localCostCents: z.coerce.number().int().min(0).max(100_000_000).optional(),
+  localSupplierId: optionalText(64)
 });
 
 /** Shared by suspend (hold the cart) and checkout (hold + pay) — a resumed sale carries its id along.

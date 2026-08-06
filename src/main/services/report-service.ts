@@ -281,11 +281,12 @@ function sumPurchasePaymentsBySupplier(
  *
  * feeRows folds in delivery/service-charge FEE revenue (what the customer was charged, e.g. a
  * delivery fee) the same way product margin is recognized — proportional to fractionPaid. Its COST
- * side (e.g. what the rider was actually paid) is deliberately NOT subtracted again here — that's
- * already deducted once, in full, via findServiceAndDeliveryCostsInRange feeding totalExpensesCents.
- * Before this, the fee showed up in Total Revenue (it's baked into grand_total_cents) but never
- * anywhere in Net Revenue/Net Profit, while its cost always was — every delivery/service charge
- * silently ate into Net Profit with no corresponding credit for the money actually collected for it.
+ * side (e.g. what the rider was actually paid) is deliberately NOT subtracted again here — delivery
+ * cost is booked as a real "Delivery Costs" expense (feeding generalExpensesCents), and service-charge
+ * cost is deducted once via findServiceChargeCostsInRange feeding totalExpensesCents. Before this, the
+ * fee showed up in Total Revenue (it's baked into grand_total_cents) but never anywhere in Net
+ * Revenue/Net Profit, while its cost always was — every delivery/service charge silently ate into Net
+ * Profit with no corresponding credit for the money actually collected for it.
  */
 function computeNetRevenueCents(rows: CompletedSaleRow[], itemRows: SaleItemProfitRow[], feeRows: reportRepository.SaleFeeRow[]): number {
   const bySale = new Map<string, { revenueCents: number; costCents: number }>();
@@ -394,14 +395,14 @@ export function getSalesFinancialOverview(input: unknown): SalesFinancialOvervie
   const salariesPaidDocumentCount = salaryRows.reduce((sum, row) => sum + row.document_count, 0);
   const previousSalaries = reportRepository.findSalaryPayoutCentsInRange(tenantId, locationId, previousStartIso, previousEndIsoExclusive);
 
-  const deliveryServiceCosts = reportRepository.findServiceAndDeliveryCostsInRange(tenantId, locationId, startIso, endIsoExclusive);
-  const deliveryServiceCostsCents = deliveryServiceCosts.totalCents;
-  const deliveryServiceCostsDocumentCount = deliveryServiceCosts.documentCount;
-  const previousDeliveryServiceCosts = reportRepository.findServiceAndDeliveryCostsInRange(tenantId, locationId, previousStartIso, previousEndIsoExclusive);
+  const serviceChargeCosts = reportRepository.findServiceChargeCostsInRange(tenantId, locationId, startIso, endIsoExclusive);
+  const serviceChargeCostsCents = serviceChargeCosts.totalCents;
+  const serviceChargeCostsDocumentCount = serviceChargeCosts.documentCount;
+  const previousServiceChargeCosts = reportRepository.findServiceChargeCostsInRange(tenantId, locationId, previousStartIso, previousEndIsoExclusive);
 
-  const totalExpensesCents = generalExpensesCents + purchasesPaidCents + salariesPaidCents + deliveryServiceCostsCents;
+  const totalExpensesCents = generalExpensesCents + purchasesPaidCents + salariesPaidCents + serviceChargeCostsCents;
   const previousTotalExpensesCents =
-    previousGeneralExpenses.totalCents + previousPurchasesPaid.cents + previousSalaries.totalCents + previousDeliveryServiceCosts.totalCents;
+    previousGeneralExpenses.totalCents + previousPurchasesPaid.cents + previousSalaries.totalCents + previousServiceChargeCosts.totalCents;
 
   const netProfitCents = netRevenueCents - totalExpensesCents;
   const previousNetProfitCents = previousNetRevenueCents - previousTotalExpensesCents;
@@ -496,8 +497,8 @@ export function getSalesFinancialOverview(input: unknown): SalesFinancialOvervie
     purchasesPaidDocumentCount,
     salariesPaidCents,
     salariesPaidDocumentCount,
-    deliveryServiceCostsCents,
-    deliveryServiceCostsDocumentCount,
+    serviceChargeCostsCents,
+    serviceChargeCostsDocumentCount,
     expensesByCategory,
     purchasesBySupplier,
     salariesByEmployee,

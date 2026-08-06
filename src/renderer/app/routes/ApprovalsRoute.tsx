@@ -3,13 +3,15 @@ import { motion } from "framer-motion";
 import { Ban, CheckCircle2, ClipboardCheck, Eye, Loader2, Undo2, XCircle } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
-import { TextAreaField } from "@renderer/shared/components/form-fields";
+import { SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { ReceiptPreview } from "@renderer/shared/components/ReceiptPreview";
+import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useAppStore } from "@renderer/shared/stores/app-store";
+import { isStorefrontType, type Location } from "@shared/types/location";
 import type { Sale } from "@shared/types/sale";
 import type { SaleReturn } from "@shared/types/sale-return";
 import type { SaleVoid } from "@shared/types/sale-void";
@@ -35,11 +37,15 @@ function entryAmountCents(entry: ApprovalEntry): number {
 
 export function ApprovalsRoute(): React.JSX.Element {
   const tenantContext = useAppStore((state) => state.context?.tenant ?? null);
+  const { session } = usePermissions();
+  const showStorefrontFilter = session?.branch == null;
 
   const [returns, setReturns] = useState<SaleReturn[] | null>(null);
   const [voids, setVoids] = useState<SaleVoid[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [locationFilter, setLocationFilter] = useState("");
 
   const [viewingEntry, setViewingEntry] = useState<ApprovalEntry | null>(null);
   const [viewingSale, setViewingSale] = useState<Sale | null>(null);
@@ -70,6 +76,14 @@ export function ApprovalsRoute(): React.JSX.Element {
     void loadAll();
   }, [loadAll]);
 
+  useEffect(() => {
+    if (!showStorefrontFilter) return;
+    window.blueLedger.location
+      .list()
+      .then((list) => setLocations(list.filter((location) => isStorefrontType(location.locationType))))
+      .catch(() => undefined);
+  }, [showStorefrontFilter]);
+
   const pendingEntries = useMemo<ApprovalEntry[]>(() => {
     const entries: ApprovalEntry[] = [
       ...(returns ?? [])
@@ -79,10 +93,11 @@ export function ApprovalsRoute(): React.JSX.Element {
         .filter((item) => item.status === "pending_approval")
         .map((item): ApprovalEntry => ({ kind: "void", id: item.id, data: item }))
     ];
-    return entries.sort(
+    const filtered = locationFilter ? entries.filter((entry) => entry.data.locationId === locationFilter) : entries;
+    return filtered.sort(
       (a, b) => new Date(b.data.requestedAt).getTime() - new Date(a.data.requestedAt).getTime()
     );
-  }, [returns, voids]);
+  }, [returns, voids, locationFilter]);
 
   const decidedEntries = useMemo<ApprovalEntry[]>(() => {
     const entries: ApprovalEntry[] = [
@@ -93,10 +108,11 @@ export function ApprovalsRoute(): React.JSX.Element {
         .filter((item) => item.status !== "pending_approval")
         .map((item): ApprovalEntry => ({ kind: "void", id: item.id, data: item }))
     ];
-    return entries
+    const filtered = locationFilter ? entries.filter((entry) => entry.data.locationId === locationFilter) : entries;
+    return filtered
       .sort((a, b) => new Date(b.data.approvedAt ?? 0).getTime() - new Date(a.data.approvedAt ?? 0).getTime())
       .slice(0, 20);
-  }, [returns, voids]);
+  }, [returns, voids, locationFilter]);
 
   function openDecision(entry: ApprovalEntry, action: DecisionAction): void {
     setDecisionEntry({ entry, action });
@@ -179,15 +195,29 @@ export function ApprovalsRoute(): React.JSX.Element {
       />
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
-        <div>
-          <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Approvals</p>
-          <h2 className="mt-1 flex items-center gap-2 text-xl font-extrabold">
-            <ClipboardCheck className="size-5 text-primary" aria-hidden="true" />
-            Returns &amp; Voids
-          </h2>
-          <p className="mt-1 text-xs font-semibold text-muted">
-            Nothing changes on a sale or in inventory until a request here is approved.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Approvals</p>
+            <h2 className="mt-1 flex items-center gap-2 text-xl font-extrabold">
+              <ClipboardCheck className="size-5 text-primary" aria-hidden="true" />
+              Returns &amp; Voids
+            </h2>
+            <p className="mt-1 text-xs font-semibold text-muted">
+              Nothing changes on a sale or in inventory until a request here is approved.
+            </p>
+          </div>
+          {showStorefrontFilter && (
+            <SelectField
+              label="Storefront"
+              value={locationFilter}
+              onChange={setLocationFilter}
+              options={[
+                { value: "", label: "All Storefronts" },
+                ...locations.map((location) => ({ value: location.id, label: location.locationName }))
+              ]}
+              className="w-44"
+            />
+          )}
         </div>
 
         {(loadError ?? actionError) && (
@@ -224,6 +254,7 @@ export function ApprovalsRoute(): React.JSX.Element {
                         <span className="text-xs font-bold tabular-nums text-muted">
                           {entry.data.receiptNumber ?? "—"}
                         </span>
+                        {showStorefrontFilter && <DashedPill tone="accent">{entry.data.locationName}</DashedPill>}
                       </div>
                       <p className="mt-1.5 text-sm font-extrabold text-ink">{entry.data.reason}</p>
                       {entry.kind === "return" && (
@@ -294,7 +325,8 @@ export function ApprovalsRoute(): React.JSX.Element {
                     <Undo2 className="size-3.5 flex-none text-muted" aria-hidden="true" />
                   )}
                   <p className="truncate text-xs font-bold text-ink">
-                    {entry.data.receiptNumber ?? "—"} · {entry.data.reason}
+                    {entry.data.receiptNumber ?? "—"}
+                    {showStorefrontFilter && ` · ${entry.data.locationName}`} · {entry.data.reason}
                   </p>
                 </div>
                 <div className="flex flex-none items-center gap-2">

@@ -57,6 +57,7 @@ export const ipcChannels = {
   mainStoreReturn: "main-store:return",
   mainStoreReallocate: "main-store:reallocate",
   mainStoreDamage: "main-store:damage",
+  mainStoreAdjust: "main-store:adjust",
   inventoryOverview: "inventory:overview",
   inventoryListForLocation: "inventory:list-for-location",
   stockMovementList: "stock-movement:list",
@@ -194,6 +195,8 @@ export const ipcChannels = {
   printerGenerateDeliveryNotePdf: "printer:generate-delivery-note-pdf",
   printerGenerateStatementPdf: "printer:generate-statement-pdf",
   printerPrintStatementDocument: "printer:print-statement-document",
+  printerGenerateStockReceiptPdf: "printer:generate-stock-receipt-pdf",
+  printerPrintStockReceiptDocument: "printer:print-stock-receipt-document",
   statementGetForCustomer: "statement:get-for-customer",
   deliveryNoteGet: "delivery-note:get",
   deliveryNoteGetForSale: "delivery-note:get-for-sale",
@@ -210,6 +213,9 @@ export const ipcChannels = {
   stockRequestCreate: "stock-request:create",
   stockRequestApprove: "stock-request:approve",
   stockRequestReject: "stock-request:reject",
+  stockReceiptList: "stock-receipt:list",
+  stockReceiptGet: "stock-receipt:get",
+  stockReceiptCreate: "stock-receipt:create",
   recurringBillList: "recurring-bill:list",
   recurringBillGet: "recurring-bill:get",
   recurringBillCreate: "recurring-bill:create",
@@ -249,5 +255,6 @@ export const ipcChannels = {
   reportOutstandingPurchases: "report:outstanding-purchases",
   reportSupplierPurchaseHistory: "report:supplier-purchase-history",
   reportSupplierSpendBreakdown: "report:supplier-spend-breakdown",
-  reportTaxBreakdown: "report:tax-breakdown"
+  reportTaxBreakdown: "report:tax-breakdown",
+  reportLocalSourcing: "report:local-sourcing"
 } as const satisfies Record<string, IpcChannel>;

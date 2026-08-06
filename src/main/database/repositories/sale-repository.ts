@@ -69,12 +69,16 @@ export type SaleItemRow = {
   tax_type: string;
   tax_amount_cents: number;
   line_total_cents: number;
+  is_locally_sourced: number;
+  local_cost_cents: number | null;
+  local_supplier_id: string | null;
   created_at: string;
 };
 
 export type SaleItemDetailRow = SaleItemRow & {
   product_name: string;
   sku: string;
+  local_supplier_name: string | null;
 };
 
 export type PendingSaleListRow = {
@@ -357,9 +361,10 @@ export function findSaleItemDetailRows(saleId: string): SaleItemDetailRow[] {
   return getDatabase()
     .prepare(
       `
-      SELECT si.*, p.name AS product_name, p.sku AS sku
+      SELECT si.*, p.name AS product_name, p.sku AS sku, sup.business_name AS local_supplier_name
       FROM sale_items si
       JOIN products p ON p.id = si.product_id
+      LEFT JOIN suppliers sup ON sup.id = si.local_supplier_id
       WHERE si.sale_id = ?
       ORDER BY si.created_at ASC
     `
@@ -474,6 +479,9 @@ export function insertSaleItemRow(input: {
   taxType: string;
   taxAmountCents: number;
   lineTotalCents: number;
+  isLocallySourced: boolean;
+  localCostCents: number | null;
+  localSupplierId: string | null;
 }): SaleItemRow {
   const now = new Date().toISOString();
 
@@ -482,9 +490,10 @@ export function insertSaleItemRow(input: {
       `
       INSERT INTO sale_items (
         id, sale_id, product_id, quantity, unit_price_cents,
-        discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, created_at
+        discount_amount_cents, tax_type, tax_amount_cents, line_total_cents,
+        is_locally_sourced, local_cost_cents, local_supplier_id, created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
     )
     .run(
@@ -497,6 +506,9 @@ export function insertSaleItemRow(input: {
       input.taxType,
       input.taxAmountCents,
       input.lineTotalCents,
+      input.isLocallySourced ? 1 : 0,
+      input.localCostCents,
+      input.localSupplierId,
       now
     );
 
@@ -650,6 +662,10 @@ export function mapSaleItemDetailRow(row: SaleItemDetailRow): SaleItem {
     taxType: row.tax_type as SaleItem["taxType"],
     taxAmountCents: row.tax_amount_cents,
     lineTotalCents: row.line_total_cents,
+    isLocallySourced: Boolean(row.is_locally_sourced),
+    localCostCents: row.local_cost_cents,
+    localSupplierId: row.local_supplier_id,
+    localSupplierName: row.local_supplier_name,
     createdAt: row.created_at
   };
 }

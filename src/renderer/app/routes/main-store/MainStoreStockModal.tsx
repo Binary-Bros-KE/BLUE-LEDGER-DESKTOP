@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertTriangle, ArrowLeftRight, Loader2, PackagePlus, Tag, Undo2 } from "lucide-react";
+import { AlertTriangle, ArrowLeftRight, ClipboardCheck, Loader2, PackagePlus, Tag, Undo2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
@@ -7,14 +7,15 @@ import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import type { MainStoreProductRow } from "@shared/types/main-store";
 
-type Mode = "receive" | "distribute" | "return" | "reallocate" | "damage";
+type Mode = "receive" | "distribute" | "return" | "reallocate" | "damage" | "adjust";
 
 const MODE_TABS: Array<{ value: Mode; label: string; icon: typeof PackagePlus }> = [
   { value: "receive", label: "Receive", icon: PackagePlus },
   { value: "distribute", label: "Distribute", icon: ArrowLeftRight },
   { value: "return", label: "Return", icon: Undo2 },
   { value: "reallocate", label: "Allocate", icon: Tag },
-  { value: "damage", label: "Damage", icon: AlertTriangle }
+  { value: "damage", label: "Damage", icon: AlertTriangle },
+  { value: "adjust", label: "Adjust", icon: ClipboardCheck }
 ];
 
 export function MainStoreStockModal({
@@ -69,8 +70,15 @@ export function MainStoreStockModal({
     return: "Returns stock from a storefront back to Main Store, staying earmarked for them.",
     reallocate:
       "Marks Main Store stock as belonging to a specific storefront (or moves it back to Unallocated) — pure bookkeeping, nothing physically ships. This is how stock gets earmarked for a store before Distribute actually sends it there.",
-    damage: "Records damaged or lost stock, reducing a specific bucket at Main Store."
+    damage: "Records damaged or lost stock, reducing a specific bucket at Main Store.",
+    adjust:
+      "Corrects a bucket's stock to match a physical count — enter what you actually counted, not the difference. The system works out the adjustment for you."
   };
+
+  const currentBucketQuantity =
+    storefrontId === ""
+      ? product.unallocatedQuantity
+      : (product.storefronts.find((entry) => entry.storefrontId === storefrontId)?.allocatedQuantity ?? 0);
 
   async function handleSubmit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
@@ -79,8 +87,11 @@ export function MainStoreStockModal({
     setNotice(null);
 
     const quantityNumber = Number(quantity);
-    if (!Number.isFinite(quantityNumber) || quantityNumber <= 0) {
-      setActionError("Enter a quantity greater than 0");
+    // Adjust enters an absolute counted quantity, not a delta — 0 is a legitimate physical count
+    // (the shelf is genuinely empty), unlike every other mode here which moves a positive amount.
+    const quantityValid = mode === "adjust" ? Number.isFinite(quantityNumber) && quantityNumber >= 0 : Number.isFinite(quantityNumber) && quantityNumber > 0;
+    if (!quantityValid) {
+      setActionError(mode === "adjust" ? "Enter the quantity you counted (0 or more)" : "Enter a quantity greater than 0");
       setSaving(false);
       return;
     }
@@ -125,6 +136,13 @@ export function MainStoreStockModal({
           quantity: quantityNumber,
           notes
         });
+      } else if (mode === "adjust") {
+        await window.blueLedger.mainStore.adjust({
+          productId: product.productId,
+          storefrontId: storefrontId || null,
+          countedQuantity: quantityNumber,
+          notes
+        });
       } else {
         await window.blueLedger.mainStore.reallocate({
           productId: product.productId,
@@ -135,7 +153,7 @@ export function MainStoreStockModal({
       }
       onChanged();
       resetForm();
-      setNotice("Saved.");
+      setNotice(mode === "adjust" && quantityNumber === currentBucketQuantity ? "Count matched — no change needed." : "Saved.");
     } catch (err) {
       setActionError(getErrorMessage(err, "Failed to update stock"));
     } finally {
@@ -231,9 +249,25 @@ export function MainStoreStockModal({
             <SelectField label="To" value={toStorefrontId} onChange={setToStorefrontId} options={bucketOptions} />
           </div>
         )}
+        {mode === "adjust" && (
+          <>
+            <SelectField label="Which bucket" value={storefrontId} onChange={setStorefrontId} options={bucketOptions} />
+            <p className="text-[11px] font-semibold text-muted">
+              System currently shows <span className="font-extrabold text-ink">{currentBucketQuantity}</span> in this
+              bucket.
+            </p>
+          </>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Quantity" type="number" value={quantity} onChange={setQuantity} placeholder="e.g. 10" required />
+          <Field
+            label={mode === "adjust" ? "Counted Quantity" : "Quantity"}
+            type="number"
+            value={quantity}
+            onChange={setQuantity}
+            placeholder={mode === "adjust" ? "What you physically counted" : "e.g. 10"}
+            required
+          />
           <div className="flex items-end">
             <Button type="submit" disabled={saving} className="h-10 w-full text-xs disabled:cursor-not-allowed disabled:opacity-50">
               {saving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
@@ -241,6 +275,20 @@ export function MainStoreStockModal({
             </Button>
           </div>
         </div>
+        {mode === "adjust" && quantity.trim() !== "" && Number.isFinite(Number(quantity)) && (
+          <p className="text-[11px] font-bold text-muted">
+            {(() => {
+              const delta = Number(quantity) - currentBucketQuantity;
+              if (delta === 0) return "No change — counted quantity matches current stock.";
+              return (
+                <>
+                  This records a <span className={delta > 0 ? "text-success" : "text-danger"}>{delta > 0 ? `+${delta}` : delta}</span>{" "}
+                  adjustment.
+                </>
+              );
+            })()}
+          </p>
+        )}
         {mode !== "reallocate" && (
           <TextAreaField label="Notes" value={notes} onChange={setNotes} rows={2} placeholder="Optional" />
         )}

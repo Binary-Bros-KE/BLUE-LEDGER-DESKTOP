@@ -87,7 +87,8 @@ const api: BlueLedgerApi = {
     distribute: (input) => invoke("main-store:distribute", input),
     returnStock: (input) => invoke("main-store:return", input),
     reallocate: (input) => invoke("main-store:reallocate", input),
-    damage: (input) => invoke("main-store:damage", input)
+    damage: (input) => invoke("main-store:damage", input),
+    adjust: (input) => invoke("main-store:adjust", input)
   },
   inventory: {
     overview: (productId) => invoke("inventory:overview", productId),
@@ -262,7 +263,9 @@ const api: BlueLedgerApi = {
     printDeliveryNoteThermal: (deliveryNoteId) => invoke("printer:print-delivery-note-thermal", deliveryNoteId),
     generateDeliveryNotePdf: (deliveryNoteId) => invoke("printer:generate-delivery-note-pdf", deliveryNoteId),
     generateStatementPdf: (customerId) => invoke("printer:generate-statement-pdf", customerId),
-    printStatementDocument: (customerId) => invoke("printer:print-statement-document", customerId)
+    printStatementDocument: (customerId) => invoke("printer:print-statement-document", customerId),
+    generateStockReceiptPdf: (stockReceiptId) => invoke("printer:generate-stock-receipt-pdf", stockReceiptId),
+    printStockReceiptDocument: (stockReceiptId) => invoke("printer:print-stock-receipt-document", stockReceiptId)
   },
   statement: {
     getForCustomer: (customerId) => invoke("statement:get-for-customer", customerId)
@@ -289,6 +292,11 @@ const api: BlueLedgerApi = {
     create: (input) => invoke("stock-request:create", input),
     approve: (id) => invoke("stock-request:approve", id),
     reject: (id, input) => invoke("stock-request:reject", id, input)
+  },
+  stockReceipt: {
+    list: () => invoke("stock-receipt:list"),
+    get: (id) => invoke("stock-receipt:get", id),
+    create: (input) => invoke("stock-receipt:create", input)
   },
   recurringBill: {
     list: () => invoke("recurring-bill:list"),
@@ -341,7 +349,8 @@ const api: BlueLedgerApi = {
     outstandingPurchases: () => invoke("report:outstanding-purchases"),
     supplierPurchaseHistory: (input) => invoke("report:supplier-purchase-history", input),
     supplierSpendBreakdown: (input) => invoke("report:supplier-spend-breakdown", input),
-    taxBreakdown: (range) => invoke("report:tax-breakdown", range)
+    taxBreakdown: (range) => invoke("report:tax-breakdown", range),
+    localSourcing: (range) => invoke("report:local-sourcing", range)
   }
 };
 

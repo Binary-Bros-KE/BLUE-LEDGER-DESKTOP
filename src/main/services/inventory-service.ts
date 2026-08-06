@@ -40,8 +40,7 @@ function assertValidDirection(input: StockMovementInput): void {
  * Must be called from within a transaction (own or a caller's, e.g. product creation with opening stock).
  *
  * When the movement's location is the tenant's Main Store, this also keeps the Main Store allocation
- * breakdown (main-store-service.ts) in lockstep with the plain inventory total, so the two numbers can
- * never drift apart:
+ * breakdown (main-store-service.ts) in lockstep with the plain inventory total:
  *  - Pass allocationStorefrontId to target a SPECIFIC bucket precisely (throws if that bucket doesn't
  *    have enough — used by the Main Store's own receive/distribute/return actions).
  *  - Leave it unset and the change is reflected in the "unallocated" bucket instead, clamped at zero.
@@ -49,6 +48,14 @@ function assertValidDirection(input: StockMovementInput): void {
  *    stock, generic transfers) that doesn't know about allocations — it keeps the total correct, but
  *    can't tell an already-earmarked bucket from a general one, so use the dedicated Main Store actions
  *    when precise per-storefront tracking matters.
+ *
+ * The insufficient-stock check and the resulting plain-inventory total both come from the ALLOCATION
+ * BUCKETS for a Main Store move, not the plain inventory row itself — that row is a derived rollup
+ * that can drift from the buckets (e.g. historical data written straight into main_store_allocations
+ * without ever touching the plain row), and validating against a drifted number produces a false
+ * "insufficient stock" error even when the bucket actually being touched has plenty. Recomputing the
+ * plain total as a fresh sum of every bucket after each Main Store move (rather than incrementing its
+ * own possibly-stale value) also self-heals that drift going forward.
  */
 export function applyValidatedStockMovement(
   input: StockMovementInput & { allocationStorefrontId?: string | null },
@@ -66,8 +73,24 @@ export function applyValidatedStockMovement(
     throw new Error("Location not found");
   }
 
-  const existing = inventoryRepository.findInventoryRow(input.productId, input.locationId);
-  const currentQuantity = existing?.quantity ?? 0;
+  const mainStore = locationRepository.findMainStoreLocationRow(tenantId);
+  const isMainStoreBucketMove = Boolean(mainStore) && input.locationId === mainStore!.id;
+
+  // A Main Store movement's real source of truth is the allocation BUCKET being touched, not the
+  // plain inventory row — that row is a derived rollup (sum of every bucket) that can drift from
+  // the buckets themselves (e.g. historical data written straight into main_store_allocations,
+  // such as an import's opening stock, without ever touching the plain row). Validating against a
+  // drifted plain row produces a false "insufficient stock" error even though the bucket the user
+  // is actually adjusting has plenty — caught live: a product showing 53 unallocated at Main Store
+  // (the correct, bucket-level number) failed a -3 Adjust because the plain row separately read 0.
+  let currentQuantity: number;
+  if (isMainStoreBucketMove) {
+    const bucketId = input.allocationStorefrontId !== undefined ? input.allocationStorefrontId : null;
+    currentQuantity = mainStoreAllocationRepository.findAllocationRow(input.productId, bucketId)?.quantity ?? 0;
+  } else {
+    const existing = inventoryRepository.findInventoryRow(input.productId, input.locationId);
+    currentQuantity = existing?.quantity ?? 0;
+  }
   const nextQuantity = currentQuantity + input.quantityChange;
 
   if (nextQuantity < 0 && !product.allow_negative_stock) {
@@ -82,15 +105,7 @@ export function applyValidatedStockMovement(
     tenantId
   });
 
-  inventoryRepository.upsertInventoryQuantity({
-    tenantId,
-    productId: input.productId,
-    locationId: input.locationId,
-    quantity: nextQuantity
-  });
-
-  const mainStore = locationRepository.findMainStoreLocationRow(tenantId);
-  if (mainStore && input.locationId === mainStore.id) {
+  if (isMainStoreBucketMove) {
     if (input.allocationStorefrontId !== undefined) {
       mainStoreAllocationRepository.adjustAllocationQuantity({
         tenantId,
@@ -99,14 +114,32 @@ export function applyValidatedStockMovement(
         delta: input.quantityChange
       });
     } else {
-      const unallocated = mainStoreAllocationRepository.findAllocationRow(input.productId, null)?.quantity ?? 0;
       mainStoreAllocationRepository.setAllocationQuantity({
         tenantId,
         productId: input.productId,
         storefrontId: null,
-        quantity: Math.max(0, unallocated + input.quantityChange)
+        quantity: Math.max(0, currentQuantity + input.quantityChange)
       });
     }
+    // Recomputed fresh as the sum of every bucket, not incremented from the plain row's own
+    // (possibly stale) value — this is what actually self-heals the drift going forward, not just
+    // avoids tripping over it this once.
+    const trueTotal = mainStoreAllocationRepository
+      .findAllocationRowsForProduct(input.productId)
+      .reduce((sum, row) => sum + row.quantity, 0);
+    inventoryRepository.upsertInventoryQuantity({
+      tenantId,
+      productId: input.productId,
+      locationId: input.locationId,
+      quantity: trueTotal
+    });
+  } else {
+    inventoryRepository.upsertInventoryQuantity({
+      tenantId,
+      productId: input.productId,
+      locationId: input.locationId,
+      quantity: nextQuantity
+    });
   }
 
   return stockMovementRepository.mapStockMovementRow(movementRow);

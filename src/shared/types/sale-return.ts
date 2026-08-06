@@ -31,6 +31,8 @@ export type SaleReturn = {
   tenantId: string;
   saleId: string;
   receiptNumber: string | null;
+  locationId: string;
+  locationName: string;
   status: SaleReturnStatus;
   reason: string;
   notes: string | null;

@@ -27,6 +27,23 @@ export function ensureDefaultExpenseCategories(tenantId: string): void {
   }
 }
 
+/** Used by internal auto-booking flows (e.g. the delivery-cost expense created alongside a sale/
+ * invoice) that need a category to exist but have no user in the loop to pick or create one —
+ * unlike createExpenseCategory, this never throws on a name collision, it just returns the
+ * existing row. Case-insensitive, matching the table's own unique index. */
+export function findOrCreateExpenseCategoryByName(tenantId: string, name: string): ExpenseCategory {
+  const existing = expenseCategoryRepository.findExpenseCategoryByNameRow(tenantId, name);
+  if (existing) return expenseCategoryRepository.mapExpenseCategoryRow(existing);
+
+  const row = expenseCategoryRepository.insertExpenseCategoryRow({
+    id: `expense_category_${randomUUID()}`,
+    tenantId,
+    name,
+    description: null
+  });
+  return expenseCategoryRepository.mapExpenseCategoryRow(row);
+}
+
 function assertUniqueName(tenantId: string, name: string, excludeId?: string): void {
   if (expenseCategoryRepository.findExpenseCategoryByNameRow(tenantId, name, excludeId)) {
     throw new Error(`A category named "${name}" already exists`);

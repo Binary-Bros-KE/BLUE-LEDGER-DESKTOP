@@ -9,7 +9,7 @@ export type SharePreferences = {
   includeDelivery: boolean;
 };
 
-const DEFAULT_PREFERENCES: SharePreferences = { includeWhatsappPreview: true, includeDelivery: true };
+const DEFAULT_PREFERENCES: SharePreferences = { includeWhatsappPreview: false, includeDelivery: true };
 
 export function getSharePreferences(): SharePreferences {
   try {

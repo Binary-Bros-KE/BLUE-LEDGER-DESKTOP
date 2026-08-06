@@ -36,6 +36,13 @@ export type TenantRow = {
   prices_tax_inclusive: number;
   receipt_header: string | null;
   receipt_footer: string | null;
+  // Fallback-only, like receipt_header/receipt_footer above — no Business Profile UI sets these,
+  // they're purely what resolveDocumentBusiness (printer-service.ts) falls back to when an employee
+  // has no assigned storefront at all, so its own per-location value can't be looked up.
+  invoice_header: string | null;
+  invoice_footer: string | null;
+  quotation_header: string | null;
+  quotation_footer: string | null;
   license_key: string | null;
   license_status: string;
   subscription_plan: string;

@@ -50,9 +50,20 @@ export type LocationInputFields = {
   closingTime: string | null;
   description: string | null;
   /** Shown on this storefront's own receipts/invoices/quotations instead of the tenant-wide default —
-   * each storefront is its own point of sale with its own identity on customer-facing documents. */
+   * each storefront is its own point of sale with its own identity on customer-facing documents.
+   * Invoices/quotations used to just borrow the receipt footer (no header at all) — these four give
+   * each document type its own header/footer instead. */
   receiptHeader: string | null;
   receiptFooter: string | null;
+  invoiceHeader: string | null;
+  invoiceFooter: string | null;
+  quotationHeader: string | null;
+  quotationFooter: string | null;
+  /** Per-line product photos on the downloaded/printed PDF only — never synced to the cloud (images
+   * are local-file-only, see image-service.ts), so the Share app can never show them regardless of
+   * this setting. Off by default: most tenants' product photos aren't curated for a formal document. */
+  showProductImagesOnInvoices: boolean;
+  showProductImagesOnQuotations: boolean;
   canReceiveStock: boolean;
   canSellStock: boolean;
   canTransferStock: boolean;

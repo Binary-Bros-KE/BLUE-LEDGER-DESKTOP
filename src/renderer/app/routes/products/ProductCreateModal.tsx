@@ -248,9 +248,11 @@ export function ProductCreateModal({
         )}
 
         <div className="flex items-center gap-4">
-          <div className="grid size-20 flex-none place-items-center overflow-hidden rounded-lg border border-line bg-soft">
+          <div className="relative grid size-20 flex-none place-items-center overflow-hidden rounded-lg border border-line bg-soft">
             {imagePreviewUrl ? (
-              <img src={imagePreviewUrl} alt="" className="size-full object-cover" />
+              // Absolute (not size-full) — see ProductThumbnail.tsx's own doc comment for why a
+              // percentage height inside a place-items-center grid cell can't be trusted otherwise.
+              <img src={imagePreviewUrl} alt="" className="absolute inset-0 size-full object-contain" />
             ) : (
               <Package className="size-7 text-muted" aria-hidden="true" />
             )}

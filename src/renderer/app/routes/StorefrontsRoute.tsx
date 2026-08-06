@@ -52,6 +52,12 @@ type FormState = {
   description: string;
   receiptHeader: string;
   receiptFooter: string;
+  invoiceHeader: string;
+  invoiceFooter: string;
+  quotationHeader: string;
+  quotationFooter: string;
+  showProductImagesOnInvoices: boolean;
+  showProductImagesOnQuotations: boolean;
   canReceiveStock: boolean;
   canSellStock: boolean;
   canTransferStock: boolean;
@@ -78,6 +84,12 @@ const emptyForm: FormState = {
   description: "",
   receiptHeader: "",
   receiptFooter: "",
+  invoiceHeader: "",
+  invoiceFooter: "",
+  quotationHeader: "",
+  quotationFooter: "",
+  showProductImagesOnInvoices: false,
+  showProductImagesOnQuotations: false,
   canReceiveStock: true,
   canSellStock: true,
   canTransferStock: true
@@ -105,6 +117,12 @@ function toFormState(location: Location): FormState {
     description: location.description ?? "",
     receiptHeader: location.receiptHeader ?? "",
     receiptFooter: location.receiptFooter ?? "",
+    invoiceHeader: location.invoiceHeader ?? "",
+    invoiceFooter: location.invoiceFooter ?? "",
+    quotationHeader: location.quotationHeader ?? "",
+    quotationFooter: location.quotationFooter ?? "",
+    showProductImagesOnInvoices: location.showProductImagesOnInvoices,
+    showProductImagesOnQuotations: location.showProductImagesOnQuotations,
     canReceiveStock: location.canReceiveStock,
     canSellStock: location.canSellStock,
     canTransferStock: location.canTransferStock
@@ -574,8 +592,9 @@ export function StorefrontsRoute(): React.JSX.Element {
             </p>
             <p className="mt-1 text-xs font-semibold text-muted">
               This storefront's own name, address, and phone (above) are what print on its receipts,
-              invoices, and quotations — never another storefront's. Add a header/footer specific to this
-              branch below.
+              invoices, and quotations — never another storefront's. Each document type gets its own
+              header/footer below; product images only ever appear on the downloaded/printed PDF, never
+              on a link shared through the Share app.
             </p>
             <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <TextAreaField
@@ -589,6 +608,44 @@ export function StorefrontsRoute(): React.JSX.Element {
                 value={form.receiptFooter}
                 onChange={(value) => updateField("receiptFooter", value)}
                 placeholder="e.g. Goods sold are non-refundable. Visit again!"
+              />
+              <TextAreaField
+                label="Invoice Header"
+                value={form.invoiceHeader}
+                onChange={(value) => updateField("invoiceHeader", value)}
+                placeholder="e.g. Official Tax Invoice"
+              />
+              <TextAreaField
+                label="Invoice Footer"
+                value={form.invoiceFooter}
+                onChange={(value) => updateField("invoiceFooter", value)}
+                placeholder="e.g. Payment due within 30 days of invoice date."
+              />
+              <TextAreaField
+                label="Quotation Header"
+                value={form.quotationHeader}
+                onChange={(value) => updateField("quotationHeader", value)}
+                placeholder="e.g. Prices below are valid for 14 days."
+              />
+              <TextAreaField
+                label="Quotation Footer"
+                value={form.quotationFooter}
+                onChange={(value) => updateField("quotationFooter", value)}
+                placeholder="e.g. Thank you for considering us!"
+              />
+            </div>
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <CheckboxField
+                label="Show Product Images on Invoices"
+                description="Each line item's own photo, downloaded/printed PDF only"
+                checked={form.showProductImagesOnInvoices}
+                onChange={(checked) => updateField("showProductImagesOnInvoices", checked)}
+              />
+              <CheckboxField
+                label="Show Product Images on Quotations"
+                description="Each line item's own photo, downloaded/printed PDF only"
+                checked={form.showProductImagesOnQuotations}
+                onChange={(checked) => updateField("showProductImagesOnQuotations", checked)}
               />
             </div>
           </div>

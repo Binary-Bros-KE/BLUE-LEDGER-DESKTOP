@@ -53,6 +53,7 @@ import { useAppStore } from "@renderer/shared/stores/app-store";
 import { formatDocumentDate } from "@shared/lib/date";
 import type { Customer } from "@shared/types/customer";
 import type { ExportListRequest } from "@shared/types/export";
+import { isStorefrontType, type Location } from "@shared/types/location";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import type { ProductListItem } from "@shared/types/product";
 import {
@@ -126,6 +127,7 @@ export function QuotationsRoute(): React.JSX.Element {
   const currency = useAppStore((state) => state.context?.tenant.currency ?? "");
   const tenantContext = useAppStore((state) => state.context?.tenant ?? null);
   const { can, session } = usePermissions();
+  const showStorefrontFilter = session?.branch == null;
   const canCreate = can("quotations", "create");
   const canEdit = can("quotations", "edit");
   const canDelete = can("quotations", "delete");
@@ -146,6 +148,8 @@ export function QuotationsRoute(): React.JSX.Element {
   const [yearFilter, setYearFilter] = useState<string>(String(currentYear()));
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [filterLocations, setFilterLocations] = useState<Location[]>([]);
+  const [locationFilter, setLocationFilter] = useState("");
 
   const [viewingQuotation, setViewingQuotation] = useState<Quotation | null>(null);
   const [sharing, setSharing] = useState(false);
@@ -204,6 +208,14 @@ export function QuotationsRoute(): React.JSX.Element {
     void loadAll();
   }, [loadAll]);
 
+  useEffect(() => {
+    if (!showStorefrontFilter) return;
+    window.blueLedger.location
+      .list()
+      .then((list) => setFilterLocations(list.filter((location) => isStorefrontType(location.locationType))))
+      .catch(() => undefined);
+  }, [showStorefrontFilter]);
+
   const activePaymentMethods = useMemo(
     () => paymentMethods.filter((method) => method.isActive).sort((a, b) => a.sortOrder - b.sortOrder),
     [paymentMethods]
@@ -243,8 +255,12 @@ export function QuotationsRoute(): React.JSX.Element {
 
     list = list.filter((quotation) => matchesYearFilter(quotation.createdAt, yearFilter));
 
+    if (locationFilter) {
+      list = list.filter((quotation) => quotation.locationId === locationFilter);
+    }
+
     return [...list].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [quotations, activeTab, searchTerm, dateFrom, dateTo, yearFilter]);
+  }, [quotations, activeTab, searchTerm, dateFrom, dateTo, yearFilter, locationFilter]);
 
   const exportRequest = useMemo<ExportListRequest | null>(() => {
     if (!filteredQuotations) return null;
@@ -252,6 +268,9 @@ export function QuotationsRoute(): React.JSX.Element {
     if (activeTab !== "all") filterParts.push(`Filter: ${FILTER_TABS.find((tab) => tab.value === activeTab)?.label}`);
     if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
     if (yearFilter !== ALL_YEARS_VALUE) filterParts.push(`Year: ${yearFilter}`);
+    if (locationFilter) {
+      filterParts.push(`Storefront: ${filterLocations.find((l) => l.id === locationFilter)?.locationName ?? locationFilter}`);
+    }
     if (dateFrom || dateTo) filterParts.push(`Date: ${dateFrom || "…"} to ${dateTo || "…"}`);
 
     return {
@@ -290,7 +309,7 @@ export function QuotationsRoute(): React.JSX.Element {
         : [],
       fileBaseName: `Quotations_${new Date().toISOString().slice(0, 10)}`
     };
-  }, [filteredQuotations, summary, activeTab, searchTerm, yearFilter, dateFrom, dateTo, currency]);
+  }, [filteredQuotations, summary, activeTab, searchTerm, yearFilter, locationFilter, filterLocations, dateFrom, dateTo, currency]);
 
   async function openView(id: string): Promise<void> {
     setViewLoading(true);
@@ -780,6 +799,18 @@ export function QuotationsRoute(): React.JSX.Element {
             options={yearFilterOptions(availableYears)}
             className="w-32"
           />
+          {showStorefrontFilter && (
+            <SelectField
+              label="Storefront"
+              value={locationFilter}
+              onChange={setLocationFilter}
+              options={[
+                { value: "", label: "All Storefronts" },
+                ...filterLocations.map((location) => ({ value: location.id, label: location.locationName }))
+              ]}
+              className="w-44"
+            />
+          )}
           <label className="block">
             <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">From</span>
             <input
@@ -1049,7 +1080,7 @@ export function QuotationsRoute(): React.JSX.Element {
                   </span>
                 </div>
               )}
-              {viewingQuotation.delivery && (
+              {viewingQuotation.delivery && viewingQuotation.delivery.feeCents > 0 && (
                 <div className="flex justify-between text-muted">
                   <span className="font-semibold">Delivery Fee</span>
                   <span className="font-bold tabular-nums">{formatCents(viewingQuotation.delivery.feeCents)}</span>

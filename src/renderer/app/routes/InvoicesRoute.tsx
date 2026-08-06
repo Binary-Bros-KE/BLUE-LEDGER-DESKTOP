@@ -36,6 +36,7 @@ import { ShareModal } from "@renderer/shared/components/ShareModal";
 import { StatementPreview } from "@renderer/shared/components/StatementPreview";
 import { StatTile } from "@renderer/shared/components/StatTile";
 import { StorefrontPicker } from "@renderer/shared/components/StorefrontPicker";
+import { SupplierPicker } from "@renderer/shared/components/SupplierPicker";
 import { TaxBreakdownTable } from "@renderer/shared/components/TaxBreakdownTable";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { computeLinePricing } from "@renderer/shared/lib/cart-pricing";
@@ -54,8 +55,10 @@ import {
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { formatDocumentDate, formatDocumentDateTime } from "@shared/lib/date";
 import type { Customer } from "@shared/types/customer";
+import type { Supplier } from "@shared/types/supplier";
 import type { ExportListRequest } from "@shared/types/export";
 import type { InvoiceListItem, InvoiceSummary } from "@shared/types/invoice";
+import { isStorefrontType, type Location } from "@shared/types/location";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import type { ProductListItem } from "@shared/types/product";
 import {
@@ -92,6 +95,12 @@ type CartLine = {
    * wholesale price". Raw text on purpose (see money.ts's own fromCents/toCents split) — converting
    * on every keystroke like discountAmountCents does would fight the user mid-type. */
   priceOverride: string;
+  /** Same locally-sourced fields as CheckoutRoute's own CartLine — an invoice is a sale like any
+   * other, and a customer wanting something this shop doesn't stock is just as likely to want it
+   * billed on credit as paid for on the spot. */
+  isLocallySourced: boolean;
+  localCost: string;
+  localSupplierId: string | null;
 };
 
 function statusTone(status: PaymentStatus): "success" | "warning" | "danger" | "neutral" | "accent" {
@@ -154,6 +163,7 @@ export function InvoicesRoute(): React.JSX.Element {
   const currency = useAppStore((state) => state.context?.tenant.currency ?? "");
   const tenantContext = useAppStore((state) => state.context?.tenant ?? null);
   const { can, session } = usePermissions();
+  const showStorefrontFilter = session?.branch == null;
   const canCreate = can("sales", "create");
   const canEdit = can("sales", "edit");
   const canExport = can("sales", "export");
@@ -164,12 +174,15 @@ export function InvoicesRoute(): React.JSX.Element {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<ProductListItem[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [yearFilter, setYearFilter] = useState<string>(String(currentYear()));
+  const [filterLocations, setFilterLocations] = useState<Location[]>([]);
+  const [locationFilter, setLocationFilter] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("invoiceDate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -229,13 +242,15 @@ export function InvoicesRoute(): React.JSX.Element {
   const loadAll = useCallback(async () => {
     setLoadError(null);
     try {
-      const [summaryResult, invoiceList, customerList, productList, methodList] = await Promise.all([
+      const [summaryResult, invoiceList, customerList, productList, methodList, supplierList] = await Promise.all([
         window.blueLedger.invoice.summary(),
         window.blueLedger.invoice.list(),
         window.blueLedger.customer.list(),
         window.blueLedger.product.list(),
-        window.blueLedger.paymentMethod.list()
+        window.blueLedger.paymentMethod.list(),
+        window.blueLedger.supplier.list()
       ]);
+      setSuppliers(supplierList);
       setSummary(summaryResult);
       setInvoices(invoiceList);
       setCustomers(customerList);
@@ -249,6 +264,14 @@ export function InvoicesRoute(): React.JSX.Element {
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  useEffect(() => {
+    if (!showStorefrontFilter) return;
+    window.blueLedger.location
+      .list()
+      .then((list) => setFilterLocations(list.filter((location) => isStorefrontType(location.locationType))))
+      .catch(() => undefined);
+  }, [showStorefrontFilter]);
 
   const activePaymentMethods = useMemo(
     () => paymentMethods.filter((method) => method.isActive).sort((a, b) => a.sortOrder - b.sortOrder),
@@ -284,6 +307,10 @@ export function InvoicesRoute(): React.JSX.Element {
 
     list = list.filter((invoice) => matchesYearFilter(invoice.invoiceDate, yearFilter));
 
+    if (locationFilter) {
+      list = list.filter((invoice) => invoice.locationId === locationFilter);
+    }
+
     const term = searchTerm.trim().toLowerCase();
     if (term) {
       list = list.filter((invoice) => {
@@ -306,7 +333,7 @@ export function InvoicesRoute(): React.JSX.Element {
     });
 
     return sorted;
-  }, [invoices, activeTab, searchTerm, yearFilter, sortKey, sortDir]);
+  }, [invoices, activeTab, searchTerm, yearFilter, locationFilter, sortKey, sortDir]);
 
   const exportRequest = useMemo<ExportListRequest | null>(() => {
     if (!filteredInvoices) return null;
@@ -314,6 +341,9 @@ export function InvoicesRoute(): React.JSX.Element {
     if (activeTab !== "all") filterParts.push(`Filter: ${FILTER_TABS.find((tab) => tab.value === activeTab)?.label}`);
     if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
     if (yearFilter !== ALL_YEARS_VALUE) filterParts.push(`Year: ${yearFilter}`);
+    if (locationFilter) {
+      filterParts.push(`Storefront: ${filterLocations.find((l) => l.id === locationFilter)?.locationName ?? locationFilter}`);
+    }
 
     return {
       module: "sales",
@@ -352,7 +382,7 @@ export function InvoicesRoute(): React.JSX.Element {
         : [],
       fileBaseName: `Invoices_${new Date().toISOString().slice(0, 10)}`
     };
-  }, [filteredInvoices, summary, activeTab, searchTerm, yearFilter, currency]);
+  }, [filteredInvoices, summary, activeTab, searchTerm, yearFilter, locationFilter, filterLocations, currency]);
 
   function toggleSort(key: SortKey): void {
     if (sortKey === key) {
@@ -657,7 +687,17 @@ export function InvoicesRoute(): React.JSX.Element {
       }
       return [
         ...prev,
-        { productId: product.id, name: product.name, sku: product.sku, quantity: 1, discountAmountCents: 0, priceOverride: "" }
+        {
+          productId: product.id,
+          name: product.name,
+          sku: product.sku,
+          quantity: 1,
+          discountAmountCents: 0,
+          priceOverride: "",
+          isLocallySourced: false,
+          localCost: "",
+          localSupplierId: null
+        }
       ];
     });
     setProductSearch("");
@@ -688,6 +728,30 @@ export function InvoicesRoute(): React.JSX.Element {
   function updateCreatePriceOverride(productId: string, value: string): void {
     setCreateItems((prev) =>
       prev.map((line) => (line.productId === productId ? { ...line, priceOverride: value } : line))
+    );
+  }
+
+  function toggleCreateLocallySourced(productId: string): void {
+    setCreateItems((prev) =>
+      prev.map((line) =>
+        line.productId === productId
+          ? {
+            ...line,
+            isLocallySourced: !line.isLocallySourced,
+            ...(line.isLocallySourced ? { localCost: "", localSupplierId: null } : {})
+          }
+          : line
+      )
+    );
+  }
+
+  function updateCreateLocalCost(productId: string, value: string): void {
+    setCreateItems((prev) => prev.map((line) => (line.productId === productId ? { ...line, localCost: value } : line)));
+  }
+
+  function updateCreateLocalSupplier(productId: string, supplierId: string | null): void {
+    setCreateItems((prev) =>
+      prev.map((line) => (line.productId === productId ? { ...line, localSupplierId: supplierId } : line))
     );
   }
 
@@ -727,7 +791,10 @@ export function InvoicesRoute(): React.JSX.Element {
           productId: line.productId,
           quantity: line.quantity,
           discountAmountCents: line.discountAmountCents,
-          unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined
+          unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined,
+          isLocallySourced: line.isLocallySourced,
+          localCostCents: line.isLocallySourced && line.localCost.trim() ? toCents(line.localCost) : undefined,
+          localSupplierId: line.localSupplierId
         })),
         serviceCharges: createServiceCharges.map((charge) => ({
           name: charge.name,
@@ -886,6 +953,18 @@ export function InvoicesRoute(): React.JSX.Element {
             options={yearFilterOptions(availableYears)}
             className="w-32"
           />
+          {showStorefrontFilter && (
+            <SelectField
+              label="Storefront"
+              value={locationFilter}
+              onChange={setLocationFilter}
+              options={[
+                { value: "", label: "All Storefronts" },
+                ...filterLocations.map((location) => ({ value: location.id, label: location.locationName }))
+              ]}
+              className="w-44"
+            />
+          )}
         </div>
 
         <div className="mt-5">
@@ -1065,6 +1144,32 @@ export function InvoicesRoute(): React.JSX.Element {
               </div>
             </div>
 
+            {viewingSale.items.some((item) => item.isLocallySourced) && (
+              <div className="mt-4 rounded-lg border border-line bg-soft px-3.5 py-3">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">
+                  Sourced From Another Shop
+                </p>
+                <p className="mt-0.5 text-[11px] font-semibold text-muted">
+                  Internal record only — never shown on the printed/shared invoice.
+                </p>
+                <div className="mt-2 space-y-1.5">
+                  {viewingSale.items
+                    .filter((item) => item.isLocallySourced)
+                    .map((item) => (
+                      <div key={item.id} className="flex items-center justify-between gap-2 text-xs">
+                        <div className="min-w-0">
+                          <p className="truncate font-bold text-ink">{item.productName}</p>
+                          <p className="truncate text-muted">{item.localSupplierName ?? "No supplier recorded"}</p>
+                        </div>
+                        <span className="flex-none font-bold tabular-nums text-ink">
+                          Cost {item.localCostCents !== null ? formatCents(item.localCostCents) : "—"}
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+
             {viewingSale.serviceCharges.length > 0 && (
               <div className="mt-4">
                 <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Service Charges</p>
@@ -1143,7 +1248,7 @@ export function InvoicesRoute(): React.JSX.Element {
                   </span>
                 </div>
               )}
-              {viewingSale.delivery && (
+              {viewingSale.delivery && viewingSale.delivery.feeCents > 0 && (
                 <div className="flex justify-between text-muted">
                   <span className="font-semibold">Delivery Fee</span>
                   <span className="font-bold tabular-nums">{formatCents(viewingSale.delivery.feeCents)}</span>
@@ -1677,6 +1782,42 @@ export function InvoicesRoute(): React.JSX.Element {
                       </label>
                       <span className="text-sm font-extrabold text-ink">{formatCents(pricing.lineTotalCents)}</span>
                     </div>
+
+                    <label className="mt-2 flex items-center gap-1.5 text-[10px] font-bold text-muted cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={line.isLocallySourced}
+                        onChange={() => toggleCreateLocallySourced(line.productId)}
+                        className="size-3.5 accent-accent"
+                      />
+                      Sourced from another shop
+                    </label>
+
+                    {line.isLocallySourced && (
+                      <div className="mt-2 flex flex-col gap-2.5 rounded-md bg-soft/60 p-2.5">
+                        <label className="block text-sm font-extrabold text-ink">
+                          Cost paid
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={line.localCost}
+                            onChange={(event) => updateCreateLocalCost(line.productId, event.target.value)}
+                            placeholder="0.00"
+                            className="mt-1 h-10 w-full rounded-md border border-line px-3 text-sm font-semibold outline-none focus:border-accent"
+                          />
+                        </label>
+                        <div>
+                          <p className="text-sm font-extrabold text-ink">Local supplier</p>
+                          <SupplierPicker
+                            suppliers={suppliers}
+                            value={line.localSupplierId}
+                            onChange={(supplierId) => updateCreateLocalSupplier(line.productId, supplierId)}
+                            onSupplierCreated={(supplier) => setSuppliers((prev) => [...prev, supplier])}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))
               )}

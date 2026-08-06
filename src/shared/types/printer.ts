@@ -31,7 +31,11 @@ export const DEFAULT_PRINTER_SETTINGS: PrinterSettings = {
   connectionType: "network",
   address: "",
   printerType: "epson",
-  paperWidth: 48,
+  // Was 48 — bumped now that this setting is actually wired into the thermal print pipeline's page
+  // width (see printer-service.ts's resolveThermalPageWidthIn). 70 is the client's own confirmed
+  // sweet spot on a real 80mm-roll printer, found by comparing against another POS's own receipts
+  // printed on the same printer/roll.
+  paperWidth: 70,
   autoPrintOnSale: true
 };
 

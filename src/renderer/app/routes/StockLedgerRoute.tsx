@@ -19,6 +19,7 @@ import {
 } from "@renderer/shared/lib/year-filter";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import type { ExportListRequest } from "@shared/types/export";
+import type { Location } from "@shared/types/location";
 import { STOCK_MOVEMENT_TYPE_OPTIONS, type StockMovementFeedItem, type StockMovementType } from "@shared/types/stock-movement";
 
 const INCREASING_TYPES = new Set<StockMovementType>(["purchase", "transfer_in", "return", "opening_stock"]);
@@ -43,14 +44,17 @@ function Th({ children, className }: { children: React.ReactNode; className?: st
 
 export function StockLedgerRoute(): React.JSX.Element {
   const currency = useAppStore((state) => state.context?.tenant.currency ?? "");
-  const { can } = usePermissions();
+  const { can, session } = usePermissions();
   const canExport = can("inventory", "export");
+  const showStorefrontFilter = session?.branch == null;
 
   const [movements, setMovements] = useState<StockMovementFeedItem[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [typeFilter, setTypeFilter] = useState<StockMovementType | "all">("all");
   const [yearFilter, setYearFilter] = useState<string>(String(currentYear()));
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [locationFilter, setLocationFilter] = useState("");
 
   const loadMovements = useCallback(async (limit: number) => {
     setLoadError(null);
@@ -68,6 +72,16 @@ export function StockLedgerRoute(): React.JSX.Element {
     void loadMovements(yearFilter === String(currentYear()) ? 300 : 5000);
   }, [loadMovements, yearFilter]);
 
+  useEffect(() => {
+    if (!showStorefrontFilter) return;
+    // Every location, not just storefronts — Main Store movements (receive, allocate, etc.) show up
+    // in this same feed, so the filter needs to be able to isolate those too.
+    window.blueLedger.location
+      .list()
+      .then(setLocations)
+      .catch(() => undefined);
+  }, [showStorefrontFilter]);
+
   const availableYears = useMemo(
     () => buildAvailableYears((movements ?? []).map((movement) => movement.createdAt)),
     [movements]
@@ -83,6 +97,10 @@ export function StockLedgerRoute(): React.JSX.Element {
 
     list = list.filter((movement) => matchesYearFilter(movement.createdAt, yearFilter));
 
+    if (locationFilter) {
+      list = list.filter((movement) => movement.locationId === locationFilter);
+    }
+
     const term = searchTerm.trim().toLowerCase();
     if (term) {
       list = list.filter((movement) =>
@@ -91,7 +109,7 @@ export function StockLedgerRoute(): React.JSX.Element {
     }
 
     return list;
-  }, [movements, searchTerm, typeFilter, yearFilter]);
+  }, [movements, searchTerm, typeFilter, yearFilter, locationFilter]);
 
   const summary = useMemo(() => {
     if (!movements) return null;
@@ -110,6 +128,9 @@ export function StockLedgerRoute(): React.JSX.Element {
     if (typeFilter !== "all") filterParts.push(`Type: ${movementTypeLabel(typeFilter)}`);
     if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
     if (yearFilter !== ALL_YEARS_VALUE) filterParts.push(`Year: ${yearFilter}`);
+    if (locationFilter) {
+      filterParts.push(`Storefront: ${locations.find((l) => l.id === locationFilter)?.locationName ?? locationFilter}`);
+    }
 
     return {
       module: "inventory",
@@ -144,7 +165,7 @@ export function StockLedgerRoute(): React.JSX.Element {
         : [],
       fileBaseName: `StockLedger_${new Date().toISOString().slice(0, 10)}`
     };
-  }, [filteredMovements, summary, typeFilter, searchTerm, yearFilter, currency]);
+  }, [filteredMovements, summary, typeFilter, searchTerm, yearFilter, locationFilter, locations, currency]);
 
   return (
     <motion.div
@@ -255,6 +276,18 @@ export function StockLedgerRoute(): React.JSX.Element {
             options={yearFilterOptions(availableYears)}
             className="w-32"
           />
+          {showStorefrontFilter && (
+            <SelectField
+              label="Storefront"
+              value={locationFilter}
+              onChange={setLocationFilter}
+              options={[
+                { value: "", label: "All Locations" },
+                ...locations.map((location) => ({ value: location.id, label: location.locationName }))
+              ]}
+              className="w-44"
+            />
+          )}
         </div>
 
         <div className="mt-5">

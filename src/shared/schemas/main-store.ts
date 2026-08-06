@@ -54,3 +54,17 @@ export const mainStoreDamageSchema = z.object({
 });
 
 export type MainStoreDamageInput = z.infer<typeof mainStoreDamageSchema>;
+
+/** Corrects a specific bucket's stock to match what was physically counted — the delta (counted
+ * minus current) is computed server-side, not entered directly, so a cashier doing a stock take
+ * never has to do the subtraction themselves or risk a stale on-screen count producing the wrong
+ * delta. 0 is a valid count (shelf is genuinely empty) — the .int().min(0) below deliberately allows
+ * it, unlike every other main-store quantity field here which requires a positive delta. */
+export const mainStoreAdjustSchema = z.object({
+  productId: z.string().trim().min(1),
+  storefrontId: nullableStorefrontId,
+  countedQuantity: z.coerce.number().int().min(0, "Counted quantity can't be negative"),
+  notes: optionalText(500)
+});
+
+export type MainStoreAdjustInput = z.infer<typeof mainStoreAdjustSchema>;

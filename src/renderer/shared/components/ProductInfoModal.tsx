@@ -68,11 +68,13 @@ export function ProductInfoModal({ product, onClose }: { product: ProductListIte
       <div className="space-y-5">
         <div className="flex items-start gap-4">
           <div
-            className="grid size-20 flex-none place-items-center overflow-hidden rounded-lg"
+            className="relative grid size-20 flex-none place-items-center overflow-hidden rounded-lg"
             style={{ backgroundColor: imageUrl ? undefined : (product.categoryColor ?? "#83795f") }}
           >
             {imageUrl ? (
-              <img src={imageUrl} alt="" className="size-full object-cover" />
+              // Absolute (not size-full) — see ProductThumbnail.tsx's own doc comment for why a
+              // percentage height inside a place-items-center grid cell can't be trusted otherwise.
+              <img src={imageUrl} alt="" className="absolute inset-0 size-full object-contain" />
             ) : (
               <Package className="size-8 text-white/90" aria-hidden="true" />
             )}

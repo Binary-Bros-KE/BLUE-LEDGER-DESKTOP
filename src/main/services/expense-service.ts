@@ -3,13 +3,20 @@ import * as expenseCategoryRepository from "@main/database/repositories/expense-
 import * as expenseRepository from "@main/database/repositories/expense-repository";
 import * as locationRepository from "@main/database/repositories/location-repository";
 import * as paymentMethodRepository from "@main/database/repositories/payment-method-repository";
+import * as riderRepository from "@main/database/repositories/rider-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
+import { findOrCreateExpenseCategoryByName } from "@main/services/expense-category-service";
 import { deleteManagedExpenseAttachment } from "@main/services/image-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
+import type { DeliveryInput } from "@shared/schemas/charges";
 import { expenseInputSchema, type ExpenseInput } from "@shared/schemas/expense";
 import { isStorefrontType, type LocationType } from "@shared/types/location";
 import type { Expense, ExpenseSummary } from "@shared/types/expense";
+
+/** Name of the auto-created category used by createDeliveryCostExpenseIfNeeded — deliberately a
+ * plain constant, not tenant-configurable, matching the client's own naming ask verbatim. */
+const DELIVERY_COST_CATEGORY_NAME = "Delivery Costs";
 
 function generateExpenseNumber(tenantId: string): string {
   return generateDocumentNumber({
@@ -144,6 +151,80 @@ export function createExpense(input: unknown): Expense {
     createdBy: employeeId
   });
   return getExpenseDetail(row.id);
+}
+
+/** Encodes exactly what the client asked for into the expense's own description field (expenses
+ * have no separate "notes" field — description is the closest, free-text, 1000-char one) so the
+ * delivery cost record is self-explanatory on its own, without needing to cross-reference the
+ * originating sale/invoice: which document it came from, who the customer was, and the delivery's
+ * own recipient/address/rider — the same fields a staff member would want if reviewing this expense
+ * weeks later with no other context open. */
+function buildDeliveryExpenseDescription(params: {
+  documentNumber: string | null;
+  customerName: string | null;
+  delivery: DeliveryInput;
+}): string {
+  const lines: string[] = [];
+  if (params.documentNumber) lines.push(`Sale: ${params.documentNumber}`);
+  lines.push(`Customer: ${params.customerName ?? "Walk-in Customer"}`);
+  lines.push(`Delivered To: ${params.delivery.recipientName}`);
+  const addressParts = [params.delivery.physicalAddress, params.delivery.town, params.delivery.country].filter(
+    (part): part is string => Boolean(part)
+  );
+  if (addressParts.length > 0) lines.push(`Address: ${addressParts.join(", ")}`);
+  if (params.delivery.riderId) {
+    const rider = riderRepository.findRiderRowById(params.delivery.riderId);
+    if (rider) lines.push(`Rider: ${rider.name}`);
+  }
+  if (params.delivery.notes) lines.push(`Notes: ${params.delivery.notes}`);
+  return lines.join("\n");
+}
+
+/**
+ * Auto-books the seller's own delivery cost as a real, auditable "Delivery Costs" expense the
+ * moment a sale or invoice with a delivery is created — a client-requested alternative to the old
+ * behavior of folding delivery cost into a flat, uncategorized "hidden cost" figure on the Sales
+ * Report (see report-service.ts's own comment on totalExpensesCents, which no longer counts
+ * delivery cost separately to avoid double-deducting it now that it lands here instead). Bypasses
+ * requirePermission/getCurrentEmployeeId deliberately — this runs as a side effect of a sale/invoice
+ * a cashier just created inside its own transaction, not a standalone user action, so it must not
+ * fail just because that cashier individually lacks "expenses:create".
+ *
+ * Silently no-ops (does NOT throw) when there's no cost to book, or no payment method to attribute
+ * it to — an invoice created with no initial payment has no payment method in scope at all, and
+ * inventing one would misrepresent how the business actually paid for the delivery. Never called
+ * for quotations (nothing has actually shipped or been paid for yet — see persistCartExtras).
+ */
+export function createDeliveryCostExpenseIfNeeded(params: {
+  tenantId: string;
+  documentNumber: string | null;
+  customerName: string | null;
+  delivery: DeliveryInput;
+  locationId: string;
+  employeeId: string;
+  paymentMethodId: string | null;
+  date: string;
+}): void {
+  if (params.delivery.costCents <= 0 || !params.paymentMethodId) return;
+
+  const category = findOrCreateExpenseCategoryByName(params.tenantId, DELIVERY_COST_CATEGORY_NAME);
+
+  expenseRepository.insertExpenseRow({
+    id: `expense_${randomUUID()}`,
+    tenantId: params.tenantId,
+    kind: "general",
+    expenseNumber: generateExpenseNumber(params.tenantId),
+    createdBy: params.employeeId,
+    expenseDate: params.date.slice(0, 10),
+    categoryId: category.id,
+    amountCents: params.delivery.costCents,
+    paidBy: null,
+    paymentMethodId: params.paymentMethodId,
+    storefrontId: params.locationId,
+    reference: null,
+    description: buildDeliveryExpenseDescription(params),
+    attachmentPath: null
+  });
 }
 
 function requireEditableExpense(id: string, tenantId: string): expenseRepository.ExpenseRow {

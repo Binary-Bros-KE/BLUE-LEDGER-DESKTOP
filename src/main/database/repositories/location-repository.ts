@@ -32,6 +32,12 @@ export type LocationRow = {
   closing_time: string | null;
   receipt_header: string | null;
   receipt_footer: string | null;
+  invoice_header: string | null;
+  invoice_footer: string | null;
+  quotation_header: string | null;
+  quotation_footer: string | null;
+  show_product_images_on_invoices: number;
+  show_product_images_on_quotations: number;
   working_days: string | null;
   default_tax_rate: number | null;
   allow_negative_stock: number;
@@ -98,10 +104,12 @@ export function insertLocationRow(
         id, tenant_id, location_code, location_name, location_type, logo_path, logo_ratio,
         phone, alternative_phone, email, country, county, city, physical_address,
         manager_name, manager_phone, manager_email, opening_time, closing_time,
-        description, receipt_header, receipt_footer, can_receive_stock, can_sell_stock, can_transfer_stock,
+        description, receipt_header, receipt_footer, invoice_header, invoice_footer,
+        quotation_header, quotation_footer, show_product_images_on_invoices, show_product_images_on_quotations,
+        can_receive_stock, can_sell_stock, can_transfer_stock,
         status, created_at, updated_at, created_by, sync_status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
     `
     )
     .run(
@@ -127,6 +135,12 @@ export function insertLocationRow(
       input.description,
       input.receiptHeader,
       input.receiptFooter,
+      input.invoiceHeader,
+      input.invoiceFooter,
+      input.quotationHeader,
+      input.quotationFooter,
+      input.showProductImagesOnInvoices ? 1 : 0,
+      input.showProductImagesOnQuotations ? 1 : 0,
       input.canReceiveStock ? 1 : 0,
       input.canSellStock ? 1 : 0,
       input.canTransferStock ? 1 : 0,
@@ -172,6 +186,12 @@ export function updateLocationRow(
         description = ?,
         receipt_header = ?,
         receipt_footer = ?,
+        invoice_header = ?,
+        invoice_footer = ?,
+        quotation_header = ?,
+        quotation_footer = ?,
+        show_product_images_on_invoices = ?,
+        show_product_images_on_quotations = ?,
         can_receive_stock = ?,
         can_sell_stock = ?,
         can_transfer_stock = ?,
@@ -202,6 +222,12 @@ export function updateLocationRow(
       input.description,
       input.receiptHeader,
       input.receiptFooter,
+      input.invoiceHeader,
+      input.invoiceFooter,
+      input.quotationHeader,
+      input.quotationFooter,
+      input.showProductImagesOnInvoices ? 1 : 0,
+      input.showProductImagesOnQuotations ? 1 : 0,
       input.canReceiveStock ? 1 : 0,
       input.canSellStock ? 1 : 0,
       input.canTransferStock ? 1 : 0,
@@ -263,6 +289,12 @@ export function mapLocationRow(row: LocationRow): Location {
     closingTime: row.closing_time,
     receiptHeader: row.receipt_header,
     receiptFooter: row.receipt_footer,
+    invoiceHeader: row.invoice_header,
+    invoiceFooter: row.invoice_footer,
+    quotationHeader: row.quotation_header,
+    quotationFooter: row.quotation_footer,
+    showProductImagesOnInvoices: Boolean(row.show_product_images_on_invoices),
+    showProductImagesOnQuotations: Boolean(row.show_product_images_on_quotations),
     workingDays: row.working_days,
     defaultTaxRate: row.default_tax_rate,
     allowNegativeStock: Boolean(row.allow_negative_stock),

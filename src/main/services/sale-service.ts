@@ -6,11 +6,13 @@ import * as paymentMethodRepository from "@main/database/repositories/payment-me
 import * as productRepository from "@main/database/repositories/product-repository";
 import * as saleRepository from "@main/database/repositories/sale-repository";
 import * as serviceChargeRepository from "@main/database/repositories/service-charge-repository";
+import * as supplierRepository from "@main/database/repositories/supplier-repository";
 import { runInTransaction } from "@main/database/connection";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
 import { getCurrentBranchScope, getSession, requirePermission } from "@main/services/auth-service";
 import { generateDeliveryNoteNumber } from "@main/services/delivery-note-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
+import { createDeliveryCostExpenseIfNeeded } from "@main/services/expense-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import type { DeliveryInput, ServiceChargeInput } from "@shared/schemas/charges";
 import {
@@ -33,6 +35,9 @@ export type PreparedItem = {
   taxType: ProductTaxType;
   taxAmountCents: number;
   lineTotalCents: number;
+  isLocallySourced: boolean;
+  localCostCents: number | null;
+  localSupplierId: string | null;
 };
 
 export type PreparedCartExtras = {
@@ -102,10 +107,23 @@ function assertCustomerExists(tenantId: string, customerId: string | null): void
 /** Prices and taxes every cart line from live product data — never trusts client-supplied money math.
  * extras (service charges + delivery) are optional so callers that never touch them (e.g. quotation
  * updateQuotation before this feature existed) don't need changes; their fees are folded straight
- * into grandTotalCents, while subtotal/discount/tax stay pure product math. */
+ * into grandTotalCents, while subtotal/discount/tax stay pure product math.
+ *
+ * The item shape is deliberately its own structural type rather than reusing SaleCartInput["items"]
+ * directly — quotations/invoices/demo-seeding call this with their OWN item shapes (no local-sourcing
+ * concept there), so isLocallySourced/localCostCents/localSupplierId stay optional here and default
+ * inside the map below, instead of forcing every caller to pass them. */
 export function prepareCart(
   tenantId: string,
-  items: SaleCartInput["items"],
+  items: Array<{
+    productId: string;
+    quantity: number;
+    discountAmountCents: number;
+    unitPriceCents?: number | undefined;
+    isLocallySourced?: boolean | undefined;
+    localCostCents?: number | undefined;
+    localSupplierId?: string | null | undefined;
+  }>,
   extras?: PreparedCartExtras
 ): PreparedCart {
   const tenantTaxConfig = getCurrentTenant();
@@ -156,6 +174,16 @@ export function prepareCart(
     discountAmountCents += item.discountAmountCents;
     taxAmountCents += lineTaxCents;
 
+    const isLocallySourced = item.isLocallySourced ?? false;
+    let localSupplierId: string | null = null;
+    if (isLocallySourced && item.localSupplierId) {
+      const supplier = supplierRepository.findSupplierRowById(item.localSupplierId);
+      if (!supplier || supplier.tenant_id !== tenantId) {
+        throw new Error("Selected local supplier not found");
+      }
+      localSupplierId = supplier.id;
+    }
+
     return {
       product,
       quantity: item.quantity,
@@ -163,7 +191,12 @@ export function prepareCart(
       discountAmountCents: item.discountAmountCents,
       taxType: product.tax_type as ProductTaxType,
       taxAmountCents: lineTaxCents,
-      lineTotalCents
+      lineTotalCents,
+      isLocallySourced,
+      // The customer is still charged unitPriceCents like any other line — this is purely a cost
+      // figure for Reports, never folded into any total (see this file's own doc comment above).
+      localCostCents: isLocallySourced ? (item.localCostCents ?? null) : null,
+      localSupplierId: isLocallySourced ? localSupplierId : null
     };
   });
 
@@ -347,7 +380,10 @@ export function suspendSale(input: unknown): { id: string } {
         discountAmountCents: item.discountAmountCents,
         taxType: item.taxType,
         taxAmountCents: item.taxAmountCents,
-        lineTotalCents: item.lineTotalCents
+        lineTotalCents: item.lineTotalCents,
+        isLocallySourced: item.isLocallySourced,
+        localCostCents: item.localCostCents,
+        localSupplierId: item.localSupplierId
       });
     }
 
@@ -441,10 +477,16 @@ export function insertCompletedSaleFromCart(input: {
         discountAmountCents: item.discountAmountCents,
         taxType: item.taxType,
         taxAmountCents: item.taxAmountCents,
-        lineTotalCents: item.lineTotalCents
+        lineTotalCents: item.lineTotalCents,
+        isLocallySourced: item.isLocallySourced,
+        localCostCents: item.localCostCents,
+        localSupplierId: item.localSupplierId
       });
 
-      if (item.product.track_stock) {
+      // A locally-sourced line never touched this shop's own shelf — it went straight from the
+      // other shop to the customer — so it skips the stock movement even if this product is
+      // normally tracked (e.g. temporarily out of stock and bought elsewhere just this once).
+      if (item.product.track_stock && !item.isLocallySourced) {
         applyValidatedStockMovement(
           {
             productId: item.product.id,
@@ -462,6 +504,20 @@ export function insertCompletedSaleFromCart(input: {
     }
 
     persistCartExtras(tenantId, { saleId }, cart);
+
+    if (cart.delivery) {
+      const customer = input.customerId ? customerRepository.findCustomerRowById(input.customerId) : undefined;
+      createDeliveryCostExpenseIfNeeded({
+        tenantId,
+        documentNumber: receiptNumber,
+        customerName: customer?.name ?? null,
+        delivery: cart.delivery,
+        locationId,
+        employeeId,
+        paymentMethodId: input.paymentMethodId,
+        date: now
+      });
+    }
 
     return getSaleDetail(saleId);
   });

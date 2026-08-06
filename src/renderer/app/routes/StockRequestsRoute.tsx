@@ -83,6 +83,7 @@ export function StockRequestsRoute(): React.JSX.Element {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<FilterTab>("all");
   const [yearFilter, setYearFilter] = useState<string>(String(currentYear()));
+  const [locationFilter, setLocationFilter] = useState("");
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createStorefrontId, setCreateStorefrontId] = useState("");
@@ -117,16 +118,20 @@ export function StockRequestsRoute(): React.JSX.Element {
   }, [loadRequests]);
 
   useEffect(() => {
-    if (!canCreate) return;
-    window.blueLedger.product
-      .list()
-      .then(setProducts)
-      .catch(() => undefined);
-    window.blueLedger.location
-      .list()
-      .then(setLocations)
-      .catch(() => undefined);
-  }, [canCreate]);
+    if (canCreate) {
+      window.blueLedger.product
+        .list()
+        .then(setProducts)
+        .catch(() => undefined);
+    }
+    // Also needed for the branch-less Storefront filter below, not just the create form.
+    if (canCreate || needsStorefrontPicker) {
+      window.blueLedger.location
+        .list()
+        .then(setLocations)
+        .catch(() => undefined);
+    }
+  }, [canCreate, needsStorefrontPicker]);
 
   const storefronts = useMemo(
     () => locations.filter((location) => isStorefrontType(location.locationType)),
@@ -154,6 +159,9 @@ export function StockRequestsRoute(): React.JSX.Element {
       list = list.filter((request) => request.status === statusFilter);
     }
     list = list.filter((request) => matchesYearFilter(request.requestedAt, yearFilter));
+    if (locationFilter) {
+      list = list.filter((request) => request.storefrontId === locationFilter);
+    }
     const term = searchTerm.trim().toLowerCase();
     if (term) {
       list = list.filter((request) =>
@@ -161,7 +169,7 @@ export function StockRequestsRoute(): React.JSX.Element {
       );
     }
     return list;
-  }, [requests, statusFilter, searchTerm, yearFilter]);
+  }, [requests, statusFilter, searchTerm, yearFilter, locationFilter]);
 
   const counts = useMemo(() => {
     const source = requests ?? [];
@@ -390,6 +398,18 @@ export function StockRequestsRoute(): React.JSX.Element {
                 options={yearFilterOptions(availableYears)}
                 className="w-32"
               />
+              {needsStorefrontPicker && (
+                <SelectField
+                  label="Storefront"
+                  value={locationFilter}
+                  onChange={setLocationFilter}
+                  options={[
+                    { value: "", label: "All Storefronts" },
+                    ...storefronts.map((location) => ({ value: location.id, label: location.locationName }))
+                  ]}
+                  className="w-44"
+                />
+              )}
 
               <div className="flex flex-wrap gap-1.5 rounded-lg border border-line bg-soft px-1 py-0.5">
                 {FILTER_TABS.map((tab) => (

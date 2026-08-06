@@ -12,6 +12,7 @@ import { formatCents } from "@renderer/shared/lib/money";
 import { taxBreakdownLabel } from "@shared/lib/tax-calculation";
 import { useUiStore } from "@renderer/shared/stores/ui-store";
 import type { ReportExportRequest, ReportExportSection } from "@shared/types/report-export";
+import type { LocalSourcingReport } from "@shared/types/local-sourcing-report";
 import type { TaxReport } from "@shared/types/tax-report";
 import type {
   CancelledPurchasesReport,
@@ -34,6 +35,7 @@ import { RevenueExpenseBreakdown } from "./reports/RevenueExpenseBreakdown";
 import { defaultAnchorForMode, rangeForAnchor, shiftAnchor, todayIso, trendWindowInputForMode } from "./reports/salesReportDate";
 import { SalesModeSelector } from "./reports/SalesModeSelector";
 import { SalesReportNotes } from "./reports/SalesReportNotes";
+import { LocalSourcingReportSection } from "./reports/LocalSourcingReportSection";
 import { TaxBreakdownReportSection } from "./reports/TaxBreakdownReportSection";
 import { TransactionsList } from "./reports/TransactionsList";
 import { VoidsAndReturnsSection } from "./reports/VoidsAndReturnsSection";
@@ -123,6 +125,7 @@ export function SalesReportRoute(): React.JSX.Element {
   const [byPaymentMethod, setByPaymentMethod] = useState<SalesByPaymentMethodRow[]>([]);
   const [cancelledPurchases, setCancelledPurchases] = useState<CancelledPurchasesReport | null>(null);
   const [taxReport, setTaxReport] = useState<TaxReport | null>(null);
+  const [localSourcingReport, setLocalSourcingReport] = useState<LocalSourcingReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -138,7 +141,8 @@ export function SalesReportRoute(): React.JSX.Element {
         employeeResult,
         paymentResult,
         cancelledPurchasesResult,
-        taxReportResult
+        taxReportResult,
+        localSourcingReportResult
       ] = await Promise.all([
           window.blueLedger.report.salesFinancialOverview(range),
           window.blueLedger.report.salesTransactions(range),
@@ -148,6 +152,7 @@ export function SalesReportRoute(): React.JSX.Element {
           window.blueLedger.report.salesByPaymentMethod(range),
           window.blueLedger.report.cancelledPurchases(range),
           window.blueLedger.report.taxBreakdown(range),
+          window.blueLedger.report.localSourcing(range),
         ]);
       setOverview(overviewResult);
       setTransactions(transactionsResult);
@@ -157,6 +162,7 @@ export function SalesReportRoute(): React.JSX.Element {
       setByPaymentMethod(paymentResult);
       setCancelledPurchases(cancelledPurchasesResult);
       setTaxReport(taxReportResult);
+      setLocalSourcingReport(localSourcingReportResult);
     } catch (err) {
       setError(getErrorMessage(err, "Failed to load the sales report"));
     } finally {
@@ -521,6 +527,25 @@ export function SalesReportRoute(): React.JSX.Element {
             tax: money(entry.taxCents),
             gross: money(entry.grossCents)
           }))
+        },
+      localSourcingReport !== null &&
+        localSourcingReport.bySupplier.length > 0 && {
+          type: "table",
+          title: "Local Purchase Sales — By Supplier",
+          columns: [
+            { key: "supplier", header: "Supplier" },
+            { key: "lines", header: "Lines", align: "right" },
+            { key: "revenue", header: "Revenue", align: "right" },
+            { key: "cost", header: "Cost", align: "right" },
+            { key: "margin", header: "Margin", align: "right" }
+          ],
+          rows: localSourcingReport.bySupplier.map((entry) => ({
+            supplier: entry.supplierName,
+            lines: String(entry.lineCount),
+            revenue: money(entry.revenueCents),
+            cost: money(entry.costCents),
+            margin: money(entry.netMarginCents)
+          }))
         }
     ];
     const sections = rawSections.filter((section): section is ReportExportSection => Boolean(section));
@@ -532,7 +557,7 @@ export function SalesReportRoute(): React.JSX.Element {
       sections,
       fileBaseName: `SalesReport_${resolvedRange.startDate}_to_${resolvedRange.endDate}`
     };
-  }, [overview, transactions, byStorefront, byEmployee, byPaymentMethod, taxReport, resolvedRange]);
+  }, [overview, transactions, byStorefront, byEmployee, byPaymentMethod, taxReport, localSourcingReport, resolvedRange]);
 
   return (
     <motion.div
@@ -726,6 +751,8 @@ export function SalesReportRoute(): React.JSX.Element {
           )}
 
           {taxReport && <TaxBreakdownReportSection report={taxReport} />}
+
+          {localSourcingReport && <LocalSourcingReportSection report={localSourcingReport} />}
 
           <SalesReportNotes />
         </div>

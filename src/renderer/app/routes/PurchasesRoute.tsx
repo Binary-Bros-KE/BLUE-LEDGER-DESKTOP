@@ -85,7 +85,8 @@ function Th({ children, className }: { children: React.ReactNode; className?: st
 }
 
 export function PurchasesRoute(): React.JSX.Element {
-  const { can } = usePermissions();
+  const { can, session } = usePermissions();
+  const showStorefrontFilter = session?.branch == null;
   const canCreate = can("purchases", "create");
   const canEdit = can("purchases", "edit");
   const canExport = can("purchases", "export");
@@ -429,15 +430,17 @@ export function PurchasesRoute(): React.JSX.Element {
               ...suppliers.map((supplier) => ({ value: supplier.id, label: supplier.businessName }))
             ]}
           />
-          <SelectField
-            label="Storefront"
-            value={locationFilter}
-            onChange={setLocationFilter}
-            options={[
-              { value: "", label: "All Locations" },
-              ...locations.map((location) => ({ value: location.id, label: location.locationName }))
-            ]}
-          />
+          {showStorefrontFilter && (
+            <SelectField
+              label="Storefront"
+              value={locationFilter}
+              onChange={setLocationFilter}
+              options={[
+                { value: "", label: "All Locations" },
+                ...locations.map((location) => ({ value: location.id, label: location.locationName }))
+              ]}
+            />
+          )}
           <label className="block">
             <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">From Date</span>
             <input

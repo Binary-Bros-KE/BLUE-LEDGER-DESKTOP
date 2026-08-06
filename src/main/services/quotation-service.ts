@@ -306,7 +306,11 @@ function repriceLineForQuantity(item: QuotationItemDetailRow, product: ProductRo
     discountAmountCents,
     taxType,
     taxAmountCents,
-    lineTotalCents: taxableCents
+    lineTotalCents: taxableCents,
+    // Quotations have no local-sourcing concept — see PreparedItem's own doc comment.
+    isLocallySourced: false,
+    localCostCents: null,
+    localSupplierId: null
   };
 }
 
@@ -341,7 +345,10 @@ function buildConversionCart(
       discountAmountCents: item.discount_amount_cents,
       taxType: item.tax_type as ProductTaxType,
       taxAmountCents: item.tax_amount_cents,
-      lineTotalCents: item.line_total_cents
+      lineTotalCents: item.line_total_cents,
+      isLocallySourced: false,
+      localCostCents: null,
+      localSupplierId: null
     };
   });
 

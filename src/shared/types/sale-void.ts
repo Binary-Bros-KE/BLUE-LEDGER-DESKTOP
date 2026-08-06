@@ -17,6 +17,8 @@ export type SaleVoid = {
   saleId: string;
   receiptNumber: string | null;
   saleGrandTotalCents: number;
+  locationId: string;
+  locationName: string;
   status: SaleVoidStatus;
   reason: string;
   notes: string | null;

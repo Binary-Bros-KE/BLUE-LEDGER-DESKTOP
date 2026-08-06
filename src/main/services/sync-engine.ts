@@ -61,6 +61,8 @@ const SYNC_ENTITIES: SyncEntity[] = [
   "main_store_allocations",
   // Depends on locations + employees (storefront_id/requested_by/reviewed_by) + products (item FKs).
   "stock_requests",
+  // Same dependency shape as stock_requests (locations + employees + products).
+  "stock_receipts",
   "expense_categories",
   "sales",
   "quotations",
@@ -87,7 +89,9 @@ const BESPOKE_APPLY_ENTITIES = new Set<SyncEntity>([
   "stock_movements",
   // Back to a plain document-with-line-items, same shape as sale_returns — a header with a real
   // update path (approve/reject) plus items only ever inserted once at creation.
-  "stock_requests"
+  "stock_requests",
+  // Same shape again, but create-only — no update path at all (see this entity's own comments).
+  "stock_receipts"
 ]);
 
 /** Every entity whose PAYLOAD_BUILDER includes a `baseUpdatedAt` field and whose successful push/
@@ -117,6 +121,7 @@ const CONFLICT_AWARE_ENTITIES = new Set<SyncEntity>([
   "purchases",
   "sale_returns",
   "stock_requests",
+  "stock_receipts",
   // Unlike stock_movements (append-only, no concurrent-edit scenario), this table genuinely can be
   // touched by two devices before either syncs (e.g. both reallocate the same bucket offline) — a
   // real optimistic-lock case, same as any other mutable reference row.
@@ -486,6 +491,61 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       baseUpdatedAt: row.synced_updated_at
     };
   },
+  // Same header-with-frozen-line-items shape as stock_requests, but create-only — no reviewedBy/
+  // reviewedAt-style update path exists (see this table's own migrate.ts comment), so there's no
+  // update scenario to worry about here beyond the generic optimistic-lock plumbing every
+  // CONFLICT_AWARE_ENTITIES member gets for free.
+  stock_receipts: (id) => {
+    const row = getDatabase().prepare("SELECT * FROM stock_receipts WHERE id = ?").get(id) as
+      | {
+          id: string;
+          receipt_number: string;
+          location_id: string;
+          allocation_storefront_id: string | null;
+          received_by: string;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+          synced_updated_at: string | null;
+        }
+      | undefined;
+    if (!row) return null;
+
+    const itemRows = getDatabase()
+      .prepare("SELECT * FROM stock_receipt_items WHERE stock_receipt_id = ? ORDER BY created_at ASC")
+      .all(id) as Array<{
+      id: string;
+      product_id: string;
+      quantity_received: number;
+      previous_quantity: number;
+      new_quantity: number;
+      created_at: string;
+    }>;
+
+    return {
+      id: row.id,
+      receiptNumber: row.receipt_number,
+      // locationId/allocationStorefrontId/receivedBy are flat header columns, alias-translated
+      // generically by resolvePayloadRefsForPush via refColumnsFor's bespokeColumns entry below —
+      // only item.productId (nested inside the items JSON array) needs a manual resolveCloudRef call
+      // here, since that generic mechanism only ever walks the payload's top-level fields.
+      locationId: row.location_id,
+      allocationStorefrontId: row.allocation_storefront_id,
+      receivedBy: row.received_by,
+      notes: row.notes,
+      items: itemRows.map((i) => ({
+        id: i.id,
+        productId: resolveCloudRef("products", i.product_id),
+        quantityReceived: i.quantity_received,
+        previousQuantity: i.previous_quantity,
+        newQuantity: i.new_quantity,
+        createdAt: i.created_at
+      })),
+      localCreatedAt: row.created_at,
+      localUpdatedAt: row.updated_at,
+      baseUpdatedAt: row.synced_updated_at
+    };
+  },
   employees: (id) => {
     const row = employeeRepository.findEmployeeRowById(id);
     if (!row) return null;
@@ -580,6 +640,12 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       notes: row.notes,
       receiptHeader: row.receipt_header,
       receiptFooter: row.receipt_footer,
+      invoiceHeader: row.invoice_header,
+      invoiceFooter: row.invoice_footer,
+      quotationHeader: row.quotation_header,
+      quotationFooter: row.quotation_footer,
+      showProductImagesOnInvoices: Boolean(row.show_product_images_on_invoices),
+      showProductImagesOnQuotations: Boolean(row.show_product_images_on_quotations),
       localCreatedAt: row.created_at,
       localUpdatedAt: row.updated_at,
       baseUpdatedAt: row.synced_updated_at
@@ -600,6 +666,9 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       tax_type: string;
       tax_amount_cents: number;
       line_total_cents: number;
+      is_locally_sourced: number;
+      local_cost_cents: number | null;
+      local_supplier_id: string | null;
       created_at: string;
     }>;
     const items = itemRows.map((i) => ({
@@ -614,6 +683,9 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       taxType: i.tax_type,
       taxAmountCents: i.tax_amount_cents,
       lineTotalCents: i.line_total_cents,
+      isLocallySourced: Boolean(i.is_locally_sourced),
+      localCostCents: i.local_cost_cents,
+      localSupplierId: resolveCloudRef("suppliers", i.local_supplier_id),
       createdAt: i.created_at
     }));
 
@@ -1243,6 +1315,15 @@ type ColumnMap = {
    * employees, payment_methods, expense_categories, locations) — the incoming value is resolved
    * through resolveRef() before use, in case it was reconciled under a different local id. */
   refEntity?: SyncEntity;
+  /** This column is NOT NULL locally, so resolveRefOrNull's "fall back to null when unresolvable"
+   * behavior would just trade an FK violation for a NOT NULL one — no better. Uses resolveRef
+   * instead (alias-translate if a merge happened, otherwise pass the raw id through unchanged and
+   * let the FK check throw so the existing 2-pass-then-retry-next-cycle mechanism handles it, same
+   * as every NOT NULL item-level ref like sale_items.product_id already does). Caught live: a fresh
+   * device's very first sync threw straight through sale_returns.sale_id/sale_voids.sale_id being
+   * resolved to null via the unconditional resolveRefOrNull this column map used before this flag
+   * existed. */
+  refNotNull?: boolean;
   /** Fallback for a NOT NULL column when an older device's payload was built before this field
    * existed (so the key is simply absent, not explicitly null). SQLite only applies a column's own
    * DEFAULT when the column is omitted from the INSERT — an explicit NULL bind still violates NOT
@@ -1447,7 +1528,17 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       { local: "description", cloud: "description" },
       { local: "notes", cloud: "notes" },
       { local: "receipt_header", cloud: "receiptHeader" },
-      { local: "receipt_footer", cloud: "receiptFooter" }
+      { local: "receipt_footer", cloud: "receiptFooter" },
+      { local: "invoice_header", cloud: "invoiceHeader" },
+      { local: "invoice_footer", cloud: "invoiceFooter" },
+      { local: "quotation_header", cloud: "quotationHeader" },
+      { local: "quotation_footer", cloud: "quotationFooter" },
+      // NOT NULL locally (DEFAULT 0) — an older device (pre-dating this feature) editing ANY field
+      // on a storefront it owns would push a payload missing these keys entirely; without this
+      // default, toLocalValue's undefined-fallback would bind a bare null into a NOT NULL column
+      // and crash the pull, exactly like sale_items.local_supplier_id did before it got one.
+      { local: "show_product_images_on_invoices", cloud: "showProductImagesOnInvoices", type: "bool", default: 0 },
+      { local: "show_product_images_on_quotations", cloud: "showProductImagesOnQuotations", type: "bool", default: 0 }
     ]
   },
   expense_categories: {
@@ -1466,7 +1557,7 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
     table: "main_store_allocations",
     naturalKey: { local: "bucket_key", cloud: "bucketKey" },
     columns: [
-      { local: "product_id", cloud: "productId", refEntity: "products" },
+      { local: "product_id", cloud: "productId", refEntity: "products", refNotNull: true },
       { local: "storefront_id", cloud: "storefrontId", refEntity: "locations" },
       { local: "quantity", cloud: "quantity" },
       { local: "bucket_key", cloud: "bucketKey" }
@@ -1478,10 +1569,10 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       { local: "kind", cloud: "kind", default: "general" },
       { local: "expense_number", cloud: "expenseNumber" },
       { local: "expense_date", cloud: "expenseDate" },
-      { local: "category_id", cloud: "categoryId", refEntity: "expense_categories" },
+      { local: "category_id", cloud: "categoryId", refEntity: "expense_categories", refNotNull: true },
       { local: "amount_cents", cloud: "amountCents" },
       { local: "paid_by", cloud: "paidBy" },
-      { local: "payment_method_id", cloud: "paymentMethodId", refEntity: "payment_methods" },
+      { local: "payment_method_id", cloud: "paymentMethodId", refEntity: "payment_methods", refNotNull: true },
       { local: "storefront_id", cloud: "storefrontId", refEntity: "locations" },
       { local: "reference", cloud: "reference" },
       { local: "description", cloud: "description" },
@@ -1496,13 +1587,13 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
     table: "salaries",
     columns: [
       { local: "payslip_number", cloud: "payslipNumber" },
-      { local: "employee_id", cloud: "employeeId", refEntity: "employees" },
+      { local: "employee_id", cloud: "employeeId", refEntity: "employees", refNotNull: true },
       { local: "pay_period", cloud: "payPeriod" },
       { local: "basic_salary_cents", cloud: "basicSalaryCents" },
       { local: "allowances_cents", cloud: "allowancesCents" },
       { local: "deductions_cents", cloud: "deductionsCents" },
       { local: "net_pay_cents", cloud: "netPayCents" },
-      { local: "payment_method_id", cloud: "paymentMethodId", refEntity: "payment_methods" },
+      { local: "payment_method_id", cloud: "paymentMethodId", refEntity: "payment_methods", refNotNull: true },
       { local: "payment_reference", cloud: "paymentReference" },
       { local: "status", cloud: "status" },
       { local: "notes", cloud: "notes" },
@@ -1527,11 +1618,11 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
   sale_voids: {
     table: "sale_voids",
     columns: [
-      { local: "sale_id", cloud: "saleId", refEntity: "sales" },
+      { local: "sale_id", cloud: "saleId", refEntity: "sales", refNotNull: true },
       { local: "status", cloud: "status" },
       { local: "reason", cloud: "reason" },
       { local: "notes", cloud: "notes" },
-      { local: "requested_by", cloud: "requestedBy", refEntity: "employees" },
+      { local: "requested_by", cloud: "requestedBy", refEntity: "employees", refNotNull: true },
       { local: "requested_at", cloud: "requestedAt" },
       { local: "approved_by", cloud: "approvedBy", refEntity: "employees" },
       { local: "approved_at", cloud: "approvedAt" }
@@ -1543,7 +1634,9 @@ function toLocalValue(value: unknown, col: ColumnMap): SQLInputValue {
   if (value === null || value === undefined) return col.default ?? null;
   if (col.type === "bool") return value ? 1 : 0;
   if (col.type === "json") return JSON.stringify(value);
-  if (col.refEntity) return resolveRefOrNull(col.refEntity, value) as SQLInputValue;
+  if (col.refEntity) {
+    return (col.refNotNull ? resolveRef(col.refEntity, value) : resolveRefOrNull(col.refEntity, value)) as SQLInputValue;
+  }
   return value as SQLInputValue;
 }
 
@@ -1638,11 +1731,16 @@ export function resolveCloudRef(entity: SyncEntity, value: unknown): unknown {
  * payment method that was never actually inserted there under that id (the exact mechanism behind
  * [[project_dangling_ref_cursor_freeze_bug]]'s frozen cursor on the OTHER device pulling it back). */
 function refColumnsFor(entity: SyncEntity): Array<{ cloud: string; refEntity: SyncEntity }> {
-  const bespokeColumns: Partial<Record<SyncEntity, Array<{ local: string; cloud: string; refEntity?: SyncEntity }>>> = {
+  const bespokeColumns: Partial<Record<SyncEntity, Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }>>> = {
     purchases: PURCHASE_HEADER_COLUMNS,
     quotations: QUOTATION_HEADER_COLUMNS,
     sale_returns: SALE_RETURN_HEADER_COLUMNS,
-    sales: SALE_HEADER_COLUMNS
+    sales: SALE_HEADER_COLUMNS,
+    // Previously missing here — storefront_id/requested_by/reviewed_by never got alias-translated
+    // before push, the exact bug class [[project_alias_push_resolution_bug]] fixed elsewhere in this
+    // codebase; found and closed alongside adding stock_receipts (its own sibling entity) below.
+    stock_requests: STOCK_REQUEST_HEADER_COLUMNS,
+    stock_receipts: STOCK_RECEIPT_HEADER_COLUMNS
   };
   const columns = APPLY_CONFIG[entity]?.columns ?? bespokeColumns[entity] ?? [];
   return columns.filter((c): c is { local: string; cloud: string; refEntity: SyncEntity } => Boolean(c.refEntity));
@@ -1681,6 +1779,7 @@ function applyPulledRow(entity: SyncEntity, row: Record<string, unknown>, force 
     // this deliberately isn't, so there's no force parameter to thread through here.
     if (entity === "stock_movements") applyStockMovementPulledRow(row);
     if (entity === "stock_requests") applyStockRequestPulledRow(row, force);
+    if (entity === "stock_receipts") applyStockReceiptPulledRow(row, force);
     return;
   }
 
@@ -1787,10 +1886,10 @@ function applyPulledRow(entity: SyncEntity, row: Record<string, unknown>, force 
 
 /** Sale's business fields, header-row only — mirrors the generic ColumnMap shape but kept separate
  * from APPLY_CONFIG since the header alone isn't the whole story for this entity (see below). */
-const SALE_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity }> = [
+const SALE_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }> = [
   { local: "receipt_number", cloud: "receiptNumber" },
-  { local: "location_id", cloud: "locationId", refEntity: "locations" },
-  { local: "employee_id", cloud: "employeeId", refEntity: "employees" },
+  { local: "location_id", cloud: "locationId", refEntity: "locations", refNotNull: true },
+  { local: "employee_id", cloud: "employeeId", refEntity: "employees", refNotNull: true },
   // Missing this tag (unlike location_id/employee_id right above) meant customer_id was pushed AND
   // pulled 100% raw, with zero alias/existence protection — the real cause behind a rash of
   // permanently FK-failing sales for a customer id that no longer exists anywhere in the cloud
@@ -1875,7 +1974,11 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
       const values: SQLInputValue[] = [
         id,
         localTenantId,
-        ...SALE_HEADER_COLUMNS.map((c) => (c.refEntity ? (resolveRefOrNull(c.refEntity, row[c.cloud]) as SQLInputValue) : (row[c.cloud] as SQLInputValue))),
+        ...SALE_HEADER_COLUMNS.map((c) =>
+          c.refEntity
+            ? ((c.refNotNull ? resolveRef(c.refEntity, row[c.cloud]) : resolveRefOrNull(c.refEntity, row[c.cloud])) as SQLInputValue)
+            : (row[c.cloud] as SQLInputValue)
+        ),
         JSON.stringify(row.payments ?? []),
         localCreatedAt,
         localUpdatedAt,
@@ -1894,7 +1997,11 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         ...(isConflictAware ? ["synced_updated_at = ?"] : [])
       ];
       const values: SQLInputValue[] = [
-        ...SALE_HEADER_COLUMNS.map((c) => (c.refEntity ? (resolveRefOrNull(c.refEntity, row[c.cloud]) as SQLInputValue) : (row[c.cloud] as SQLInputValue))),
+        ...SALE_HEADER_COLUMNS.map((c) =>
+          c.refEntity
+            ? ((c.refNotNull ? resolveRef(c.refEntity, row[c.cloud]) : resolveRefOrNull(c.refEntity, row[c.cloud])) as SQLInputValue)
+            : (row[c.cloud] as SQLInputValue)
+        ),
         JSON.stringify(row.payments ?? []),
         localUpdatedAt,
         now,
@@ -1908,8 +2015,8 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
     const items = (row.items as Array<Record<string, unknown>>) ?? [];
     for (const item of items) {
       db.prepare(
-        `INSERT INTO sale_items (id, sale_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO sale_items (id, sale_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, is_locally_sourced, local_cost_cents, local_supplier_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         item.id as string,
         id,
@@ -1926,6 +2033,16 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         (item.taxType as string | undefined) ?? "vat",
         (item.taxAmountCents as number | undefined) ?? 0,
         item.lineTotalCents as number,
+        // Older device's payload predates this field entirely, same fallback reasoning as taxType.
+        item.isLocallySourced ? 1 : 0,
+        (item.localCostCents as number | null | undefined) ?? null,
+        // Nullable — resolveRefOrNull is safe here (unlike product_id above, which is NOT NULL).
+        // Older device's payload predates this field entirely too — same fallback reasoning as
+        // taxType above, but here it matters even more: better-sqlite3 throws a TypeError on an
+        // undefined bind parameter (unlike null, which is fine), so without normalizing first this
+        // crashed the WHOLE row — every sale from a pre-feature device, not just ones that actually
+        // used local sourcing.
+        resolveRefOrNull("suppliers", (item.localSupplierId as string | null | undefined) ?? null) as string | null,
         item.createdAt as string
       );
     }
@@ -2039,7 +2156,7 @@ function insertPulledDeliveryNote(
  * sale_return line items don't). */
 function upsertDocumentHeader(
   table: string,
-  businessColumns: Array<{ local: string; cloud: string; refEntity?: SyncEntity }>,
+  businessColumns: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }>,
   jsonColumns: Array<{ local: string; cloud: string }>,
   row: Record<string, unknown>,
   force: boolean
@@ -2079,7 +2196,11 @@ function upsertDocumentHeader(
     const values: SQLInputValue[] = [
       id,
       localTenantId,
-      ...businessColumns.map((c) => (c.refEntity ? (resolveRefOrNull(c.refEntity, row[c.cloud]) as SQLInputValue) : (row[c.cloud] as SQLInputValue))),
+      ...businessColumns.map((c) =>
+        c.refEntity
+          ? ((c.refNotNull ? resolveRef(c.refEntity, row[c.cloud]) : resolveRefOrNull(c.refEntity, row[c.cloud])) as SQLInputValue)
+          : (row[c.cloud] as SQLInputValue)
+      ),
       ...jsonColumns.map((c) => JSON.stringify(row[c.cloud] ?? null)),
       localCreatedAt,
       localUpdatedAt,
@@ -2098,7 +2219,11 @@ function upsertDocumentHeader(
       ...(isConflictAware ? ["synced_updated_at = ?"] : [])
     ];
     const values: SQLInputValue[] = [
-      ...businessColumns.map((c) => (c.refEntity ? (resolveRefOrNull(c.refEntity, row[c.cloud]) as SQLInputValue) : (row[c.cloud] as SQLInputValue))),
+      ...businessColumns.map((c) =>
+        c.refEntity
+          ? ((c.refNotNull ? resolveRef(c.refEntity, row[c.cloud]) : resolveRefOrNull(c.refEntity, row[c.cloud])) as SQLInputValue)
+          : (row[c.cloud] as SQLInputValue)
+      ),
       ...jsonColumns.map((c) => JSON.stringify(row[c.cloud] ?? null)),
       localUpdatedAt,
       now,
@@ -2111,12 +2236,13 @@ function upsertDocumentHeader(
   return localTenantId;
 }
 
-const QUOTATION_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity }> = [
+const QUOTATION_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }> = [
   { local: "quotation_number", cloud: "quotationNumber" },
-  // Same missing-tag bug as SALE_HEADER_COLUMNS' customer_id above — fixed identically.
-  { local: "customer_id", cloud: "customerId", refEntity: "customers" },
-  { local: "location_id", cloud: "locationId", refEntity: "locations" },
-  { local: "employee_id", cloud: "employeeId", refEntity: "employees" },
+  // Same missing-tag bug as SALE_HEADER_COLUMNS' customer_id above — fixed identically. NOT NULL
+  // on quotations (unlike sales, where customer_id is nullable/walk-in) — refNotNull matters here.
+  { local: "customer_id", cloud: "customerId", refEntity: "customers", refNotNull: true },
+  { local: "location_id", cloud: "locationId", refEntity: "locations", refNotNull: true },
+  { local: "employee_id", cloud: "employeeId", refEntity: "employees", refNotNull: true },
   { local: "status", cloud: "status" },
   { local: "subtotal_cents", cloud: "subtotalCents" },
   { local: "discount_amount_cents", cloud: "discountAmountCents" },
@@ -2202,12 +2328,12 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
   });
 }
 
-const PURCHASE_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity }> = [
+const PURCHASE_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }> = [
   { local: "purchase_number", cloud: "purchaseNumber" },
   // Same missing-tag bug as SALE_HEADER_COLUMNS' customer_id — fixed identically.
-  { local: "supplier_id", cloud: "supplierId", refEntity: "suppliers" },
+  { local: "supplier_id", cloud: "supplierId", refEntity: "suppliers", refNotNull: true },
   { local: "supplier_invoice_number", cloud: "supplierInvoiceNumber" },
-  { local: "location_id", cloud: "locationId", refEntity: "locations" },
+  { local: "location_id", cloud: "locationId", refEntity: "locations", refNotNull: true },
   { local: "status", cloud: "status" },
   { local: "tax_type", cloud: "taxType" },
   { local: "subtotal_cents", cloud: "subtotalCents" },
@@ -2261,12 +2387,12 @@ function applyPurchasePulledRow(row: Record<string, unknown>, force: boolean): v
   });
 }
 
-const SALE_RETURN_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity }> = [
-  { local: "sale_id", cloud: "saleId", refEntity: "sales" },
+const SALE_RETURN_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }> = [
+  { local: "sale_id", cloud: "saleId", refEntity: "sales", refNotNull: true },
   { local: "status", cloud: "status" },
   { local: "reason", cloud: "reason" },
   { local: "notes", cloud: "notes" },
-  { local: "requested_by", cloud: "requestedBy", refEntity: "employees" },
+  { local: "requested_by", cloud: "requestedBy", refEntity: "employees", refNotNull: true },
   { local: "requested_at", cloud: "requestedAt" },
   { local: "approved_by", cloud: "approvedBy", refEntity: "employees" },
   { local: "approved_at", cloud: "approvedAt" }
@@ -2378,13 +2504,13 @@ function applyStockMovementPulledRow(row: Record<string, unknown>): void {
   });
 }
 
-const STOCK_REQUEST_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity }> = [
+const STOCK_REQUEST_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }> = [
   { local: "request_number", cloud: "requestNumber" },
-  { local: "storefront_id", cloud: "storefrontId", refEntity: "locations" },
+  { local: "storefront_id", cloud: "storefrontId", refEntity: "locations", refNotNull: true },
   { local: "status", cloud: "status" },
   { local: "notes", cloud: "notes" },
   { local: "rejection_reason", cloud: "rejectionReason" },
-  { local: "requested_by", cloud: "requestedBy", refEntity: "employees" },
+  { local: "requested_by", cloud: "requestedBy", refEntity: "employees", refNotNull: true },
   { local: "requested_at", cloud: "requestedAt" },
   { local: "reviewed_by", cloud: "reviewedBy", refEntity: "employees" },
   { local: "reviewed_at", cloud: "reviewedAt" }
@@ -2414,6 +2540,43 @@ function applyStockRequestPulledRow(row: Record<string, unknown>, force: boolean
         id,
         resolveRef("products", item.productId) as string,
         item.quantityRequested as number,
+        item.createdAt as string
+      );
+    }
+  });
+}
+
+const STOCK_RECEIPT_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }> = [
+  { local: "receipt_number", cloud: "receiptNumber" },
+  { local: "location_id", cloud: "locationId", refEntity: "locations", refNotNull: true },
+  { local: "allocation_storefront_id", cloud: "allocationStorefrontId", refEntity: "locations" },
+  { local: "received_by", cloud: "receivedBy", refEntity: "employees", refNotNull: true },
+  { local: "notes", cloud: "notes" }
+];
+
+/** Same header-with-frozen-line-items pattern as applyStockRequestPulledRow — safe to replace-all
+ * the items on every apply because stock_receipt_items are only ever inserted once at creation
+ * (create-only entity, no edit/approve flow — see this table's own migrate.ts comment). */
+function applyStockReceiptPulledRow(row: Record<string, unknown>, force: boolean): void {
+  runInTransaction(() => {
+    const id = row.id as string;
+    const localTenantId = upsertDocumentHeader("stock_receipts", STOCK_RECEIPT_HEADER_COLUMNS, [], row, force);
+    if (!localTenantId) return;
+
+    const db = getDatabase();
+    db.prepare("DELETE FROM stock_receipt_items WHERE stock_receipt_id = ?").run(id);
+    const items = (row.items as Array<Record<string, unknown>>) ?? [];
+    for (const item of items) {
+      db.prepare(
+        `INSERT INTO stock_receipt_items (id, stock_receipt_id, product_id, quantity_received, previous_quantity, new_quantity, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        item.id as string,
+        id,
+        resolveRef("products", item.productId) as string,
+        item.quantityReceived as number,
+        item.previousQuantity as number,
+        item.newQuantity as number,
         item.createdAt as string
       );
     }

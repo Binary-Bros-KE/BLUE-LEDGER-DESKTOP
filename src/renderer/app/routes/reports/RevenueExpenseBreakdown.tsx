@@ -246,13 +246,13 @@ export function ExpenseSummaryBlock({
           <span className="text-muted">+</span>
           <span>{money(overview.salariesPaidCents)}</span>
           <span className="text-xs font-semibold text-muted">({overview.salariesPaidDocumentCount} payslips)</span>
-          {overview.deliveryServiceCostsCents > 0 && (
+          {overview.serviceChargeCostsCents > 0 && (
             <>
               <span className="text-muted">+</span>
-              <span>{money(overview.deliveryServiceCostsCents)}</span>
+              <span>{money(overview.serviceChargeCostsCents)}</span>
               <span className="text-xs font-semibold text-muted">
-                (hidden cost on {overview.deliveryServiceCostsDocumentCount} delivery/service charge
-                {overview.deliveryServiceCostsDocumentCount === 1 ? "" : "s"})
+                (hidden cost on {overview.serviceChargeCostsDocumentCount} custom charge
+                {overview.serviceChargeCostsDocumentCount === 1 ? "" : "s"})
               </span>
             </>
           )}
@@ -261,8 +261,10 @@ export function ExpenseSummaryBlock({
         </FormulaLine>
         <p className="mt-2 text-xs font-semibold text-muted">
           Only cash actually paid out counts — an unpaid supplier bill isn&rsquo;t an expense yet (see Creditors below).
-          Delivery/service costs are the internal, never-printed cost side of any delivery fee or custom charge added
-          on a sale — this is what tells you whether delivery and services are actually profitable.
+          Service-charge cost is the internal, never-printed cost side of a custom charge added on a sale — this is
+          what tells you whether that service is actually profitable. Delivery cost shows up below instead, under
+          Expenses by category ("Delivery Costs") — it's booked as a real expense the moment a sale or invoice
+          with a delivery is created.
         </p>
       </div>
 

@@ -12,6 +12,7 @@ import {
   requirePermission
 } from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
+import { createDeliveryCostExpenseIfNeeded } from "@main/services/expense-service";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
 import {
   getSaleDetail,
@@ -234,10 +235,13 @@ export function insertInvoiceFromCart(input: {
         discountAmountCents: item.discountAmountCents,
         taxType: item.taxType,
         taxAmountCents: item.taxAmountCents,
-        lineTotalCents: item.lineTotalCents
+        lineTotalCents: item.lineTotalCents,
+        isLocallySourced: item.isLocallySourced,
+        localCostCents: item.localCostCents,
+        localSupplierId: item.localSupplierId
       });
 
-      if (item.product.track_stock) {
+      if (item.product.track_stock && !item.isLocallySourced) {
         applyValidatedStockMovement(
           {
             productId: item.product.id,
@@ -255,6 +259,20 @@ export function insertInvoiceFromCart(input: {
     }
 
     persistCartExtras(tenantId, { saleId }, input.cart);
+
+    if (input.cart.delivery) {
+      const customer = customerRepository.findCustomerRowById(input.customerId);
+      createDeliveryCostExpenseIfNeeded({
+        tenantId,
+        documentNumber: invoiceNumber,
+        customerName: customer?.name ?? null,
+        delivery: input.cart.delivery,
+        locationId,
+        employeeId,
+        paymentMethodId: input.initialPayment?.paymentMethodId ?? null,
+        date: invoiceDate
+      });
+    }
   });
 
   return saleId;
@@ -366,7 +384,12 @@ export function duplicateInvoice(saleId: string): Sale {
     original.items.map((item) => ({
       productId: item.productId,
       quantity: item.quantity,
-      discountAmountCents: item.discountAmountCents
+      discountAmountCents: item.discountAmountCents,
+      // Carried over from the original invoice, not re-decided — the duplicate is billing the same
+      // goods from the same source, same as it keeps the same products/quantities.
+      isLocallySourced: item.isLocallySourced,
+      localCostCents: item.localCostCents ?? undefined,
+      localSupplierId: item.localSupplierId
     })),
     { serviceCharges: original.serviceCharges, delivery: original.delivery }
   );

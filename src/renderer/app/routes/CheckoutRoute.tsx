@@ -34,6 +34,7 @@ import { QuickCreateCustomerModal } from "@renderer/shared/components/QuickCreat
 import { ReceiptPreview } from "@renderer/shared/components/ReceiptPreview";
 import { StampBadge } from "@renderer/shared/components/StampBadge";
 import { StorefrontPicker } from "@renderer/shared/components/StorefrontPicker";
+import { SupplierPicker } from "@renderer/shared/components/SupplierPicker";
 import { TaxBreakdownTable } from "@renderer/shared/components/TaxBreakdownTable";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { computeLinePricing, type LinePricing } from "@renderer/shared/lib/cart-pricing";
@@ -49,6 +50,7 @@ import type { MpesaTransactionStatus } from "@shared/types/mpesa";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import type { ProductListItem } from "@shared/types/product";
 import type { Sale } from "@shared/types/sale";
+import type { Supplier } from "@shared/types/supplier";
 
 type CartLine = {
   productId: string;
@@ -62,6 +64,13 @@ type CartLine = {
    * — never written back to the product's own selling price. Empty string means "use the normal/
    * wholesale price", same convention as `discount`. */
   priceOverride: string;
+  /** This line's product was bought from another shop on the spot (a customer wanted something this
+   * shop doesn't carry) rather than pulled from its own stock — see sale-service.ts's prepareCart
+   * for why this skips the usual stock movement. localCost is raw text like discount/priceOverride;
+   * localSupplierId is null until a supplier is picked or quick-created. */
+  isLocallySourced: boolean;
+  localCost: string;
+  localSupplierId: string | null;
 };
 
 type DraftStatus = "draft" | "suspended";
@@ -107,6 +116,7 @@ export function CheckoutRoute(): React.JSX.Element {
   const [stockLevels, setStockLevels] = useState<LocationStockLevel[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [autoPrintOnSale, setAutoPrintOnSale] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -150,16 +160,18 @@ export function CheckoutRoute(): React.JSX.Element {
     void (async () => {
       setLoadError(null);
       try {
-        const [productList, customerList, methodList, pendingList, printerSettings] = await Promise.all([
+        const [productList, customerList, methodList, supplierList, pendingList, printerSettings] = await Promise.all([
           window.blueLedger.product.list(),
           window.blueLedger.customer.list(),
           window.blueLedger.paymentMethod.list(),
+          window.blueLedger.supplier.list(),
           window.blueLedger.sale.listPending(),
           window.blueLedger.printer.getSettings().catch(() => null)
         ]);
         setProducts(productList);
         setCustomers(customerList);
         setPaymentMethods(methodList);
+        setSuppliers(supplierList);
         setAutoPrintOnSale(printerSettings?.enabled === true && printerSettings.autoPrintOnSale === true);
 
         const drafts = await Promise.all(
@@ -182,7 +194,12 @@ export function CheckoutRoute(): React.JSX.Element {
                 // held cart always re-prices from the product's current live data (same as it always
                 // has), and a markup is a fresh, per-checkout cashier decision, not a sticky
                 // attribute of the held draft.
-                priceOverride: ""
+                priceOverride: "",
+                // Unlike priceOverride, this IS a sticky fact about the line, not a pricing decision
+                // — it was bought from another shop or it wasn't.
+                isLocallySourced: item.isLocallySourced,
+                localCost: item.localCostCents !== null ? fromCents(item.localCostCents) : "",
+                localSupplierId: item.localSupplierId
               })),
               serviceCharges: full.serviceCharges.map((charge) => ({
                 key: charge.id,
@@ -477,7 +494,17 @@ export function CheckoutRoute(): React.JSX.Element {
       )
       : [
         ...draft.items,
-        { productId: product.id, name: product.name, sku: product.sku, quantity: 1, discount: "0.00", priceOverride: "" }
+        {
+          productId: product.id,
+          name: product.name,
+          sku: product.sku,
+          quantity: 1,
+          discount: "0.00",
+          priceOverride: "",
+          isLocallySourced: false,
+          localCost: "",
+          localSupplierId: null
+        }
       ];
     return { ...draft, items };
   }
@@ -553,6 +580,34 @@ export function CheckoutRoute(): React.JSX.Element {
   function updatePriceOverride(productId: string, value: string): void {
     updateActiveItems((items) =>
       items.map((line) => (line.productId === productId ? { ...line, priceOverride: value } : line))
+    );
+  }
+
+  function toggleLocallySourced(productId: string): void {
+    updateActiveItems((items) =>
+      items.map((line) =>
+        line.productId === productId
+          ? {
+            ...line,
+            isLocallySourced: !line.isLocallySourced,
+            // Clears any half-entered cost/supplier when switching back off, so a stale value
+            // can't silently ride along if the cashier re-enables it later for a different sale.
+            ...(line.isLocallySourced ? { localCost: "", localSupplierId: null } : {})
+          }
+          : line
+      )
+    );
+  }
+
+  function updateLocalCost(productId: string, value: string): void {
+    updateActiveItems((items) =>
+      items.map((line) => (line.productId === productId ? { ...line, localCost: value } : line))
+    );
+  }
+
+  function updateLocalSupplier(productId: string, supplierId: string | null): void {
+    updateActiveItems((items) =>
+      items.map((line) => (line.productId === productId ? { ...line, localSupplierId: supplierId } : line))
     );
   }
 
@@ -664,7 +719,10 @@ export function CheckoutRoute(): React.JSX.Element {
           productId: line.productId,
           quantity: line.quantity,
           discountAmountCents: toCents(line.discount),
-          unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined
+          unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined,
+          isLocallySourced: line.isLocallySourced,
+          localCostCents: line.isLocallySourced && line.localCost.trim() ? toCents(line.localCost) : undefined,
+          localSupplierId: line.localSupplierId
         })),
         ...buildExtrasPayload(activeDraft),
         locationId: session && !session.branch ? storefrontId : undefined
@@ -704,7 +762,10 @@ export function CheckoutRoute(): React.JSX.Element {
           productId: line.productId,
           quantity: line.quantity,
           discountAmountCents: toCents(line.discount),
-          unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined
+          unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined,
+          isLocallySourced: line.isLocallySourced,
+          localCostCents: line.isLocallySourced && line.localCost.trim() ? toCents(line.localCost) : undefined,
+          localSupplierId: line.localSupplierId
         })),
         ...buildExtrasPayload(activeDraft),
         paymentMethodId,
@@ -1031,6 +1092,42 @@ export function CheckoutRoute(): React.JSX.Element {
                               </button>
                             </div>
                           </div>
+
+                          <label className="mt-2 flex items-center gap-1.5 text-[10px] font-bold text-muted cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={line.isLocallySourced}
+                              onChange={() => toggleLocallySourced(line.productId)}
+                              className="size-3.5 accent-accent"
+                            />
+                            Sourced from another shop
+                          </label>
+
+                          {line.isLocallySourced && (
+                            <div className="mt-2 flex flex-col gap-2.5 rounded-md bg-soft/60 p-2.5">
+                              <label className="block text-sm font-extrabold text-ink">
+                                Cost paid
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={line.localCost}
+                                  onChange={(event) => updateLocalCost(line.productId, event.target.value)}
+                                  placeholder="0.00"
+                                  className="mt-1 h-10 w-full rounded-md border border-line px-3 text-sm font-semibold outline-none focus:border-accent"
+                                />
+                              </label>
+                              <div>
+                                <p className="text-sm font-extrabold text-ink">Local supplier</p>
+                                <SupplierPicker
+                                  suppliers={suppliers}
+                                  value={line.localSupplierId}
+                                  onChange={(supplierId) => updateLocalSupplier(line.productId, supplierId)}
+                                  onSupplierCreated={(supplier) => setSuppliers((prev) => [...prev, supplier])}
+                                />
+                              </div>
+                            </div>
+                          )}
                         </div>
                       ))
                     )}
@@ -1425,11 +1522,13 @@ function ProductCard({
       <div className="flex items-center gap-3">
 
         <div
-          className="grid size-10 flex-none place-items-center overflow-hidden rounded-lg"
+          className="relative grid size-10 flex-none place-items-center overflow-hidden rounded-lg"
           style={{ backgroundColor: imageUrl ? undefined : (product.categoryColor ?? "#83795f") }}
         >
           {imageUrl ? (
-            <img src={imageUrl} alt="" className="size-full object-cover" />
+            // Absolute (not size-full) — see ProductThumbnail.tsx's own doc comment for why a
+            // percentage height inside a place-items-center grid cell can't be trusted otherwise.
+            <img src={imageUrl} alt="" className="absolute inset-0 size-full object-contain" />
           ) : (
             <Package className="size-4 text-white/90" aria-hidden="true" />
           )}
@@ -1467,24 +1566,37 @@ function ProductCard({
         </p>
       </div>
 
-      <button
-        type="button"
-        onClick={onAdd}
-        disabled={outOfStock}
-        className={cn(
-          "flex h-9 flex-none items-center justify-center gap-1.5 rounded-lg px-3.5 text-[11px] font-extrabold uppercase tracking-wide transition",
-          outOfStock ? "cursor-not-allowed bg-soft text-muted" : "cursor-pointer bg-teal text-white hover:brightness-110"
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={onAdd}
+          disabled={outOfStock}
+          className={cn(
+            "flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg px-3.5 text-[11px] font-extrabold uppercase tracking-wide transition",
+            outOfStock ? "cursor-not-allowed bg-soft text-muted" : "cursor-pointer bg-teal text-white hover:brightness-110"
+          )}
+        >
+          {outOfStock ? (
+            "Out of Stock"
+          ) : (
+            <>
+              <Plus className="size-3.5" aria-hidden="true" />
+              Add To Order
+            </>
+          )}
+        </button>
+        {outOfStock && (
+          <button
+            type="button"
+            onClick={onAdd}
+            title="Add anyway — source this one from another shop"
+            aria-label="Add anyway — source this one from another shop"
+            className="grid size-9 flex-none cursor-pointer place-items-center rounded-lg border border-teal text-teal transition hover:bg-teal hover:text-white"
+          >
+            <Store className="size-4" aria-hidden="true" />
+          </button>
         )}
-      >
-        {outOfStock ? (
-          "Out of Stock"
-        ) : (
-          <>
-            <Plus className="size-3.5" aria-hidden="true" />
-            Add To Order
-          </>
-        )}
-      </button>
+      </div>
     </div>
   );
 }

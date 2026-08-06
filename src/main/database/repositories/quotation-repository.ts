@@ -389,6 +389,7 @@ export function mapQuotationListRow(row: QuotationListRow): QuotationListItem {
     id: row.id,
     quotationNumber: row.quotation_number,
     customerName: row.customer_name,
+    locationId: row.location_id,
     locationName: row.location_name,
     employeeName: row.employee_name,
     status: liveStatus(row),

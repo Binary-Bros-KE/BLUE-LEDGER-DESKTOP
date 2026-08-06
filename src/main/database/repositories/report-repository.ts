@@ -472,8 +472,10 @@ export function findSalariesByEmployeeInRange(
 
 export type SaleFeeRow = { sale_id: string; fee_cents: number };
 
-/** Service-charge + delivery FEE (the revenue charged to the customer, not the cost side — see
- * findServiceAndDeliveryCostsInRange below) per completed sale in range, so Net Revenue can
+/** Service-charge + delivery FEE (the revenue charged to the customer, not the cost side — service
+ * charge cost is tracked via findServiceChargeCostsInRange below; delivery cost is booked as a real
+ * "Delivery Costs" expense instead, see expense-service.ts) per completed sale in range, so Net
+ * Revenue can
  * recognize it as real revenue the same way it recognizes product margin — proportional to how much
  * of that sale has actually been paid so far. Deliberately per-sale (not a flat period sum): each
  * amount needs its OWN sale's fractionPaid applied, exactly like SaleItemProfitRow. */
@@ -520,12 +522,18 @@ export function findSaleFeeRowsInRange(
 
 export type ServiceDeliveryCostTotals = { totalCents: number; documentCount: number };
 
-/** Hidden internal cost_cents on service charges + delivery attached to completed sales in range —
- * feeds the expense side of the Financial Overview so delivery/service profitability shows up in Net
- * Profit. Branch-scoped via the parent sale's location_id, dated by the sale's completed_at (not the
+/** Hidden internal cost_cents on service charges attached to completed sales in range — feeds the
+ * expense side of the Financial Overview so service-charge profitability shows up in Net Profit.
+ * Branch-scoped via the parent sale's location_id, dated by the sale's completed_at (not the
  * charge's own created_at) to match every other completed-sale query in this file. Quotation-only
- * charges (sale_id IS NULL) never count — nothing has actually been sold yet. */
-export function findServiceAndDeliveryCostsInRange(
+ * charges (sale_id IS NULL) never count — nothing has actually been sold yet.
+ *
+ * Delivery cost is deliberately NOT included here anymore — it's now booked as a real, auditable
+ * "Delivery Costs" expense at the moment a sale/invoice with a delivery is created (see
+ * expense-service.ts's createDeliveryCostExpenseIfNeeded), which already flows into
+ * generalExpensesCents via the normal expense-category breakdown. Counting it here too would
+ * double-deduct it from Net Profit. */
+export function findServiceChargeCostsInRange(
   tenantId: string,
   locationId: string | null,
   startIso: string,
@@ -547,25 +555,9 @@ export function findServiceAndDeliveryCostsInRange(
     document_count: number;
   };
 
-  const deliveryRow = getDatabase()
-    .prepare(
-      `
-      SELECT COALESCE(SUM(dn.cost_cents), 0) AS total_cents, COUNT(*) AS document_count
-      FROM delivery_notes dn
-      JOIN sales s ON s.id = dn.sale_id
-      WHERE s.tenant_id = ? AND s.sale_status = 'completed'
-        AND s.completed_at >= ? AND s.completed_at < ?
-        AND (? IS NULL OR s.location_id = ?)
-    `
-    )
-    .get(tenantId, startIso, endIsoExclusive, locationId, locationId) as {
-    total_cents: number;
-    document_count: number;
-  };
-
   return {
-    totalCents: serviceRow.total_cents + deliveryRow.total_cents,
-    documentCount: serviceRow.document_count + deliveryRow.document_count
+    totalCents: serviceRow.total_cents,
+    documentCount: serviceRow.document_count
   };
 }
 

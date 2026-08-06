@@ -25,6 +25,7 @@ import {
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { formatDocumentDateTime } from "@shared/lib/date";
 import type { ExportListRequest } from "@shared/types/export";
+import { isStorefrontType, type Location } from "@shared/types/location";
 import type { Sale, SaleDelivery, SaleListItem } from "@shared/types/sale";
 import type { SaleReturn } from "@shared/types/sale-return";
 import type { SaleVoid } from "@shared/types/sale-void";
@@ -83,7 +84,8 @@ const RETURNS_FILTER_TABS: Array<{ value: ReturnsFilter; label: string }> = [
 
 export function ReceiptsRoute(): React.JSX.Element {
   const tenantContext = useAppStore((state) => state.context?.tenant ?? null);
-  const { can } = usePermissions();
+  const { can, session } = usePermissions();
+  const showStorefrontFilter = session?.branch == null;
   const canRequest = can("sales", "edit");
   const canExport = can("sales", "export");
 
@@ -98,6 +100,8 @@ export function ReceiptsRoute(): React.JSX.Element {
   const [deliveryFilter, setDeliveryFilter] = useState<DeliveryFilter>("all");
   const [returnsFilter, setReturnsFilter] = useState<ReturnsFilter>("all");
   const [yearFilter, setYearFilter] = useState<string>(String(currentYear()));
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [locationFilter, setLocationFilter] = useState("");
 
   const [viewingSale, setViewingSale] = useState<Sale | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
@@ -143,6 +147,14 @@ export function ReceiptsRoute(): React.JSX.Element {
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  useEffect(() => {
+    if (!showStorefrontFilter) return;
+    window.blueLedger.location
+      .list()
+      .then((list) => setLocations(list.filter((location) => isStorefrontType(location.locationType))))
+      .catch(() => undefined);
+  }, [showStorefrontFilter]);
 
   const saleStatusInfo = useMemo(() => {
     const map = new Map<
@@ -210,6 +222,7 @@ export function ReceiptsRoute(): React.JSX.Element {
         if (!haystack.includes(term)) return false;
       }
       if (!matchesYearFilter(sale.completedAt, yearFilter)) return false;
+      if (locationFilter && sale.locationId !== locationFilter) return false;
       if (sale.completedAt) {
         const saleDate = sale.completedAt.slice(0, 10);
         if (dateFrom && saleDate < dateFrom) return false;
@@ -225,7 +238,7 @@ export function ReceiptsRoute(): React.JSX.Element {
       }
       return true;
     });
-  }, [sales, searchTerm, yearFilter, dateFrom, dateTo, deliveryFilter, returnsFilter, saleStatusInfo]);
+  }, [sales, searchTerm, yearFilter, locationFilter, dateFrom, dateTo, deliveryFilter, returnsFilter, saleStatusInfo]);
 
   const summary = useMemo(() => {
     if (!filteredSales) return null;
@@ -244,6 +257,9 @@ export function ReceiptsRoute(): React.JSX.Element {
     const filterParts: string[] = [];
     if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
     if (yearFilter !== ALL_YEARS_VALUE) filterParts.push(`Year: ${yearFilter}`);
+    if (locationFilter) {
+      filterParts.push(`Storefront: ${locations.find((l) => l.id === locationFilter)?.locationName ?? locationFilter}`);
+    }
     if (dateFrom || dateTo) filterParts.push(`Date: ${dateFrom || "…"} to ${dateTo || "…"}`);
     if (deliveryFilter !== "all") {
       filterParts.push(`Delivery: ${DELIVERY_FILTER_TABS.find((tab) => tab.value === deliveryFilter)?.label}`);
@@ -286,7 +302,7 @@ export function ReceiptsRoute(): React.JSX.Element {
         : [],
       fileBaseName: `Receipts_${new Date().toISOString().slice(0, 10)}`
     };
-  }, [filteredSales, summary, searchTerm, yearFilter, dateFrom, dateTo, deliveryFilter, returnsFilter, saleStatusInfo]);
+  }, [filteredSales, summary, searchTerm, yearFilter, locationFilter, locations, dateFrom, dateTo, deliveryFilter, returnsFilter, saleStatusInfo]);
 
   async function openReceipt(saleId: string): Promise<void> {
     setViewLoading(true);
@@ -473,6 +489,18 @@ export function ReceiptsRoute(): React.JSX.Element {
                 options={yearFilterOptions(availableYears)}
                 className="w-32"
               />
+              {showStorefrontFilter && (
+                <SelectField
+                  label="Storefront"
+                  value={locationFilter}
+                  onChange={setLocationFilter}
+                  options={[
+                    { value: "", label: "All Storefronts" },
+                    ...locations.map((location) => ({ value: location.id, label: location.locationName }))
+                  ]}
+                  className="w-44"
+                />
+              )}
               <label className="block">
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">From</span>
                 <input
@@ -709,6 +737,32 @@ export function ReceiptsRoute(): React.JSX.Element {
         ) : viewingSale ? (
           <div>
             {tenantContext && <ReceiptPreview sale={viewingSale} tenant={tenantContext} />}
+
+            {viewingSale.items.some((item) => item.isLocallySourced) && (
+              <div className="mt-4 rounded-lg border border-line bg-soft px-3.5 py-3">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">
+                  Sourced From Another Shop
+                </p>
+                <p className="mt-0.5 text-[11px] font-semibold text-muted">
+                  Internal record only — never shown on the printed/shared receipt.
+                </p>
+                <div className="mt-2 space-y-1.5">
+                  {viewingSale.items
+                    .filter((item) => item.isLocallySourced)
+                    .map((item) => (
+                      <div key={item.id} className="flex items-center justify-between gap-2 text-xs">
+                        <div className="min-w-0">
+                          <p className="truncate font-bold text-ink">{item.productName}</p>
+                          <p className="truncate text-muted">{item.localSupplierName ?? "No supplier recorded"}</p>
+                        </div>
+                        <span className="flex-none font-bold tabular-nums text-ink">
+                          Cost {item.localCostCents !== null ? formatCents(item.localCostCents) : "—"}
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
 
             {canRequest && (
               <div className="mt-4 grid grid-cols-2 gap-2 border-t border-line pt-4">

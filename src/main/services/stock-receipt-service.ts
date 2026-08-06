@@ -1,0 +1,179 @@
+import { runInTransaction } from "@main/database/connection";
+import * as inventoryRepository from "@main/database/repositories/inventory-repository";
+import * as locationRepository from "@main/database/repositories/location-repository";
+import * as mainStoreAllocationRepository from "@main/database/repositories/main-store-allocation-repository";
+import * as stockReceiptRepository from "@main/database/repositories/stock-receipt-repository";
+import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
+import { generateDocumentNumber } from "@main/services/document-number-service";
+import { applyValidatedStockMovement } from "@main/services/inventory-service";
+import { getCurrentTenant } from "@main/services/tenant-service";
+import { stockReceiptCreateSchema, type StockReceiptCreateInput } from "@shared/schemas/stock-receipt";
+import { isStorefrontType, type LocationType } from "@shared/types/location";
+import type { StockReceipt, StockReceiptItem, StockReceiptListItem } from "@shared/types/stock-receipt";
+
+/** GRN-D{n}-000001, GRN-D{n}-000002, ... — "Goods Received Note", the standard term for this document. */
+function generateStockReceiptNumber(tenantId: string): string {
+  return generateDocumentNumber({
+    tenantId,
+    prefix: "GRN",
+    digits: 6,
+    existingNumbers: stockReceiptRepository.findMaxStockReceiptNumberRow(tenantId)
+  });
+}
+
+function mapListRow(row: stockReceiptRepository.StockReceiptRow): StockReceiptListItem {
+  return {
+    id: row.id,
+    receiptNumber: row.receipt_number,
+    locationId: row.location_id,
+    locationName: row.location_name,
+    allocationStorefrontId: row.allocation_storefront_id,
+    allocationStorefrontName: row.allocation_storefront_name,
+    receivedByName: row.received_by_name,
+    itemCount: row.item_count,
+    totalQuantityReceived: row.total_quantity_received,
+    notes: row.notes,
+    createdAt: row.created_at
+  };
+}
+
+function mapItemRow(row: stockReceiptRepository.StockReceiptItemRow): StockReceiptItem {
+  return {
+    id: row.id,
+    productId: row.product_id,
+    productName: row.product_name,
+    sku: row.sku,
+    quantityReceived: row.quantity_received,
+    previousQuantity: row.previous_quantity,
+    newQuantity: row.new_quantity
+  };
+}
+
+/** Throws "not found" (rather than a permission error) for a branch-scoped caller trying to read a
+ * different location's receipt, so a Cashier probing ids can't tell the difference from a typo —
+ * same convention as stock-request-service.ts's own buildStockRequest. */
+function buildStockReceipt(id: string): StockReceipt {
+  const row = stockReceiptRepository.findStockReceiptRowById(id);
+  if (!row) {
+    throw new Error("Stock receipt not found");
+  }
+  const branchScope = getCurrentBranchScope();
+  if (branchScope && row.location_id !== branchScope) {
+    throw new Error("Stock receipt not found");
+  }
+  const items = stockReceiptRepository.findStockReceiptItemRows(id).map(mapItemRow);
+  return { ...mapListRow(row), items };
+}
+
+/** Branch-scoped roles (Cashier/Manager) only ever see their own storefront's receipts; a null branch
+ * scope (Storekeeper/Super Admin, or anyone receiving into Main Store which nobody is "scoped" to)
+ * sees every location's, same convention as every other branch-scoped read in this app. */
+export function listStockReceipts(): StockReceiptListItem[] {
+  requirePermission("inventory", "view");
+  const { tenantId } = getCurrentTenant();
+  const locationId = getCurrentBranchScope();
+  return stockReceiptRepository.findAllStockReceiptRows(tenantId, locationId).map(mapListRow);
+}
+
+export function getStockReceipt(id: string): StockReceipt {
+  requirePermission("inventory", "view");
+  return buildStockReceipt(id);
+}
+
+/** Receives many products in one batch — the bulk counterpart to the single-item Receive tab in
+ * MainStoreStockModal, sharing its exact same "Into Main Store (pick a bucket) vs Direct to
+ * Storefront" destination model, just applied once for the whole batch instead of per item.
+ *
+ * previousQuantity/newQuantity are captured HERE, immediately before each item's movement applies —
+ * not recomputed later — so the printed/reprinted document always shows exactly what was true at
+ * the moment of receiving, even if the product's stock has moved on since. */
+export function createStockReceipt(input: unknown): StockReceipt {
+  requirePermission("inventory", "edit");
+  const parsed: StockReceiptCreateInput = stockReceiptCreateSchema.parse(input);
+  const { tenantId } = getCurrentTenant();
+  const employeeId = getCurrentEmployeeId();
+  if (!employeeId) {
+    throw new Error("You must be signed in to do that");
+  }
+
+  let targetLocationId: string;
+  let allocationStorefrontId: string | null;
+
+  if (parsed.destination === "main_store") {
+    // Same boundary role-service.ts's own DEFAULT_SYSTEM_ROLES comment describes: Manager keeps
+    // "inventory" (their own storefront's stock) but deliberately never gets "main_store" — that
+    // split only means something if it's also enforced here, not just left to the UI hiding the
+    // option. requirePermission("inventory", "edit") above is not enough on its own.
+    requirePermission("main_store", "edit");
+    const mainStore = locationRepository.findMainStoreLocationRow(tenantId);
+    if (!mainStore) {
+      throw new Error("No Main Store is set up for this business yet");
+    }
+    targetLocationId = mainStore.id;
+    allocationStorefrontId = parsed.allocationStorefrontId ?? null;
+    if (allocationStorefrontId) {
+      const bucket = locationRepository.findLocationRowById(allocationStorefrontId);
+      if (!bucket || bucket.tenant_id !== tenantId || !isStorefrontType(bucket.location_type as LocationType)) {
+        throw new Error("Storefront not found");
+      }
+    }
+  } else {
+    const branchScope = getCurrentBranchScope();
+    const storefrontId = branchScope ?? parsed.locationId;
+    if (!storefrontId) {
+      throw new Error("Choose which storefront this receipt is for");
+    }
+    const location = locationRepository.findLocationRowById(storefrontId);
+    if (!location || location.tenant_id !== tenantId || !isStorefrontType(location.location_type as LocationType)) {
+      throw new Error("Storefront not found");
+    }
+    targetLocationId = storefrontId;
+    allocationStorefrontId = null;
+  }
+
+  const receiptNumber = generateStockReceiptNumber(tenantId);
+  let receiptId = "";
+
+  runInTransaction(() => {
+    receiptId = stockReceiptRepository.insertStockReceiptRow({
+      tenantId,
+      receiptNumber,
+      locationId: targetLocationId,
+      allocationStorefrontId,
+      notes: parsed.notes,
+      receivedBy: employeeId
+    });
+
+    for (const item of parsed.items) {
+      const previousQuantity =
+        parsed.destination === "main_store"
+          ? (mainStoreAllocationRepository.findAllocationRow(item.productId, allocationStorefrontId)?.quantity ?? 0)
+          : (inventoryRepository.findInventoryRow(item.productId, targetLocationId)?.quantity ?? 0);
+
+      applyValidatedStockMovement(
+        {
+          productId: item.productId,
+          locationId: targetLocationId,
+          movementType: "purchase",
+          quantityChange: item.quantityReceived,
+          referenceType: "stock_receipt",
+          referenceId: receiptId,
+          performedBy: employeeId,
+          notes: parsed.notes,
+          ...(parsed.destination === "main_store" ? { allocationStorefrontId } : {})
+        },
+        tenantId
+      );
+
+      stockReceiptRepository.insertStockReceiptItemRow({
+        stockReceiptId: receiptId,
+        productId: item.productId,
+        quantityReceived: item.quantityReceived,
+        previousQuantity,
+        newQuantity: previousQuantity + item.quantityReceived
+      });
+    }
+  });
+
+  return buildStockReceipt(receiptId);
+}

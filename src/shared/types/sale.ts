@@ -93,6 +93,17 @@ export type SaleItem = {
   taxType: ProductTaxType;
   taxAmountCents: number;
   lineTotalCents: number;
+  /** This line's product was bought from another shop on the spot rather than pulled from this
+   * shop's own stock (a customer wanted something this shop doesn't carry) — see checkout-pricing's
+   * own doc comment on why this skips the usual stock movement regardless of the product's own
+   * track_stock setting. */
+  isLocallySourced: boolean;
+  /** What THIS shop paid the local supplier for it — null unless isLocallySourced. Never contributes
+   * to the sale's own totals (the customer is charged unitPriceCents like any other line); purely a
+   * cost figure for Reports' locally-sourced margin breakdown. */
+  localCostCents: number | null;
+  localSupplierId: string | null;
+  localSupplierName: string | null;
   createdAt: string;
 };
 

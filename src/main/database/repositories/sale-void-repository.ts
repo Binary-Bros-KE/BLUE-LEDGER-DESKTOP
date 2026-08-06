@@ -22,6 +22,8 @@ export type SaleVoidRow = {
 export type SaleVoidDetailRow = SaleVoidRow & {
   receipt_number: string | null;
   sale_grand_total_cents: number;
+  location_id: string;
+  location_name: string;
   requested_by_name: string;
   approved_by_name: string | null;
 };
@@ -35,10 +37,13 @@ export function findAllSaleVoidRows(tenantId: string, locationId: string | null)
         v.*,
         s.receipt_number AS receipt_number,
         s.grand_total_cents AS sale_grand_total_cents,
+        s.location_id AS location_id,
+        l.location_name AS location_name,
         (req.first_name || ' ' || req.last_name) AS requested_by_name,
         CASE WHEN app.id IS NULL THEN NULL ELSE (app.first_name || ' ' || app.last_name) END AS approved_by_name
       FROM sale_voids v
       JOIN sales s ON s.id = v.sale_id
+      JOIN locations l ON l.id = s.location_id
       JOIN employees req ON req.id = v.requested_by
       LEFT JOIN employees app ON app.id = v.approved_by
       WHERE v.tenant_id = ?
@@ -63,10 +68,13 @@ export function findSaleVoidDetailRowById(id: string): SaleVoidDetailRow | undef
         v.*,
         s.receipt_number AS receipt_number,
         s.grand_total_cents AS sale_grand_total_cents,
+        s.location_id AS location_id,
+        l.location_name AS location_name,
         (req.first_name || ' ' || req.last_name) AS requested_by_name,
         CASE WHEN app.id IS NULL THEN NULL ELSE (app.first_name || ' ' || app.last_name) END AS approved_by_name
       FROM sale_voids v
       JOIN sales s ON s.id = v.sale_id
+      JOIN locations l ON l.id = s.location_id
       JOIN employees req ON req.id = v.requested_by
       LEFT JOIN employees app ON app.id = v.approved_by
       WHERE v.id = ?
@@ -154,6 +162,8 @@ export function mapSaleVoidDetailRow(row: SaleVoidDetailRow): SaleVoid {
     saleId: row.sale_id,
     receiptNumber: row.receipt_number,
     saleGrandTotalCents: row.sale_grand_total_cents,
+    locationId: row.location_id,
+    locationName: row.location_name,
     status: row.status as SaleVoidStatus,
     reason: row.reason,
     notes: row.notes,

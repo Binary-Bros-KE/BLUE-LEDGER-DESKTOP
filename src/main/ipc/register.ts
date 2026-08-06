@@ -84,6 +84,7 @@ import {
   generateReceiptPdf,
   generateSalaryPdf,
   generateStatementPdf,
+  generateStockReceiptPdf,
   getPrinterSettings,
   printDeliveryNote,
   printDeliveryNoteViaThermal,
@@ -93,6 +94,7 @@ import {
   printQuotationViaThermal,
   printReceipt,
   printStatementDocument,
+  printStockReceipt,
   savePrinterSettings,
   shareSalaryPayslip,
   testPrinterConnection
@@ -107,6 +109,7 @@ import {
 import { getCustomerStatement } from "@main/services/statement-service";
 import { exportListToCsv, exportListToExcel, exportListToPdf } from "@main/services/export-service";
 import { exportReportToExcel, exportReportToPdf } from "@main/services/report-export-service";
+import { createStockReceipt, getStockReceipt, listStockReceipts } from "@main/services/stock-receipt-service";
 import {
   approveStockRequest,
   createStockRequest,
@@ -151,6 +154,7 @@ import {
   listMainStoreProductRows,
   reallocateMainStoreStock,
   receiveMainStoreStock,
+  recordMainStoreAdjustment,
   recordMainStoreDamage,
   returnToMainStore
 } from "@main/services/main-store-service";
@@ -271,6 +275,7 @@ import {
 import { getInventoryReportData } from "@main/services/inventory-report-service";
 import { getProductSalesHistory, getProductsPerformanceReport } from "@main/services/product-report-service";
 import { getTaxReport } from "@main/services/tax-report-service";
+import { getLocalSourcingReport } from "@main/services/local-sourcing-report-service";
 import { getCustomerPurchaseHistory, getOutstandingInvoices, getTopCustomers } from "@main/services/customer-report-service";
 import {
   getOutstandingPurchases,
@@ -427,6 +432,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.mainStoreReturn, (_event, input: unknown) => returnToMainStore(input));
   ipcMain.handle(ipcChannels.mainStoreReallocate, (_event, input: unknown) => reallocateMainStoreStock(input));
   ipcMain.handle(ipcChannels.mainStoreDamage, (_event, input: unknown) => recordMainStoreDamage(input));
+  ipcMain.handle(ipcChannels.mainStoreAdjust, (_event, input: unknown) => recordMainStoreAdjustment(input));
   ipcMain.handle(ipcChannels.inventoryOverview, (_event, productId: string) =>
     getInventoryOverview(productId)
   );
@@ -658,6 +664,12 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.printerPrintStatementDocument, (_event, customerId: string) =>
     printStatementDocument(customerId)
   );
+  ipcMain.handle(ipcChannels.printerGenerateStockReceiptPdf, (_event, stockReceiptId: string) =>
+    generateStockReceiptPdf(stockReceiptId)
+  );
+  ipcMain.handle(ipcChannels.printerPrintStockReceiptDocument, (_event, stockReceiptId: string) =>
+    printStockReceipt(stockReceiptId)
+  );
   ipcMain.handle(ipcChannels.statementGetForCustomer, (_event, customerId: string) => getCustomerStatement(customerId));
   ipcMain.handle(ipcChannels.deliveryNoteGet, (_event, id: string) => getDeliveryNote(id));
   ipcMain.handle(ipcChannels.deliveryNoteGetForSale, (_event, saleId: string) => getDeliveryNoteForSale(saleId));
@@ -682,6 +694,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.stockRequestCreate, (_event, input: unknown) => createStockRequest(input));
   ipcMain.handle(ipcChannels.stockRequestApprove, (_event, id: string) => approveStockRequest(id));
   ipcMain.handle(ipcChannels.stockRequestReject, (_event, id: string, input: unknown) => rejectStockRequest(id, input));
+  ipcMain.handle(ipcChannels.stockReceiptList, () => listStockReceipts());
+  ipcMain.handle(ipcChannels.stockReceiptGet, (_event, id: string) => getStockReceipt(id));
+  ipcMain.handle(ipcChannels.stockReceiptCreate, (_event, input: unknown) => createStockReceipt(input));
   ipcMain.handle(ipcChannels.recurringBillList, () => listRecurringBills());
   ipcMain.handle(ipcChannels.recurringBillGet, (_event, id: string) => getRecurringBill(id));
   ipcMain.handle(ipcChannels.recurringBillCreate, (_event, input: unknown) => createRecurringBill(input));
@@ -742,4 +757,5 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.reportSupplierPurchaseHistory, (_event, input: unknown) => getSupplierPurchaseHistory(input));
   ipcMain.handle(ipcChannels.reportSupplierSpendBreakdown, (_event, input: unknown) => getSupplierSpendBreakdown(input));
   ipcMain.handle(ipcChannels.reportTaxBreakdown, (_event, range: unknown) => getTaxReport(range));
+  ipcMain.handle(ipcChannels.reportLocalSourcing, (_event, range: unknown) => getLocalSourcingReport(range));
 }

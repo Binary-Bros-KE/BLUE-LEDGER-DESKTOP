@@ -6,8 +6,9 @@ import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import type { Supplier } from "@shared/types/supplier";
 
-/** The fast path for adding a supplier mid-purchase — only the fields needed to place an order.
- * Everything else (address, payment details, credit limit) can be filled in later from Suppliers. */
+/** The fast path for adding a supplier mid-purchase or mid-checkout (a locally-sourced sale line) —
+ * only the fields needed to place an order. Everything else (address, payment details, credit
+ * limit) can be filled in later from Suppliers. */
 export function QuickCreateSupplierModal({
   open,
   onClose,

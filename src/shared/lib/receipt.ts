@@ -80,7 +80,9 @@ export function buildReceiptViewModel(sale: Sale, business: ReceiptBusinessInfo)
         unitPriceCents: charge.feeCents,
         lineTotalCents: charge.feeCents
       })),
-      ...(sale.delivery
+      // A seller who absorbs the delivery cost themselves charges the customer nothing for it —
+      // a printed "Delivery Fee: 0.00" line would be confusing, so skip it entirely when zero.
+      ...(sale.delivery && sale.delivery.feeCents > 0
         ? [
             {
               name: "Delivery Fee",

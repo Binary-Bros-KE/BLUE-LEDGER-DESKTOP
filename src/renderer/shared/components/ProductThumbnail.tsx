@@ -30,12 +30,19 @@ export function ProductThumbnail({
   return (
     <div
       className={cn(
-        "grid size-10 flex-none place-items-center overflow-hidden rounded-lg border border-line bg-soft",
+        "relative grid size-10 flex-none place-items-center overflow-hidden rounded-lg border border-line bg-soft",
         className
       )}
     >
       {previewUrl ? (
-        <img src={previewUrl} alt="" className="size-full object-cover" />
+        // Absolutely positioned (not size-full inside the grid) — a percentage height on a grid
+        // item only resolves against the parent's own height when the item actually stretches to
+        // fill it, and place-items-center turns that stretch off, so height:100% silently falls
+        // back to the image's OWN intrinsic aspect ratio instead of this box's — a tall photo then
+        // renders as a much taller (and, once overflow-hidden clips it, cropped) box than the
+        // square frame implies. Absolute positioning resolves against the containing block's actual
+        // size regardless of any alignment setting, so it can't hit that gotcha.
+        <img src={previewUrl} alt="" className="absolute inset-0 size-full object-contain" />
       ) : (
         <Package className="size-4 text-muted" aria-hidden="true" />
       )}

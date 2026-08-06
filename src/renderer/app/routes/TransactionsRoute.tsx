@@ -5,7 +5,6 @@ import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import { StatTile } from "@renderer/shared/components/StatTile";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
-import { getDashboardVariant } from "@renderer/shared/lib/dashboard-role";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import { todayIso } from "@renderer/app/routes/reports/salesReportDate";
@@ -45,7 +44,10 @@ function formatDateTime(iso: string): string {
  * nothing to hide client-side. */
 export function TransactionsRoute(): React.JSX.Element {
   const { can, session } = usePermissions();
-  const isSuperAdmin = getDashboardVariant(session) === "superAdmin";
+  // Gated on "no assigned branch" (Super Admin, typically, but any branch-less role too — e.g. a
+  // Storekeeper without a storefront) rather than getDashboardVariant's role-name check, which
+  // would wrongly exclude a branch-less Storekeeper (see [[project_storefront_filter_rollout]]).
+  const showStorefrontFilter = session?.branch == null;
   const canExport = can("sales", "export");
 
   const [yearFilter, setYearFilter] = useState<string>(String(currentYear()));
@@ -109,7 +111,7 @@ export function TransactionsRoute(): React.JSX.Element {
     if (cashierFilter !== ALL_VALUE) {
       list = list.filter((row) => row.processedByName === cashierFilter);
     }
-    if (isSuperAdmin && locationFilter !== ALL_VALUE) {
+    if (showStorefrontFilter && locationFilter !== ALL_VALUE) {
       list = list.filter((row) => row.locationName === locationFilter);
     }
 
@@ -120,7 +122,7 @@ export function TransactionsRoute(): React.JSX.Element {
         `${row.transactionCode} ${row.paymentMethodName ?? ""} ${row.processedByName} ${row.locationName} ${row.partyName ?? ""}`.toLowerCase();
       return haystack.includes(term);
     });
-  }, [transactions, searchTerm, paymentMethodFilter, cashierFilter, locationFilter, isSuperAdmin]);
+  }, [transactions, searchTerm, paymentMethodFilter, cashierFilter, locationFilter, showStorefrontFilter]);
 
   const summary = useMemo(() => {
     if (!filtered) return null;
@@ -141,7 +143,7 @@ export function TransactionsRoute(): React.JSX.Element {
     if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
     if (paymentMethodFilter !== ALL_VALUE) filterParts.push(`Payment Method: ${paymentMethodFilter}`);
     if (cashierFilter !== ALL_VALUE) filterParts.push(`Cashier: ${cashierFilter}`);
-    if (isSuperAdmin && locationFilter !== ALL_VALUE) filterParts.push(`Storefront: ${locationFilter}`);
+    if (showStorefrontFilter && locationFilter !== ALL_VALUE) filterParts.push(`Storefront: ${locationFilter}`);
 
     return {
       module: "sales",
@@ -179,7 +181,7 @@ export function TransactionsRoute(): React.JSX.Element {
         : [],
       fileBaseName: `Transactions_${dateFrom}_to_${dateTo}`
     };
-  }, [filtered, summary, dateFrom, dateTo, searchTerm, paymentMethodFilter, cashierFilter, locationFilter, isSuperAdmin]);
+  }, [filtered, summary, dateFrom, dateTo, searchTerm, paymentMethodFilter, cashierFilter, locationFilter, showStorefrontFilter]);
 
   return (
     <motion.div
@@ -314,7 +316,7 @@ export function TransactionsRoute(): React.JSX.Element {
               ))}
             </select>
           </label>
-          {isSuperAdmin && (
+          {showStorefrontFilter && (
             <label className="block">
               <select
                 value={locationFilter}

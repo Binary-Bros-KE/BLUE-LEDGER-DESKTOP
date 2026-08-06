@@ -9,10 +9,12 @@ import { applyValidatedStockMovement } from "@main/services/inventory-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { isStorefrontType, type LocationType } from "@shared/types/location";
 import {
+  mainStoreAdjustSchema,
   mainStoreDamageSchema,
   mainStoreReallocateSchema,
   mainStoreReceiveSchema,
   mainStoreTransferSchema,
+  type MainStoreAdjustInput,
   type MainStoreDamageInput,
   type MainStoreReallocateInput,
   type MainStoreReceiveInput,
@@ -350,6 +352,44 @@ export function recordMainStoreDamage(input: unknown): MainStoreProductDetail {
         movementType: "damage",
         quantityChange: -parsed.quantity,
         referenceType: "main_store_damage",
+        referenceId: null,
+        performedBy: employeeId,
+        notes: parsed.notes,
+        allocationStorefrontId: parsed.storefrontId
+      },
+      tenantId
+    );
+  });
+
+  return buildProductDetail(tenantId, parsed.productId);
+}
+
+/** Corrects a bucket's stock to match a physical count — e.g. a shelf count turns up 42 units but
+ * the system shows 47, so this records a -5 adjustment. The delta is computed here, against the
+ * SAME bucket-quantity read the rest of this transaction uses, rather than trusting a delta the
+ * renderer computed against a possibly-stale on-screen number. A count that already matches current
+ * stock is a no-op, not an error — nothing to record. */
+export function recordMainStoreAdjustment(input: unknown): MainStoreProductDetail {
+  requirePermission("main_store", "edit");
+  const parsed: MainStoreAdjustInput = mainStoreAdjustSchema.parse(input);
+  const { tenantId } = getCurrentTenant();
+  const employeeId = getCurrentEmployeeId();
+  const mainStore = requireMainStoreLocation(tenantId);
+  if (parsed.storefrontId) requireStorefront(parsed.storefrontId, tenantId);
+
+  runInTransaction(() => {
+    const currentQuantity =
+      mainStoreAllocationRepository.findAllocationRow(parsed.productId, parsed.storefrontId)?.quantity ?? 0;
+    const delta = parsed.countedQuantity - currentQuantity;
+    if (delta === 0) return;
+
+    applyValidatedStockMovement(
+      {
+        productId: parsed.productId,
+        locationId: mainStore.id,
+        movementType: "adjustment",
+        quantityChange: delta,
+        referenceType: "main_store_adjustment",
         referenceId: null,
         performedBy: employeeId,
         notes: parsed.notes,

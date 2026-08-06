@@ -67,6 +67,7 @@ export type QuotationListItem = {
   id: QuotationId;
   quotationNumber: string;
   customerName: string;
+  locationId: string;
   locationName: string;
   employeeName: string;
   status: QuotationStatus;

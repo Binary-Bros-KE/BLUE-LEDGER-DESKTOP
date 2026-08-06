@@ -12,7 +12,7 @@ import type { Purchase } from "@shared/types/purchase";
 import type { Supplier } from "@shared/types/supplier";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { QuickCreateProductModal } from "@renderer/shared/components/QuickCreateProductModal";
-import { QuickCreateSupplierModal } from "./QuickCreateSupplierModal";
+import { QuickCreateSupplierModal } from "@renderer/shared/components/QuickCreateSupplierModal";
 
 type ItemLine = {
   productId: string;

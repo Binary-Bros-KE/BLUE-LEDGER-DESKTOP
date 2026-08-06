@@ -18,6 +18,7 @@ import type { Product, ProductListItem, ProductStatus, ProductStockSummary } fro
 import type { ProductSalesHistoryEntry, ProductsPerformanceReport } from "./product-report";
 import type { CustomerPurchaseHistoryEntry, OutstandingInvoicesSummary, TopCustomerRow } from "./customer-report";
 import type { OutstandingPurchasesSummary, SupplierPurchaseHistoryEntry, SupplierSpendRow } from "./supplier-report";
+import type { LocalSourcingReport } from "./local-sourcing-report";
 import type { TaxReport } from "./tax-report";
 import type { PrinterActionResult, PrinterSettings } from "./printer";
 import type { Expense, ExpenseSummary } from "./expense";
@@ -49,6 +50,7 @@ import type { SaleReturn } from "./sale-return";
 import type { SaleVoid } from "./sale-void";
 import type { RecurringBill } from "./recurring-bill";
 import type { StockMovement, StockMovementFeedItem, StockTransferResult } from "./stock-movement";
+import type { StockReceipt, StockReceiptListItem } from "./stock-receipt";
 import type { StockRequest, StockRequestListItem } from "./stock-request";
 import type {
   ConflictResolution,
@@ -291,6 +293,10 @@ export type IpcInvokeMap = {
     result: MainStoreProductDetail;
   };
   "main-store:damage": {
+    args: [Record<string, unknown>];
+    result: MainStoreProductDetail;
+  };
+  "main-store:adjust": {
     args: [Record<string, unknown>];
     result: MainStoreProductDetail;
   };
@@ -810,6 +816,14 @@ export type IpcInvokeMap = {
     args: [string];
     result: PrinterActionResult;
   };
+  "printer:generate-stock-receipt-pdf": {
+    args: [string];
+    result: string | null;
+  };
+  "printer:print-stock-receipt-document": {
+    args: [string];
+    result: PrinterActionResult;
+  };
   "printer:generate-quotation-pdf": {
     args: [string];
     result: string | null;
@@ -905,6 +919,18 @@ export type IpcInvokeMap = {
   "stock-request:reject": {
     args: [string, Record<string, unknown>];
     result: StockRequest;
+  };
+  "stock-receipt:list": {
+    args: [];
+    result: StockReceiptListItem[];
+  };
+  "stock-receipt:get": {
+    args: [string];
+    result: StockReceipt;
+  };
+  "stock-receipt:create": {
+    args: [Record<string, unknown>];
+    result: StockReceipt;
   };
   "recurring-bill:list": {
     args: [];
@@ -1066,6 +1092,10 @@ export type IpcInvokeMap = {
     args: [DateRangeInput];
     result: TaxReport;
   };
+  "report:local-sourcing": {
+    args: [DateRangeInput];
+    result: LocalSourcingReport;
+  };
 };
 
 export type IpcChannel = keyof IpcInvokeMap;
@@ -1184,6 +1214,7 @@ export type BlueLedgerApi = {
     returnStock: (input: Record<string, unknown>) => Promise<IpcInvokeMap["main-store:return"]["result"]>;
     reallocate: (input: Record<string, unknown>) => Promise<IpcInvokeMap["main-store:reallocate"]["result"]>;
     damage: (input: Record<string, unknown>) => Promise<IpcInvokeMap["main-store:damage"]["result"]>;
+    adjust: (input: Record<string, unknown>) => Promise<IpcInvokeMap["main-store:adjust"]["result"]>;
   };
   inventory: {
     overview: (productId: string) => Promise<IpcInvokeMap["inventory:overview"]["result"]>;
@@ -1470,6 +1501,12 @@ export type BlueLedgerApi = {
     printStatementDocument: (
       customerId: string
     ) => Promise<IpcInvokeMap["printer:print-statement-document"]["result"]>;
+    generateStockReceiptPdf: (
+      stockReceiptId: string
+    ) => Promise<IpcInvokeMap["printer:generate-stock-receipt-pdf"]["result"]>;
+    printStockReceiptDocument: (
+      stockReceiptId: string
+    ) => Promise<IpcInvokeMap["printer:print-stock-receipt-document"]["result"]>;
   };
   statement: {
     getForCustomer: (customerId: string) => Promise<IpcInvokeMap["statement:get-for-customer"]["result"]>;
@@ -1507,6 +1544,11 @@ export type BlueLedgerApi = {
       id: string,
       input: Record<string, unknown>
     ) => Promise<IpcInvokeMap["stock-request:reject"]["result"]>;
+  };
+  stockReceipt: {
+    list: () => Promise<IpcInvokeMap["stock-receipt:list"]["result"]>;
+    get: (id: string) => Promise<IpcInvokeMap["stock-receipt:get"]["result"]>;
+    create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["stock-receipt:create"]["result"]>;
   };
   recurringBill: {
     list: () => Promise<IpcInvokeMap["recurring-bill:list"]["result"]>;
@@ -1581,5 +1623,6 @@ export type BlueLedgerApi = {
     supplierPurchaseHistory: (input: { supplierId: string }) => Promise<SupplierPurchaseHistoryEntry[]>;
     supplierSpendBreakdown: (input: DateRangeInput) => Promise<SupplierSpendRow[]>;
     taxBreakdown: (range: DateRangeInput) => Promise<TaxReport>;
+    localSourcing: (range: DateRangeInput) => Promise<LocalSourcingReport>;
   };
 };

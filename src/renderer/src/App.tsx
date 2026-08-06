@@ -13,6 +13,7 @@ import { CustomersRoute } from "@renderer/app/routes/CustomersRoute";
 import { DashboardRoute } from "@renderer/app/routes/DashboardRoute";
 import { EmployeesRoute } from "@renderer/app/routes/EmployeesRoute";
 import { ExpensesRoute } from "@renderer/app/routes/ExpensesRoute";
+import { GoodsReceivedRoute } from "@renderer/app/routes/GoodsReceivedRoute";
 import { ImportRoute } from "@renderer/app/routes/ImportRoute";
 import { InvoicesRoute } from "@renderer/app/routes/InvoicesRoute";
 import { LicenseBlockedRoute } from "@renderer/app/routes/LicenseBlockedRoute";
@@ -123,6 +124,8 @@ export function App(): React.JSX.Element {
         <StockLedgerRoute />
       ) : activeNavKey === "stock-requests" ? (
         <StockRequestsRoute />
+      ) : activeNavKey === "goods-received" ? (
+        <GoodsReceivedRoute />
       ) : activeNavKey === "employees" ? (
         <EmployeesRoute />
       ) : activeNavKey === "roles" ? (

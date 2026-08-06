@@ -132,10 +132,13 @@ export type SalesFinancialOverview = {
   purchasesPaidDocumentCount: number;
   salariesPaidCents: number;
   salariesPaidDocumentCount: number;
-  /** Hidden internal cost of service charges + delivery on completed sales — never shown to the
-   * customer, but tracked here so delivery/service profitability shows up in Net Profit. */
-  deliveryServiceCostsCents: number;
-  deliveryServiceCostsDocumentCount: number;
+  /** Hidden internal cost of service charges on completed sales — never shown to the customer, but
+   * tracked here so service-charge profitability shows up in Net Profit. Delivery cost is NOT
+   * included — it's booked as a real "Delivery Costs" expense instead (see
+   * expense-service.ts's createDeliveryCostExpenseIfNeeded), already counted via
+   * generalExpensesCents. */
+  serviceChargeCostsCents: number;
+  serviceChargeCostsDocumentCount: number;
   expensesByCategory: SalesCategoryBreakdownEntry[];
   purchasesBySupplier: SalesCategoryBreakdownEntry[];
   salariesByEmployee: SalesCategoryBreakdownEntry[];
