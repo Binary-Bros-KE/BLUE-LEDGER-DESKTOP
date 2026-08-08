@@ -2,6 +2,7 @@ import { getDatabase } from "@main/database/connection";
 import {
   getCloudIdentity,
   getEntitySyncOverview as getEntitySyncOverviewFromEngine,
+  getPullOrphanCount,
   listConflicts as listConflictsFromEngine,
   listRecentReconciliations as listRecentReconciliationsFromEngine,
   readSetting,
@@ -77,7 +78,8 @@ export function getSyncSnapshot(): SyncSnapshot {
     queuedCount: queuedCountRow["COUNT(*)"],
     failedCount,
     serverUrl: API_BASE_URL,
-    drift
+    drift,
+    orphanedPullCount: getPullOrphanCount()
   };
 }
 

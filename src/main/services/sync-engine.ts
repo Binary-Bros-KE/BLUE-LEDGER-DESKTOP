@@ -2633,6 +2633,44 @@ async function fetchPull(
   }
 }
 
+/** A row still failing after this many separate PULL CYCLES (not the 2 in-page passes below — full
+ * cycles, ~20s apart per bootstrap.ts's SYNC_INTERVAL_MS) is no longer treated as "just hasn't
+ * arrived yet" — every genuinely transient case (a dependency sitting a few pages behind in the SAME
+ * cycle, a same-page ordering quirk) resolves within the first cycle or two via the retry below. Past
+ * this threshold it's a permanent gap (e.g. a stock_movement referencing a storefront that's since
+ * been deleted from the cloud entirely — confirmed live: the referenced location_id doesn't exist in
+ * EITHER the local DB or a fresh full pull of the cloud's own locations table), and the row gets
+ * quarantined instead — see recordPullOrphanAttempt below. */
+const ORPHAN_QUARANTINE_THRESHOLD = 3;
+
+/** Records (or bumps the attempt count on) a row that's still failing after the in-page retry below.
+ * Table is local-only, diagnostic, and deliberately has no FK constraints of its own — it must be
+ * able to hold any orphaned payload without itself becoming a second thing that can fail to insert.
+ * Returns the new attempt count so the caller can decide whether to quarantine yet. */
+function recordPullOrphanAttempt(entity: SyncEntity, rowId: string, error: unknown, payload: Record<string, unknown>): number {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  const existing = db
+    .prepare("SELECT attempts FROM sync_pull_orphans WHERE entity = ? AND row_id = ?")
+    .get(entity, rowId) as { attempts: number } | undefined;
+  const attempts = (existing?.attempts ?? 0) + 1;
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  db.prepare(
+    `INSERT INTO sync_pull_orphans (entity, row_id, attempts, last_error, payload_json, first_seen_at, last_seen_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(entity, row_id) DO UPDATE SET
+       attempts = excluded.attempts, last_error = excluded.last_error,
+       payload_json = excluded.payload_json, last_seen_at = excluded.last_seen_at`
+  ).run(entity, rowId, attempts, errorMessage, JSON.stringify(payload), now, now);
+  return attempts;
+}
+
+/** Clears any quarantine record for a row that just applied successfully — covers the case where a
+ * row had accumulated a few failed cycles (below the threshold) and then its dependency arrived. */
+function clearPullOrphan(entity: SyncEntity, rowId: string): void {
+  getDatabase().prepare("DELETE FROM sync_pull_orphans WHERE entity = ? AND row_id = ?").run(entity, rowId);
+}
+
 async function pullEntity(tenantId: string, deviceId: string, entity: SyncEntity): Promise<void> {
   let since = readCursor(entity);
   let hasMore = true;
@@ -2644,14 +2682,17 @@ async function pullEntity(tenantId: string, deviceId: string, entity: SyncEntity
     // Two passes so same-page dependency ordering resolves itself (e.g. a role that appears after
     // an employee referencing it, or a child category before its parent). A row still failing after
     // both passes is logged and retried again on a LATER pull cycle — see below for why the cursor
-    // deliberately does not advance past it.
+    // deliberately does not advance past it (until ORPHAN_QUARANTINE_THRESHOLD is hit).
     let remaining = response.rows;
+    const lastErrors = new Map<string, unknown>();
     for (let pass = 0; pass < 2 && remaining.length > 0; pass++) {
       const stillFailing: Array<Record<string, unknown>> = [];
       for (const row of remaining) {
         try {
           applyPulledRow(entity, row);
+          clearPullOrphan(entity, row.id as string);
         } catch (err) {
+          lastErrors.set(row.id as string, err);
           stillFailing.push(row);
           if (pass === 1) {
             console.warn(`[sync] ${entity} row ${row.id as string} still failing after 2 passes, will retry next cycle:`, err);
@@ -2661,23 +2702,57 @@ async function pullEntity(tenantId: string, deviceId: string, entity: SyncEntity
       remaining = stillFailing;
     }
 
-    // Only advance past this page if EVERY row in it actually applied. Advancing unconditionally
-    // (the original behavior) turned a transient failure into a PERMANENT one: since the cursor is
-    // `syncedAt`-based, not per-row, a page containing even one still-failing row would have that
-    // row skipped forever the moment the cursor moved past its syncedAt — found live via two-device
-    // testing, where a role-name collision (see APPLY_CONFIG's naturalKey reconciliation above)
-    // silently and permanently blocked that role, and every employee referencing it, from ever
-    // pulling again. Re-fetching the same page next cycle is safe — applying an already-succeeded
-    // row again is a harmless no-op update — and correct: once whatever was blocking it resolves
-    // (a dependency lands, a reconciliation fix applies), the retry on a later cycle succeeds.
+    // Only advance past this page if EVERY row in it actually applied (or has since been quarantined
+    // below). Advancing unconditionally (the original behavior) turned a transient failure into a
+    // PERMANENT one: since the cursor is `syncedAt`-based, not per-row, a page containing even one
+    // still-failing row would have that row skipped forever the moment the cursor moved past its
+    // syncedAt — found live via two-device testing, where a role-name collision (see APPLY_CONFIG's
+    // naturalKey reconciliation above) silently and permanently blocked that role, and every employee
+    // referencing it, from ever pulling again. Re-fetching the same page next cycle is safe — applying
+    // an already-succeeded row again is a harmless no-op update — and correct: once whatever was
+    // blocking it resolves (a dependency lands, a reconciliation fix applies), the retry on a later
+    // cycle succeeds.
+    //
+    // But that same "never advance past a bad row" rule, applied to a row that will NEVER resolve
+    // (its FK target is permanently gone from the cloud, not just running behind), instead freezes
+    // this entity's cursor forever — every future row behind it, however unrelated, silently never
+    // arrives either. That's the failure mode this quarantine step exists to break: past
+    // ORPHAN_QUARANTINE_THRESHOLD cycles of the identical failure, give up on that one row specifically
+    // (it's excluded from the local table it belongs to, so its effect on inventory/totals is simply
+    // never applied — the same outcome as if it never existed, matching the reality that its target
+    // doesn't exist either) and let every other row keep syncing.
     if (remaining.length > 0) {
-      return;
+      const stillBlocking: Array<Record<string, unknown>> = [];
+      for (const row of remaining) {
+        const rowId = row.id as string;
+        const attempts = recordPullOrphanAttempt(entity, rowId, lastErrors.get(rowId), row);
+        if (attempts >= ORPHAN_QUARANTINE_THRESHOLD) {
+          console.error(
+            `[sync] ${entity} row ${rowId} permanently quarantined after ${attempts} pull cycles of the same ` +
+              "failure — it references data that no longer exists in the cloud. Skipping it so the rest of " +
+              `${entity} can keep syncing; see sync_pull_orphans for details.`
+          );
+        } else {
+          stillBlocking.push(row);
+        }
+      }
+      if (stillBlocking.length > 0) {
+        return;
+      }
     }
 
     since = response.cursor;
     writeCursor(entity, since);
     hasMore = response.hasMore;
   }
+}
+
+/** Count of rows currently quarantined by the ORPHAN_QUARANTINE_THRESHOLD path in pullEntity above —
+ * surfaced in the Cloud Sync tab so a permanent, unresolvable gap (e.g. a movement referencing a
+ * deleted storefront) is visible to a human instead of only ever appearing in main-process logs. */
+export function getPullOrphanCount(): number {
+  const row = getDatabase().prepare("SELECT COUNT(*) as count FROM sync_pull_orphans").get() as { count: number };
+  return row.count;
 }
 
 export async function pullDeltas(): Promise<void> {

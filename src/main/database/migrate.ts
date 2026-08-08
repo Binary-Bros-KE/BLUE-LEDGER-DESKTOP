@@ -2212,6 +2212,28 @@ const migrations = [
       ALTER TABLE quotation_items ADD COLUMN local_cost_cents INTEGER;
       ALTER TABLE quotation_items ADD COLUMN local_supplier_id TEXT REFERENCES suppliers(id);
     `
+  },
+  {
+    version: 62,
+    name: "sync_pull_orphans",
+    sql: `
+      -- Diagnostic-only quarantine for pull rows whose NOT NULL foreign key (e.g. stock_movements.
+      -- location_id) genuinely never resolves — not a race where the dependency just hasn't arrived
+      -- yet (that already self-heals via pullEntity's normal same-page retry), but a permanent gap,
+      -- e.g. a storefront that was deleted from the cloud after historical stock movements already
+      -- referenced it. Deliberately has NO foreign keys of its own — it must be able to hold any
+      -- orphaned payload without itself becoming a second thing that can fail to insert. Never synced.
+      CREATE TABLE sync_pull_orphans (
+        entity TEXT NOT NULL,
+        row_id TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 1,
+        last_error TEXT,
+        payload_json TEXT,
+        first_seen_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        PRIMARY KEY (entity, row_id)
+      );
+    `
   }
 ] as const;
 

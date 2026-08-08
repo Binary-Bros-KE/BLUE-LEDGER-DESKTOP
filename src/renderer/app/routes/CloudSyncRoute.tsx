@@ -273,6 +273,22 @@ export function CloudSyncRoute(): React.JSX.Element {
         </div>
       )}
 
+      {snapshot.orphanedPullCount > 0 && (
+        <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm font-bold text-warning">
+          <AlertTriangle className="mt-0.5 size-4 flex-none" aria-hidden="true" />
+          <div>
+            <p>
+              {snapshot.orphanedPullCount} {snapshot.orphanedPullCount === 1 ? "record" : "records"} could not sync
+              to this device.
+            </p>
+            <p className="mt-1 text-xs font-semibold">
+              These reference something that no longer exists in the cloud (e.g. a deleted storefront) — contact
+              support so the underlying data can be corrected.
+            </p>
+          </div>
+        </div>
+      )}
+
       {conflicts.length > 0 && (
         <div className="rounded-lg border border-danger/30 bg-white p-5 shadow-soft">
           <div className="flex items-center gap-2">

@@ -64,6 +64,7 @@ export type SyncSnapshot = {
   failedCount: number;
   serverUrl: string | null;
   drift: Partial<Record<SyncEntity, DriftEntry>>;
+  orphanedPullCount: number;
 };
 
 /** Phase 2 — a push that lost the optimistic-lock check (see sync-service.ts's pushRows on the
