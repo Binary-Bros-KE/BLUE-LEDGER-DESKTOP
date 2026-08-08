@@ -156,6 +156,14 @@ export function prepareCart(
     if (item.discountAmountCents > lineSubtotalCents) {
       throw new Error(`Discount for "${product.name}" can't exceed its subtotal`);
     }
+    // Split into two distinct checks (was one combined "discount would drop it below minimum"
+    // message) — a cashier typing a marked-up price straight below the floor, with zero discount
+    // involved, used to see a confusing error blaming a discount that was never applied.
+    if (product.minimum_price_cents !== null && unitPriceCents < product.minimum_price_cents) {
+      throw new Error(
+        `Price for "${product.name}" can't be below its minimum price of ${(product.minimum_price_cents / 100).toFixed(2)}`
+      );
+    }
     const minLineSubtotalCents =
       product.minimum_price_cents !== null ? product.minimum_price_cents * item.quantity : 0;
     if (lineSubtotalCents - item.discountAmountCents < minLineSubtotalCents) {

@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { CheckCircle2, Download, Loader2, Printer, RefreshCw, Settings as SettingsIcon, XCircle } from "lucide-react";
+import { CheckCircle2, Download, Loader2, MessageCircle, Printer, RefreshCw, Settings as SettingsIcon, XCircle } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { CheckboxField, Field, SelectField } from "@renderer/shared/components/form-fields";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { getSharePreferences, setSharePreferences } from "@renderer/shared/lib/share-preferences";
 import { useUpdateStatusWidget } from "@renderer/app/layouts/useUpdateStatusWidget";
 import {
   DEFAULT_PRINTER_SETTINGS,
@@ -68,6 +69,15 @@ export function SettingsRoute(): React.JSX.Element {
 
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Device-local, not printer-related — reused as-is, no separate load/save round trip needed (see
+  // share-preferences.ts's own doc comment on why this lives in localStorage).
+  const [whatsappInstalled, setWhatsappInstalled] = useState<boolean>(() => getSharePreferences().whatsappInstalled);
+
+  function handleWhatsappInstalledChange(checked: boolean): void {
+    setWhatsappInstalled(checked);
+    setSharePreferences({ ...getSharePreferences(), whatsappInstalled: checked });
+  }
 
   useEffect(() => {
     void (async () => {
@@ -288,6 +298,25 @@ export function SettingsRoute(): React.JSX.Element {
               )}
             </form>
           )}
+        </div>
+
+        <div className="mt-6 border-t border-line pt-5">
+          <h3 className="flex items-center gap-2 text-sm font-extrabold text-ink">
+            <MessageCircle className="size-4 text-primary" aria-hidden="true" />
+            WhatsApp Sharing
+          </h3>
+          <p className="mt-1 text-xs font-semibold text-muted">
+            Controls how the Share button's WhatsApp link opens on this machine.
+          </p>
+
+          <div className="mt-4 max-w-xl">
+            <CheckboxField
+              label="WhatsApp is installed on this machine"
+              description="Opens the WhatsApp desktop app directly. Uncheck this if WhatsApp can't be installed here (e.g. a 32-bit Windows install) — the link will open in your browser instead."
+              checked={whatsappInstalled}
+              onChange={handleWhatsappInstalledChange}
+            />
+          </div>
         </div>
 
         <div className="mt-6 border-t border-line pt-5">

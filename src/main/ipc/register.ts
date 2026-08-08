@@ -138,6 +138,7 @@ import {
   voidSalary
 } from "@main/services/salary-service";
 import {
+  bulkSetProductTaxType,
   createProduct,
   getProduct,
   getProductStockSummary,
@@ -415,6 +416,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.productSetStatus, (_event, id: string, status: ProductStatus) =>
     setProductStatus(id, status)
   );
+  ipcMain.handle(ipcChannels.productBulkSetTaxType, (_event, input: unknown) => bulkSetProductTaxType(input));
   ipcMain.handle(ipcChannels.productPickImage, () => pickAndStoreProductImage());
   ipcMain.handle(ipcChannels.productReadImagePreview, (_event, relativePath: string) =>
     readManagedProductImagePreview(relativePath)

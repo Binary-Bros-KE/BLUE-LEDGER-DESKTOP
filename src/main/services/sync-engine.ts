@@ -914,6 +914,9 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       tax_type: string;
       tax_amount_cents: number;
       line_total_cents: number;
+      is_locally_sourced: number;
+      local_cost_cents: number | null;
+      local_supplier_id: string | null;
       created_at: string;
     }>;
     const items = itemRows.map((i) => ({
@@ -928,6 +931,9 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       taxType: i.tax_type,
       taxAmountCents: i.tax_amount_cents,
       lineTotalCents: i.line_total_cents,
+      isLocallySourced: Boolean(i.is_locally_sourced),
+      localCostCents: i.local_cost_cents,
+      localSupplierId: resolveCloudRef("suppliers", i.local_supplier_id),
       createdAt: i.created_at
     }));
 
@@ -2286,8 +2292,8 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
     const items = (row.items as Array<Record<string, unknown>>) ?? [];
     for (const item of items) {
       db.prepare(
-        `INSERT INTO quotation_items (id, quotation_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO quotation_items (id, quotation_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, is_locally_sourced, local_cost_cents, local_supplier_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         item.id as string,
         id,
@@ -2298,6 +2304,11 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
         (item.taxType as string | undefined) ?? "vat",
         (item.taxAmountCents as number | undefined) ?? 0,
         item.lineTotalCents as number,
+        // Older device's payload predates this field entirely, same fallback reasoning as taxType —
+        // see applySalePulledRow's own identical comment for sale_items.
+        item.isLocallySourced ? 1 : 0,
+        (item.localCostCents as number | null | undefined) ?? null,
+        resolveRefOrNull("suppliers", (item.localSupplierId as string | null | undefined) ?? null) as string | null,
         item.createdAt as string
       );
     }

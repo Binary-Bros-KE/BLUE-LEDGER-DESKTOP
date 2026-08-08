@@ -46,6 +46,7 @@ export const ipcChannels = {
   productCreate: "product:create",
   productUpdate: "product:update",
   productSetStatus: "product:set-status",
+  productBulkSetTaxType: "product:bulk-set-tax-type",
   productPickImage: "product:pick-image",
   productReadImagePreview: "product:read-image-preview",
   mainStoreProductList: "main-store:product-list",

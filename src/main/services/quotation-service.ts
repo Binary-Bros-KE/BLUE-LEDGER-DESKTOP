@@ -154,7 +154,10 @@ export function createQuotation(input: unknown): Quotation {
         discountAmountCents: item.discountAmountCents,
         taxType: item.taxType,
         taxAmountCents: item.taxAmountCents,
-        lineTotalCents: item.lineTotalCents
+        lineTotalCents: item.lineTotalCents,
+        isLocallySourced: item.isLocallySourced,
+        localCostCents: item.localCostCents,
+        localSupplierId: item.localSupplierId
       });
     }
 
@@ -209,7 +212,10 @@ export function updateQuotation(id: string, input: unknown): Quotation {
         discountAmountCents: item.discountAmountCents,
         taxType: item.taxType,
         taxAmountCents: item.taxAmountCents,
-        lineTotalCents: item.lineTotalCents
+        lineTotalCents: item.lineTotalCents,
+        isLocallySourced: item.isLocallySourced,
+        localCostCents: item.localCostCents,
+        localSupplierId: item.localSupplierId
       });
     }
 
@@ -270,17 +276,23 @@ export function checkQuotationStock(id: string): QuotationStockCheckItem[] {
   requirePermission("quotations", "view");
   const quotation = getQuotationDetail(id);
 
-  return quotation.items.map((item) => {
-    const inventoryRow = inventoryRepository.findInventoryRow(item.productId, quotation.locationId);
-    const availableQuantity = inventoryRow?.quantity ?? 0;
-    return {
-      productId: item.productId,
-      productName: item.productName,
-      requestedQuantity: item.quantity,
-      availableQuantity,
-      sufficient: availableQuantity >= item.quantity
-    };
-  });
+  // A locally-sourced line never touched (and never will touch) this shop's own inventory — see
+  // insertCompletedSaleFromCart's own stock-movement skip for the same condition — so checking its
+  // availability here would show a misleading "insufficient stock" for a product this shop may not
+  // even stock at all.
+  return quotation.items
+    .filter((item) => !item.isLocallySourced)
+    .map((item) => {
+      const inventoryRow = inventoryRepository.findInventoryRow(item.productId, quotation.locationId);
+      const availableQuantity = inventoryRow?.quantity ?? 0;
+      return {
+        productId: item.productId,
+        productName: item.productName,
+        requestedQuantity: item.quantity,
+        availableQuantity,
+        sufficient: availableQuantity >= item.quantity
+      };
+    });
 }
 
 /** Re-derives a line's discount/tax/total for an overridden (reduced) quantity, keeping the frozen
@@ -307,10 +319,12 @@ function repriceLineForQuantity(item: QuotationItemDetailRow, product: ProductRo
     taxType,
     taxAmountCents,
     lineTotalCents: taxableCents,
-    // Quotations have no local-sourcing concept — see PreparedItem's own doc comment.
-    isLocallySourced: false,
-    localCostCents: null,
-    localSupplierId: null
+    // Carried over unchanged even though quantity was re-priced above — localCostCents is a flat
+    // "what we paid for this batch" figure the cashier typed once, not a per-unit rate, so there's
+    // no proportional amount to recompute here.
+    isLocallySourced: Boolean(item.is_locally_sourced),
+    localCostCents: item.local_cost_cents,
+    localSupplierId: item.local_supplier_id
   };
 }
 
@@ -346,9 +360,9 @@ function buildConversionCart(
       taxType: item.tax_type as ProductTaxType,
       taxAmountCents: item.tax_amount_cents,
       lineTotalCents: item.line_total_cents,
-      isLocallySourced: false,
-      localCostCents: null,
-      localSupplierId: null
+      isLocallySourced: Boolean(item.is_locally_sourced),
+      localCostCents: item.local_cost_cents,
+      localSupplierId: item.local_supplier_id
     };
   });
 
@@ -377,7 +391,12 @@ function buildConversionCart(
     subtotalCents,
     discountAmountCents,
     taxAmountCents,
-    grandTotalCents: subtotalCents - discountAmountCents + taxAmountCents + extraFeesCents,
+    // Tax is a reporting figure ONLY — it's already inside subtotalCents (prices are tax-inclusive),
+    // so it must never be added again here. This mirrors prepareCart's own grandTotalCents formula
+    // in sale-service.ts (see its own comment for the bug this exact line used to reintroduce for
+    // any quotation converted to a sale/invoice: the total was silently inflated by its own tax
+    // amount, on top of what checkout/invoice creation already gets right).
+    grandTotalCents: subtotalCents - discountAmountCents + extraFeesCents,
     serviceCharges,
     delivery
   };

@@ -37,7 +37,7 @@ import { StorefrontPicker } from "@renderer/shared/components/StorefrontPicker";
 import { SupplierPicker } from "@renderer/shared/components/SupplierPicker";
 import { TaxBreakdownTable } from "@renderer/shared/components/TaxBreakdownTable";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
-import { computeLinePricing, type LinePricing } from "@renderer/shared/lib/cart-pricing";
+import { computeLinePricing, isPriceBelowMinimum, type LinePricing } from "@renderer/shared/lib/cart-pricing";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
@@ -1068,7 +1068,12 @@ export function CheckoutRoute(): React.JSX.Element {
                                   value={line.priceOverride}
                                   onChange={(event) => updatePriceOverride(line.productId, event.target.value)}
                                   placeholder={fromCents(pricing.unitPriceCents)}
-                                  className="h-7 w-16 rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
+                                  className={cn(
+                                    "h-7 w-16 rounded-md border px-1.5 text-right text-xs font-semibold outline-none focus:border-accent",
+                                    line.priceOverride.trim() && isPriceBelowMinimum(toCents(line.priceOverride), product.minimumPriceCents)
+                                      ? "border-danger text-danger"
+                                      : "border-line"
+                                  )}
                                 />
                               </label>
                               <label className="flex items-center gap-1 text-[10px] font-bold text-muted">
@@ -1092,6 +1097,12 @@ export function CheckoutRoute(): React.JSX.Element {
                               </button>
                             </div>
                           </div>
+
+                          {line.priceOverride.trim() && isPriceBelowMinimum(toCents(line.priceOverride), product.minimumPriceCents) && (
+                            <p className="mt-1 text-right text-[10px] font-bold text-danger">
+                              Below minimum price of {fromCents(product.minimumPriceCents)}
+                            </p>
+                          )}
 
                           <label className="mt-2 flex items-center gap-1.5 text-[10px] font-bold text-muted cursor-pointer">
                             <input

@@ -25,6 +25,13 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import {
+  ALL_YEARS_VALUE,
+  buildAvailableYears,
+  currentYear,
+  matchesYearFilter,
+  yearFilterOptions
+} from "@renderer/shared/lib/year-filter";
 import type { Expense, ExpenseStatus, ExpenseSummary } from "@shared/types/expense";
 import type { ExpenseCategory } from "@shared/types/expense-category";
 import type { ExportListRequest } from "@shared/types/export";
@@ -71,6 +78,7 @@ export function ExpensesRoute(): React.JSX.Element {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
+  const [yearFilter, setYearFilter] = useState<string>(String(currentYear()));
   const [categoryFilter, setCategoryFilter] = useState("");
   const [storefrontFilter, setStorefrontFilter] = useState("");
   const [paymentMethodFilter, setPaymentMethodFilter] = useState("");
@@ -115,6 +123,8 @@ export function ExpensesRoute(): React.JSX.Element {
     return () => clearTimeout(timer);
   }, [actionError]);
 
+  const availableYears = useMemo(() => buildAvailableYears((expenses ?? []).map((expense) => expense.expenseDate)), [expenses]);
+
   const filteredExpenses = useMemo(() => {
     if (!expenses) return null;
     let list = expenses;
@@ -122,6 +132,7 @@ export function ExpensesRoute(): React.JSX.Element {
     if (statusFilter !== "all") {
       list = list.filter((expense) => expense.status === statusFilter);
     }
+    list = list.filter((expense) => matchesYearFilter(expense.expenseDate, yearFilter));
     if (categoryFilter) {
       list = list.filter((expense) => expense.categoryId === categoryFilter);
     }
@@ -150,12 +161,13 @@ export function ExpensesRoute(): React.JSX.Element {
     }
 
     return list;
-  }, [expenses, statusFilter, categoryFilter, storefrontFilter, paymentMethodFilter, dateFrom, dateTo, searchTerm]);
+  }, [expenses, statusFilter, yearFilter, categoryFilter, storefrontFilter, paymentMethodFilter, dateFrom, dateTo, searchTerm]);
 
   const exportRequest = useMemo<ExportListRequest | null>(() => {
     if (!filteredExpenses) return null;
     const filterParts: string[] = [];
     if (statusFilter !== "all") filterParts.push(`Status: ${statusFilter}`);
+    if (yearFilter !== ALL_YEARS_VALUE) filterParts.push(`Year: ${yearFilter}`);
     if (categoryFilter) {
       filterParts.push(`Category: ${categories.find((c) => c.id === categoryFilter)?.name ?? categoryFilter}`);
     }
@@ -207,6 +219,7 @@ export function ExpensesRoute(): React.JSX.Element {
     filteredExpenses,
     summary,
     statusFilter,
+    yearFilter,
     categoryFilter,
     storefrontFilter,
     paymentMethodFilter,
@@ -431,6 +444,12 @@ export function ExpensesRoute(): React.JSX.Element {
             ))}
           </div>
 
+          <SelectField
+            label="Year"
+            value={yearFilter}
+            onChange={setYearFilter}
+            options={yearFilterOptions(availableYears)}
+          />
           <SelectField
             label="Category"
             value={categoryFilter}

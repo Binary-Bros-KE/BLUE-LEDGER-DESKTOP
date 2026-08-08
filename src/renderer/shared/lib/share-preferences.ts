@@ -7,9 +7,15 @@ const STORAGE_KEY = "blueledger.share.preferences";
 export type SharePreferences = {
   includeWhatsappPreview: boolean;
   includeDelivery: boolean;
+  /** Whether the WhatsApp desktop app is installed on THIS machine — set from Settings, read by
+   * ShareModal to decide which WhatsApp link format to open (see its own doc comment for why the
+   * two formats behave differently). Defaults true (the common case); a user on a 32-bit Windows
+   * install that can't run WhatsApp Desktop at all unchecks it once and every future share
+   * respects that. */
+  whatsappInstalled: boolean;
 };
 
-const DEFAULT_PREFERENCES: SharePreferences = { includeWhatsappPreview: false, includeDelivery: true };
+const DEFAULT_PREFERENCES: SharePreferences = { includeWhatsappPreview: false, includeDelivery: true, whatsappInstalled: true };
 
 export function getSharePreferences(): SharePreferences {
   try {
@@ -18,7 +24,8 @@ export function getSharePreferences(): SharePreferences {
     const parsed = JSON.parse(raw) as Partial<SharePreferences>;
     return {
       includeWhatsappPreview: parsed.includeWhatsappPreview ?? DEFAULT_PREFERENCES.includeWhatsappPreview,
-      includeDelivery: parsed.includeDelivery ?? DEFAULT_PREFERENCES.includeDelivery
+      includeDelivery: parsed.includeDelivery ?? DEFAULT_PREFERENCES.includeDelivery,
+      whatsappInstalled: parsed.whatsappInstalled ?? DEFAULT_PREFERENCES.whatsappInstalled
     };
   } catch {
     return DEFAULT_PREFERENCES;

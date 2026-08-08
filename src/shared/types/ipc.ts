@@ -252,6 +252,10 @@ export type IpcInvokeMap = {
     args: [string, ProductStatus];
     result: Product;
   };
+  "product:bulk-set-tax-type": {
+    args: [Record<string, unknown>];
+    result: { updatedCount: number };
+  };
   "product:pick-image": {
     args: [];
     result: string | null;
@@ -1197,6 +1201,9 @@ export type BlueLedgerApi = {
       id: string,
       status: ProductStatus
     ) => Promise<IpcInvokeMap["product:set-status"]["result"]>;
+    bulkSetTaxType: (
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["product:bulk-set-tax-type"]["result"]>;
     pickImage: () => Promise<IpcInvokeMap["product:pick-image"]["result"]>;
     readImagePreview: (
       relativePath: string

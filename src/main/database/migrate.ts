@@ -2199,6 +2199,19 @@ const migrations = [
       ALTER TABLE employees ADD COLUMN default_allowances_json TEXT NOT NULL DEFAULT '[]';
       ALTER TABLE employees ADD COLUMN default_deductions_json TEXT NOT NULL DEFAULT '[]';
     `
+  },
+  {
+    version: 61,
+    name: "locally_sourced_quotation_items",
+    sql: `
+      -- Same feature as locally_sourced_sale_items (migration 57), extended to quotations — a
+      -- quoted product this shop doesn't stock is just as likely to have been sourced from another
+      -- shop as one already sold. Quotations use their own quotation_items table (not sale_items),
+      -- so this needed its own migration rather than being covered by 57.
+      ALTER TABLE quotation_items ADD COLUMN is_locally_sourced INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE quotation_items ADD COLUMN local_cost_cents INTEGER;
+      ALTER TABLE quotation_items ADD COLUMN local_supplier_id TEXT REFERENCES suppliers(id);
+    `
   }
 ] as const;
 

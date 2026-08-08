@@ -14,6 +14,7 @@ import {
   Search,
   TrendingDown
 } from "lucide-react";
+import { BulkTaxCategoryModal } from "@renderer/app/routes/products/BulkTaxCategoryModal";
 import { ProductCreateModal } from "@renderer/app/routes/products/ProductCreateModal";
 import { ProductDetailModal } from "@renderer/app/routes/products/ProductDetailModal";
 import { ProductEditModal } from "@renderer/app/routes/products/ProductEditModal";
@@ -97,6 +98,9 @@ export function ProductsRoute(): React.JSX.Element {
   const [statusFilter, setStatusFilter] = useState("");
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [outOfStockOnly, setOutOfStockOnly] = useState(false);
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkTaxModalOpen, setBulkTaxModalOpen] = useState(false);
 
   const loadAll = useCallback(async () => {
     setLoadError(null);
@@ -195,6 +199,38 @@ export function ProductsRoute(): React.JSX.Element {
       fileBaseName: `Products_${new Date().toISOString().slice(0, 10)}`
     };
   }, [filteredProducts, stockAlerts, searchTerm, categoryFilter, statusFilter, lowStockOnly, outOfStockOnly, categoryOptions, currency]);
+
+  const allFilteredSelected =
+    filteredProducts !== null && filteredProducts.length > 0 && filteredProducts.every((product) => selectedIds.has(product.id));
+
+  function toggleSelectOne(id: string): void {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAllFiltered(): void {
+    if (!filteredProducts) return;
+    setSelectedIds((prev) => {
+      if (allFilteredSelected) {
+        const next = new Set(prev);
+        for (const product of filteredProducts) next.delete(product.id);
+        return next;
+      }
+      const next = new Set(prev);
+      for (const product of filteredProducts) next.add(product.id);
+      return next;
+    });
+  }
+
+  async function handleBulkTaxApplied(updatedCount: number): Promise<void> {
+    setSelectedIds(new Set());
+    await loadAll();
+    setNotice(`Updated tax category on ${updatedCount} product${updatedCount === 1 ? "" : "s"}.`);
+  }
 
   function clearFilters(): void {
     setSearchTerm("");
@@ -364,6 +400,26 @@ export function ProductsRoute(): React.JSX.Element {
           </div>
         )}
 
+        {canEdit && selectedIds.size > 0 && (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-accent/30 bg-accent/10 px-4 py-3">
+            <p className="text-xs font-extrabold text-ink">
+              {selectedIds.size} product{selectedIds.size === 1 ? "" : "s"} selected
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedIds(new Set())}
+                className="text-[11px] font-extrabold uppercase tracking-wider text-muted hover:underline cursor-pointer"
+              >
+                Clear selection
+              </button>
+              <Button type="button" onClick={() => setBulkTaxModalOpen(true)} className="h-8 text-xs">
+                Set Tax Category
+              </Button>
+            </div>
+          </div>
+        )}
+
         <div className="mt-5">
           {loadError ? (
             <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-danger/30 bg-danger-soft/40 p-10 text-center">
@@ -405,7 +461,8 @@ export function ProductsRoute(): React.JSX.Element {
             <div className="overflow-x-auto rounded-lg border border-line">
               <table className="w-full table-fixed border-collapse text-sm">
                 <colgroup>
-                  <col className="w-[31%]" />
+                  <col className="w-[4%]" />
+                  <col className="w-[27%]" />
                   <col className="w-[11%]" />
                   <col className="w-[9%]" />
                   <col className="w-[9%]" />
@@ -413,6 +470,17 @@ export function ProductsRoute(): React.JSX.Element {
                 </colgroup>
                 <thead>
                   <tr className="bg-primary text-white">
+                    <Th>
+                      {canEdit && (
+                        <input
+                          type="checkbox"
+                          checked={allFilteredSelected}
+                          onChange={toggleSelectAllFiltered}
+                          aria-label="Select all products"
+                          className="size-3.5 accent-white"
+                        />
+                      )}
+                    </Th>
                     <Th>Product</Th>
                     <Th className="text-right">Price</Th>
                     <Th className="text-right">Stock</Th>
@@ -423,6 +491,17 @@ export function ProductsRoute(): React.JSX.Element {
                 <tbody>
                   {(filteredProducts ?? []).map((product) => (
                     <tr key={product.id} className="border-t border-line odd:bg-white even:bg-soft/50">
+                      <td className="px-4 py-3">
+                        {canEdit && (
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(product.id)}
+                            onChange={() => toggleSelectOne(product.id)}
+                            aria-label={`Select ${product.name}`}
+                            className="size-3.5 accent-primary"
+                          />
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
                           <ProductThumbnail imagePath={product.imagePath} />
@@ -557,6 +636,15 @@ export function ProductsRoute(): React.JSX.Element {
         />
       )}
       {infoProduct && <ProductInfoModal product={infoProduct} onClose={() => setInfoProduct(null)} />}
+
+      {canEdit && (
+        <BulkTaxCategoryModal
+          open={bulkTaxModalOpen}
+          onClose={() => setBulkTaxModalOpen(false)}
+          productIds={Array.from(selectedIds)}
+          onApplied={handleBulkTaxApplied}
+        />
+      )}
     </motion.div>
   );
 }

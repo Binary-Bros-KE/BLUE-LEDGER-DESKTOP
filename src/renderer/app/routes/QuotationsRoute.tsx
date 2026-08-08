@@ -34,9 +34,10 @@ import { QuickCreateProductModal } from "@renderer/shared/components/QuickCreate
 import { ShareModal } from "@renderer/shared/components/ShareModal";
 import { StatTile } from "@renderer/shared/components/StatTile";
 import { StorefrontPicker } from "@renderer/shared/components/StorefrontPicker";
+import { SupplierPicker } from "@renderer/shared/components/SupplierPicker";
 import { TaxBreakdownTable } from "@renderer/shared/components/TaxBreakdownTable";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
-import { computeLinePricing } from "@renderer/shared/lib/cart-pricing";
+import { computeLinePricing, isPriceBelowMinimum } from "@renderer/shared/lib/cart-pricing";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
@@ -56,6 +57,7 @@ import type { ExportListRequest } from "@shared/types/export";
 import { isStorefrontType, type Location } from "@shared/types/location";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import type { ProductListItem } from "@shared/types/product";
+import type { Supplier } from "@shared/types/supplier";
 import {
   QUOTATION_STATUS_OPTIONS,
   type Quotation,
@@ -88,6 +90,9 @@ type CartLine = {
    * wholesale price". Raw text on purpose (see money.ts's own fromCents/toCents split) — converting
    * on every keystroke like discountAmountCents does would fight the user mid-type. */
   priceOverride: string;
+  isLocallySourced: boolean;
+  localCost: string;
+  localSupplierId: string | null;
 };
 
 function statusTone(status: QuotationStatus): "success" | "warning" | "danger" | "neutral" | "accent" {
@@ -139,6 +144,7 @@ export function QuotationsRoute(): React.JSX.Element {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<ProductListItem[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -187,18 +193,20 @@ export function QuotationsRoute(): React.JSX.Element {
   const loadAll = useCallback(async () => {
     setLoadError(null);
     try {
-      const [summaryResult, quotationList, customerList, productList, methodList] = await Promise.all([
+      const [summaryResult, quotationList, customerList, productList, methodList, supplierList] = await Promise.all([
         window.blueLedger.quotation.summary(),
         window.blueLedger.quotation.list(),
         window.blueLedger.customer.list(),
         window.blueLedger.product.list(),
-        window.blueLedger.paymentMethod.list()
+        window.blueLedger.paymentMethod.list(),
+        window.blueLedger.supplier.list()
       ]);
       setSummary(summaryResult);
       setQuotations(quotationList);
       setCustomers(customerList);
       setProducts(productList);
       setPaymentMethods(methodList);
+      setSuppliers(supplierList);
     } catch (err) {
       setLoadError(getErrorMessage(err, "Failed to load quotations"));
     }
@@ -596,7 +604,17 @@ export function QuotationsRoute(): React.JSX.Element {
       }
       return [
         ...prev,
-        { productId: product.id, name: product.name, sku: product.sku, quantity: 1, discountAmountCents: 0, priceOverride: "" }
+        {
+          productId: product.id,
+          name: product.name,
+          sku: product.sku,
+          quantity: 1,
+          discountAmountCents: 0,
+          priceOverride: "",
+          isLocallySourced: false,
+          localCost: "",
+          localSupplierId: null
+        }
       ];
     });
     setProductSearch("");
@@ -627,6 +645,30 @@ export function QuotationsRoute(): React.JSX.Element {
   function updateCreatePriceOverride(productId: string, value: string): void {
     setCreateItems((prev) =>
       prev.map((line) => (line.productId === productId ? { ...line, priceOverride: value } : line))
+    );
+  }
+
+  function toggleCreateLocallySourced(productId: string): void {
+    setCreateItems((prev) =>
+      prev.map((line) =>
+        line.productId === productId
+          ? {
+            ...line,
+            isLocallySourced: !line.isLocallySourced,
+            ...(line.isLocallySourced ? { localCost: "", localSupplierId: null } : {})
+          }
+          : line
+      )
+    );
+  }
+
+  function updateCreateLocalCost(productId: string, value: string): void {
+    setCreateItems((prev) => prev.map((line) => (line.productId === productId ? { ...line, localCost: value } : line)));
+  }
+
+  function updateCreateLocalSupplier(productId: string, supplierId: string | null): void {
+    setCreateItems((prev) =>
+      prev.map((line) => (line.productId === productId ? { ...line, localSupplierId: supplierId } : line))
     );
   }
 
@@ -665,7 +707,10 @@ export function QuotationsRoute(): React.JSX.Element {
           productId: line.productId,
           quantity: line.quantity,
           discountAmountCents: line.discountAmountCents,
-          unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined
+          unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined,
+          isLocallySourced: line.isLocallySourced,
+          localCostCents: line.isLocallySourced && line.localCost.trim() ? toCents(line.localCost) : undefined,
+          localSupplierId: line.localSupplierId
         })),
         serviceCharges: createServiceCharges.map((charge) => ({
           name: charge.name,
@@ -1001,6 +1046,32 @@ export function QuotationsRoute(): React.JSX.Element {
                 ))}
               </div>
             </div>
+
+            {viewingQuotation.items.some((item) => item.isLocallySourced) && (
+              <div className="mt-4 rounded-lg border border-line bg-soft px-3.5 py-3">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">
+                  Sourced From Another Shop
+                </p>
+                <p className="mt-0.5 text-[11px] font-semibold text-muted">
+                  Internal record only — never shown on the printed/shared quotation.
+                </p>
+                <div className="mt-2 space-y-1.5">
+                  {viewingQuotation.items
+                    .filter((item) => item.isLocallySourced)
+                    .map((item) => (
+                      <div key={item.id} className="flex items-center justify-between gap-2 text-xs">
+                        <div className="min-w-0">
+                          <p className="truncate font-bold text-ink">{item.productName}</p>
+                          <p className="truncate text-muted">{item.localSupplierName ?? "No supplier recorded"}</p>
+                        </div>
+                        <span className="flex-none font-bold tabular-nums text-ink">
+                          Cost {item.localCostCents !== null ? formatCents(item.localCostCents) : "—"}
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
 
             {viewingQuotation.serviceCharges.length > 0 && (
               <div className="mt-4">
@@ -1526,7 +1597,7 @@ export function QuotationsRoute(): React.JSX.Element {
               {createLinePricing.length === 0 ? (
                 <p className="text-xs font-semibold text-muted">No products added yet.</p>
               ) : (
-                createLinePricing.map(({ line, pricing }) => (
+                createLinePricing.map(({ line, product, pricing }) => (
                   <div key={line.productId} className="rounded-lg border border-line p-2.5">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -1553,6 +1624,26 @@ export function QuotationsRoute(): React.JSX.Element {
                           className="h-8 w-16 rounded-md border border-line text-center text-xs font-bold outline-none focus:border-accent"
                         />
                       </label>
+                      <label
+                        className="flex items-center gap-1.5 text-[11px] font-bold text-muted"
+                        title="Override this line's unit price for this quotation only — the product's own price is never changed"
+                      >
+                        Price
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={line.priceOverride}
+                          onChange={(event) => updateCreatePriceOverride(line.productId, event.target.value)}
+                          placeholder={fromCents(pricing.unitPriceCents)}
+                          className={cn(
+                            "h-8 w-20 rounded-md border px-1.5 text-right text-xs font-semibold outline-none focus:border-accent",
+                            line.priceOverride.trim() && isPriceBelowMinimum(toCents(line.priceOverride), product.minimumPriceCents)
+                              ? "border-danger text-danger"
+                              : "border-line"
+                          )}
+                        />
+                      </label>
                       <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted">
                         Discount
                         <input
@@ -1566,6 +1657,48 @@ export function QuotationsRoute(): React.JSX.Element {
                       </label>
                       <span className="text-sm font-extrabold text-ink">{formatCents(pricing.lineTotalCents)}</span>
                     </div>
+
+                    {line.priceOverride.trim() && isPriceBelowMinimum(toCents(line.priceOverride), product.minimumPriceCents) && (
+                      <p className="mt-1 text-right text-[10px] font-bold text-danger">
+                        Below minimum price of {fromCents(product.minimumPriceCents)}
+                      </p>
+                    )}
+
+                    <label className="mt-2 flex items-center gap-1.5 text-[10px] font-bold text-muted cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={line.isLocallySourced}
+                        onChange={() => toggleCreateLocallySourced(line.productId)}
+                        className="size-3.5 accent-accent"
+                      />
+                      Sourced from another shop
+                    </label>
+
+                    {line.isLocallySourced && (
+                      <div className="mt-2 flex flex-col gap-2.5 rounded-md bg-soft/60 p-2.5">
+                        <label className="block text-sm font-extrabold text-ink">
+                          Cost paid
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={line.localCost}
+                            onChange={(event) => updateCreateLocalCost(line.productId, event.target.value)}
+                            placeholder="0.00"
+                            className="mt-1 h-10 w-full rounded-md border border-line px-3 text-sm font-semibold outline-none focus:border-accent"
+                          />
+                        </label>
+                        <div>
+                          <p className="text-sm font-extrabold text-ink">Local supplier</p>
+                          <SupplierPicker
+                            suppliers={suppliers}
+                            value={line.localSupplierId}
+                            onChange={(supplierId) => updateCreateLocalSupplier(line.productId, supplierId)}
+                            onSupplierCreated={(supplier) => setSuppliers((prev) => [...prev, supplier])}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))
               )}

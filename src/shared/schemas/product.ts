@@ -68,5 +68,15 @@ export const productCreateSchema = z.object({
 
 export const productUpdateSchema = productCreateSchema.omit({ openingStock: true });
 
+/** Backfill tool for a tenant onboarded before tax categories existed — every product bulk-set to
+ * one category in a few clicks instead of one-by-one, or a re-import that would just create
+ * duplicates (products have no unique code from that era, only names). */
+export const bulkSetTaxTypeSchema = z.object({
+  productIds: z.array(z.string().trim().min(1)).min(1, "Select at least one product"),
+  taxType: z.enum(taxTypeValues)
+});
+
+export type BulkSetTaxTypeInput = z.infer<typeof bulkSetTaxTypeSchema>;
+
 export type ProductCreateInput = z.infer<typeof productCreateSchema>;
 export type ProductUpdateInput = z.infer<typeof productUpdateSchema>;

@@ -386,7 +386,10 @@ export function duplicateInvoice(saleId: string): Sale {
       quantity: item.quantity,
       discountAmountCents: item.discountAmountCents,
       // Carried over from the original invoice, not re-decided — the duplicate is billing the same
-      // goods from the same source, same as it keeps the same products/quantities.
+      // goods from the same source at the same price, same as it keeps the same products/quantities.
+      // Without this, prepareCart would silently re-price every line from the product's CURRENT
+      // price, the exact bug fixed in invoiceCartItemSchema (see that field's own comment).
+      unitPriceCents: item.unitPriceCents,
       isLocallySourced: item.isLocallySourced,
       localCostCents: item.localCostCents ?? undefined,
       localSupplierId: item.localSupplierId

@@ -39,7 +39,7 @@ import { StorefrontPicker } from "@renderer/shared/components/StorefrontPicker";
 import { SupplierPicker } from "@renderer/shared/components/SupplierPicker";
 import { TaxBreakdownTable } from "@renderer/shared/components/TaxBreakdownTable";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
-import { computeLinePricing } from "@renderer/shared/lib/cart-pricing";
+import { computeLinePricing, isPriceBelowMinimum } from "@renderer/shared/lib/cart-pricing";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
@@ -1727,7 +1727,7 @@ export function InvoicesRoute(): React.JSX.Element {
               {createLinePricing.length === 0 ? (
                 <p className="text-xs font-semibold text-muted">No products added yet.</p>
               ) : (
-                createLinePricing.map(({ line, pricing }) => (
+                createLinePricing.map(({ line, product, pricing }) => (
                   <div key={line.productId} className="rounded-lg border border-line p-2.5">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -1766,7 +1766,12 @@ export function InvoicesRoute(): React.JSX.Element {
                           value={line.priceOverride}
                           onChange={(event) => updateCreatePriceOverride(line.productId, event.target.value)}
                           placeholder={fromCents(pricing.unitPriceCents)}
-                          className="h-8 w-20 rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
+                          className={cn(
+                            "h-8 w-20 rounded-md border px-1.5 text-right text-xs font-semibold outline-none focus:border-accent",
+                            line.priceOverride.trim() && isPriceBelowMinimum(toCents(line.priceOverride), product.minimumPriceCents)
+                              ? "border-danger text-danger"
+                              : "border-line"
+                          )}
                         />
                       </label>
                       <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted">
@@ -1782,6 +1787,12 @@ export function InvoicesRoute(): React.JSX.Element {
                       </label>
                       <span className="text-sm font-extrabold text-ink">{formatCents(pricing.lineTotalCents)}</span>
                     </div>
+
+                    {line.priceOverride.trim() && isPriceBelowMinimum(toCents(line.priceOverride), product.minimumPriceCents) && (
+                      <p className="mt-1 text-right text-[10px] font-bold text-danger">
+                        Below minimum price of {fromCents(product.minimumPriceCents)}
+                      </p>
+                    )}
 
                     <label className="mt-2 flex items-center gap-1.5 text-[10px] font-bold text-muted cursor-pointer">
                       <input

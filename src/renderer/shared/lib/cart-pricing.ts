@@ -15,6 +15,14 @@ export type LinePricing = {
  * (like on the server) replaces the derived price outright rather than needing special-casing
  * downstream. Gross line price already includes tax (see tax-calculation.ts) — lineTotalCents is
  * just the taxable amount, never taxable + tax; taxCents is purely a reporting figure. */
+/** Used by Checkout/Invoices/Quotations to warn inline the moment a cashier-typed price override
+ * dips below the product's own floor — server-side prepareCart rejects this outright at submit
+ * time (sale-service.ts), but catching it here means the user sees why immediately instead of
+ * only after the whole form fails to submit. */
+export function isPriceBelowMinimum(priceCents: number, minimumPriceCents: number | null): boolean {
+  return minimumPriceCents !== null && priceCents < minimumPriceCents;
+}
+
 export function computeLinePricing(
   product: ProductListItem,
   quantity: number,

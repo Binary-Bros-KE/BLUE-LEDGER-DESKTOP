@@ -21,7 +21,6 @@ type FormState = {
   expenseDate: string;
   categoryId: string;
   amount: string;
-  paidBy: string;
   paymentMethodId: string;
   storefrontId: string;
   reference: string;
@@ -34,7 +33,6 @@ function emptyForm(): FormState {
     expenseDate: todayIsoDate(),
     categoryId: "",
     amount: "",
-    paidBy: "",
     paymentMethodId: "",
     storefrontId: "",
     reference: "",
@@ -48,7 +46,6 @@ function toFormState(expense: Expense): FormState {
     expenseDate: expense.expenseDate.slice(0, 10),
     categoryId: expense.categoryId,
     amount: fromCents(expense.amountCents),
-    paidBy: expense.paidBy ?? "",
     paymentMethodId: expense.paymentMethodId,
     storefrontId: expense.storefrontId ?? "",
     reference: expense.reference ?? "",
@@ -91,6 +88,13 @@ export function ExpenseFormModal({
   // A branch-scoped Manager can only ever record/see an expense against THEIR OWN storefront — the
   // field is locked (never a blank/other-branch pick) whether creating new or editing an existing one.
   const storefrontLocked = !isSuperAdmin;
+
+  /** Always the logged-in employee — never manually typed, same as Local Purchases' own "Bought By".
+   * On create it's whoever is submitting the form; on edit it stays whatever was originally
+   * recorded, since editing metadata later isn't the same as having made the payment. */
+  const paidByName = editingExpense
+    ? (editingExpense.paidBy ?? "—")
+    : `${session?.employee.firstName ?? ""} ${session?.employee.lastName ?? ""}`.trim() || "—";
 
   useEffect(() => {
     if (!open) return;
@@ -151,7 +155,7 @@ export function ExpenseFormModal({
       expenseDate: form.expenseDate,
       categoryId: form.categoryId,
       amountCents: toCents(form.amount),
-      paidBy: form.paidBy,
+      paidBy: paidByName,
       paymentMethodId: form.paymentMethodId,
       storefrontId: form.storefrontId,
       reference: form.reference,
@@ -268,13 +272,7 @@ export function ExpenseFormModal({
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field
-              label="Paid By"
-              value={form.paidBy}
-              onChange={(value) => updateField("paidBy", value)}
-              placeholder="e.g. Jane, the Owner"
-              disabled={readOnly}
-            />
+            <Field label="Paid By" value={paidByName} onChange={() => {}} disabled />
             <Field
               label={selectedPaymentMethod?.requiresReference ? "Reference" : "Reference (optional)"}
               value={form.reference}

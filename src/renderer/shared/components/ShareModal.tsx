@@ -16,12 +16,13 @@ const CUSTOM_COUNTRY = "custom";
  * platform limitation, not something this app can work around. The link itself IS the share; the
  * public page it points to (the SHARE app) is what actually renders the document.
  *
- * The WhatsApp link is deliberately `https://wa.me/...`, NOT `whatsapp://send?...` — wa.me is
- * WhatsApp's own real HTTPS page: its own JavaScript detects whether the app responded and
- * redirects to web.whatsapp.com if not. A bare `whatsapp://` custom URI scheme has no such
- * fallback logic of its own — if nothing on the machine has registered a handler for it, Windows
- * just shows its own "no app found" dialog instead. wa.me's "extra hop" IS that same app-detection
- * redirect, just done properly, so there's no reliability to trade away by using it. */
+ * The WhatsApp link format is deliberately settings-driven, not fixed. `whatsapp://send?...` is the
+ * default: on a machine with WhatsApp Desktop installed it opens the app directly, no browser tab
+ * at all. `https://api.whatsapp.com/send?...` (WhatsApp's own HTTPS page, confirmed via direct
+ * testing to reliably open in a browser tab EVEN when WhatsApp Desktop is installed and running —
+ * it does not app-detect and redirect the way wa.me does) is the fallback for a machine that can't
+ * run WhatsApp Desktop at all (e.g. a 32-bit Windows install) — Settings' "WhatsApp is installed on
+ * this machine" checkbox (see share-preferences.ts's whatsappInstalled) picks which one gets used. */
 export function ShareModal({
   open,
   onClose,
@@ -59,12 +60,12 @@ export function ShareModal({
 
   function handleIncludeDeliveryChange(checked: boolean): void {
     setIncludeDelivery(checked);
-    setSharePreferences({ includeDelivery: checked, includeWhatsappPreview });
+    setSharePreferences({ ...getSharePreferences(), includeDelivery: checked, includeWhatsappPreview });
   }
 
   function handleIncludeWhatsappPreviewChange(checked: boolean): void {
     setIncludeWhatsappPreview(checked);
-    setSharePreferences({ includeDelivery, includeWhatsappPreview: checked });
+    setSharePreferences({ ...getSharePreferences(), includeDelivery, includeWhatsappPreview: checked });
   }
 
   useEffect(() => {
@@ -121,7 +122,11 @@ export function ShareModal({
       if (channel === "whatsapp") {
         const effectiveCode = countryCode === CUSTOM_COUNTRY ? customCode : countryCode;
         const digits = normalizePhoneForWhatsApp(recipient, effectiveCode);
-        window.open(`whatsapp://send?phone=${digits}&text=${encodeURIComponent(message)}`);
+        const text = encodeURIComponent(message);
+        const url = getSharePreferences().whatsappInstalled
+          ? `whatsapp://send?phone=${digits}&text=${text}`
+          : `https://api.whatsapp.com/send?phone=${digits}&text=${text}`;
+        window.open(url);
       } else {
         const subject = encodeURIComponent(documentLabel);
         window.open(`mailto:${recipient}?subject=${subject}&body=${encodeURIComponent(message)}`);

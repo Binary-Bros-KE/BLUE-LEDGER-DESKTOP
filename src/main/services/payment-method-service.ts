@@ -15,8 +15,7 @@ const DEFAULT_PAYMENT_METHODS: Array<{
   { name: "Card", code: "CARD", requiresReference: true },
   { name: "Bank Transfer", code: "BANK_TRANSFER", requiresReference: true },
   { name: "Cheque", code: "CHEQUE", requiresReference: true },
-  { name: "PayPal", code: "PAYPAL", requiresReference: true },
-  { name: "Credit", code: "CREDIT", requiresReference: false }
+  { name: "PayPal", code: "PAYPAL", requiresReference: true }
 ];
 
 /**
@@ -42,6 +41,21 @@ export function ensureDefaultPaymentMethods(tenantId: string): void {
       isSystemMethod: true
     });
   });
+}
+
+/**
+ * Was seeded as a default system payment method; removed from DEFAULT_PAYMENT_METHODS since a
+ * credit sale is never actually completed with a payment method at all — it goes through Invoices
+ * instead (unpaid/partially paid, no payment_method_id until an actual payment is recorded against
+ * it). Tenants that already had it seeded before this change get it deactivated here (not deleted —
+ * it's a system method that may already be synced/referenced by old sales, and deactivating already
+ * achieves "no longer offered at checkout" without losing that historical link). Idempotent and
+ * cheap (no-op once already inactive), same as every other "ensureX" boot fixup.
+ */
+export function ensureCreditPaymentMethodDeactivated(tenantId: string): void {
+  const row = paymentMethodRepository.findPaymentMethodByCodeRow(tenantId, "CREDIT");
+  if (!row || !row.is_system_method || !row.is_active) return;
+  paymentMethodRepository.setPaymentMethodActiveRow(row.id, false);
 }
 
 function assertUniqueFields(

@@ -257,6 +257,22 @@ export function setProductStatusRow(id: string, status: ProductStatus): ProductR
   return row;
 }
 
+/** Same narrow-update shape as setProductStatusRow (one field + the sync_status/updated_at bump
+ * every row needs to get picked up by the existing AFTER UPDATE sync-outbox trigger), just batched
+ * across many ids in one statement instead of one row. tenant_id is re-checked here too — defense
+ * in depth even though callers only ever pass ids already scoped to the caller's own product list. */
+export function bulkSetTaxTypeRows(tenantId: string, productIds: string[], taxType: string): number {
+  if (productIds.length === 0) return 0;
+  const now = new Date().toISOString();
+  const placeholders = productIds.map(() => "?").join(", ");
+
+  const result = getDatabase()
+    .prepare(`UPDATE products SET tax_type = ?, sync_status = 'pending', updated_at = ? WHERE tenant_id = ? AND id IN (${placeholders})`)
+    .run(taxType, now, tenantId, ...productIds);
+
+  return Number(result.changes);
+}
+
 export function mapProductRow(row: ProductRow): Product {
   return {
     id: row.id,

@@ -10,7 +10,7 @@ import { generateDocumentNumber } from "@main/services/document-number-service";
 import { deleteManagedProductImage } from "@main/services/image-service";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
-import { productCreateSchema, productUpdateSchema } from "@shared/schemas/product";
+import { bulkSetTaxTypeSchema, productCreateSchema, productUpdateSchema } from "@shared/schemas/product";
 import type { Product, ProductListItem, ProductStatus, ProductStockSummary } from "@shared/types/product";
 
 function assertCategoryBelongsToTenant(categoryId: string | null, tenantId: string): void {
@@ -241,4 +241,16 @@ export function setProductStatus(id: string, status: ProductStatus): Product {
   requirePermission("products", "edit");
   const row = productRepository.setProductStatusRow(id, status);
   return productRepository.mapProductRow(row);
+}
+
+/** Bulk tax-category backfill — built for a tenant onboarded before tax categories existed, whose
+ * whole catalog needs re-classifying at once. Not scoped to the caller's own branch (unlike most
+ * product actions) — tax classification is a catalog-wide business decision, not a per-storefront
+ * one, same as every other product field. */
+export function bulkSetProductTaxType(input: unknown): { updatedCount: number } {
+  requirePermission("products", "edit");
+  const parsed = bulkSetTaxTypeSchema.parse(input);
+  const { tenantId } = getCurrentTenant();
+  const updatedCount = productRepository.bulkSetTaxTypeRows(tenantId, parsed.productIds, parsed.taxType);
+  return { updatedCount };
 }

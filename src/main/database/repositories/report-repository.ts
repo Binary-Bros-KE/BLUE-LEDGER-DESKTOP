@@ -324,6 +324,7 @@ export type ExpenseTransactionSourceRow = {
   id: string;
   expense_number: string;
   expense_date: string;
+  created_at: string;
   amount_cents: number;
   reference: string | null;
   description: string | null;
@@ -346,7 +347,7 @@ export function findExpenseTransactionRows(
     .prepare(
       `
       SELECT
-        e.id, e.expense_number, e.expense_date, e.amount_cents, e.reference, e.description,
+        e.id, e.expense_number, e.expense_date, e.created_at, e.amount_cents, e.reference, e.description,
         ec.name AS category_name,
         COALESCE(l.location_name, 'General') AS location_name,
         pm.name AS payment_method_name,
@@ -359,7 +360,7 @@ export function findExpenseTransactionRows(
       WHERE e.tenant_id = ? AND e.status = 'active'
         AND e.expense_date >= ? AND e.expense_date <= ?
         AND (? IS NULL OR e.storefront_id = ? OR e.storefront_id IS NULL)
-      ORDER BY e.expense_date DESC
+      ORDER BY e.created_at DESC
     `
     )
     .all(tenantId, startDate, endDate, locationId, locationId) as ExpenseTransactionSourceRow[];

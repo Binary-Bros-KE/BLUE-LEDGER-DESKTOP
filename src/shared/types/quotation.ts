@@ -29,6 +29,12 @@ export type QuotationItem = {
   taxType: ProductTaxType;
   taxAmountCents: number;
   lineTotalCents: number;
+  isLocallySourced: boolean;
+  /** What THIS shop paid the local supplier for it — null unless isLocallySourced. Never contributes
+   * to the customer-facing price, purely a cost figure for Reports. */
+  localCostCents: number | null;
+  localSupplierId: string | null;
+  localSupplierName: string | null;
   createdAt: string;
 };
 

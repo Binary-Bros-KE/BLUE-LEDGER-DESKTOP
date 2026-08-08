@@ -697,7 +697,13 @@ export function getPaymentTransactions(input: unknown): PaymentTransactionRow[] 
       results.push({
         id: row.id,
         transactionCode: row.reference ?? row.expense_number,
-        occurredAt: row.expense_date,
+        // created_at (the actual moment this was recorded), not expense_date — expense_date is a
+        // plain calendar-date string ("2026-08-08", no time) from the date picker; parsing a
+        // date-only string as a JS Date treats it as UTC midnight, which then displays hours off
+        // from the real time in any timezone ahead of UTC (Kenya's UTC+3 showed "3:00 AM" for a
+        // transaction made at noon) and sorted it out of chronological order against same-day
+        // transactions that DO carry real timestamps (sales/purchases/salaries).
+        occurredAt: row.created_at,
         locationName: row.location_name,
         paymentMethodName: row.payment_method_name,
         processedByName: row.created_by_name ?? "—",
