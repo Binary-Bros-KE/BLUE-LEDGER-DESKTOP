@@ -60,11 +60,18 @@ type PesapalFlowState = "idle" | "submitting" | "awaiting" | "success" | "error"
 export function PayNowModal({
   open,
   onClose,
-  amountLabel
+  amountLabel,
+  onPaymentSuccess
 }: {
   open: boolean;
   onClose: () => void;
   amountLabel?: string | undefined;
+  /** Called right after a successful payment (either method) — separate from the global
+   * heartbeat+hydrate below, which only refreshes app-level license/tenant state, not a page's own
+   * locally-fetched data (e.g. PaymentScheduleCalendar's schedule, PaymentsRoute's payment list).
+   * Callers use this to re-fetch their own view so a just-paid period doesn't keep showing grayed
+   * out until the next full page reload. */
+  onPaymentSuccess?: () => void;
 }): React.JSX.Element {
   const [selected, setSelected] = useState<string | null>(null);
   const hydrate = useAppStore((state) => state.hydrate);
@@ -108,6 +115,7 @@ export function PayNowModal({
       setState("success");
       setMessage(MPESA_MESSAGES.success);
       void window.blueLedger.activation.heartbeat().then(() => hydrate());
+      onPaymentSuccess?.();
     } else {
       setState("error");
       setMessage(MPESA_MESSAGES[result.status]);
@@ -141,6 +149,7 @@ export function PayNowModal({
       setPesapalState("success");
       setPesapalMessage(PESAPAL_MESSAGES.success);
       void window.blueLedger.activation.heartbeat().then(() => hydrate());
+      onPaymentSuccess?.();
     } else {
       setPesapalState("error");
       setPesapalMessage(PESAPAL_MESSAGES[result.status]);

@@ -98,6 +98,7 @@ const DEFAULT_SYSTEM_ROLES: Array<{
       quotations: ["view", "create", "edit"],
       customers: ["view", "create"],
       riders: ["view", "create", "edit"],
+      suppliers: ["view"],
       payment_methods: ["view"],
       stock_transfers: ["view"],
       salaries: ["view"],

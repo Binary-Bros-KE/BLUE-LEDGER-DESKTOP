@@ -15,7 +15,16 @@ const STATUS_STYLE: Record<BillingPeriodEntry["status"], string> = {
  * computed-not-stored logic (see SERVER's computePaymentSchedule), fetched fresh via
  * activation:payment-schedule. Grouped by year (MONTHLY can span multiple years once a tenant's
  * been around a while; YEARLY is naturally one entry per row). */
-export function PaymentScheduleCalendar({ onPayInAdvance }: { onPayInAdvance: () => void }): React.JSX.Element | null {
+export function PaymentScheduleCalendar({
+  onPayInAdvance,
+  refreshKey
+}: {
+  onPayInAdvance: () => void;
+  /** Bump this (e.g. a counter incremented on payment success) to force a re-fetch — otherwise this
+   * only ever loads once on mount, so a just-completed payment keeps showing its period grayed out
+   * ("future"/"due") until the whole page is reloaded. */
+  refreshKey?: number;
+}): React.JSX.Element | null {
   const [schedule, setSchedule] = useState<PaymentScheduleResult | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -32,7 +41,8 @@ export function PaymentScheduleCalendar({ onPayInAdvance }: { onPayInAdvance: ()
     return () => {
       cancelled = true;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   if (loading) {
     return (

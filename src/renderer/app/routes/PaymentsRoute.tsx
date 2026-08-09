@@ -40,6 +40,7 @@ export function PaymentsRoute(): React.JSX.Element {
   const [paymentsLoading, setPaymentsLoading] = useState(true);
   const [payTarget, setPayTarget] = useState<SubscriptionPaymentRecord | null>(null);
   const [payInAdvanceOpen, setPayInAdvanceOpen] = useState(false);
+  const [scheduleRefreshKey, setScheduleRefreshKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,6 +67,14 @@ export function PaymentsRoute(): React.JSX.Element {
       cancelled = true;
     };
   }, []);
+
+  /** Re-fetches the payment list and re-triggers PaymentScheduleCalendar's own fetch — called from
+   * PayNowModal's onPaymentSuccess so a just-paid period stops showing grayed out immediately,
+   * instead of only updating after the next full page reload. */
+  function handlePaymentSuccess(): void {
+    void window.blueLedger.activation.payments().then(setPayments);
+    setScheduleRefreshKey((n) => n + 1);
+  }
 
   return (
     <motion.div
@@ -228,7 +237,7 @@ export function PaymentsRoute(): React.JSX.Element {
               )}
             </div>
 
-            <PaymentScheduleCalendar onPayInAdvance={() => setPayInAdvanceOpen(true)} />
+            <PaymentScheduleCalendar onPayInAdvance={() => setPayInAdvanceOpen(true)} refreshKey={scheduleRefreshKey} />
           </>
         )}
       </section>
@@ -240,6 +249,7 @@ export function PaymentsRoute(): React.JSX.Element {
           setPayInAdvanceOpen(false);
         }}
         amountLabel={payTarget ? `${payTarget.currency} ${formatCents(payTarget.amountCents)}` : undefined}
+        onPaymentSuccess={handlePaymentSuccess}
       />
     </motion.div>
   );
