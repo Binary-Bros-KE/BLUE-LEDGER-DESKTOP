@@ -2,6 +2,7 @@ import type { AppContext, TenantContext, TenantRecord } from "./tenant";
 import type { UpdateStatusResult } from "./update";
 import type { PaymentHistoryResult, PaymentScheduleResult } from "./subscription-payment";
 import type { BillingMpesaStatusResult, BillingStkPushResult } from "./billing-mpesa";
+import type { BillingPesapalStatusResult, BillingPesapalSubmitOrderResult } from "./billing-pesapal";
 import type { BrandTheme } from "./theme";
 import type { AuthSession } from "./auth";
 import type { Category, CategoryStatus } from "./category";
@@ -115,6 +116,22 @@ export type IpcInvokeMap = {
   "billing-mpesa:check-stk-status": {
     args: [string];
     result: BillingMpesaStatusResult;
+  };
+  "billing-pesapal:submit-order": {
+    args: [{ periodCount: number; enrollAutoBilling: boolean }];
+    result: BillingPesapalSubmitOrderResult;
+  };
+  "billing-pesapal:get-status": {
+    args: [string];
+    result: BillingPesapalStatusResult;
+  };
+  "billing-pesapal:check-status": {
+    args: [string];
+    result: BillingPesapalStatusResult;
+  };
+  "billing-pesapal:open-redirect": {
+    args: [string];
+    result: void;
   };
   "auth:login": {
     args: [Record<string, unknown>];
@@ -1126,6 +1143,15 @@ export type BlueLedgerApi = {
     }) => Promise<IpcInvokeMap["billing-mpesa:send-stk-push"]["result"]>;
     getStkStatus: (checkoutRequestId: string) => Promise<IpcInvokeMap["billing-mpesa:get-stk-status"]["result"]>;
     checkStkStatus: (checkoutRequestId: string) => Promise<IpcInvokeMap["billing-mpesa:check-stk-status"]["result"]>;
+  };
+  billingPesapal: {
+    submitOrder: (input: {
+      periodCount: number;
+      enrollAutoBilling: boolean;
+    }) => Promise<IpcInvokeMap["billing-pesapal:submit-order"]["result"]>;
+    getStatus: (orderTrackingId: string) => Promise<IpcInvokeMap["billing-pesapal:get-status"]["result"]>;
+    checkStatus: (orderTrackingId: string) => Promise<IpcInvokeMap["billing-pesapal:check-status"]["result"]>;
+    openRedirect: (redirectUrl: string) => Promise<IpcInvokeMap["billing-pesapal:open-redirect"]["result"]>;
   };
   auth: {
     login: (input: Record<string, unknown>) => Promise<IpcInvokeMap["auth:login"]["result"]>;

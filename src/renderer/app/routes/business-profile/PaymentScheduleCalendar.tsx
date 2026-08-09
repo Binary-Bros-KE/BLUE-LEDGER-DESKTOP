@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CalendarClock, CreditCard, Loader2 } from "lucide-react";
+import { CalendarClock, CreditCard, Loader2, Zap } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { cn } from "@renderer/shared/lib/cn";
 import type { BillingPeriodEntry, PaymentScheduleResult } from "@shared/types/subscription-payment";
@@ -64,6 +64,14 @@ export function PaymentScheduleCalendar({ onPayInAdvance }: { onPayInAdvance: ()
             {schedule.billingCycle === "MONTHLY" ? "Every month" : "Every year"} since this account
             started — green is paid, amber is due now, red is overdue, grey hasn't come due yet.
           </p>
+          {schedule.pesapalAutoBillingEnabled && (
+            <span className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-success/30 bg-success/10 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider text-success">
+              <Zap className="size-3 flex-none" aria-hidden="true" />
+              Auto-Billing Active
+              {schedule.pesapalAutoBillingActivatedAt &&
+                ` since ${new Date(schedule.pesapalAutoBillingActivatedAt).toLocaleDateString()}`}
+            </span>
+          )}
         </div>
         <Button type="button" onClick={onPayInAdvance} className="h-9 text-xs">
           <CreditCard className="mr-1.5 size-3.5" aria-hidden="true" />

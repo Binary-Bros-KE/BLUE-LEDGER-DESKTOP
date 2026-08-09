@@ -249,6 +249,12 @@ import {
 } from "@main/services/tenant-service";
 import { activateInstallation, fetchPaymentHistory, fetchPaymentSchedule, heartbeatAndGetContext } from "@main/services/license-service";
 import { checkBillingStkStatus, getBillingStkStatus, sendBillingStkPush } from "@main/services/billing-mpesa-service";
+import {
+  checkPesapalStatus,
+  getPesapalStatus,
+  openPesapalCheckout,
+  submitBillingPesapalOrder
+} from "@main/services/billing-pesapal-service";
 import { checkForUpdates, getUpdateStatus, installUpdateNow } from "@main/services/update-service";
 import {
   getEntitySyncOverview,
@@ -357,6 +363,12 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.billingMpesaCheckStkStatus, (_event, checkoutRequestId: string) =>
     checkBillingStkStatus(checkoutRequestId)
   );
+  ipcMain.handle(ipcChannels.billingPesapalSubmitOrder, (_event, input: { periodCount: number; enrollAutoBilling: boolean }) =>
+    submitBillingPesapalOrder(input)
+  );
+  ipcMain.handle(ipcChannels.billingPesapalGetStatus, (_event, orderTrackingId: string) => getPesapalStatus(orderTrackingId));
+  ipcMain.handle(ipcChannels.billingPesapalCheckStatus, (_event, orderTrackingId: string) => checkPesapalStatus(orderTrackingId));
+  ipcMain.handle(ipcChannels.billingPesapalOpenRedirect, (_event, redirectUrl: string) => openPesapalCheckout(redirectUrl));
   ipcMain.handle(ipcChannels.authLogin, (_event, input: unknown) => login(input));
   ipcMain.handle(ipcChannels.authLogout, () => {
     logout();

@@ -37,4 +37,8 @@ export type PaymentScheduleResult = {
   currency: string;
   periods: BillingPeriodEntry[];
   nextDueDate: string | null;
+  /** Only ever true once the FIRST recurring-flagged Pesapal IPN has actually landed — see
+   * billing-pesapal-service.ts (SERVER). Powers PaymentsRoute.tsx's "Auto-Billing Active" badge. */
+  pesapalAutoBillingEnabled: boolean;
+  pesapalAutoBillingActivatedAt: string | null;
 };

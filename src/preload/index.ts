@@ -30,6 +30,12 @@ const api: BlueLedgerApi = {
     getStkStatus: (checkoutRequestId) => invoke("billing-mpesa:get-stk-status", checkoutRequestId),
     checkStkStatus: (checkoutRequestId) => invoke("billing-mpesa:check-stk-status", checkoutRequestId)
   },
+  billingPesapal: {
+    submitOrder: (input) => invoke("billing-pesapal:submit-order", input),
+    getStatus: (orderTrackingId) => invoke("billing-pesapal:get-status", orderTrackingId),
+    checkStatus: (orderTrackingId) => invoke("billing-pesapal:check-status", orderTrackingId),
+    openRedirect: (redirectUrl) => invoke("billing-pesapal:open-redirect", redirectUrl)
+  },
   auth: {
     login: (input) => invoke("auth:login", input),
     logout: () => invoke("auth:logout"),
