@@ -12,6 +12,7 @@ import {
   INK,
   timestampedFileName
 } from "@main/services/export-shared";
+import { openPdfPreviewWindow } from "@main/services/printer-service";
 import type { ExportListRequest } from "@shared/types/export";
 
 const { BrowserWindow, dialog } = electron;
@@ -23,8 +24,10 @@ function escapeCsvCell(value: string): string {
   return value;
 }
 
-/** Renders the export to PDF and prompts the user for a save location. Returns the saved path, or null if cancelled. */
-export async function exportListToPdf(request: ExportListRequest): Promise<string | null> {
+/** Renders the export to PDF and opens it in the in-app preview window — same "view, print, or
+ * download" pattern as every document preview (see printer-service.ts's preview*Pdf functions), so a
+ * client clicking "Export as PDF" from any list sees it immediately instead of a save dialog. */
+export async function exportListToPdf(request: ExportListRequest): Promise<void> {
   requirePermission(request.module, "export");
 
   const html = buildExportHtml(request);
@@ -37,14 +40,7 @@ export async function exportListToPdf(request: ExportListRequest): Promise<strin
     win.destroy();
   }
 
-  const result = await dialog.showSaveDialog({
-    title: "Export as PDF",
-    defaultPath: timestampedFileName(request.fileBaseName, "pdf"),
-    filters: [{ name: "PDF", extensions: ["pdf"] }]
-  });
-  if (result.canceled || !result.filePath) return null;
-  await writeFile(result.filePath, buffer);
-  return result.filePath;
+  await openPdfPreviewWindow(buffer, timestampedFileName(request.fileBaseName, "pdf"), request.title);
 }
 
 /** Writes the export to a CSV file and prompts the user for a save location. Returns the saved path, or null if cancelled. */

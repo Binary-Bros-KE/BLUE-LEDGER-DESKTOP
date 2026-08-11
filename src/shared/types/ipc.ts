@@ -817,9 +817,17 @@ export type IpcInvokeMap = {
     args: [string];
     result: string | null;
   };
+  "printer:preview-receipt-pdf": {
+    args: [string];
+    result: void;
+  };
   "printer:generate-invoice-pdf": {
     args: [string];
     result: string | null;
+  };
+  "printer:preview-invoice-pdf": {
+    args: [string];
+    result: void;
   };
   "printer:print-invoice-document": {
     args: [string];
@@ -833,6 +841,10 @@ export type IpcInvokeMap = {
     args: [string];
     result: string | null;
   };
+  "printer:preview-statement-pdf": {
+    args: [string];
+    result: void;
+  };
   "printer:print-statement-document": {
     args: [string];
     result: PrinterActionResult;
@@ -841,13 +853,33 @@ export type IpcInvokeMap = {
     args: [string];
     result: string | null;
   };
+  "printer:preview-stock-receipt-pdf": {
+    args: [string];
+    result: void;
+  };
   "printer:print-stock-receipt-document": {
+    args: [string];
+    result: PrinterActionResult;
+  };
+  "printer:get-pdf-preview-data": {
+    args: [string];
+    result: { data: string; filename: string; title: string } | null;
+  };
+  "printer:print-pdf-preview": {
+    args: [string];
+    result: PrinterActionResult;
+  };
+  "printer:download-pdf-preview": {
     args: [string];
     result: PrinterActionResult;
   };
   "printer:generate-quotation-pdf": {
     args: [string];
     result: string | null;
+  };
+  "printer:preview-quotation-pdf": {
+    args: [string];
+    result: void;
   };
   "printer:print-quotation-document": {
     args: [string];
@@ -860,6 +892,10 @@ export type IpcInvokeMap = {
   "printer:generate-salary-pdf": {
     args: [string];
     result: string | null;
+  };
+  "printer:preview-salary-pdf": {
+    args: [string];
+    result: void;
   };
   "printer:share-salary-payslip": {
     args: [string];
@@ -876,6 +912,10 @@ export type IpcInvokeMap = {
   "printer:generate-delivery-note-pdf": {
     args: [string];
     result: string | null;
+  };
+  "printer:preview-delivery-note-pdf": {
+    args: [string];
+    result: void;
   };
   "delivery-note:get": {
     args: [string];
@@ -903,7 +943,7 @@ export type IpcInvokeMap = {
   };
   "export:to-pdf": {
     args: [ExportListRequest];
-    result: string | null;
+    result: void;
   };
   "export:to-csv": {
     args: [ExportListRequest];
@@ -915,7 +955,7 @@ export type IpcInvokeMap = {
   };
   "report-export:to-pdf": {
     args: [ReportExportRequest];
-    result: string | null;
+    result: void;
   };
   "report-export:to-excel": {
     args: [ReportExportRequest];
@@ -1505,7 +1545,9 @@ export type BlueLedgerApi = {
     testConnection: () => Promise<IpcInvokeMap["printer:test-connection"]["result"]>;
     printReceipt: (saleId: string) => Promise<IpcInvokeMap["printer:print-receipt"]["result"]>;
     generateReceiptPdf: (saleId: string) => Promise<IpcInvokeMap["printer:generate-receipt-pdf"]["result"]>;
+    previewReceiptPdf: (saleId: string) => Promise<IpcInvokeMap["printer:preview-receipt-pdf"]["result"]>;
     generateInvoicePdf: (saleId: string) => Promise<IpcInvokeMap["printer:generate-invoice-pdf"]["result"]>;
+    previewInvoicePdf: (saleId: string) => Promise<IpcInvokeMap["printer:preview-invoice-pdf"]["result"]>;
     printInvoiceDocument: (
       saleId: string
     ) => Promise<IpcInvokeMap["printer:print-invoice-document"]["result"]>;
@@ -1513,6 +1555,9 @@ export type BlueLedgerApi = {
     generateQuotationPdf: (
       quotationId: string
     ) => Promise<IpcInvokeMap["printer:generate-quotation-pdf"]["result"]>;
+    previewQuotationPdf: (
+      quotationId: string
+    ) => Promise<IpcInvokeMap["printer:preview-quotation-pdf"]["result"]>;
     printQuotationDocument: (
       quotationId: string
     ) => Promise<IpcInvokeMap["printer:print-quotation-document"]["result"]>;
@@ -1520,6 +1565,7 @@ export type BlueLedgerApi = {
       quotationId: string
     ) => Promise<IpcInvokeMap["printer:print-quotation-thermal"]["result"]>;
     generateSalaryPdf: (salaryId: string) => Promise<IpcInvokeMap["printer:generate-salary-pdf"]["result"]>;
+    previewSalaryPdf: (salaryId: string) => Promise<IpcInvokeMap["printer:preview-salary-pdf"]["result"]>;
     shareSalaryPayslip: (salaryId: string) => Promise<IpcInvokeMap["printer:share-salary-payslip"]["result"]>;
     printDeliveryNote: (
       deliveryNoteId: string
@@ -1530,16 +1576,26 @@ export type BlueLedgerApi = {
     generateDeliveryNotePdf: (
       deliveryNoteId: string
     ) => Promise<IpcInvokeMap["printer:generate-delivery-note-pdf"]["result"]>;
+    previewDeliveryNotePdf: (
+      deliveryNoteId: string
+    ) => Promise<IpcInvokeMap["printer:preview-delivery-note-pdf"]["result"]>;
     generateStatementPdf: (customerId: string) => Promise<IpcInvokeMap["printer:generate-statement-pdf"]["result"]>;
+    previewStatementPdf: (customerId: string) => Promise<IpcInvokeMap["printer:preview-statement-pdf"]["result"]>;
     printStatementDocument: (
       customerId: string
     ) => Promise<IpcInvokeMap["printer:print-statement-document"]["result"]>;
     generateStockReceiptPdf: (
       stockReceiptId: string
     ) => Promise<IpcInvokeMap["printer:generate-stock-receipt-pdf"]["result"]>;
+    previewStockReceiptPdf: (
+      stockReceiptId: string
+    ) => Promise<IpcInvokeMap["printer:preview-stock-receipt-pdf"]["result"]>;
     printStockReceiptDocument: (
       stockReceiptId: string
     ) => Promise<IpcInvokeMap["printer:print-stock-receipt-document"]["result"]>;
+    getPdfPreviewData: (previewId: string) => Promise<IpcInvokeMap["printer:get-pdf-preview-data"]["result"]>;
+    printPdfPreview: (previewId: string) => Promise<IpcInvokeMap["printer:print-pdf-preview"]["result"]>;
+    downloadPdfPreview: (previewId: string) => Promise<IpcInvokeMap["printer:download-pdf-preview"]["result"]>;
   };
   statement: {
     getForCustomer: (customerId: string) => Promise<IpcInvokeMap["statement:get-for-customer"]["result"]>;

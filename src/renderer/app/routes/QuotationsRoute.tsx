@@ -4,7 +4,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   ClipboardList,
-  Download,
   Eye,
   FileText,
   Loader2,
@@ -390,14 +389,13 @@ export function QuotationsRoute(): React.JSX.Element {
     }
   }
 
-  async function handleDownload(): Promise<void> {
+  async function handlePreview(): Promise<void> {
     if (!viewingQuotation) return;
     setActionError(null);
     try {
-      const savedPath = await window.blueLedger.printer.generateQuotationPdf(viewingQuotation.id);
-      if (savedPath) setNotice(`Saved to ${savedPath}`);
+      await window.blueLedger.printer.previewQuotationPdf(viewingQuotation.id);
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to generate PDF"));
+      setActionError(getErrorMessage(err, "Failed to open preview"));
     }
   }
 
@@ -1179,11 +1177,11 @@ export function QuotationsRoute(): React.JSX.Element {
               </Button>
               <Button
                 type="button"
-                onClick={() => void handleDownload()}
+                onClick={() => void handlePreview()}
                 className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
               >
-                <Download className="mr-1.5 size-3.5" aria-hidden="true" />
-                Download PDF
+                <Eye className="mr-1.5 size-3.5" aria-hidden="true" />
+                Preview
               </Button>
               <Button
                 type="button"

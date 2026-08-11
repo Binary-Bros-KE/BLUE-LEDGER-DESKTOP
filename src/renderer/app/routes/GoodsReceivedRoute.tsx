@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Download, Eye, Loader2, PackageCheck, Plus, Printer, Search, Trash2 } from "lucide-react";
+import { Eye, Loader2, PackageCheck, Plus, Printer, Search, Trash2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
@@ -17,7 +17,7 @@ import type { LocationStockLevel } from "@shared/types/inventory";
 import type { ProductListItem } from "@shared/types/product";
 import type { StockReceipt, StockReceiptListItem } from "@shared/types/stock-receipt";
 
-type Destination = "main_store" | "storefront";
+type Destination = "main_store" | "storefront" | "main_store_transfer";
 
 type DraftItem = {
   productId: string;
@@ -50,6 +50,9 @@ export function GoodsReceivedRoute(): React.JSX.Element {
   // storefront's stock) but never gets "main_store" — see role-service.ts's own comment. Receiving
   // straight to a storefront doesn't need it; earmarking stock at Main Store does.
   const canReceiveIntoMainStore = can("main_store", "edit");
+  // Same permission MainStoreStockModal's own Transfer tab (distributeFromMainStore) checks — this
+  // is the bulk counterpart of that single-product flow, not a separate capability.
+  const canTransferFromMainStore = can("stock_transfers", "create");
 
   const needsStorefrontPicker = session?.branch == null;
   const ownBranchId = session?.branch?.id ?? null;
@@ -80,7 +83,7 @@ export function GoodsReceivedRoute(): React.JSX.Element {
   const [viewingReceipt, setViewingReceipt] = useState<StockReceipt | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
   const [printing, setPrinting] = useState(false);
-  const [downloading, setDownloading] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
 
   const loadReceipts = useCallback(async () => {
     setLoadError(null);
@@ -121,21 +124,28 @@ export function GoodsReceivedRoute(): React.JSX.Element {
 
   // Live-preview stock lookups — refreshed whenever the destination (or which bucket/storefront)
   // changes, so "Current Stock" / "New Total" in the preview table always reflect the choice
-  // actually being submitted, not a stale snapshot from when the modal opened.
+  // actually being submitted, not a stale snapshot from when the modal opened. A transfer needs
+  // BOTH sources at once: allocationSummary to show what's actually available to draw from at Main
+  // Store (the whole point of the field feedback this destination exists to fix — see
+  // getAvailableToTransfer below), and storefrontStock for the same "Current Stock"/"New Total at
+  // the receiving storefront" preview the plain "storefront" destination already shows.
   useEffect(() => {
     if (!createOpen) return;
-    if (destination === "main_store") {
+    if (destination === "main_store" || destination === "main_store_transfer") {
       window.blueLedger.mainStore
         .allocationSummary()
         .then(setAllocationSummary)
         .catch(() => undefined);
-    } else if (effectiveStorefrontLocationId) {
-      window.blueLedger.inventory
-        .listForLocation(effectiveStorefrontLocationId)
-        .then(setStorefrontStock)
-        .catch(() => undefined);
-    } else {
-      setStorefrontStock([]);
+    }
+    if (destination !== "main_store") {
+      if (effectiveStorefrontLocationId) {
+        window.blueLedger.inventory
+          .listForLocation(effectiveStorefrontLocationId)
+          .then(setStorefrontStock)
+          .catch(() => undefined);
+      } else {
+        setStorefrontStock([]);
+      }
     }
   }, [createOpen, destination, effectiveStorefrontLocationId]);
 
@@ -146,6 +156,19 @@ export function GoodsReceivedRoute(): React.JSX.Element {
       return allocationStorefrontId ? (row.allocatedByStorefront[allocationStorefrontId] ?? 0) : row.unallocatedQuantity;
     }
     return storefrontStock.find((r) => r.productId === productId)?.quantity ?? 0;
+  }
+
+  /** What's actually available to draw from at Main Store for the storefront this receipt is going
+   * to — that storefront's own earmarked allocation plus the unallocated pool, the exact same
+   * allocated-then-unallocated order distributeMainStoreStockCore itself draws from. Purely
+   * informational here (the real enforcement happens server-side, atomically, per item) — this is
+   * what lets the person filling out the receipt see up front whether a quantity will actually go
+   * through instead of finding out only after submitting. */
+  function getAvailableToTransfer(productId: string): number {
+    const row = allocationSummary.find((r) => r.productId === productId);
+    if (!row) return 0;
+    const allocated = effectiveStorefrontLocationId ? (row.allocatedByStorefront[effectiveStorefrontLocationId] ?? 0) : 0;
+    return row.unallocatedQuantity + allocated;
   }
 
   const filteredPickerProducts = useMemo(() => {
@@ -238,23 +261,30 @@ export function GoodsReceivedRoute(): React.JSX.Element {
       setCreateError("Add at least one product");
       return;
     }
-    if (destination === "storefront" && needsStorefrontPicker && !createLocationId) {
+    if (destination !== "main_store" && needsStorefrontPicker && !createLocationId) {
       setCreateError("Choose which storefront this receipt is for");
       return;
+    }
+    if (destination === "main_store_transfer") {
+      const shortItem = createItems.find((item) => item.quantity > getAvailableToTransfer(item.productId));
+      if (shortItem) {
+        setCreateError(`Not enough stock at Main Store for ${shortItem.productName}`);
+        return;
+      }
     }
 
     setCreateSaving(true);
     try {
       await window.blueLedger.stockReceipt.create({
         destination,
-        locationId: destination === "storefront" && needsStorefrontPicker ? createLocationId : null,
+        locationId: destination !== "main_store" && needsStorefrontPicker ? createLocationId : null,
         allocationStorefrontId: destination === "main_store" ? allocationStorefrontId || null : null,
         notes: createNotes,
         items: createItems.map((item) => ({ productId: item.productId, quantityReceived: item.quantity }))
       });
       setCreateOpen(false);
       await loadReceipts();
-      showSuccessToast("Goods received recorded");
+      showSuccessToast(destination === "main_store_transfer" ? "Stock transferred from Main Store" : "Goods received recorded");
     } catch (err) {
       const message = getErrorMessage(err, "Failed to record goods received");
       setCreateError(message);
@@ -298,21 +328,18 @@ export function GoodsReceivedRoute(): React.JSX.Element {
     }
   }
 
-  async function handleDownload(): Promise<void> {
+  async function handlePreview(): Promise<void> {
     if (!viewingReceipt) return;
-    setDownloading(true);
+    setPreviewing(true);
     setActionError(null);
     try {
-      const savedPath = await window.blueLedger.printer.generateStockReceiptPdf(viewingReceipt.id);
-      if (savedPath) {
-        showSuccessToast(`Saved to ${savedPath}`);
-      }
+      await window.blueLedger.printer.previewStockReceiptPdf(viewingReceipt.id);
     } catch (err) {
-      const message = getErrorMessage(err, "Failed to generate PDF");
+      const message = getErrorMessage(err, "Failed to open preview");
       setActionError(message);
       showErrorToast(message);
     } finally {
-      setDownloading(false);
+      setPreviewing(false);
     }
   }
 
@@ -487,6 +514,7 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                           {receipt.allocationStorefrontName && (
                             <DashedPill tone="accent">For {receipt.allocationStorefrontName}</DashedPill>
                           )}
+                          {receipt.sourceType === "transfer" && <DashedPill tone="warning">Transfer</DashedPill>}
                         </div>
                       </td>
                       <td className="px-4 py-3 text-xs font-bold tabular-nums text-muted">
@@ -530,21 +558,23 @@ export function GoodsReceivedRoute(): React.JSX.Element {
             </div>
           )}
 
-          {canReceiveIntoMainStore && (
+          {(canReceiveIntoMainStore || canTransferFromMainStore) && (
             <div className="flex gap-1.5 rounded-lg border border-line bg-soft p-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setDestination("main_store");
-                  setCreateLocationId("");
-                }}
-                className={cn(
-                  "flex-1 rounded-md px-2 py-1.5 text-[11px] font-extrabold uppercase tracking-wide transition cursor-pointer",
-                  destination === "main_store" ? "bg-primary text-white" : "text-muted hover:bg-white"
-                )}
-              >
-                Into Main Store
-              </button>
+              {canReceiveIntoMainStore && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDestination("main_store");
+                    setCreateLocationId("");
+                  }}
+                  className={cn(
+                    "flex-1 rounded-md px-2 py-1.5 text-[11px] font-extrabold uppercase tracking-wide transition cursor-pointer",
+                    destination === "main_store" ? "bg-primary text-white" : "text-muted hover:bg-white"
+                  )}
+                >
+                  Into Main Store
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -558,6 +588,21 @@ export function GoodsReceivedRoute(): React.JSX.Element {
               >
                 Direct to Storefront
               </button>
+              {canTransferFromMainStore && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDestination("main_store_transfer");
+                    setAllocationStorefrontId("");
+                  }}
+                  className={cn(
+                    "flex-1 rounded-md px-2 py-1.5 text-[11px] font-extrabold uppercase tracking-wide transition cursor-pointer",
+                    destination === "main_store_transfer" ? "bg-primary text-white" : "text-muted hover:bg-white"
+                  )}
+                >
+                  Transfer from Main Store
+                </button>
+              )}
             </div>
           )}
 
@@ -620,6 +665,11 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                   <tr className="bg-soft">
                     <th className="px-3 py-2 text-left font-extrabold uppercase tracking-wider text-muted">Product</th>
                     <th className="px-3 py-2 text-right font-extrabold uppercase tracking-wider text-muted">Qty Received</th>
+                    {destination === "main_store_transfer" && (
+                      <th className="px-3 py-2 text-right font-extrabold uppercase tracking-wider text-muted">
+                        Available at Main Store
+                      </th>
+                    )}
                     <th className="px-3 py-2 text-right font-extrabold uppercase tracking-wider text-muted">Current Stock</th>
                     <th className="px-3 py-2 text-right font-extrabold uppercase tracking-wider text-muted">New Total</th>
                     <th className="px-3 py-2" />
@@ -628,6 +678,8 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                 <tbody>
                   {createItems.map((item) => {
                     const currentStock = getCurrentStock(item.productId);
+                    const availableToTransfer = getAvailableToTransfer(item.productId);
+                    const overRequested = destination === "main_store_transfer" && item.quantity > availableToTransfer;
                     return (
                       <tr key={item.productId} className="border-t border-line">
                         <td className="px-3 py-2">
@@ -642,9 +694,27 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                             onChange={(event) => updateDraftItemQuantityDraft(item.productId, event.target.value)}
                             onBlur={() => updateDraftItemQuantity(item.productId, item.quantity)}
                             aria-label={`Quantity for ${item.productName}`}
-                            className="h-8 w-16 rounded-md border border-line px-2 text-center text-sm font-extrabold tabular-nums text-ink outline-none focus:border-accent"
+                            className={cn(
+                              "h-8 w-16 rounded-md border px-2 text-center text-sm font-extrabold tabular-nums text-ink outline-none focus:border-accent",
+                              overRequested ? "border-danger" : "border-line"
+                            )}
                           />
                         </td>
+                        {destination === "main_store_transfer" && (
+                          <td
+                            className={cn(
+                              "px-3 py-2 text-right font-bold tabular-nums",
+                              overRequested ? "text-danger" : "text-muted"
+                            )}
+                            title={
+                              overRequested
+                                ? "Not enough stock at Main Store (earmarked for this storefront + unallocated) to cover this quantity"
+                                : undefined
+                            }
+                          >
+                            {availableToTransfer}
+                          </td>
+                        )}
                         <td className="px-3 py-2 text-right font-bold tabular-nums text-muted">{currentStock}</td>
                         <td className="px-3 py-2 text-right font-extrabold tabular-nums text-success">
                           {currentStock + item.quantity}
@@ -714,6 +784,9 @@ export function GoodsReceivedRoute(): React.JSX.Element {
               {viewingReceipt.allocationStorefrontName && (
                 <DashedPill tone="accent">For {viewingReceipt.allocationStorefrontName}</DashedPill>
               )}
+              {viewingReceipt.sourceType === "transfer" && (
+                <DashedPill tone="warning">Transferred from Main Store</DashedPill>
+              )}
               <span className="text-xs font-semibold text-muted">
                 Received by {viewingReceipt.receivedByName} · {formatDateTime(viewingReceipt.createdAt)}
               </span>
@@ -776,16 +849,16 @@ export function GoodsReceivedRoute(): React.JSX.Element {
               </Button>
               <Button
                 type="button"
-                onClick={() => void handleDownload()}
-                disabled={downloading}
+                onClick={() => void handlePreview()}
+                disabled={previewing}
                 className="h-9 border border-line bg-white text-[11px] text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {downloading ? (
+                {previewing ? (
                   <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
                 ) : (
-                  <Download className="mr-1.5 size-3.5" aria-hidden="true" />
+                  <Eye className="mr-1.5 size-3.5" aria-hidden="true" />
                 )}
-                Download PDF
+                Preview
               </Button>
             </div>
           </div>

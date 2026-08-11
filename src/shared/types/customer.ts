@@ -4,7 +4,9 @@ export const CUSTOMER_TYPE_OPTIONS = [
   { value: "retail", label: "Retail" },
   { value: "wholesale", label: "Wholesale" },
   { value: "corporate", label: "Corporate" },
-  { value: "walk_in", label: "Walk-In" }
+  { value: "walk_in", label: "Walk-In" },
+  { value: "personal", label: "Personal" },
+  { value: "business", label: "Business" }
 ] as const;
 
 export type CustomerType = (typeof CUSTOMER_TYPE_OPTIONS)[number]["value"];

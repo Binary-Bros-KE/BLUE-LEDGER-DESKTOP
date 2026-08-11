@@ -16,6 +16,14 @@ export type StockReceiptRow = {
   updated_at: string;
   item_count: number;
   total_quantity_received: number;
+  /** Derived, not stored — 1 if any of this receipt's own stock_movements rows is a transfer_in
+   * (see createStockReceipt's main_store_transfer branch), 0 for the plain purchase case. Computed
+   * at read time from stock_movements instead of a real column deliberately: stock_receipts is a
+   * synced entity (see sync-engine.ts's STOCK_RECEIPT_HEADER_COLUMNS/PAYLOAD_BUILDERS), and adding a
+   * genuinely new persisted field there means extending the cloud schema too (a live production
+   * Postgres migration) for what's purely a display distinction — this way "was it a transfer" is
+   * always correctly derivable from data that already exists and already syncs on its own. */
+  is_transfer: number;
 };
 
 export type StockReceiptItemRow = {
@@ -35,7 +43,8 @@ const SELECT_WITH_JOINS = `
     CASE WHEN sr.allocation_storefront_id IS NOT NULL THEN als.location_name ELSE NULL END AS allocation_storefront_name,
     (rec.first_name || ' ' || rec.last_name) AS received_by_name,
     (SELECT COUNT(*) FROM stock_receipt_items sri WHERE sri.stock_receipt_id = sr.id) AS item_count,
-    (SELECT COALESCE(SUM(sri.quantity_received), 0) FROM stock_receipt_items sri WHERE sri.stock_receipt_id = sr.id) AS total_quantity_received
+    (SELECT COALESCE(SUM(sri.quantity_received), 0) FROM stock_receipt_items sri WHERE sri.stock_receipt_id = sr.id) AS total_quantity_received,
+    (SELECT COUNT(*) FROM stock_movements sm WHERE sm.reference_type = 'stock_receipt' AND sm.reference_id = sr.id AND sm.movement_type = 'transfer_in') AS is_transfer
   FROM stock_receipts sr
   JOIN locations l ON l.id = sr.location_id
   LEFT JOIN locations als ON als.id = sr.allocation_storefront_id

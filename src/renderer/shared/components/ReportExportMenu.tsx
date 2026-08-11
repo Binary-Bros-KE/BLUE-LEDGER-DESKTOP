@@ -8,7 +8,7 @@ import type { ReportExportRequest } from "@shared/types/report-export";
 type ReportExportFormat = "pdf" | "excel";
 
 const FORMAT_OPTIONS: Array<{ format: ReportExportFormat; label: string; icon: typeof FileText }> = [
-  { format: "pdf", label: "Export as PDF", icon: FileText },
+  { format: "pdf", label: "Preview as PDF", icon: FileText },
   { format: "excel", label: "Export as Excel", icon: FileSpreadsheet }
 ];
 
@@ -44,12 +44,13 @@ export function ReportExportMenu({
     setOpen(false);
     setExporting(format);
     try {
-      const savedPath =
-        format === "pdf"
-          ? await window.blueLedger.reportExport.toPdf(request)
-          : await window.blueLedger.reportExport.toExcel(request);
-      if (savedPath) {
-        showSuccessToast(`${request.title} exported`);
+      if (format === "pdf") {
+        // Opens in the in-app preview window instead of a save dialog — the window appearing IS the
+        // feedback, same as every document preview button, so no success toast here.
+        await window.blueLedger.reportExport.toPdf(request);
+      } else {
+        const savedPath = await window.blueLedger.reportExport.toExcel(request);
+        if (savedPath) showSuccessToast(`${request.title} exported`);
       }
     } catch (err) {
       showErrorToast(getErrorMessage(err, "Failed to export report"));

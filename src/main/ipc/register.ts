@@ -85,11 +85,21 @@ import {
   generateSalaryPdf,
   generateStatementPdf,
   generateStockReceiptPdf,
+  getPdfPreviewData,
   getPrinterSettings,
+  downloadPdfPreview,
+  previewDeliveryNotePdf,
+  previewInvoicePdf,
+  previewQuotationPdf,
+  previewReceiptPdf,
+  previewSalaryPdf,
+  previewStatementPdf,
+  previewStockReceiptPdf,
   printDeliveryNote,
   printDeliveryNoteViaThermal,
   printInvoiceDocument,
   printInvoiceViaThermal,
+  printPdfPreview,
   printQuotationDocument,
   printQuotationViaThermal,
   printReceipt,
@@ -641,8 +651,14 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.printerGenerateReceiptPdf, (_event, saleId: string) =>
     generateReceiptPdf(saleId)
   );
+  ipcMain.handle(ipcChannels.printerPreviewReceiptPdf, (_event, saleId: string) =>
+    previewReceiptPdf(saleId)
+  );
   ipcMain.handle(ipcChannels.printerGenerateInvoicePdf, (_event, saleId: string) =>
     generateInvoicePdf(saleId)
+  );
+  ipcMain.handle(ipcChannels.printerPreviewInvoicePdf, (_event, saleId: string) =>
+    previewInvoicePdf(saleId)
   );
   ipcMain.handle(ipcChannels.printerPrintInvoiceDocument, (_event, saleId: string) =>
     printInvoiceDocument(saleId)
@@ -653,6 +669,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.printerGenerateQuotationPdf, (_event, quotationId: string) =>
     generateQuotationPdf(quotationId)
   );
+  ipcMain.handle(ipcChannels.printerPreviewQuotationPdf, (_event, quotationId: string) =>
+    previewQuotationPdf(quotationId)
+  );
   ipcMain.handle(ipcChannels.printerPrintQuotationDocument, (_event, quotationId: string) =>
     printQuotationDocument(quotationId)
   );
@@ -660,6 +679,7 @@ export function registerIpcHandlers(): void {
     printQuotationViaThermal(quotationId)
   );
   ipcMain.handle(ipcChannels.printerGenerateSalaryPdf, (_event, salaryId: string) => generateSalaryPdf(salaryId));
+  ipcMain.handle(ipcChannels.printerPreviewSalaryPdf, (_event, salaryId: string) => previewSalaryPdf(salaryId));
   ipcMain.handle(ipcChannels.printerShareSalaryPayslip, (_event, salaryId: string) =>
     shareSalaryPayslip(salaryId)
   );
@@ -672,8 +692,14 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.printerGenerateDeliveryNotePdf, (_event, deliveryNoteId: string) =>
     generateDeliveryNotePdf(deliveryNoteId)
   );
+  ipcMain.handle(ipcChannels.printerPreviewDeliveryNotePdf, (_event, deliveryNoteId: string) =>
+    previewDeliveryNotePdf(deliveryNoteId)
+  );
   ipcMain.handle(ipcChannels.printerGenerateStatementPdf, (_event, customerId: string) =>
     generateStatementPdf(customerId)
+  );
+  ipcMain.handle(ipcChannels.printerPreviewStatementPdf, (_event, customerId: string) =>
+    previewStatementPdf(customerId)
   );
   ipcMain.handle(ipcChannels.printerPrintStatementDocument, (_event, customerId: string) =>
     printStatementDocument(customerId)
@@ -681,9 +707,15 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.printerGenerateStockReceiptPdf, (_event, stockReceiptId: string) =>
     generateStockReceiptPdf(stockReceiptId)
   );
+  ipcMain.handle(ipcChannels.printerPreviewStockReceiptPdf, (_event, stockReceiptId: string) =>
+    previewStockReceiptPdf(stockReceiptId)
+  );
   ipcMain.handle(ipcChannels.printerPrintStockReceiptDocument, (_event, stockReceiptId: string) =>
     printStockReceipt(stockReceiptId)
   );
+  ipcMain.handle(ipcChannels.printerGetPdfPreviewData, (_event, previewId: string) => getPdfPreviewData(previewId));
+  ipcMain.handle(ipcChannels.printerPrintPdfPreview, (_event, previewId: string) => printPdfPreview(previewId));
+  ipcMain.handle(ipcChannels.printerDownloadPdfPreview, (_event, previewId: string) => downloadPdfPreview(previewId));
   ipcMain.handle(ipcChannels.statementGetForCustomer, (_event, customerId: string) => getCustomerStatement(customerId));
   ipcMain.handle(ipcChannels.deliveryNoteGet, (_event, id: string) => getDeliveryNote(id));
   ipcMain.handle(ipcChannels.deliveryNoteGetForSale, (_event, saleId: string) => getDeliveryNoteForSale(saleId));

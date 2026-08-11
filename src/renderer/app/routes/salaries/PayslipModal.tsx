@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { format } from "date-fns";
-import { Ban, CheckCircle2, Download, Loader2, RotateCcw, Share2, Trash2 } from "lucide-react";
+import { Ban, CheckCircle2, Eye, Loader2, RotateCcw, Share2, Trash2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { useConfirm } from "@renderer/shared/components/ConfirmModal";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
@@ -59,19 +59,18 @@ export function PayslipModal({
   onCompleteRequested: (salary: Salary) => void;
 }): React.JSX.Element {
   const confirm = useConfirm();
-  const [busy, setBusy] = useState<"download" | "share" | "void" | "restore" | "delete" | null>(null);
+  const [busy, setBusy] = useState<"preview" | "share" | "void" | "restore" | "delete" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleDownload(): Promise<void> {
-    setBusy("download");
+  async function handlePreview(): Promise<void> {
+    setBusy("preview");
     setError(null);
     setNotice(null);
     try {
-      const savedPath = await window.blueLedger.printer.generateSalaryPdf(salary.id);
-      if (savedPath) setNotice(`Saved to ${savedPath}`);
+      await window.blueLedger.printer.previewSalaryPdf(salary.id);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to generate PDF"));
+      setError(getErrorMessage(err, "Failed to open preview"));
     } finally {
       setBusy(null);
     }
@@ -255,16 +254,16 @@ export function PayslipModal({
         <div className="mt-5 grid grid-cols-2 gap-2 border-t border-line pt-4">
           <Button
             type="button"
-            onClick={() => void handleDownload()}
+            onClick={() => void handlePreview()}
             disabled={busy !== null}
             className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {busy === "download" ? (
+            {busy === "preview" ? (
               <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
             ) : (
-              <Download className="mr-1.5 size-3.5" aria-hidden="true" />
+              <Eye className="mr-1.5 size-3.5" aria-hidden="true" />
             )}
-            Download PDF
+            Preview
           </Button>
           <Button
             type="button"

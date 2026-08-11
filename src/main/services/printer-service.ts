@@ -15,6 +15,7 @@ import * as saleRepository from "@main/database/repositories/sale-repository";
 import * as serviceChargeRepository from "@main/database/repositories/service-charge-repository";
 import * as stockReceiptRepository from "@main/database/repositories/stock-receipt-repository";
 import * as tenantRepository from "@main/database/repositories/tenant-repository";
+import { buildRendererCsp } from "@main/security/content-security-policy";
 import { requirePermission } from "@main/services/auth-service";
 import {
   readManagedBusinessLogoPreview,
@@ -39,7 +40,6 @@ import {
 import { QUOTATION_STATUS_OPTIONS, type Quotation } from "@shared/types/quotation";
 import {
   PAYMENT_STATUS_OPTIONS,
-  TRANSACTION_TYPE_OPTIONS,
   type Sale,
   type SaleDelivery,
   type SaleServiceCharge
@@ -470,6 +470,134 @@ function buildReceiptHtml(vm: ReceiptViewModel): string {
 </html>`;
 }
 
+/** Shared by buildReceiptLetterheadHtml/buildInvoiceHtml/buildQuotationHtml — one CSS block instead
+ * of three independently-copy-pasted ones, so a future tweak is one edit here instead of three (kept
+ * in sync by hand with SERVER's own identical copy in document-html.ts — no code sharing is possible
+ * across the Electron-main/Express runtime boundary).
+ *
+ * The bordered `.items-frame` is the actual point of this redesign — field feedback asked for a
+ * printed-form look where the item table's rectangle fills most of the page even with only one line
+ * item, not a short table floating in a lot of blank space. `min-height` on the frame plus a
+ * `flex: 1` spacer between the item rows and the totals table (itself pinned to the bottom via
+ * `margin-top: auto`) achieves that with plain flexbox.
+ *
+ * That flex treatment is now applied CONDITIONALLY, via a `.fill-page` modifier class added at
+ * render time (see renderHtmlToPdfBuffer/DESKTOP and renderHtmlToPdf/SERVER) only once the frame's
+ * own natural (unpadded) content height is measured and confirmed to genuinely fit under 500px —
+ * NOT unconditionally in the template. A real multi-page invoice (any document whose item table
+ * needs more than one physical page) surfaced a serious bug when this was unconditional: Electron's
+ * `webContents.printToPDF` (its native print-preview pipeline, a different code path from the
+ * headless CDP `Page.printToPDF` Puppeteer/SERVER's own PDF pipeline uses) does not reliably
+ * fragment a `display:flex` container across more than one physical page — content beyond the first
+ * page silently got dropped, not just visually misplaced. Reproduced with a throwaway
+ * puppeteer+pdfjs-dist script: SERVER's own CDP-based pipeline paginated a 90-item invoice across 4
+ * pages with every item intact; the same HTML through Electron's printToPDF cut off partway through
+ * page 2 for any document actually needing to fragment the frame. The safe fix is to only ever force
+ * `min-height: 500px` (via flex) when we've confirmed the content is already short enough that no
+ * fragmentation is needed — a document that already needs 2+ pages doesn't need the "fills the page"
+ * cosmetic anyway, since it's already filling multiple pages with real content, and letting it fall
+ * back to a plain block box means Chromium's ordinary (reliable) block/table pagination handles it
+ * instead. 500px itself was tuned against a real 7-item invoice with BOTH a Payments Made table and a
+ * Tax Breakdown table rendered below the frame (not counted in the frame's own height) — fits one A4
+ * page with a comfortable margin; 640px was tried first and overflowed that same scenario onto a 2nd
+ * page, 420px left more blank space than necessary.
+ *
+ * `.bill-to`/`.doc-vat`/`.payment-terms` are the three pieces extracted OUT of the old flex `.meta`
+ * row (per field feedback: drop the redundant Storefront/Transaction-Type fields, move Bill-To above
+ * the info block, and add a computed payment-terms line) — `table.meta-table` is what `.meta` became:
+ * a real bordered table with a shaded header row instead of stacked label/value blocks, one row of
+ * values (Invoice Date / Due Date / Issued By / Your VAT No. for an invoice), matching the reference
+ * layout's own info-row table. */
+const LETTERHEAD_STYLES = `
+  * { box-sizing: border-box; }
+  /* Every border in this file is the same 1.5px/#d1d5db — was a mix of 1px/1.3px at various points.
+     A hairline width that thin risks landing on a fractional pixel once Chromium rasterizes the page
+     (worse on the table's own OUTER right edge specifically, confirmed live: it visibly thinned out
+     to near-invisible at some zoom levels while the same table's other edges stayed crisp) — a real
+     anti-aliasing artifact of the border's own sub-pixel position, not just a display quirk, so it
+     would show up printed too, not only on screen. 1.5px is comfortably thick enough to survive that
+     rounding at any zoom or print DPI. */
+  /* No body padding — edge whitespace on every page now comes entirely from renderHtmlToPdfBuffer's
+     own real print margins (all four sides), not from CSS padding on this box. CSS padding on a tall
+     element that fragments across a physical page break is NOT guaranteed to keep providing left/right
+     whitespace on continuation pages in Electron's print pipeline — confirmed live: page 2+ of a real
+     multi-page invoice rendered its tables edge-to-edge with no side margin at all, while page 1 (never
+     fragmented, so nothing exposed the bug) looked correct. A real print margin is enforced by Chromium
+     per-PAGE, independent of content fragmentation, so it can't have this failure mode. */
+  body { font-family: Arial, Helvetica, sans-serif; color: #1c1710; margin: 0; padding: 0; font-size: 12px; }
+  /* max-width was 720px — right at (very slightly over) the ~717px actually available on an A4 page
+     once the 0.4in print margins on each side are subtracted, leaving zero slack. With no margin for
+     error, the rightmost border (wherever a table/frame's own right edge landed) got clipped by a
+     hair by the page's own boundary — thin/faint rather than a normal 1.5px line, and thickening the
+     border itself didn't fix it since a border partially outside the printable area is still only
+     partially rendered no matter how wide it's declared. 700px leaves real headroom so this can't
+     recur even if the margin-to-pixel conversion rounds slightly differently than expected. */
+  .sheet { max-width: 700px; margin: 0 auto; }
+  .header { border-bottom: 1.5px solid #d1d5db; }
+  .header-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
+  .logo { display: block; height: auto; max-height: 60px; width: auto; max-width: 200px; object-fit: contain; margin-bottom: 6px; }
+  .business-name { font-size: 19px; font-weight: bold; color: #1c1710; margin: 0; }
+  .muted { color: #555; font-size: 11px; }
+  .invoice-title, .doc-title { font-size: 27px; font-weight: bold; text-align: right; color: #1c1710; margin: 0; letter-spacing: 1.5px; }
+  .badge { display: inline-block; margin-top: 6px; padding: 3px 10px; border-radius: 999px; font-size: 10px; font-weight: bold; text-transform: uppercase; background: #f1ede1; color: #1c1710; }
+
+  /* Sits inside .header, below .header-row but ABOVE the header's own border-bottom rule — so it
+     reads as "on the line", matching the reference layout, not floating below it. margin-bottom is
+     deliberately small (not the header-row/doc-vat gap's own 14px) — that gap collapses fine with
+     header-row's margin-bottom above it, but a comparable gap BELOW would visually separate this
+     text from the rule it's meant to sit on. */
+  .doc-vat { margin: 10px 0 3px; font-size: 10px; font-style: italic; color: #555; }
+  .bill-to { margin-top: 12px; }
+  .bill-to .label { font-size: 9px; text-transform: uppercase; color: #83795f; font-weight: bold; }
+  .bill-to .name { font-size: 13px; font-weight: bold; margin: 2px 0 0; }
+
+  table.meta-table { width: 100%; border-collapse: collapse; margin-top: 8px; border: 1.5px solid #d1d5db; }
+  table.meta-table th { background: #f0f0f0; color: #1c1710; text-transform: uppercase; font-size: 9px; font-weight: bold; padding: 6px 8px; text-align: left; border-bottom: 1.5px solid #d1d5db; }
+  table.meta-table th + th, table.meta-table td + td { border-left: 1.5px solid #d1d5db; }
+  table.meta-table td { padding: 6px 8px; font-size: 11px; font-weight: 600; }
+  .payment-terms { margin-top: 8px; font-size: 10.5px; font-style: italic; color: #555; }
+
+  /* box-decoration-break: clone — without it, a browser only draws a bordered block's border at the
+     very start of its first page-fragment and the very end of its last, leaving every fragment in
+     between (and the fragment edges themselves) with no border at all: the box looks like it's been
+     cut open rather than continuing on the next page. clone makes EVERY fragment get the box's full
+     border independently, so a table that spans a page break reads as two complete, closed boxes —
+     matching how the item table's own <thead> already repeats itself on each new page. */
+  .items-frame { border: 1.5px solid #d1d5db; margin-top: 12px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+  .items-frame.fill-page { display: flex; flex-direction: column; min-height: 500px; }
+  table.items-table { width: 100%; border-collapse: collapse; }
+  table.items-table th { text-align: left; font-size: 10px; text-transform: uppercase; font-weight: bold; padding: 7px 8px; border-bottom: 1.5px solid #d1d5db; background: #f0f0f0; }
+  table.items-table th + th, table.items-table td + td { border-left: 1.5px solid #d1d5db; }
+  table.items-table td { padding: 7px 8px; vertical-align: top; font-size: 11px; border-bottom: 1.5px solid #d1d5db; }
+  .items-spacer { flex: 1 1 auto; }
+  .center { text-align: center; }
+  .right { text-align: right; white-space: nowrap; }
+
+  table.totals-table { width: 100%; border-collapse: collapse; margin-top: auto; border-top: 1.5px solid #d1d5db; }
+  table.totals-table td { padding: 5px 8px; font-size: 11px; }
+  table.totals-table td:first-child { text-align: left; font-weight: bold; width: 70%; }
+  table.totals-table td:last-child { text-align: right; }
+  table.totals-table tr.grand td { font-weight: bold; font-size: 13px; border-top: 1.5px solid #d1d5db; }
+  table.totals-table tr.balance td { font-weight: bold; font-size: 13px; color: #ad3a29; }
+
+  .tax-breakdown-title { margin-top: 16px; font-size: 10px; text-transform: uppercase; color: #83795f; font-weight: bold; }
+  table.tax-breakdown { width: 100%; border-collapse: collapse; margin-top: 6px; border: 1.5px solid #d1d5db; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+  table.tax-breakdown th { font-size: 10px; text-transform: uppercase; font-weight: bold; padding: 6px 8px; border-bottom: 1.5px solid #d1d5db; background: #f0f0f0; text-align: left; }
+  table.tax-breakdown th + th, table.tax-breakdown td + td { border-left: 1.5px solid #d1d5db; }
+  table.tax-breakdown td { padding: 5px 8px; font-size: 11px; }
+
+  .payment { margin-top: 16px; }
+  .payment p { margin: 2px 0; }
+  .notes { margin-top: 16px; padding: 10px 12px; background: #f1ede1; border-radius: 4px; }
+  .terms { margin-top: 14px; font-size: 11px; color: #666; }
+  .signatures { display: flex; gap: 40px; margin-top: 48px; }
+  .signature { flex: 1; }
+  .signature .line { border-top: 1.5px solid #d1d5db; margin-top: 40px; padding-top: 4px; font-size: 11px; color: #83795f; }
+  .footer { margin-top: 20px; text-align: center; color: #83795f; font-size: 11px; }
+  .item-cell { display: flex; align-items: center; gap: 8px; }
+  .item-thumb { width: 96px; height: 96px; object-fit: contain; border-radius: 4px; flex: none; background: #f1ede1; }
+`;
+
 /** Letterhead-style receipt for the Download PDF / share-link path — same visual family as the
  * invoice/quotation/statement documents (buildInvoiceHtml etc.), not the narrow thermal-roll look
  * above. Deliberately a simpler 5-column item table (no per-item discount/tax/SKU) — ReceiptViewModel
@@ -495,85 +623,60 @@ function buildReceiptLetterheadHtml(vm: ReceiptViewModel, logo: DocumentLogo): s
 <html>
 <head>
 <meta charset="utf-8" />
-<style>
-  * { box-sizing: border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; color: #1c1710; margin: 0; padding: 48px; font-size: 13px; }
-  .sheet { max-width: 720px; margin: 0 auto; }
-  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #061e64; padding-bottom: 16px; }
-  .logo { display: block; height: auto; max-height: 64px; width: auto; max-width: 220px; object-fit: contain; margin-bottom: 8px; }
-  .business-name { font-size: 20px; font-weight: bold; color: #061e64; margin: 0; }
-  .muted { color: #666; font-size: 11px; }
-  .invoice-title { font-size: 26px; font-weight: bold; text-align: right; color: #061e64; margin: 0; letter-spacing: 1px; }
-  .meta { display: flex; justify-content: space-between; margin-top: 20px; gap: 24px; }
-  .meta-block p { margin: 2px 0; }
-  .meta-block .label { font-size: 10px; text-transform: uppercase; color: #83795f; font-weight: bold; }
-  table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-  th { text-align: left; font-size: 10px; text-transform: uppercase; color: #83795f; border-bottom: 2px solid #ddd5c2; padding: 6px 4px; }
-  td { padding: 8px 4px; border-bottom: 1px solid #eee; vertical-align: top; }
-  .center { text-align: center; }
-  .right { text-align: right; white-space: nowrap; }
-  .totals { width: 260px; margin-left: auto; margin-top: 16px; }
-  .totals td { border-bottom: none; padding: 3px 4px; }
-  .totals .grand td { font-size: 15px; font-weight: bold; border-top: 2px solid #061e64; padding-top: 8px; }
-  .payment { margin-top: 20px; }
-  .payment p { margin: 2px 0; }
-  .footer { margin-top: 32px; text-align: center; color: #83795f; font-size: 11px; }
-  .tax-breakdown-title { margin-top: 20px; font-size: 10px; text-transform: uppercase; color: #83795f; font-weight: bold; }
-  table.tax-breakdown { margin-top: 6px; }
-  table.tax-breakdown th, table.tax-breakdown td { font-size: 12px; }
-</style>
+<style>${LETTERHEAD_STYLES}</style>
 </head>
 <body>
   <div class="sheet">
     <div class="header">
-      <div>
-        ${logo.logoDataUrl ? `<img src="${logo.logoDataUrl}" class="logo" alt="" />` : ""}
-        <p class="business-name">${escapeHtml(vm.businessName)}</p>
-        ${vm.physicalAddress ? `<p class="muted">${escapeHtml(vm.physicalAddress)}</p>` : ""}
-        ${vm.primaryPhone ? `<p class="muted">${escapeHtml(vm.primaryPhone)}</p>` : ""}
-        ${vm.receiptHeader ? `<p class="muted">${escapeHtml(vm.receiptHeader)}</p>` : ""}
-      </div>
-      <div>
-        <p class="invoice-title">RECEIPT</p>
-        <p class="muted" style="text-align:right;">${escapeHtml(vm.receiptNumber ?? "-")}</p>
-      </div>
-    </div>
-
-    <div class="meta">
-      <div class="meta-block">
-        <p class="label">Sold To</p>
-        <p><strong>${escapeHtml(vm.customerName ?? "Walk-in Customer")}</strong></p>
-      </div>
-      <div class="meta-block">
-        <p class="label">Date</p>
-        <p>${escapeHtml(vm.dateLabel)}</p>
-      </div>
-      <div class="meta-block">
-        <p class="label">Storefront</p>
-        <p>${escapeHtml(vm.branchName)}</p>
-        <p class="label" style="margin-top:10px;">Served By</p>
-        <p>${escapeHtml(vm.cashierName)}</p>
+      <div class="header-row">
+        <div>
+          ${logo.logoDataUrl ? `<img src="${logo.logoDataUrl}" class="logo" alt="" />` : ""}
+          <p class="business-name">${escapeHtml(vm.businessName)}</p>
+          ${vm.physicalAddress ? `<p class="muted">${escapeHtml(vm.physicalAddress)}</p>` : ""}
+          ${vm.primaryPhone ? `<p class="muted">${escapeHtml(vm.primaryPhone)}</p>` : ""}
+          ${vm.receiptHeader ? `<p class="muted">${escapeHtml(vm.receiptHeader)}</p>` : ""}
+        </div>
+        <div>
+          <p class="invoice-title">RECEIPT</p>
+          <p class="muted" style="text-align:right;">${escapeHtml(vm.receiptNumber ?? "-")}</p>
+        </div>
       </div>
     </div>
 
-    <table>
+    <div class="bill-to">
+      <p class="label">Sold To</p>
+      <p class="name">${escapeHtml(vm.customerName ?? "Walk-in Customer")}</p>
+    </div>
+
+    <table class="meta-table">
       <thead>
-        <tr>
-          <th>#</th>
-          <th>Product</th>
-          <th class="center">Qty</th>
-          <th class="right">Unit Price</th>
-          <th class="right">Line Total</th>
-        </tr>
+        <tr><th>Date</th><th>Served By</th></tr>
       </thead>
-      <tbody>${itemRows}</tbody>
+      <tbody>
+        <tr><td>${escapeHtml(vm.dateLabel)}</td><td>${escapeHtml(vm.cashierName)}</td></tr>
+      </tbody>
     </table>
 
-    <table class="totals">
-      <tr><td>Subtotal</td><td class="right">${money(vm.subtotalCents)}</td></tr>
-      ${vm.discountAmountCents > 0 ? `<tr><td>Discount</td><td class="right">-${money(vm.discountAmountCents)}</td></tr>` : ""}
-      <tr class="grand"><td>Total</td><td class="right">${money(vm.grandTotalCents)}</td></tr>
-    </table>
+    <div class="items-frame">
+      <table class="items-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Product</th>
+            <th class="center">Qty</th>
+            <th class="right">Unit Price</th>
+            <th class="right">Line Total</th>
+          </tr>
+        </thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+      <div class="items-spacer"></div>
+      <table class="totals-table">
+        <tr><td>Subtotal</td><td>${money(vm.subtotalCents)}</td></tr>
+        ${vm.discountAmountCents > 0 ? `<tr><td>Discount</td><td>-${money(vm.discountAmountCents)}</td></tr>` : ""}
+        <tr class="grand"><td>Total</td><td>${money(vm.grandTotalCents)}</td></tr>
+      </table>
+    </div>
 
     ${buildTaxBreakdownHtml(vm.taxBreakdown, vm.vatRatePercent, (cents) => money(cents), "tax-breakdown")}
 
@@ -598,15 +701,177 @@ async function renderHtmlToPdfBuffer(
   const win = new BrowserWindow({ show: false });
   try {
     await win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(html).toString("base64")}`);
+    // Only ever adds `.fill-page` (the flex/min-height treatment — see LETTERHEAD_STYLES's own doc
+    // comment) once fonts have settled AND the frame's real content is confirmed short enough that
+    // forcing it to 500px can't possibly require fragmentation. This is the actual fix for content
+    // silently getting cut off on any document whose item table needed to span more than one physical
+    // page: Electron's printToPDF cannot reliably fragment a flex container across pages, so a
+    // document that's already going to need 2+ pages must never be flex in the first place — it's
+    // left as a plain block/border, and Chromium's ordinary (reliable) block/table pagination takes
+    // over instead. A no-op for document templates with no `.items-frame` at all (payslip/delivery
+    // note/stock receipt use their own layouts).
+    await win.webContents.executeJavaScript(`
+      document.fonts.ready.then(function () {
+        var frame = document.querySelector(".items-frame");
+        if (frame && frame.getBoundingClientRect().height < 500) frame.classList.add("fill-page");
+        return document.body.offsetHeight;
+      });
+    `);
     return await win.webContents.printToPDF({
       printBackground: true,
       landscape: options?.landscape ?? false,
-      ...(options?.pageSize ? { pageSize: options.pageSize } : {}),
-      ...(options?.margins ? { margins: options.margins } : {})
+      // Defaults to true A4, not printToPDF's own Letter/"default"-margin default — every non-thermal
+      // document builder (receipt/invoice/quotation/payslip/stock-receipt/statement/delivery-note)
+      // calls this with no options at all, so they were all silently rendering on US Letter paper
+      // while SERVER's puppeteer pipeline for the same documents already renders true A4
+      // (`page.pdf({ format: "a4" })`, document-html.ts).
+      pageSize: options?.pageSize ?? "A4",
+      // Real print margins on all four sides, not CSS body padding — LETTERHEAD_STYLES' `body` rule
+      // now has NO padding at all; see its own doc comment for why (CSS padding on a fragmented box
+      // isn't guaranteed to keep providing left/right whitespace on continuation pages in Electron's
+      // print pipeline — confirmed live: page 2 of a real multi-page invoice rendered edge-to-edge).
+      // 0.4in on every side ≈ the 40px this used to be, applied via Chromium's own per-page margin
+      // mechanism instead, which can't have that failure mode. Despite PrintToPDFOptions.margins' own
+      // doc comment saying "in pixels", it's actually inches (same unit pageSize's custom Size object
+      // uses, and confirmed by Electron's own margin-vs-pageSize validation rejecting anything that
+      // isn't inches-scale — a genuinely wrong doc comment, not a mistake here).
+      margins: options?.margins ?? { marginType: "custom", top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 },
+      // Centered "Page N out of total" footer on every document — Electron exposes the same
+      // header/footer template mechanism Puppeteer/CDP does. headerTemplate is set to an empty span
+      // rather than left unset: displayHeaderFooter defaults to showing BOTH, and an unset
+      // headerTemplate falls back to Chromium's own default (date/title/URL), not nothing.
+      displayHeaderFooter: true,
+      headerTemplate: "<span></span>",
+      footerTemplate:
+        '<div style="width:100%;font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#83795f;text-align:center;">Page <span class="pageNumber"></span> out of <span class="totalPages"></span></div>'
     });
   } finally {
     win.destroy();
   }
+}
+
+/** In-memory only — a preview is single-window, single-session, and never needs to survive the app
+ * restarting, so there's no reason to touch disk until the user actually asks to print or download.
+ * Keyed by a random id that only this process ever hands out (via the hash it loads the preview
+ * window with), so nothing else can address an entry. Cleared when its window closes. */
+const pdfPreviewRegistry = new Map<string, { buffer: Buffer; filename: string; title: string }>();
+
+/** Opens a rendered PDF in its own dedicated window instead of forcing a save-dialog-then-locate-
+ * then-open-externally round trip — field feedback specifically asked for an in-app way to just SEE
+ * a document immediately.
+ *
+ * Chromium's own native PDF viewer (`webPreferences.plugins: true`) was the first thing tried here —
+ * it produced nothing but a black screen with no error (did-finish-load fired clean, did-fail-load
+ * never fired), and turned out to be a genuinely long-standing, unfixed weakness in Electron itself
+ * (spanning years of open GitHub issues; Electron's own official replacement package,
+ * @electron/pdf-viewer, was archived/abandoned in Feb 2021). This function instead opens a SECOND
+ * instance of our own renderer bundle — same pattern as billing-pesapal-service.ts's
+ * openPesapalCheckout for an isolated window, but pointed at ourselves rather than a third party —
+ * navigated to a `#/pdf-preview/<id>` hash that main.tsx checks before deciding whether to boot the
+ * full app shell or a lightweight PdfPreviewApp that renders the PDF itself via pdfjs-dist onto a
+ * canvas. The `id` only keys an in-memory buffer (see pdfPreviewRegistry above); the PDF bytes are
+ * fetched over the same IPC bridge (window.blueLedger.printer.getPdfPreviewData) the rest of the app
+ * already uses, not written to disk. Own `partition` keeps this window OUT of the main window's
+ * session, matching every other secondary window this app opens. */
+export async function openPdfPreviewWindow(pdfBuffer: Buffer, suggestedFilename: string, windowTitle: string): Promise<void> {
+  const previewId = randomUUID();
+  pdfPreviewRegistry.set(previewId, { buffer: pdfBuffer, filename: suggestedFilename, title: windowTitle });
+
+  const isDev = !app.isPackaged && Boolean(process.env.ELECTRON_RENDERER_URL);
+
+  const previewWindow = new BrowserWindow({
+    width: 900,
+    height: 1000,
+    minWidth: 640,
+    minHeight: 600,
+    title: windowTitle,
+    autoHideMenuBar: true,
+    show: false,
+    webPreferences: {
+      preload: join(app.getAppPath(), "out/preload/index.js"),
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      partition: "pdf-preview"
+    }
+  });
+
+  // Own session (via `partition` above), so this does NOT inherit main-window.ts's CSP injection —
+  // applied again here explicitly rather than relying on that, both for defense-in-depth (this window
+  // loads our own trusted bundle either way) and because pdfjs-dist's worker asset must load under it.
+  previewWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        "Content-Security-Policy": [buildRendererCsp(isDev)]
+      }
+    });
+  });
+  previewWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+
+  const hash = `/pdf-preview/${previewId}`;
+  if (isDev && process.env.ELECTRON_RENDERER_URL) {
+    await previewWindow.loadURL(`${process.env.ELECTRON_RENDERER_URL}#${hash}`);
+  } else {
+    await previewWindow.loadFile(join(app.getAppPath(), "out/renderer/index.html"), { hash });
+  }
+  previewWindow.maximize();
+  previewWindow.show();
+
+  previewWindow.on("closed", () => {
+    pdfPreviewRegistry.delete(previewId);
+  });
+}
+
+/** Renderer-side counterpart of openPdfPreviewWindow — PdfPreviewApp calls this once on mount to fetch
+ * the actual bytes for the id its own `#/pdf-preview/<id>` hash was opened with. Base64 over IPC
+ * (rather than a raw Buffer/Uint8Array) is deliberate: contextBridge's structured-clone boundary
+ * handles plain strings unambiguously, where a Node Buffer arriving in the renderer would need its own
+ * re-wrapping anyway. Null means the window somehow outlived its registry entry (e.g. a reload after
+ * the app restarted) — the caller shows an error instead of throwing. */
+export function getPdfPreviewData(previewId: string): { data: string; filename: string; title: string } | null {
+  const entry = pdfPreviewRegistry.get(previewId);
+  if (!entry) return null;
+  return { data: entry.buffer.toString("base64"), filename: entry.filename, title: entry.title };
+}
+
+/** The preview window's own Print button — reuses the exact same pdf-to-printer pipeline every other
+ * "Print" action in this file already relies on (see printHtmlViaSystemPrinter's own reasoning: this
+ * sidesteps webContents.print()'s "Invalid printer settings" failures against real POS/label printer
+ * drivers), just skipping the HTML-render step since the buffer already exists in the registry. */
+export async function printPdfPreview(previewId: string): Promise<PrinterActionResult> {
+  const entry = pdfPreviewRegistry.get(previewId);
+  if (!entry) return { success: false, message: "This preview has expired — close the window and open it again." };
+
+  const tempPath = join(app.getPath("temp"), `blue-ledger-preview-print-${randomUUID()}.pdf`);
+  await writeFile(tempPath, entry.buffer);
+  try {
+    await printPdfToPrinter(tempPath, { silent: true });
+    return { success: true, message: "Sent to printer" };
+  } catch (err) {
+    return { success: false, message: err instanceof Error ? err.message : "Failed to print" };
+  } finally {
+    await unlink(tempPath).catch(() => {});
+  }
+}
+
+/** The preview window's own Download button — identical save-dialog tail every generate*Pdf function
+ * already used before this feature existed, just fed from the registry's buffer instead of a fresh
+ * render. */
+export async function downloadPdfPreview(previewId: string): Promise<PrinterActionResult> {
+  const entry = pdfPreviewRegistry.get(previewId);
+  if (!entry) return { success: false, message: "This preview has expired — close the window and open it again." };
+
+  const result = await dialog.showSaveDialog({
+    title: "Save PDF",
+    defaultPath: entry.filename,
+    filters: [{ name: "PDF", extensions: ["pdf"] }]
+  });
+  if (result.canceled || !result.filePath) return { success: false, message: "Cancelled" };
+
+  await writeFile(result.filePath, entry.buffer);
+  return { success: true, message: `Saved to ${result.filePath}` };
 }
 
 /** Renders HTML to a PDF sized EXACTLY to its own content, for continuous-roll thermal printing.
@@ -673,16 +938,40 @@ export async function generateReceiptPdf(saleId: string): Promise<string | null>
   return result.filePath;
 }
 
+/** Opens the receipt in a preview window instead of prompting for a save location — see
+ * openPdfPreviewWindow's own doc comment. Same data-loading/HTML-build as generateReceiptPdf. */
+export async function previewReceiptPdf(saleId: string): Promise<void> {
+  requirePermission("sales", "view");
+  const { sale, business } = loadReceiptData(saleId);
+  const viewModel = buildReceiptViewModel(sale, business);
+  const tenantRow = tenantRepository.findTenantRow();
+  const logo = tenantRow ? await resolveDocumentLogo(sale.locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
+  const html = buildReceiptLetterheadHtml(viewModel, logo);
+  const buffer = await renderHtmlToPdfBuffer(html);
+  const filename = `Receipt-${viewModel.receiptNumber ?? saleId}.pdf`;
+  await openPdfPreviewWindow(buffer, filename, `Receipt ${viewModel.receiptNumber ?? saleId}`);
+}
+
 function paymentStatusLabel(status: Sale["paymentStatus"]): string {
   return PAYMENT_STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status;
 }
 
-function transactionTypeLabel(type: Sale["transactionType"]): string {
-  return TRANSACTION_TYPE_OPTIONS.find((option) => option.value === type)?.label ?? type;
-}
-
 function formatInvoiceDate(value: string | null): string {
   return formatDocumentDate(value);
+}
+
+/** Whole days between two ISO dates, rounded — used for the computed "Payment Terms: Payment due
+ * within N days" (invoice) / "Quotation expires within N days" (quotation) line, since neither is a
+ * stored field, just the gap between two dates every document already carries. Null if either date
+ * is missing, so the caller can skip the line entirely rather than show a nonsense "within NaN days". */
+function daysBetween(startIso: string | null, endIso: string | null): number | null {
+  if (!startIso || !endIso) return null;
+  const diffMs = new Date(endIso).getTime() - new Date(startIso).getTime();
+  if (!Number.isFinite(diffMs)) return null;
+  // Clamped at 0 — a same-day due date can round to -1 purely from time-of-day noise (e.g. invoice
+  // timestamped 14:03, due date stored as that same calendar day's midnight), and there's no such
+  // thing as a real invoice whose stated term is a negative number of days.
+  return Math.max(0, Math.round(diffMs / (1000 * 60 * 60 * 24)));
 }
 
 type DocumentLogo = { logoDataUrl: string | null; logoRatio: LogoRatio | null };
@@ -705,6 +994,9 @@ type DocumentBusinessInfo = {
   showProductImagesOnQuotations: boolean;
   currency: string;
   vatRatePercent: number;
+  /** The business's own KRA PIN — shown as "Our VAT No." on the invoice PDF only, always tenant-
+   * wide (no per-storefront override exists for this, unlike header/footer text). */
+  kraPin: string | null;
 };
 
 /** Every customer-facing document belongs to a specific storefront, and must show THAT storefront's
@@ -730,7 +1022,8 @@ function resolveDocumentBusiness(locationId: string | null, tenantRow: tenantRep
     showProductImagesOnInvoices: Boolean(locationRow?.show_product_images_on_invoices),
     showProductImagesOnQuotations: Boolean(locationRow?.show_product_images_on_quotations),
     currency: tenantRow.currency,
-    vatRatePercent: tenantRow.vat_rate_percent
+    vatRatePercent: tenantRow.vat_rate_percent,
+    kraPin: tenantRow.kra_pin
   };
 }
 
@@ -864,101 +1157,82 @@ function buildInvoiceHtml(
 <html>
 <head>
 <meta charset="utf-8" />
-<style>
-  * { box-sizing: border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; color: #1c1710; margin: 0; padding: 48px; font-size: 13px; }
-  .sheet { max-width: 720px; margin: 0 auto; }
-  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #061e64; padding-bottom: 16px; }
-  .logo { display: block; height: auto; max-height: 64px; width: auto; max-width: 220px; object-fit: contain; margin-bottom: 8px; }
-  .business-name { font-size: 20px; font-weight: bold; color: #061e64; margin: 0; }
-  .muted { color: #666; font-size: 11px; }
-  .invoice-title { font-size: 26px; font-weight: bold; text-align: right; color: #061e64; margin: 0; letter-spacing: 1px; }
-  .badge { display: inline-block; margin-top: 6px; padding: 3px 10px; border-radius: 999px; font-size: 10px; font-weight: bold; text-transform: uppercase; background: #f1ede1; color: #1c1710; }
-  .meta { display: flex; justify-content: space-between; margin-top: 20px; gap: 24px; }
-  .meta-block p { margin: 2px 0; }
-  .meta-block .label { font-size: 10px; text-transform: uppercase; color: #83795f; font-weight: bold; }
-  table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-  th { text-align: left; font-size: 10px; text-transform: uppercase; color: #83795f; border-bottom: 2px solid #ddd5c2; padding: 6px 4px; }
-  td { padding: 8px 4px; border-bottom: 1px solid #eee; vertical-align: top; }
-  .center { text-align: center; }
-  .right { text-align: right; white-space: nowrap; }
-  .totals { width: 260px; margin-left: auto; margin-top: 16px; }
-  .totals td { border-bottom: none; padding: 3px 4px; }
-  .totals .grand td { font-size: 15px; font-weight: bold; border-top: 2px solid #061e64; padding-top: 8px; }
-  .totals .balance td { font-size: 15px; font-weight: bold; color: #ad3a29; }
-  .notes { margin-top: 24px; padding: 12px; background: #f1ede1; border-radius: 8px; }
-  .footer { margin-top: 32px; text-align: center; color: #83795f; font-size: 11px; }
-  .tax-breakdown-title { margin-top: 20px; font-size: 10px; text-transform: uppercase; color: #83795f; font-weight: bold; }
-  table.tax-breakdown { margin-top: 6px; }
-  table.tax-breakdown th, table.tax-breakdown td { font-size: 12px; }
-  .item-cell { display: flex; align-items: center; gap: 8px; }
-  .item-thumb { width: 96px; height: 96px; object-fit: contain; border-radius: 4px; flex: none; background: #f1ede1; }
-</style>
+<style>${LETTERHEAD_STYLES}</style>
 </head>
 <body>
   <div class="sheet">
     <div class="header">
-      <div>
-        ${logo.logoDataUrl ? `<img src="${logo.logoDataUrl}" class="logo" alt="" />` : ""}
-        <p class="business-name">${escapeHtml(business.businessName)}</p>
-        ${business.physicalAddress ? `<p class="muted">${escapeHtml(business.physicalAddress)}</p>` : ""}
-        ${business.primaryPhone ? `<p class="muted">${escapeHtml(business.primaryPhone)}</p>` : ""}
-        ${business.invoiceHeader ? `<p class="muted">${escapeHtml(business.invoiceHeader)}</p>` : ""}
+      <div class="header-row">
+        <div>
+          ${logo.logoDataUrl ? `<img src="${logo.logoDataUrl}" class="logo" alt="" />` : ""}
+          <p class="business-name">${escapeHtml(business.businessName)}</p>
+          ${business.physicalAddress ? `<p class="muted">${escapeHtml(business.physicalAddress)}</p>` : ""}
+          ${business.primaryPhone ? `<p class="muted">${escapeHtml(business.primaryPhone)}</p>` : ""}
+          ${business.invoiceHeader ? `<p class="muted">${escapeHtml(business.invoiceHeader)}</p>` : ""}
+        </div>
+        <div>
+          <p class="invoice-title">INVOICE</p>
+          <p class="muted" style="text-align:right;">${escapeHtml(sale.invoiceNumber ?? "-")}</p>
+          <div style="text-align:right;"><span class="badge">${escapeHtml(paymentStatusLabel(sale.paymentStatus))}</span></div>
+        </div>
       </div>
-      <div>
-        <p class="invoice-title">INVOICE</p>
-        <p class="muted" style="text-align:right;">${escapeHtml(sale.invoiceNumber ?? "-")}</p>
-        <div style="text-align:right;"><span class="badge">${escapeHtml(paymentStatusLabel(sale.paymentStatus))}</span></div>
-      </div>
+      ${business.kraPin ? `<p class="doc-vat">Our VAT No. ${escapeHtml(business.kraPin)}</p>` : ""}
     </div>
 
-    <div class="meta">
-      <div class="meta-block">
-        <p class="label">Bill To</p>
-        <p><strong>${escapeHtml(sale.customerName ?? "Walk-in Customer")}</strong></p>
-        <p class="label" style="margin-top:10px;">Transaction Type</p>
-        <p>${escapeHtml(transactionTypeLabel(sale.transactionType))}</p>
-      </div>
-      <div class="meta-block">
-        <p class="label">Invoice Date</p>
-        <p>${formatInvoiceDate(sale.invoiceDate)}</p>
-        <p class="label" style="margin-top:10px;">Due Date</p>
-        <p>${formatInvoiceDate(sale.dueDate)}</p>
-      </div>
-      <div class="meta-block">
-        <p class="label">Storefront</p>
-        <p>${escapeHtml(sale.locationName)}</p>
-        <p class="label" style="margin-top:10px;">Issued By</p>
-        <p>${escapeHtml(sale.employeeName)}</p>
-      </div>
+    <div class="bill-to">
+      <p class="label">Billed To:</p>
+      <p class="name">${escapeHtml(sale.customerName ?? "Walk-in Customer")}</p>
     </div>
 
-    <table>
+    <table class="meta-table">
       <thead>
-        <tr>
-          <th>#</th>
-          <th>Product</th>
-          <th class="center">Qty</th>
-          <th class="right">Unit Price</th>
-          <th class="right">Discount</th>
-          <th class="right">Line Total</th>
-        </tr>
+        <tr><th>Invoice Date</th><th>Due Date</th><th>Issued By</th><th>Your VAT No.</th></tr>
       </thead>
-      <tbody>${itemRows}</tbody>
+      <tbody>
+        <tr>
+          <td>${formatInvoiceDate(sale.invoiceDate)}</td>
+          <td>${formatInvoiceDate(sale.dueDate)}</td>
+          <td>${escapeHtml(sale.employeeName)}</td>
+          <td>${escapeHtml(sale.customerKraPin ?? "-")}</td>
+        </tr>
+      </tbody>
     </table>
 
-    <table class="totals">
-      <tr><td>Subtotal</td><td class="right">${money(sale.subtotalCents)}</td></tr>
-      ${sale.discountAmountCents > 0 ? `<tr><td>Discount</td><td class="right">-${money(sale.discountAmountCents)}</td></tr>` : ""}
-      <tr class="grand"><td>Total</td><td class="right">${money(sale.grandTotalCents)}</td></tr>
-      <tr><td>Amount Paid</td><td class="right">${money(sale.amountPaidCents)}</td></tr>
-      <tr class="balance"><td>Balance Due</td><td class="right">${money(sale.balanceDueCents)}</td></tr>
-    </table>
+    ${
+      (() => {
+        const days = daysBetween(sale.invoiceDate, sale.dueDate);
+        return days === null ? "" : `<p class="payment-terms">Payment Terms: Payment due within ${days} day${days === 1 ? "" : "s"}</p>`;
+      })()
+    }
+
+    <div class="items-frame">
+      <table class="items-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Product</th>
+            <th class="center">Qty</th>
+            <th class="right">Unit Price</th>
+            <th class="right">Discount</th>
+            <th class="right">Line Total</th>
+          </tr>
+        </thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+      <div class="items-spacer"></div>
+      <table class="totals-table">
+        <tr><td>Subtotal</td><td>${money(sale.subtotalCents)}</td></tr>
+        ${sale.discountAmountCents > 0 ? `<tr><td>Discount</td><td>-${money(sale.discountAmountCents)}</td></tr>` : ""}
+        <tr class="grand"><td>Total</td><td>${money(sale.grandTotalCents)}</td></tr>
+        <tr><td>Amount Paid</td><td>${money(sale.amountPaidCents)}</td></tr>
+        <tr class="balance"><td>Balance Due</td><td>${money(sale.balanceDueCents)}</td></tr>
+      </table>
+    </div>
 
     ${
       sale.payments.length > 0
         ? `<p class="tax-breakdown-title">Payments Made</p>
-    <table>
+    <table class="tax-breakdown">
       <thead>
         <tr><th>Date</th><th>Method</th><th>Reference</th><th>Received By</th><th class="right">Amount</th></tr>
       </thead>
@@ -1001,6 +1275,22 @@ export async function generateInvoicePdf(saleId: string): Promise<string | null>
 
   await writeFile(result.filePath, buffer);
   return result.filePath;
+}
+
+/** Opens the invoice in a preview window instead of prompting for a save location — see
+ * openPdfPreviewWindow's own doc comment. Same data-loading/HTML-build as generateInvoicePdf. */
+export async function previewInvoicePdf(saleId: string): Promise<void> {
+  requirePermission("sales", "view");
+  const { sale, business } = loadReceiptData(saleId);
+  if (!sale.invoiceNumber) {
+    throw new Error("This sale is not an invoice");
+  }
+  const tenantRow = tenantRepository.findTenantRow();
+  const logo = tenantRow ? await resolveDocumentLogo(sale.locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
+  const productImages = business.showProductImagesOnInvoices ? await resolveItemProductImages(sale.items) : new Map();
+  const html = buildInvoiceHtml(sale, business, logo, productImages);
+  const buffer = await renderHtmlToPdfBuffer(html);
+  await openPdfPreviewWindow(buffer, `${sale.invoiceNumber}.pdf`, `Invoice ${sale.invoiceNumber}`);
 }
 
 /** Sends the invoice document straight to Windows' default printer — a regular A4 printer, not the
@@ -1235,95 +1525,73 @@ function buildQuotationHtml(
 <html>
 <head>
 <meta charset="utf-8" />
-<style>
-  * { box-sizing: border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; color: #1c1710; margin: 0; padding: 48px; font-size: 13px; }
-  .sheet { max-width: 720px; margin: 0 auto; }
-  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #061e64; padding-bottom: 16px; }
-  .logo { display: block; height: auto; max-height: 64px; width: auto; max-width: 220px; object-fit: contain; margin-bottom: 8px; }
-  .business-name { font-size: 20px; font-weight: bold; color: #061e64; margin: 0; }
-  .muted { color: #666; font-size: 11px; }
-  .doc-title { font-size: 26px; font-weight: bold; text-align: right; color: #061e64; margin: 0; letter-spacing: 1px; }
-  .badge { display: inline-block; margin-top: 6px; padding: 3px 10px; border-radius: 999px; font-size: 10px; font-weight: bold; text-transform: uppercase; background: #f1ede1; color: #1c1710; }
-  .meta { display: flex; justify-content: space-between; margin-top: 20px; gap: 24px; }
-  .meta-block p { margin: 2px 0; }
-  .meta-block .label { font-size: 10px; text-transform: uppercase; color: #83795f; font-weight: bold; }
-  table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-  th { text-align: left; font-size: 10px; text-transform: uppercase; color: #83795f; border-bottom: 2px solid #ddd5c2; padding: 6px 4px; }
-  td { padding: 8px 4px; border-bottom: 1px solid #eee; vertical-align: top; }
-  .center { text-align: center; }
-  .right { text-align: right; white-space: nowrap; }
-  .totals { width: 260px; margin-left: auto; margin-top: 16px; }
-  .totals td { border-bottom: none; padding: 3px 4px; }
-  .totals .grand td { font-size: 15px; font-weight: bold; border-top: 2px solid #061e64; padding-top: 8px; }
-  .notes { margin-top: 24px; padding: 12px; background: #f1ede1; border-radius: 8px; }
-  .terms { margin-top: 16px; font-size: 11px; color: #666; }
-  .signatures { display: flex; gap: 40px; margin-top: 56px; }
-  .signature { flex: 1; }
-  .signature .line { border-top: 1px solid #999; margin-top: 40px; padding-top: 4px; font-size: 11px; color: #83795f; }
-  .footer { margin-top: 32px; text-align: center; color: #83795f; font-size: 11px; }
-  .tax-breakdown-title { margin-top: 20px; font-size: 10px; text-transform: uppercase; color: #83795f; font-weight: bold; }
-  table.tax-breakdown { margin-top: 6px; }
-  table.tax-breakdown th, table.tax-breakdown td { font-size: 12px; }
-  .item-cell { display: flex; align-items: center; gap: 8px; }
-  .item-thumb { width: 96px; height: 96px; object-fit: contain; border-radius: 4px; flex: none; background: #f1ede1; }
-</style>
+<style>${LETTERHEAD_STYLES}</style>
 </head>
 <body>
   <div class="sheet">
     <div class="header">
-      <div>
-        ${logo.logoDataUrl ? `<img src="${logo.logoDataUrl}" class="logo" alt="" />` : ""}
-        <p class="business-name">${escapeHtml(business.businessName)}</p>
-        ${business.physicalAddress ? `<p class="muted">${escapeHtml(business.physicalAddress)}</p>` : ""}
-        ${business.primaryPhone ? `<p class="muted">${escapeHtml(business.primaryPhone)}</p>` : ""}
-        ${business.quotationHeader ? `<p class="muted">${escapeHtml(business.quotationHeader)}</p>` : ""}
-      </div>
-      <div>
-        <p class="doc-title">QUOTATION</p>
-        <p class="muted" style="text-align:right;">${escapeHtml(quotation.quotationNumber)}</p>
-        <div style="text-align:right;"><span class="badge">${escapeHtml(quotationStatusLabel(quotation.status))}</span></div>
-      </div>
-    </div>
-
-    <div class="meta">
-      <div class="meta-block">
-        <p class="label">Quoted To</p>
-        <p><strong>${escapeHtml(quotation.customerName)}</strong></p>
-      </div>
-      <div class="meta-block">
-        <p class="label">Date Prepared</p>
-        <p>${formatInvoiceDate(quotation.createdAt)}</p>
-        <p class="label" style="margin-top:10px;">Valid Until</p>
-        <p>${formatInvoiceDate(quotation.validUntil)}</p>
-      </div>
-      <div class="meta-block">
-        <p class="label">Storefront</p>
-        <p>${escapeHtml(quotation.locationName)}</p>
-        <p class="label" style="margin-top:10px;">Prepared By</p>
-        <p>${escapeHtml(quotation.employeeName)}</p>
+      <div class="header-row">
+        <div>
+          ${logo.logoDataUrl ? `<img src="${logo.logoDataUrl}" class="logo" alt="" />` : ""}
+          <p class="business-name">${escapeHtml(business.businessName)}</p>
+          ${business.physicalAddress ? `<p class="muted">${escapeHtml(business.physicalAddress)}</p>` : ""}
+          ${business.primaryPhone ? `<p class="muted">${escapeHtml(business.primaryPhone)}</p>` : ""}
+          ${business.quotationHeader ? `<p class="muted">${escapeHtml(business.quotationHeader)}</p>` : ""}
+        </div>
+        <div>
+          <p class="doc-title">QUOTATION</p>
+          <p class="muted" style="text-align:right;">${escapeHtml(quotation.quotationNumber)}</p>
+          <div style="text-align:right;"><span class="badge">${escapeHtml(quotationStatusLabel(quotation.status))}</span></div>
+        </div>
       </div>
     </div>
 
-    <table>
+    <div class="bill-to">
+      <p class="label">Quoted To</p>
+      <p class="name">${escapeHtml(quotation.customerName)}</p>
+    </div>
+
+    <table class="meta-table">
       <thead>
-        <tr>
-          <th>#</th>
-          <th>Product</th>
-          <th class="center">Qty</th>
-          <th class="right">Unit Price</th>
-          <th class="right">Discount</th>
-          <th class="right">Line Total</th>
-        </tr>
+        <tr><th>Date Prepared</th><th>Valid Until</th><th>Prepared By</th></tr>
       </thead>
-      <tbody>${itemRows}</tbody>
+      <tbody>
+        <tr>
+          <td>${formatInvoiceDate(quotation.createdAt)}</td>
+          <td>${formatInvoiceDate(quotation.validUntil)}</td>
+          <td>${escapeHtml(quotation.employeeName)}</td>
+        </tr>
+      </tbody>
     </table>
 
-    <table class="totals">
-      <tr><td>Subtotal</td><td class="right">${money(quotation.subtotalCents)}</td></tr>
-      ${quotation.discountAmountCents > 0 ? `<tr><td>Discount</td><td class="right">-${money(quotation.discountAmountCents)}</td></tr>` : ""}
-      <tr class="grand"><td>Total</td><td class="right">${money(quotation.grandTotalCents)}</td></tr>
-    </table>
+    ${
+      (() => {
+        const days = daysBetween(quotation.createdAt, quotation.validUntil);
+        return days === null ? "" : `<p class="payment-terms">Quotation expires within ${days} day${days === 1 ? "" : "s"}</p>`;
+      })()
+    }
+
+    <div class="items-frame">
+      <table class="items-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Product</th>
+            <th class="center">Qty</th>
+            <th class="right">Unit Price</th>
+            <th class="right">Discount</th>
+            <th class="right">Line Total</th>
+          </tr>
+        </thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+      <div class="items-spacer"></div>
+      <table class="totals-table">
+        <tr><td>Subtotal</td><td>${money(quotation.subtotalCents)}</td></tr>
+        ${quotation.discountAmountCents > 0 ? `<tr><td>Discount</td><td>-${money(quotation.discountAmountCents)}</td></tr>` : ""}
+        <tr class="grand"><td>Total</td><td>${money(quotation.grandTotalCents)}</td></tr>
+      </table>
+    </div>
 
     ${buildTaxBreakdownHtml(computeTaxBreakdown(quotation.items), business.vatRatePercent, (cents) => money(cents), "tax-breakdown")}
 
@@ -1370,6 +1638,19 @@ export async function generateQuotationPdf(quotationId: string): Promise<string 
 
   await writeFile(result.filePath, buffer);
   return result.filePath;
+}
+
+/** Opens the quotation in a preview window instead of prompting for a save location — see
+ * openPdfPreviewWindow's own doc comment. Same data-loading/HTML-build as generateQuotationPdf. */
+export async function previewQuotationPdf(quotationId: string): Promise<void> {
+  requirePermission("quotations", "view");
+  const { quotation, business } = loadQuotationData(quotationId);
+  const tenantRow = tenantRepository.findTenantRow();
+  const logo = tenantRow ? await resolveDocumentLogo(quotation.locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
+  const productImages = business.showProductImagesOnQuotations ? await resolveItemProductImages(quotation.items) : new Map();
+  const html = buildQuotationHtml(quotation, business, logo, productImages);
+  const buffer = await renderHtmlToPdfBuffer(html);
+  await openPdfPreviewWindow(buffer, `${quotation.quotationNumber}.pdf`, `Quotation ${quotation.quotationNumber}`);
 }
 
 /** Opens the native print dialog for the quotation document — a regular A4 printer, not the ESC/POS thermal one. */
@@ -1671,6 +1952,15 @@ export async function generateSalaryPdf(salaryId: string): Promise<string | null
 
   await writeFile(result.filePath, buffer);
   return result.filePath;
+}
+
+/** Opens the payslip in a preview window instead of prompting for a save location — see
+ * openPdfPreviewWindow's own doc comment. Same data-loading/HTML-build as generateSalaryPdf. */
+export async function previewSalaryPdf(salaryId: string): Promise<void> {
+  const { salary, business, logo } = await loadSalaryData(salaryId);
+  const html = buildPayslipHtml(salary, business, logo);
+  const buffer = await renderHtmlToPdfBuffer(html);
+  await openPdfPreviewWindow(buffer, `${salary.payslipNumber}.pdf`, `Payslip ${salary.payslipNumber}`);
 }
 
 /**
@@ -1977,6 +2267,18 @@ export async function generateDeliveryNotePdf(deliveryNoteId: string): Promise<s
   return result.filePath;
 }
 
+/** Opens the delivery note in a preview window instead of prompting for a save location — see
+ * openPdfPreviewWindow's own doc comment. Same data-loading/HTML-build as generateDeliveryNotePdf. */
+export async function previewDeliveryNotePdf(deliveryNoteId: string): Promise<void> {
+  requirePermission("sales", "view");
+  const { vm, locationId } = loadDeliveryNoteData(deliveryNoteId);
+  const tenantRow = tenantRepository.findTenantRow();
+  const logo = tenantRow ? await resolveDocumentLogo(locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
+  const html = buildDeliveryNoteHtml(vm, logo);
+  const buffer = await renderHtmlToPdfBuffer(html);
+  await openPdfPreviewWindow(buffer, `${vm.deliveryNoteNumber}.pdf`, `Delivery Note ${vm.deliveryNoteNumber}`);
+}
+
 type StockReceiptDocumentViewModel = {
   receiptNumber: string;
   locationName: string;
@@ -1984,6 +2286,9 @@ type StockReceiptDocumentViewModel = {
   receivedByName: string;
   notes: string | null;
   createdAt: string;
+  /** See StockReceiptRow.is_transfer's own comment (stock-receipt-repository.ts) — derived, not
+   * stored; distinguishes a plain Goods Received Note from an internal Main Store transfer note. */
+  isTransfer: boolean;
   items: Array<{
     productName: string;
     sku: string;
@@ -2008,6 +2313,7 @@ function loadStockReceiptData(stockReceiptId: string): { vm: StockReceiptDocumen
       receivedByName: row.received_by_name,
       notes: row.notes,
       createdAt: row.created_at,
+      isTransfer: row.is_transfer > 0,
       items: items.map((item) => ({
         productName: item.product_name,
         sku: item.sku,
@@ -2075,15 +2381,16 @@ function buildStockReceiptHtml(vm: StockReceiptDocumentViewModel, business: Docu
         ${business.primaryPhone ? `<p class="muted">${escapeHtml(business.primaryPhone)}</p>` : ""}
       </div>
       <div>
-        <p class="doc-title">GOODS RECEIVED</p>
+        <p class="doc-title">${vm.isTransfer ? "STOCK TRANSFER" : "GOODS RECEIVED"}</p>
         <p class="muted" style="text-align:right;">${escapeHtml(vm.receiptNumber)}</p>
       </div>
     </div>
 
     <div class="meta">
       <div class="meta-block">
-        <p class="label">Received Into</p>
+        <p class="label">${vm.isTransfer ? "Transferred To" : "Received Into"}</p>
         <p><strong>${escapeHtml(vm.locationName)}</strong></p>
+        ${vm.isTransfer ? `<p class="label" style="margin-top:10px;">Source</p><p>Main Store</p>` : ""}
         ${vm.allocationStorefrontName ? `<p class="label" style="margin-top:10px;">Earmarked For</p><p>${escapeHtml(vm.allocationStorefrontName)}</p>` : ""}
       </div>
       <div class="meta-block">
@@ -2161,6 +2468,22 @@ export async function generateStockReceiptPdf(stockReceiptId: string): Promise<s
   return result.filePath;
 }
 
+/** Opens the goods received note in a preview window instead of prompting for a save location — see
+ * openPdfPreviewWindow's own doc comment. Same data-loading/HTML-build as generateStockReceiptPdf. */
+export async function previewStockReceiptPdf(stockReceiptId: string): Promise<void> {
+  requirePermission("inventory", "view");
+  const { vm, locationId } = loadStockReceiptData(stockReceiptId);
+  const tenantRow = tenantRepository.findTenantRow();
+  if (!tenantRow) {
+    throw new Error("Business profile not found");
+  }
+  const business = resolveDocumentBusiness(locationId, tenantRow);
+  const logo = await resolveDocumentLogo(locationId, tenantRow);
+  const html = buildStockReceiptHtml(vm, business, logo);
+  const buffer = await renderHtmlToPdfBuffer(html);
+  await openPdfPreviewWindow(buffer, `${vm.receiptNumber}.pdf`, `${vm.isTransfer ? "Stock Transfer" : "Goods Received"} ${vm.receiptNumber}`);
+}
+
 /** Builds a Statement of Account — not tied to one storefront (a customer's invoices can span
  * several), so unlike every other document template here this one never resolves a per-location
  * business override; vm's business fields are already the tenant-wide default (see
@@ -2193,83 +2516,67 @@ function buildStatementHtml(vm: CustomerStatementViewModel): string {
 <html>
 <head>
 <meta charset="utf-8" />
-<style>
-  * { box-sizing: border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; color: #1c1710; margin: 0; padding: 48px; font-size: 13px; }
-  .sheet { max-width: 720px; margin: 0 auto; }
-  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #061e64; padding-bottom: 16px; }
-  .business-name { font-size: 20px; font-weight: bold; color: #061e64; margin: 0; }
-  .muted { color: #666; font-size: 11px; }
-  .invoice-title { font-size: 26px; font-weight: bold; text-align: right; color: #061e64; margin: 0; letter-spacing: 1px; }
-  .meta { display: flex; justify-content: space-between; margin-top: 20px; gap: 24px; }
-  .meta-block p { margin: 2px 0; }
-  .meta-block .label { font-size: 10px; text-transform: uppercase; color: #83795f; font-weight: bold; }
-  table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-  th { text-align: left; font-size: 10px; text-transform: uppercase; color: #83795f; border-bottom: 2px solid #ddd5c2; padding: 6px 4px; }
-  td { padding: 8px 4px; border-bottom: 1px solid #eee; vertical-align: top; }
-  .center { text-align: center; }
-  .right { text-align: right; white-space: nowrap; }
-  .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 10px; font-weight: bold; text-transform: uppercase; background: #f1ede1; color: #1c1710; }
-  .totals { width: 260px; margin-left: auto; margin-top: 16px; }
-  .totals td { border-bottom: none; padding: 3px 4px; }
-  .totals .grand td { font-size: 15px; font-weight: bold; border-top: 2px solid #061e64; padding-top: 8px; color: #ad3a29; }
-  .footer { margin-top: 32px; text-align: center; color: #83795f; font-size: 11px; }
-</style>
+<style>${LETTERHEAD_STYLES}</style>
 </head>
 <body>
   <div class="sheet">
     <div class="header">
-      <div>
-        <p class="business-name">${escapeHtml(vm.businessName)}</p>
-        ${vm.physicalAddress ? `<p class="muted">${escapeHtml(vm.physicalAddress)}</p>` : ""}
-        ${vm.primaryPhone ? `<p class="muted">${escapeHtml(vm.primaryPhone)}</p>` : ""}
-      </div>
-      <div>
-        <p class="invoice-title">STATEMENT</p>
-        <p class="muted" style="text-align:right;">${formatInvoiceDate(vm.generatedAt)}</p>
+      <div class="header-row">
+        <div>
+          <p class="business-name">${escapeHtml(vm.businessName)}</p>
+          ${vm.physicalAddress ? `<p class="muted">${escapeHtml(vm.physicalAddress)}</p>` : ""}
+          ${vm.primaryPhone ? `<p class="muted">${escapeHtml(vm.primaryPhone)}</p>` : ""}
+        </div>
+        <div>
+          <p class="invoice-title">STATEMENT</p>
+          <p class="muted" style="text-align:right;">${formatInvoiceDate(vm.generatedAt)}</p>
+        </div>
       </div>
     </div>
 
-    <div class="meta">
-      <div class="meta-block">
-        <p class="label">Statement For</p>
-        <p><strong>${escapeHtml(vm.customerName)}</strong></p>
-        <p>${escapeHtml(vm.customerPhone)}</p>
-        ${vm.customerEmail ? `<p>${escapeHtml(vm.customerEmail)}</p>` : ""}
-      </div>
-      ${
-        vm.creditLimitCents !== null && availableCreditCents !== null
-          ? `<div class="meta-block">
-        <p class="label">Credit Limit</p>
-        <p>${money(vm.creditLimitCents)}</p>
-        <p class="label" style="margin-top:10px;">Available Credit</p>
-        <p>${money(availableCreditCents)}</p>
-      </div>`
-          : ""
-      }
+    <div class="bill-to">
+      <p class="label">Statement For</p>
+      <p class="name">${escapeHtml(vm.customerName)}</p>
+      <p class="muted">${escapeHtml(vm.customerPhone)}</p>
+      ${vm.customerEmail ? `<p class="muted">${escapeHtml(vm.customerEmail)}</p>` : ""}
     </div>
 
-    <table>
+    ${
+      vm.creditLimitCents !== null && availableCreditCents !== null
+        ? `<table class="meta-table">
       <thead>
-        <tr>
-          <th>#</th>
-          <th>Invoice</th>
-          <th>Date</th>
-          <th>Due</th>
-          <th class="right">Total</th>
-          <th class="right">Paid</th>
-          <th class="right">Balance</th>
-          <th>Status</th>
-        </tr>
+        <tr><th>Credit Limit</th><th>Available Credit</th></tr>
       </thead>
-      <tbody>${rows}</tbody>
-    </table>
+      <tbody>
+        <tr><td>${money(vm.creditLimitCents)}</td><td>${money(availableCreditCents)}</td></tr>
+      </tbody>
+    </table>`
+        : ""
+    }
 
-    <table class="totals">
-      <tr><td>Total Invoiced</td><td class="right">${money(vm.totalInvoicedCents)}</td></tr>
-      <tr><td>Total Paid</td><td class="right">${money(vm.totalPaidCents)}</td></tr>
-      <tr class="grand"><td>Total Outstanding</td><td class="right">${money(vm.totalOutstandingCents)}</td></tr>
-    </table>
+    <div class="items-frame">
+      <table class="items-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Invoice</th>
+            <th>Date</th>
+            <th>Due</th>
+            <th class="right">Total</th>
+            <th class="right">Paid</th>
+            <th class="right">Balance</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="items-spacer"></div>
+      <table class="totals-table">
+        <tr><td>Total Invoiced</td><td>${money(vm.totalInvoicedCents)}</td></tr>
+        <tr><td>Total Paid</td><td>${money(vm.totalPaidCents)}</td></tr>
+        <tr class="balance"><td>Total Outstanding</td><td>${money(vm.totalOutstandingCents)}</td></tr>
+      </table>
+    </div>
 
     <div class="footer">Generated by ${escapeHtml(vm.businessName)} — please settle outstanding invoices at your earliest convenience.</div>
   </div>
@@ -2295,6 +2602,17 @@ export async function generateStatementPdf(customerId: string): Promise<string |
 
   await writeFile(result.filePath, buffer);
   return result.filePath;
+}
+
+/** Opens the statement in a preview window instead of prompting for a save location — see
+ * openPdfPreviewWindow's own doc comment. Same data-loading/HTML-build as generateStatementPdf. */
+export async function previewStatementPdf(customerId: string): Promise<void> {
+  requirePermission("sales", "view");
+  const vm = getCustomerStatement(customerId);
+  const html = buildStatementHtml(vm);
+  const buffer = await renderHtmlToPdfBuffer(html);
+  const filename = `Statement-${vm.customerName.replace(/[^a-z0-9]+/gi, "-")}.pdf`;
+  await openPdfPreviewWindow(buffer, filename, `Statement — ${vm.customerName}`);
 }
 
 /** Sends the statement straight to Windows' default printer — same A4 system-printer path as

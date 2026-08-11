@@ -6,7 +6,7 @@ import { cn } from "@renderer/shared/lib/cn";
 import type { ExportColumn, ExportFormat, ExportListRequest } from "@shared/types/export";
 
 const FORMAT_OPTIONS: Array<{ format: ExportFormat; label: string; icon: typeof FileText }> = [
-  { format: "pdf", label: "Export as PDF", icon: FileText },
+  { format: "pdf", label: "Preview as PDF", icon: FileText },
   { format: "excel", label: "Export as EXCEL", icon: FileSpreadsheet },
   { format: "csv", label: "Export as CSV", icon: FileDown }
 ];
@@ -72,14 +72,16 @@ export function ExportMenu({
         columns,
         stats: withStats ? (request.stats ?? []) : []
       };
-      const savedPath =
-        format === "pdf"
-          ? await window.blueLedger.export.toPdf(scopedRequest)
-          : format === "excel"
+      if (format === "pdf") {
+        // Opens in the in-app preview window instead of a save dialog — the window appearing IS the
+        // feedback, same as every document preview button, so no success toast here.
+        await window.blueLedger.export.toPdf(scopedRequest);
+      } else {
+        const savedPath =
+          format === "excel"
             ? await window.blueLedger.export.toExcel(scopedRequest)
             : await window.blueLedger.export.toCsv(scopedRequest);
-      if (savedPath) {
-        showSuccessToast(`${request.title} exported`);
+        if (savedPath) showSuccessToast(`${request.title} exported`);
       }
     } catch (err) {
       showErrorToast(getErrorMessage(err, "Failed to export"));

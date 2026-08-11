@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Download, Loader2, Printer, Share2 } from "lucide-react";
+import { Eye, Loader2, Printer, Share2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { ShareModal } from "@renderer/shared/components/ShareModal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
@@ -12,7 +12,7 @@ import type { TenantContext } from "@shared/types/tenant";
 
 export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantContext }): React.JSX.Element {
   const [printing, setPrinting] = useState(false);
-  const [downloading, setDownloading] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -71,22 +71,18 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
     }
   }
 
-  async function handleDownload(): Promise<void> {
-    setDownloading(true);
+  async function handlePreview(): Promise<void> {
+    setPreviewing(true);
     setError(null);
     setNotice(null);
     try {
-      const savedPath = await window.blueLedger.printer.generateReceiptPdf(sale.id);
-      if (savedPath) {
-        setNotice(`Saved to ${savedPath}`);
-        showSuccessToast(`Saved to ${savedPath}`);
-      }
+      await window.blueLedger.printer.previewReceiptPdf(sale.id);
     } catch (err) {
-      const message = getErrorMessage(err, "Failed to generate PDF");
+      const message = getErrorMessage(err, "Failed to open preview");
       setError(message);
       showErrorToast(message);
     } finally {
-      setDownloading(false);
+      setPreviewing(false);
     }
   }
 
@@ -239,16 +235,16 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
         </Button>
         <Button
           type="button"
-          onClick={() => void handleDownload()}
-          disabled={downloading}
+          onClick={() => void handlePreview()}
+          disabled={previewing}
           className="h-9 border border-line bg-white text-[11px] text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {downloading ? (
+          {previewing ? (
             <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
           ) : (
-            <Download className="mr-1.5 size-3.5" aria-hidden="true" />
+            <Eye className="mr-1.5 size-3.5" aria-hidden="true" />
           )}
-          Download
+          Preview
         </Button>
         <Button
           type="button"

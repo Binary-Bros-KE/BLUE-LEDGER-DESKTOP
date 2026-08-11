@@ -194,13 +194,18 @@ export function receiveMainStoreStock(input: unknown): MainStoreProductDetail {
 }
 
 /**
- * Core of shipping stock from Main Store to a storefront — draws from that storefront's own earmarked
- * allocation first; only dips into the unallocated bucket if the storefront doesn't have enough already
- * earmarked (never from a DIFFERENT storefront's allocation). Deliberately NOT wrapped in its own
- * transaction and NOT permission-checked, so callers that need to fulfil several products atomically
- * under one already-checked permission (e.g. approving a multi-item stock request) can loop this inside
- * a single `runInTransaction`. `distributeFromMainStore` below is the normal single-product, permission
- * checked, self-transacted entry point most callers should use instead.
+ * Core of shipping stock from Main Store to a storefront — drains that storefront's own earmarked
+ * allocation FIRST, then tops up the remainder from the unallocated bucket if the earmark alone isn't
+ * enough (never from a DIFFERENT storefront's allocation). A genuine split, not an all-or-nothing pick
+ * between the two buckets — 5 earmarked + 50 unallocated, distributing 10, draws 5 from the earmark and
+ * only the remaining 5 from unallocated (previously this picked whichever SINGLE bucket could cover the
+ * whole 10 on its own, which meant a partially-earmarked storefront's own earmark was skipped entirely
+ * and left untouched — caught live against exactly that 5/50/10 scenario). Deliberately NOT wrapped in
+ * its own transaction and NOT permission-checked, so callers that need to fulfil several products
+ * atomically under one already-checked permission (e.g. approving a multi-item stock request, or a
+ * whole Goods Received transfer batch) can loop this inside a single `runInTransaction`.
+ * `distributeFromMainStore` below is the normal single-product, permission-checked, self-transacted
+ * entry point most callers should use instead.
  */
 export function distributeMainStoreStockCore(params: {
   tenantId: string;
@@ -219,31 +224,51 @@ export function distributeMainStoreStockCore(params: {
     mainStoreAllocationRepository.findAllocationRow(params.productId, params.storefrontId)?.quantity ?? 0;
   const unallocatedQuantity = mainStoreAllocationRepository.findAllocationRow(params.productId, null)?.quantity ?? 0;
 
-  let sourceBucket: string | null;
-  if (allocatedQuantity >= params.quantity) {
-    sourceBucket = params.storefrontId;
-  } else if (unallocatedQuantity >= params.quantity) {
-    sourceBucket = null;
-  } else {
+  if (allocatedQuantity + unallocatedQuantity < params.quantity) {
     throw new Error(
       `Not enough stock to distribute ${params.quantity}. Earmarked for this storefront: ${allocatedQuantity}, unallocated: ${unallocatedQuantity}.`
     );
   }
 
-  applyValidatedStockMovement(
-    {
-      productId: params.productId,
-      locationId: mainStore.id,
-      movementType: "transfer_out",
-      quantityChange: -params.quantity,
-      referenceType: params.referenceType,
-      referenceId: params.referenceId,
-      performedBy: params.employeeId,
-      notes: params.notes,
-      allocationStorefrontId: sourceBucket
-    },
-    params.tenantId
-  );
+  const fromAllocated = Math.min(allocatedQuantity, params.quantity);
+  const fromUnallocated = params.quantity - fromAllocated;
+
+  // Two separate transfer_out movements (one per bucket actually drawn from) rather than one for the
+  // combined quantity — each needs its own allocationStorefrontId so the ledger correctly shows which
+  // bucket lost how much, and applyValidatedStockMovement validates/applies against exactly the bucket
+  // it's given.
+  if (fromAllocated > 0) {
+    applyValidatedStockMovement(
+      {
+        productId: params.productId,
+        locationId: mainStore.id,
+        movementType: "transfer_out",
+        quantityChange: -fromAllocated,
+        referenceType: params.referenceType,
+        referenceId: params.referenceId,
+        performedBy: params.employeeId,
+        notes: params.notes,
+        allocationStorefrontId: params.storefrontId
+      },
+      params.tenantId
+    );
+  }
+  if (fromUnallocated > 0) {
+    applyValidatedStockMovement(
+      {
+        productId: params.productId,
+        locationId: mainStore.id,
+        movementType: "transfer_out",
+        quantityChange: -fromUnallocated,
+        referenceType: params.referenceType,
+        referenceId: params.referenceId,
+        performedBy: params.employeeId,
+        notes: params.notes,
+        allocationStorefrontId: null
+      },
+      params.tenantId
+    );
+  }
   applyValidatedStockMovement(
     {
       productId: params.productId,
@@ -260,10 +285,9 @@ export function distributeMainStoreStockCore(params: {
 }
 
 /**
- * Ships stock from Main Store to a storefront. Draws from that storefront's own earmarked allocation
- * first; only dips into the unallocated bucket if the storefront doesn't have enough already earmarked
- * — it never draws from a DIFFERENT storefront's allocation, so one branch's incoming stock can never
- * silently end up at another.
+ * Ships stock from Main Store to a storefront. Drains that storefront's own earmarked allocation
+ * first, then tops up any remainder from the unallocated bucket — it never draws from a DIFFERENT
+ * storefront's allocation, so one branch's incoming stock can never silently end up at another.
  */
 export function distributeFromMainStore(input: unknown): MainStoreProductDetail {
   requirePermission("stock_transfers", "create");

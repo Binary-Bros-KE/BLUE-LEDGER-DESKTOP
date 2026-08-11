@@ -56,6 +56,7 @@ export type SaleDetailRow = SaleRow & {
   location_name: string;
   employee_name: string;
   customer_name: string | null;
+  customer_kra_pin: string | null;
   payment_method_name: string | null;
 };
 
@@ -339,6 +340,7 @@ export function findSaleDetailRowById(id: string): SaleDetailRow | undefined {
         l.location_name AS location_name,
         (e.first_name || ' ' || e.last_name) AS employee_name,
         c.name AS customer_name,
+        c.kra_pin AS customer_kra_pin,
         pm.name AS payment_method_name
       FROM sales s
       LEFT JOIN locations l ON l.id = s.location_id
@@ -695,6 +697,7 @@ export function mapSaleDetailRow(
     employeeName: row.employee_name,
     customerId: row.customer_id,
     customerName: row.customer_name,
+    customerKraPin: row.customer_kra_pin,
     saleStatus: row.sale_status as Sale["saleStatus"],
     transactionType: row.transaction_type as TransactionType,
     paymentStatus: computePaymentStatus({

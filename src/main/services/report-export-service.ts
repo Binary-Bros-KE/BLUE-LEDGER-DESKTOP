@@ -16,6 +16,7 @@ import {
   INK,
   timestampedFileName
 } from "@main/services/export-shared";
+import { openPdfPreviewWindow } from "@main/services/printer-service";
 import type {
   ReportCardTone,
   ReportExportRequest,
@@ -36,8 +37,10 @@ const TONE_HEX: Record<ReportCardTone, string> = {
 };
 
 /** Renders a full multi-section report to PDF, visually mirroring the on-screen report — colorful
- * stat cards, real progress bars, and styled tables — rather than flattening it into one list. */
-export async function exportReportToPdf(request: ReportExportRequest): Promise<string | null> {
+ * stat cards, real progress bars, and styled tables — rather than flattening it into one list. Opens
+ * in the in-app preview window (see printer-service.ts's preview*Pdf functions) instead of a save
+ * dialog, same as every document preview and exportListToPdf. */
+export async function exportReportToPdf(request: ReportExportRequest): Promise<void> {
   requirePermission(request.module, "export");
 
   const html = buildReportHtml(request);
@@ -50,14 +53,7 @@ export async function exportReportToPdf(request: ReportExportRequest): Promise<s
     win.destroy();
   }
 
-  const result = await dialog.showSaveDialog({
-    title: "Export Report as PDF",
-    defaultPath: timestampedFileName(request.fileBaseName, "pdf"),
-    filters: [{ name: "PDF", extensions: ["pdf"] }]
-  });
-  if (result.canceled || !result.filePath) return null;
-  await writeFile(result.filePath, buffer);
-  return result.filePath;
+  await openPdfPreviewWindow(buffer, timestampedFileName(request.fileBaseName, "pdf"), request.title);
 }
 
 /** Re-presents the same insight as clean tabular sheets — a Summary sheet for every card/tile

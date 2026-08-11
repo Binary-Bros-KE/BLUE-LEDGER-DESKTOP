@@ -4,7 +4,6 @@ import {
   Ban,
   CheckCircle2,
   Copy,
-  Download,
   Eye,
   FileBarChart,
   FileText,
@@ -555,13 +554,13 @@ export function InvoicesRoute(): React.JSX.Element {
     }
   }
 
-  async function handleDownload(): Promise<void> {
+  async function handlePreview(): Promise<void> {
     if (!viewingSale) return;
     setActionError(null);
     try {
-      await window.blueLedger.printer.generateInvoicePdf(viewingSale.id);
+      await window.blueLedger.printer.previewInvoicePdf(viewingSale.id);
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to generate PDF"));
+      setActionError(getErrorMessage(err, "Failed to open preview"));
     }
   }
 
@@ -1325,11 +1324,11 @@ export function InvoicesRoute(): React.JSX.Element {
               </Button>
               <Button
                 type="button"
-                onClick={() => void handleDownload()}
+                onClick={() => void handlePreview()}
                 className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
               >
-                <Download className="mr-1.5 size-3.5" aria-hidden="true" />
-                Download PDF
+                <Eye className="mr-1.5 size-3.5" aria-hidden="true" />
+                Preview
               </Button>
               <Button
                 type="button"

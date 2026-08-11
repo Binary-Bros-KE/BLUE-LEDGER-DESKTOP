@@ -6,6 +6,7 @@ import * as stockReceiptRepository from "@main/database/repositories/stock-recei
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
+import { distributeMainStoreStockCore } from "@main/services/main-store-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { stockReceiptCreateSchema, type StockReceiptCreateInput } from "@shared/schemas/stock-receipt";
 import { isStorefrontType, type LocationType } from "@shared/types/location";
@@ -32,6 +33,7 @@ function mapListRow(row: stockReceiptRepository.StockReceiptRow): StockReceiptLi
     receivedByName: row.received_by_name,
     itemCount: row.item_count,
     totalQuantityReceived: row.total_quantity_received,
+    sourceType: row.is_transfer > 0 ? "transfer" : "purchase",
     notes: row.notes,
     createdAt: row.created_at
   };
@@ -82,11 +84,19 @@ export function getStockReceipt(id: string): StockReceipt {
 
 /** Receives many products in one batch — the bulk counterpart to the single-item Receive tab in
  * MainStoreStockModal, sharing its exact same "Into Main Store (pick a bucket) vs Direct to
- * Storefront" destination model, just applied once for the whole batch instead of per item.
+ * Storefront vs Transfer from Main Store" destination model, just applied once for the whole batch
+ * instead of per item. The transfer destination is the bulk counterpart of MainStoreStockModal's own
+ * Transfer tab (distributeFromMainStore) — same allocated-then-unallocated sourcing, just looped
+ * across many products atomically instead of one distributeFromMainStore call per product, which was
+ * the actual field complaint this batch mode exists to fix (transferring a multi-product delivery one
+ * product at a time).
  *
  * previousQuantity/newQuantity are captured HERE, immediately before each item's movement applies —
  * not recomputed later — so the printed/reprinted document always shows exactly what was true at
- * the moment of receiving, even if the product's stock has moved on since. */
+ * the moment of receiving, even if the product's stock has moved on since. For a transfer,
+ * previous/newQuantity describe the RECEIVING storefront's own on-hand stock (mirroring the "direct
+ * to storefront" case) — not the Main Store side, which the stock ledger and Main Store screen
+ * already cover on their own. */
 export function createStockReceipt(input: unknown): StockReceipt {
   requirePermission("inventory", "edit");
   const parsed: StockReceiptCreateInput = stockReceiptCreateSchema.parse(input);
@@ -118,6 +128,11 @@ export function createStockReceipt(input: unknown): StockReceipt {
       }
     }
   } else {
+    // "storefront" and "main_store_transfer" resolve their target the same way — the only
+    // difference is which movement each item's loop iteration below actually applies.
+    if (parsed.destination === "main_store_transfer") {
+      requirePermission("stock_transfers", "create");
+    }
     const branchScope = getCurrentBranchScope();
     const storefrontId = branchScope ?? parsed.locationId;
     if (!storefrontId) {
@@ -150,20 +165,37 @@ export function createStockReceipt(input: unknown): StockReceipt {
           ? (mainStoreAllocationRepository.findAllocationRow(item.productId, allocationStorefrontId)?.quantity ?? 0)
           : (inventoryRepository.findInventoryRow(item.productId, targetLocationId)?.quantity ?? 0);
 
-      applyValidatedStockMovement(
-        {
+      if (parsed.destination === "main_store_transfer") {
+        // Draws from Main Store (this storefront's own earmarked allocation first, then unallocated
+        // — throws if both are insufficient) and credits the storefront, atomically, inside this
+        // same transaction — the exact core distributeFromMainStore itself calls, just reused here
+        // for a whole batch instead of one product.
+        distributeMainStoreStockCore({
+          tenantId,
+          employeeId,
           productId: item.productId,
-          locationId: targetLocationId,
-          movementType: "purchase",
-          quantityChange: item.quantityReceived,
-          referenceType: "stock_receipt",
-          referenceId: receiptId,
-          performedBy: employeeId,
+          storefrontId: targetLocationId,
+          quantity: item.quantityReceived,
           notes: parsed.notes,
-          ...(parsed.destination === "main_store" ? { allocationStorefrontId } : {})
-        },
-        tenantId
-      );
+          referenceType: "stock_receipt",
+          referenceId: receiptId
+        });
+      } else {
+        applyValidatedStockMovement(
+          {
+            productId: item.productId,
+            locationId: targetLocationId,
+            movementType: "purchase",
+            quantityChange: item.quantityReceived,
+            referenceType: "stock_receipt",
+            referenceId: receiptId,
+            performedBy: employeeId,
+            notes: parsed.notes,
+            ...(parsed.destination === "main_store" ? { allocationStorefrontId } : {})
+          },
+          tenantId
+        );
+      }
 
       stockReceiptRepository.insertStockReceiptItemRow({
         stockReceiptId: receiptId,

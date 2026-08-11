@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Download, Loader2, Printer, Receipt, RotateCcw, Share2 } from "lucide-react";
+import { CheckCircle2, Eye, Loader2, Printer, Receipt, RotateCcw, Share2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { ShareModal } from "@renderer/shared/components/ShareModal";
@@ -61,7 +61,7 @@ export function DeliveryNotePreview({
 }): React.JSX.Element {
   const [printing, setPrinting] = useState(false);
   const [printingThermal, setPrintingThermal] = useState(false);
-  const [downloading, setDownloading] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [togglingDelivered, setTogglingDelivered] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -117,17 +117,16 @@ export function DeliveryNotePreview({
     }
   }
 
-  async function handleDownload(): Promise<void> {
-    setDownloading(true);
+  async function handlePreview(): Promise<void> {
+    setPreviewing(true);
     setError(null);
     setNotice(null);
     try {
-      const savedPath = await window.blueLedger.printer.generateDeliveryNotePdf(delivery.id);
-      if (savedPath) setNotice(`Saved to ${savedPath}`);
+      await window.blueLedger.printer.previewDeliveryNotePdf(delivery.id);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to generate PDF"));
+      setError(getErrorMessage(err, "Failed to open preview"));
     } finally {
-      setDownloading(false);
+      setPreviewing(false);
     }
   }
 
@@ -241,16 +240,16 @@ export function DeliveryNotePreview({
         </Button>
         <Button
           type="button"
-          onClick={() => void handleDownload()}
-          disabled={downloading}
+          onClick={() => void handlePreview()}
+          disabled={previewing}
           className="h-9 border border-line bg-white text-[11px] text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {downloading ? (
+          {previewing ? (
             <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
           ) : (
-            <Download className="mr-1.5 size-3.5" aria-hidden="true" />
+            <Eye className="mr-1.5 size-3.5" aria-hidden="true" />
           )}
-          Download
+          Preview
         </Button>
         <Button
           type="button"

@@ -118,6 +118,9 @@ export type Sale = {
   employeeName: string;
   customerId: string | null;
   customerName: string | null;
+  /** The customer's own KRA PIN, if they have one on file — shown as "Your VAT No." on the invoice
+   * PDF only (see printer-service.ts's buildInvoiceHtml); receipts/quotations don't show it. */
+  customerKraPin: string | null;
   saleStatus: SaleStatus;
   transactionType: TransactionType;
   paymentStatus: PaymentStatus;

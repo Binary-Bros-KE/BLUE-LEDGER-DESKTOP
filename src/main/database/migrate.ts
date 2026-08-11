@@ -2234,6 +2234,19 @@ const migrations = [
         PRIMARY KEY (entity, row_id)
       );
     `
+  },
+  {
+    version: 63,
+    name: "stock_movements_reference_index",
+    sql: `
+      -- Powers stock-receipt-repository.ts's "was this receipt a transfer from Main Store, or a
+      -- plain purchase" lookup — a correlated subquery filtering stock_movements by
+      -- (reference_type, reference_id) for every row in the Goods Received list. Without this index
+      -- it's a full scan of stock_movements (one of the largest tables in the whole schema, growing
+      -- with every sale/purchase/adjustment ever recorded) per receipt in the list, not just per
+      -- page load.
+      CREATE INDEX IF NOT EXISTS idx_stock_movements_reference ON stock_movements(reference_type, reference_id);
+    `
   }
 ] as const;
 

@@ -21,6 +21,11 @@ export type StockReceiptListItem = {
   receivedByName: string;
   itemCount: number;
   totalQuantityReceived: number;
+  /** Derived at read time from this receipt's own stock_movements, not a stored field — see
+   * stock-receipt-repository.ts's StockReceiptRow.is_transfer for why. "transfer" means every item
+   * was physically drawn out of Main Store (distributeMainStoreStockCore); "purchase" means every
+   * item was freshly added stock, whether received into Main Store or straight into a storefront. */
+  sourceType: "purchase" | "transfer";
   notes: string | null;
   createdAt: string;
 };
