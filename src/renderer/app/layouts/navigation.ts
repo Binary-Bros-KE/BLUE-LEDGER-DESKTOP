@@ -190,7 +190,7 @@ export const navGroups: NavGroup[] = [
       },
       {
         key: "local-purchases",
-        label: "Local Purchases",
+        label: "Daily Expenses",
         description: "Small day-to-day buys — tape, pens, delivery bags",
         icon: Banknote,
         permissionModule: "local_purchases"

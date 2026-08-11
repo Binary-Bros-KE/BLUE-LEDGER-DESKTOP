@@ -168,7 +168,7 @@ export function LocalPurchaseFormModal({
       await onSaved();
       onClose();
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to save local purchase"));
+      setError(getErrorMessage(err, "Failed to save daily expense"));
     } finally {
       setSaving(false);
     }
@@ -178,10 +178,10 @@ export function LocalPurchaseFormModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={editingPurchase ? editingPurchase.expenseNumber : "New Local Purchase"}
+      title={editingPurchase ? editingPurchase.expenseNumber : "New Daily Expense"}
       description={
         readOnly
-          ? "This local purchase can't be edited."
+          ? "This daily expense can't be edited."
           : "Category, storefront, payment method, and amount are required — everything else can be filled in as needed."
       }
       widthClassName="max-w-lg"
@@ -333,7 +333,7 @@ export function LocalPurchaseFormModal({
           {!readOnly && (
             <Button type="submit" disabled={saving} className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50">
               {saving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
-              {saving ? "Saving..." : editingPurchase ? "Save changes" : "Create Local Purchase"}
+              {saving ? "Saving..." : editingPurchase ? "Save changes" : "Create Daily Expense"}
             </Button>
           )}
         </div>

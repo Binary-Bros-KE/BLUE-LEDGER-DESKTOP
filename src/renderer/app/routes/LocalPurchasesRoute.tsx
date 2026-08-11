@@ -96,7 +96,7 @@ export function LocalPurchasesRoute(): React.JSX.Element {
       setLocations(locationList);
       setPaymentMethods(methodList);
     } catch (err) {
-      setLoadError(getErrorMessage(err, "Failed to load local purchases"));
+      setLoadError(getErrorMessage(err, "Failed to load daily expenses"));
     }
   }, []);
 
@@ -171,8 +171,8 @@ export function LocalPurchasesRoute(): React.JSX.Element {
 
     return {
       module: "local_purchases",
-      title: "Local Purchases",
-      subtitle: filterParts.length > 0 ? filterParts.join(" · ") : "All local purchases",
+      title: "Daily Expenses",
+      subtitle: filterParts.length > 0 ? filterParts.join(" · ") : "All daily expenses",
       columns: [
         { key: "expenseNumber", header: "Purchase #" },
         { key: "date", header: "Date" },
@@ -195,12 +195,12 @@ export function LocalPurchasesRoute(): React.JSX.Element {
       })),
       stats: summary
         ? [
-          { label: "Today's Local Purchases", value: formatCents(summary.todayCents) },
-          { label: "This Month's Local Purchases", value: formatCents(summary.thisMonthCents) },
-          { label: "Total Local Purchases", value: formatCents(summary.totalCents) }
+          { label: "Today's Daily Expenses", value: formatCents(summary.todayCents) },
+          { label: "This Month's Daily Expenses", value: formatCents(summary.thisMonthCents) },
+          { label: "Total Daily Expenses", value: formatCents(summary.totalCents) }
         ]
         : [],
-      fileBaseName: `Local_Purchases_${new Date().toISOString().slice(0, 10)}`
+      fileBaseName: `Daily_Expenses_${new Date().toISOString().slice(0, 10)}`
     };
   }, [
     filteredPurchases,
@@ -240,7 +240,7 @@ export function LocalPurchasesRoute(): React.JSX.Element {
       setEditingPurchase(purchase);
       setFormOpen(true);
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to load local purchase"));
+      setActionError(getErrorMessage(err, "Failed to load daily expense"));
     }
   }
 
@@ -250,7 +250,7 @@ export function LocalPurchasesRoute(): React.JSX.Element {
       await window.blueLedger.localPurchase.archive(purchase.id);
       await loadAll();
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to archive local purchase"));
+      setActionError(getErrorMessage(err, "Failed to archive daily expense"));
     }
   }
 
@@ -260,7 +260,7 @@ export function LocalPurchasesRoute(): React.JSX.Element {
       await window.blueLedger.localPurchase.restore(purchase.id);
       await loadAll();
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to restore local purchase"));
+      setActionError(getErrorMessage(err, "Failed to restore daily expense"));
     }
   }
 
@@ -288,9 +288,9 @@ export function LocalPurchasesRoute(): React.JSX.Element {
 
       {summary && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <StatTile icon={CalendarDays} label="Today's Local Purchases" value={formatCents(summary.todayCents)} tone="primary" />
-          <StatTile icon={ShoppingBag} label="This Month's Local Purchases" value={formatCents(summary.thisMonthCents)} tone="accent" />
-          <StatTile icon={ShoppingBag} label="Total Local Purchases" value={formatCents(summary.totalCents)} tone="warning" />
+          <StatTile icon={CalendarDays} label="Today's Daily Expenses" value={formatCents(summary.todayCents)} tone="primary" />
+          <StatTile icon={ShoppingBag} label="This Month's Daily Expenses" value={formatCents(summary.thisMonthCents)} tone="accent" />
+          <StatTile icon={ShoppingBag} label="Total Daily Expenses" value={formatCents(summary.totalCents)} tone="warning" />
           <div className="relative rounded-lg border border-line bg-white p-3.5 shadow-soft">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted">By Category</p>
@@ -298,7 +298,7 @@ export function LocalPurchasesRoute(): React.JSX.Element {
             </div>
             <div className="mt-2 space-y-1">
               {topCategories.length === 0 ? (
-                <p className="text-xs font-semibold text-muted">No local purchases recorded yet.</p>
+                <p className="text-xs font-semibold text-muted">No daily expenses recorded yet.</p>
               ) : (
                 topCategories.map((entry) => (
                   <div key={entry.categoryId} className="flex items-center justify-between text-xs">
@@ -315,7 +315,7 @@ export function LocalPurchasesRoute(): React.JSX.Element {
       <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Local Purchases</p>
+            <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Daily Expenses</p>
             <h2 className="mt-1 flex items-center gap-2 text-xl font-extrabold">
               <ShoppingBag className="size-5 text-primary" aria-hidden="true" />
               Day-to-Day Buys
@@ -329,7 +329,7 @@ export function LocalPurchasesRoute(): React.JSX.Element {
             {canCreate && (
               <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
                 <Plus className="mr-1.5 size-4" aria-hidden="true" />
-                New Local Purchase
+                New Daily Expense
               </Button>
             )}
           </div>
@@ -438,14 +438,14 @@ export function LocalPurchasesRoute(): React.JSX.Element {
               <div className="grid size-14 place-items-center rounded-2xl bg-soft text-primary">
                 <ShoppingBag className="size-7" aria-hidden="true" />
               </div>
-              <h3 className="mt-4 text-lg font-extrabold">No local purchases yet</h3>
+              <h3 className="mt-4 text-lg font-extrabold">No daily expenses yet</h3>
               <p className="mt-1 max-w-sm text-sm font-semibold text-muted">
                 Record the first day-to-day buy to start tracking it.
               </p>
               {canCreate && (
                 <Button type="button" onClick={openCreateModal} className="mt-5 h-9 text-xs">
                   <Plus className="mr-1.5 size-4" aria-hidden="true" />
-                  New Local Purchase
+                  New Daily Expense
                 </Button>
               )}
             </div>
@@ -454,7 +454,7 @@ export function LocalPurchasesRoute(): React.JSX.Element {
               <div className="grid size-14 place-items-center rounded-2xl bg-soft text-primary">
                 <Search className="size-7" aria-hidden="true" />
               </div>
-              <h3 className="mt-4 text-lg font-extrabold">No local purchases match your filters</h3>
+              <h3 className="mt-4 text-lg font-extrabold">No daily expenses match your filters</h3>
               <p className="mt-1 max-w-sm text-sm font-semibold text-muted">Try a different filter combination.</p>
               <Button type="button" onClick={clearFilters} className="mt-5 h-9 text-xs">
                 Clear filters
@@ -522,7 +522,7 @@ export function LocalPurchasesRoute(): React.JSX.Element {
                               event.stopPropagation();
                               void openEditModal(purchase.id);
                             }}
-                            aria-label={canEdit && purchase.status === "active" ? "Edit local purchase" : "View local purchase"}
+                            aria-label={canEdit && purchase.status === "active" ? "Edit daily expense" : "View daily expense"}
                             className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-ink cursor-pointer"
                           >
                             {canEdit && purchase.status === "active" ? (
@@ -538,7 +538,7 @@ export function LocalPurchasesRoute(): React.JSX.Element {
                                 event.stopPropagation();
                                 void handleArchive(purchase);
                               }}
-                              aria-label="Archive local purchase"
+                              aria-label="Archive daily expense"
                               className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-danger-soft hover:text-danger cursor-pointer"
                             >
                               <Archive className="size-3.5" aria-hidden="true" />
@@ -551,7 +551,7 @@ export function LocalPurchasesRoute(): React.JSX.Element {
                                 event.stopPropagation();
                                 void handleRestore(purchase);
                               }}
-                              aria-label="Restore local purchase"
+                              aria-label="Restore daily expense"
                               className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-success/15 hover:text-success cursor-pointer"
                             >
                               <RotateCcw className="size-3.5" aria-hidden="true" />
