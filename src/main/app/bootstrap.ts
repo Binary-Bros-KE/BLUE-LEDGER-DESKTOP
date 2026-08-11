@@ -28,12 +28,12 @@ import {
 import { ensureTenantContext } from "@main/services/tenant-service";
 import { checkInWithServer } from "@main/services/license-service";
 import { checkDrift, syncCycle } from "@main/services/sync-engine";
-import { checkForUpdates } from "@main/services/update-service";
+import { checkForUpdates, isUpdateInstallInProgress } from "@main/services/update-service";
 import { createMainWindow } from "@main/windows/main-window";
 import { seedDemoData } from "@main/dev/seed-demo-data";
 import { verifyImport } from "@main/dev/verify-import";
 
-const { app } = electron;
+const { app, dialog } = electron;
 
 /** The plan's own design calls for pushing "debounced ~5s after the outbox goes non-empty" — but
  * doing that for real would mean instrumenting every one of the 20+ service files that write to a
@@ -73,6 +73,23 @@ const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
 export async function bootstrap(): Promise<void> {
   await app.whenReady();
+
+  // Absolute first thing after whenReady — before the database, before any window. See
+  // update-service.ts's own doc comment for the real field failure this guards against: this
+  // process could be the OLD version's exe, relaunched by the user seconds after clicking
+  // "Restart & Update", while the NSIS installer it triggered is still mid-write to this exact
+  // install directory. Backing off here (never touching the DB, never opening a window) is what
+  // keeps that collision from corrupting the install — the installer gets the files to itself.
+  if (isUpdateInstallInProgress()) {
+    dialog.showMessageBoxSync({
+      type: "info",
+      title: "Blue Ledger POS",
+      message: "Blue Ledger is finishing an update.",
+      detail: "This only takes a few seconds — please try opening it again shortly."
+    });
+    app.exit(0);
+    return;
+  }
 
   app.setAppUserModelId("com.blueledger.desktop");
 
