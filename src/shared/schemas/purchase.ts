@@ -23,6 +23,8 @@ export const purchaseCreateSchema = z.object({
   supplierId: z.string().trim().min(1, "Select a supplier"),
   supplierInvoiceNumber: optionalText(100),
   locationId: z.string().trim().min(1, "Select a destination location"),
+  // Whole-order freight cost, not per-line — see Purchase.shippingCostCents' own doc comment.
+  shippingCostCents: cents.optional().default(0),
   notes: optionalText(1000),
   attachmentPath: optionalText(500),
   items: z.array(purchaseItemInputSchema).min(1, "Add at least one product"),

@@ -45,13 +45,30 @@ export type ProductListRow = ProductRow & {
 };
 
 /**
- * Lists products for the tenant. When locationId is provided, only products tagged to that
- * storefront OR tagged "All Storefronts" (storefront_id IS NULL) are included, and total_stock
- * reflects only that storefront's quantity. Pass null to see the full tenant-wide catalog (every
- * storefront tag) with stock summed across every location — used both for a super-admin's view and
- * for the Main Store's cross-storefront management screen.
+ * Lists products for the tenant. Pass null for locationId to see the full tenant-wide catalog with
+ * stock summed across every location.
+ *
+ * When locationId is provided, `requireInventoryRow` picks which of two different questions gets
+ * asked:
+ *  - false (default; the branch-scope auto-restriction every role's Checkout/Invoices/Quotations
+ *    already relies on): "which products CAN be sold here" — tagged to this storefront OR tagged
+ *    "All Storefronts" (storefront_id IS NULL), regardless of whether stock has physically been
+ *    distributed here yet (total_stock is simply 0 until it has).
+ *  - true (the Products tab's own explicit storefront filter): "which products are ACTUALLY STOCKED
+ *    here right now" — requires a real `inventory` row at this location, the exact same membership
+ *    test the Inventory Report's per-location sections use. Without this, the storefront_id-tag
+ *    fallback let every untagged product count toward every storefront's total, which is why a real
+ *    tenant's Products-tab-per-storefront count (600) badly overshot the Inventory Report's own
+ *    count for the same storefront (300) — this brings the two back into agreement.
  */
-export function findAllProductRows(tenantId: string, locationId: string | null): ProductListRow[] {
+export function findAllProductRows(
+  tenantId: string,
+  locationId: string | null,
+  requireInventoryRow = false
+): ProductListRow[] {
+  const membershipClause = requireInventoryRow
+    ? `(? IS NULL OR EXISTS (SELECT 1 FROM inventory ix WHERE ix.product_id = p.id AND ix.location_id = ?))`
+    : `(? IS NULL OR p.storefront_id IS NULL OR p.storefront_id = ?)`;
   return getDatabase()
     .prepare(
       `
@@ -60,7 +77,7 @@ export function findAllProductRows(tenantId: string, locationId: string | null):
       LEFT JOIN categories c ON c.id = p.category_id
       LEFT JOIN inventory i ON i.product_id = p.id AND (? IS NULL OR i.location_id = ?)
       WHERE p.tenant_id = ?
-        AND (? IS NULL OR p.storefront_id IS NULL OR p.storefront_id = ?)
+        AND ${membershipClause}
       GROUP BY p.id
       ORDER BY p.name ASC
     `

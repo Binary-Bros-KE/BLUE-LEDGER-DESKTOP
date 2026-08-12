@@ -6,6 +6,7 @@ import { CheckboxField, Field, SelectField } from "@renderer/shared/components/f
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { getSharePreferences, setSharePreferences } from "@renderer/shared/lib/share-preferences";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useUpdateStatusWidget } from "@renderer/app/layouts/useUpdateStatusWidget";
 import {
   DEFAULT_PRINTER_SETTINGS,
@@ -92,7 +93,9 @@ export function SettingsRoute(): React.JSX.Element {
           autoPrintOnSale: settings.autoPrintOnSale
         });
       } catch (err) {
-        setLoadError(getErrorMessage(err, "Failed to load printer settings"));
+        const message = getErrorMessage(err, "Failed to load printer settings");
+        setLoadError(message);
+        showErrorToast(message);
       } finally {
         setLoaded(true);
       }
@@ -121,8 +124,11 @@ export function SettingsRoute(): React.JSX.Element {
         autoPrintOnSale: form.autoPrintOnSale
       });
       setSaveNotice("Printer settings saved");
+      showSuccessToast("Printer settings saved");
     } catch (err) {
-      setSaveError(getErrorMessage(err, "Failed to save printer settings"));
+      const message = getErrorMessage(err, "Failed to save printer settings");
+      setSaveError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }
@@ -134,8 +140,15 @@ export function SettingsRoute(): React.JSX.Element {
     try {
       const result = await window.blueLedger.printer.testConnection();
       setTestResult(result);
+      if (result.success) {
+        showSuccessToast(result.message);
+      } else {
+        showErrorToast(result.message);
+      }
     } catch (err) {
-      setTestResult({ success: false, message: getErrorMessage(err, "Failed to test printer connection") });
+      const message = getErrorMessage(err, "Failed to test printer connection");
+      setTestResult({ success: false, message });
+      showErrorToast(message);
     } finally {
       setTesting(false);
     }

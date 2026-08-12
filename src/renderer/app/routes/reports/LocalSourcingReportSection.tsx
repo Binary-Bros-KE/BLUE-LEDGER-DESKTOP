@@ -65,7 +65,14 @@ export function LocalSourcingReportSection({ report }: { report: LocalSourcingRe
           <div>
             <p className="mb-2 text-[11px] font-extrabold uppercase tracking-wider text-muted">Top Locally-Sourced Products</p>
             <div className="overflow-x-auto rounded-lg border border-line">
-              <table className="w-full min-w-[560px] table-fixed border-collapse text-sm">
+              <table className="w-full min-w-[640px] table-fixed border-collapse text-sm">
+                <colgroup>
+                  <col className="w-[36%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[17%]" />
+                  <col className="w-[17%]" />
+                  <col className="w-[18%]" />
+                </colgroup>
                 <thead>
                   <tr className="bg-primary text-white">
                     <th className="px-3 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider">Product</th>
@@ -78,7 +85,9 @@ export function LocalSourcingReportSection({ report }: { report: LocalSourcingRe
                 <tbody>
                   {report.topProducts.map((entry) => (
                     <tr key={entry.productId} className="border-t border-line odd:bg-white even:bg-soft/50">
-                      <td className="truncate px-3 py-2 font-bold text-ink">{entry.productName}</td>
+                      <td className="line-clamp-2 px-3 py-2 leading-snug font-bold text-ink" title={entry.productName}>
+                        {entry.productName}
+                      </td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted">{entry.quantitySold}</td>
                       <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-muted">
                         {formatCents(entry.revenueCents)}

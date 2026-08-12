@@ -4,6 +4,7 @@ import { Button } from "@renderer/shared/components/Button";
 import { Field, SelectField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { MpesaEnvironment, MpesaTillSettings } from "@shared/types/mpesa";
 
 const ENVIRONMENT_OPTIONS: Array<{ value: MpesaEnvironment; label: string }> = [
@@ -53,7 +54,11 @@ export function MpesaSettingsModal({
         setForm(settings ?? emptyForm);
       })
       .catch((err) => {
-        if (!cancelled) setError(getErrorMessage(err, "Failed to load M-Pesa Till settings"));
+        if (!cancelled) {
+          const message = getErrorMessage(err, "Failed to load M-Pesa Till settings");
+          setError(message);
+          showErrorToast(message);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -75,8 +80,11 @@ export function MpesaSettingsModal({
     try {
       await window.blueLedger.mpesa.saveSettings(locationId, form);
       setSavedAt(Date.now());
+      showSuccessToast("Till settings saved");
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to save M-Pesa Till settings"));
+      const message = getErrorMessage(err, "Failed to save M-Pesa Till settings");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }

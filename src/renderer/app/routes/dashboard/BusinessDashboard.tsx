@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import { HorizontalBarList } from "@renderer/shared/components/charts/HorizontalBarList";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { showErrorToast } from "@renderer/shared/lib/toast";
 import { useUiStore } from "@renderer/shared/stores/ui-store";
 import { DashboardActionCard } from "@renderer/app/routes/dashboard/DashboardActionCard";
 import { DashboardShell } from "@renderer/app/routes/dashboard/DashboardShell";
@@ -94,7 +95,11 @@ export function BusinessDashboard({ isBusinessWide }: { isBusinessWide: boolean 
           dueRecurringBillsTotalCents: dueRecurringBills.reduce((sum, bill) => sum + bill.amountCents, 0),
         });
       } catch (err) {
-        if (!cancelled) setError(getErrorMessage(err, "Failed to load the dashboard"));
+        if (!cancelled) {
+          const message = getErrorMessage(err, "Failed to load the dashboard");
+          setError(message);
+          showErrorToast(message);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -229,15 +234,17 @@ export function BusinessDashboard({ isBusinessWide }: { isBusinessWide: boolean 
             ) : (
               <ol className="mt-3 space-y-2">
                 {data.overview.topProducts.map((product, index) => (
-                  <li key={product.productId} className="flex items-center justify-between gap-3 text-sm">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="grid size-5 flex-none place-items-center rounded-full bg-soft text-[10px] font-extrabold text-muted">
+                  <li key={product.productId} className="flex items-start justify-between gap-3 text-sm">
+                    <div className="flex min-w-0 items-start gap-2">
+                      <span className="mt-0.5 grid size-5 flex-none place-items-center rounded-full bg-soft text-[10px] font-extrabold text-muted">
                         {index + 1}
                       </span>
-                      <span className="truncate font-bold text-ink">{product.productName}</span>
-                      <span className="flex-none text-xs font-semibold text-muted">×{product.quantitySold}</span>
+                      <span className="line-clamp-2 font-bold leading-snug text-ink" title={product.productName}>
+                        {product.productName}
+                      </span>
+                      <span className="mt-0.5 flex-none text-xs font-semibold text-muted">×{product.quantitySold}</span>
                     </div>
-                    <span className="w-20 flex-none text-right text-xs font-bold tabular-nums text-ink">{money(product.revenueCents)}</span>
+                    <span className="mt-0.5 w-20 flex-none text-right text-xs font-bold tabular-nums text-ink">{money(product.revenueCents)}</span>
                   </li>
                 ))}
               </ol>

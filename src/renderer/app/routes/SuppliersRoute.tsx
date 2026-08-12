@@ -22,6 +22,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { ExportListRequest } from "@shared/types/export";
 import {
   SUPPLIER_PAYMENT_OPTION_OPTIONS,
@@ -136,7 +137,9 @@ export function SuppliersRoute(): React.JSX.Element {
       const list = await window.blueLedger.supplier.list();
       setSuppliers(list);
     } catch (err) {
-      setLoadError(getErrorMessage(err, "Failed to load suppliers"));
+      const message = getErrorMessage(err, "Failed to load suppliers");
+      setLoadError(message);
+      showErrorToast(message);
     }
   }, []);
 
@@ -264,13 +267,17 @@ export function SuppliersRoute(): React.JSX.Element {
     try {
       if (editingSupplier) {
         await window.blueLedger.supplier.update(editingSupplier.id, payload);
+        showSuccessToast(`Supplier "${form.businessName}" updated`);
       } else {
         await window.blueLedger.supplier.create(payload);
+        showSuccessToast(`Supplier "${form.businessName}" created`);
       }
       await loadSuppliers();
       setModalOpen(false);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to save supplier"));
+      const message = getErrorMessage(err, "Failed to save supplier");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }
@@ -279,13 +286,14 @@ export function SuppliersRoute(): React.JSX.Element {
   async function handleToggleStatus(supplier: Supplier): Promise<void> {
     setActionError(null);
     try {
-      await window.blueLedger.supplier.setStatus(
-        supplier.id,
-        supplier.status === "active" ? "inactive" : "active"
-      );
+      const nextStatus = supplier.status === "active" ? "inactive" : "active";
+      await window.blueLedger.supplier.setStatus(supplier.id, nextStatus);
+      showSuccessToast(`"${supplier.businessName}" ${nextStatus === "active" ? "activated" : "deactivated"}`);
       await loadSuppliers();
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to update status"));
+      const message = getErrorMessage(err, "Failed to update status");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 

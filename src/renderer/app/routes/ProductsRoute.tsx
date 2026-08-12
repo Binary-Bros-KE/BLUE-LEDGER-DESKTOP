@@ -12,7 +12,8 @@ import {
   Power,
   PowerOff,
   Search,
-  TrendingDown
+  TrendingDown,
+  Wallet
 } from "lucide-react";
 import { BulkTaxCategoryModal } from "@renderer/app/routes/products/BulkTaxCategoryModal";
 import { ProductCreateModal } from "@renderer/app/routes/products/ProductCreateModal";
@@ -30,6 +31,7 @@ import { useAppStore } from "@renderer/shared/stores/app-store";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { Category } from "@shared/types/category";
 import type { ExportListRequest } from "@shared/types/export";
 import { isStorefrontType, type Location } from "@shared/types/location";
@@ -75,7 +77,11 @@ function buildCategoryOptions(categories: Category[]): { value: string; label: s
 
 export function ProductsRoute(): React.JSX.Element {
   const currency = useAppStore((state) => state.context?.tenant.currency ?? "");
-  const { can } = usePermissions();
+  const { can, session } = usePermissions();
+  // A branch-scoped session (a storefront Manager, say) is always locked server-side to their own
+  // storefront regardless of what's requested — the filter dropdown only does something real for a
+  // caller with full multi-storefront visibility (no branch assigned, typically Super Admin).
+  const isBranchScoped = Boolean(session?.branch);
   const canCreate = can("products", "create");
   const canEdit = can("products", "edit");
   const canViewInventory = can("inventory", "view");
@@ -95,18 +101,24 @@ export function ProductsRoute(): React.JSX.Element {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  // Defaults to "active" (not "") so a deactivated product doesn't sit mixed in with active ones on
+  // first load — it stays reachable via the Status dropdown, just not shown by default.
+  const [statusFilter, setStatusFilter] = useState("active");
+  const [storefrontFilter, setStorefrontFilter] = useState("");
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [outOfStockOnly, setOutOfStockOnly] = useState(false);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkTaxModalOpen, setBulkTaxModalOpen] = useState(false);
 
+  // The storefront filter is resolved server-side (see product-service.ts's listProducts) — it
+  // narrows down to just that storefront's tagged products AND makes totalStock reflect only that
+  // storefront's own quantity, so every stat tile below is "for this storefront" for free.
   const loadAll = useCallback(async () => {
     setLoadError(null);
     try {
       const [productList, categoryList, locationList] = await Promise.all([
-        window.blueLedger.product.list(),
+        window.blueLedger.product.list(storefrontFilter || null),
         window.blueLedger.category.list(),
         window.blueLedger.location.list()
       ]);
@@ -114,9 +126,11 @@ export function ProductsRoute(): React.JSX.Element {
       setCategories(categoryList);
       setLocations(locationList);
     } catch (err) {
-      setLoadError(getErrorMessage(err, "Failed to load products"));
+      const message = getErrorMessage(err, "Failed to load products");
+      setLoadError(message);
+      showErrorToast(message);
     }
-  }, []);
+  }, [storefrontFilter]);
 
   useEffect(() => {
     void loadAll();
@@ -130,6 +144,7 @@ export function ProductsRoute(): React.JSX.Element {
 
   const categoryOptions = useMemo(() => buildCategoryOptions(categories), [categories]);
   const storefronts = useMemo(() => locations.filter((location) => isStorefrontType(location.locationType)), [locations]);
+  const showStorefrontFilter = !isBranchScoped && storefronts.length > 0;
 
   const filteredProducts = useMemo(() => {
     if (!products) return null;
@@ -150,14 +165,25 @@ export function ProductsRoute(): React.JSX.Element {
 
   const stockAlerts = useMemo(() => {
     if (!products) return { lowStockCount: 0, outOfStockCount: 0 };
+    // A deactivated product shouldn't trigger a reorder alert — nobody is buying it, so its stock
+    // level not shrinking is expected, not a warning.
+    const active = products.filter((product) => product.status === "active");
     return {
-      lowStockCount: products.filter((product) => product.totalStock <= product.reorderLevel).length,
-      outOfStockCount: products.filter((product) => product.totalStock <= 0).length
+      lowStockCount: active.filter((product) => product.totalStock <= product.reorderLevel).length,
+      outOfStockCount: active.filter((product) => product.totalStock <= 0).length
     };
   }, [products]);
 
+  // Cost-based valuation (quantity × buying price) — matches the "Stock Value" figure used
+  // throughout the Inventory Report, not the selling price (which would be projected revenue, not
+  // the value of stock actually sitting on the shelf).
+  const stockValueCents = useMemo(() => {
+    if (!products) return 0;
+    return products.reduce((sum, product) => sum + product.totalStock * product.buyingPriceCents, 0);
+  }, [products]);
+
   const hasActiveFilters = Boolean(
-    searchTerm || categoryFilter || statusFilter || lowStockOnly || outOfStockOnly
+    searchTerm || categoryFilter || statusFilter !== "active" || storefrontFilter || lowStockOnly || outOfStockOnly
   );
 
   const exportRequest = useMemo<ExportListRequest | null>(() => {
@@ -168,6 +194,9 @@ export function ProductsRoute(): React.JSX.Element {
       filterParts.push(`Category: ${categoryOptions.find((c) => c.value === categoryFilter)?.label ?? categoryFilter}`);
     }
     if (statusFilter) filterParts.push(`Status: ${statusFilter}`);
+    if (storefrontFilter) {
+      filterParts.push(`Storefront: ${storefronts.find((s) => s.id === storefrontFilter)?.locationName ?? storefrontFilter}`);
+    }
     if (lowStockOnly) filterParts.push("Low Stock Only");
     if (outOfStockOnly) filterParts.push("Out of Stock Only");
 
@@ -194,11 +223,25 @@ export function ProductsRoute(): React.JSX.Element {
       stats: [
         { label: "Total Products", value: String(filteredProducts.length) },
         { label: "Low Stock Alerts", value: String(stockAlerts.lowStockCount) },
-        { label: "Out of Stock Alerts", value: String(stockAlerts.outOfStockCount) }
+        { label: "Out of Stock Alerts", value: String(stockAlerts.outOfStockCount) },
+        { label: "Stock Value", value: `${currency} ${formatCents(stockValueCents)}` }
       ],
       fileBaseName: `Products_${new Date().toISOString().slice(0, 10)}`
     };
-  }, [filteredProducts, stockAlerts, searchTerm, categoryFilter, statusFilter, lowStockOnly, outOfStockOnly, categoryOptions, currency]);
+  }, [
+    filteredProducts,
+    stockAlerts,
+    stockValueCents,
+    searchTerm,
+    categoryFilter,
+    statusFilter,
+    storefrontFilter,
+    storefronts,
+    lowStockOnly,
+    outOfStockOnly,
+    categoryOptions,
+    currency
+  ]);
 
   const allFilteredSelected =
     filteredProducts !== null && filteredProducts.length > 0 && filteredProducts.every((product) => selectedIds.has(product.id));
@@ -229,13 +272,16 @@ export function ProductsRoute(): React.JSX.Element {
   async function handleBulkTaxApplied(updatedCount: number): Promise<void> {
     setSelectedIds(new Set());
     await loadAll();
-    setNotice(`Updated tax category on ${updatedCount} product${updatedCount === 1 ? "" : "s"}.`);
+    const message = `Updated tax category on ${updatedCount} product${updatedCount === 1 ? "" : "s"}.`;
+    setNotice(message);
+    showSuccessToast(message);
   }
 
   function clearFilters(): void {
     setSearchTerm("");
     setCategoryFilter("");
-    setStatusFilter("");
+    setStatusFilter("active");
+    setStorefrontFilter("");
     setLowStockOnly(false);
     setOutOfStockOnly(false);
   }
@@ -248,19 +294,27 @@ export function ProductsRoute(): React.JSX.Element {
     await loadAll();
     setEditingProduct(null);
     setNotice("Product updated.");
+    showSuccessToast("Product updated.");
   }
 
   async function handleProductCreated(): Promise<void> {
     setCreateOpen(false);
     await loadAll();
     setNotice("Product created.");
+    showSuccessToast("Product created.");
   }
 
   async function handleToggleStatus(product: ProductListItem): Promise<void> {
     const nextStatus = product.status === "active" ? "inactive" : "active";
-    await window.blueLedger.product.setStatus(product.id, nextStatus);
-    await loadAll();
-    setNotice(nextStatus === "active" ? "Product activated." : "Product deactivated.");
+    try {
+      await window.blueLedger.product.setStatus(product.id, nextStatus);
+      await loadAll();
+      const message = nextStatus === "active" ? "Product activated." : "Product deactivated.";
+      setNotice(message);
+      showSuccessToast(message);
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Failed to update product status"));
+    }
   }
 
   return (
@@ -324,11 +378,17 @@ export function ProductsRoute(): React.JSX.Element {
               value={String(stockAlerts.outOfStockCount)}
               tone="danger"
             />
+            <StatTile
+              icon={Wallet}
+              label="Stock Value"
+              value={`${currency} ${formatCents(stockValueCents)}`}
+              tone="success"
+            />
           </div>
         )}
 
         {products !== null && products.length > 0 && (
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
+          <div className={cn("mt-4 grid grid-cols-1 gap-3", showStorefrontFilter ? "sm:grid-cols-5" : "sm:grid-cols-4")}>
             <label className="block sm:col-span-2">
               <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
                 Search
@@ -363,8 +423,19 @@ export function ProductsRoute(): React.JSX.Element {
                 { value: "inactive", label: "Inactive" }
               ]}
             />
+            {showStorefrontFilter && (
+              <SelectField
+                label="Storefront"
+                value={storefrontFilter}
+                onChange={setStorefrontFilter}
+                options={[
+                  { value: "", label: "All Storefronts" },
+                  ...storefronts.map((storefront) => ({ value: storefront.id, label: storefront.locationName }))
+                ]}
+              />
+            )}
 
-            <div className="flex flex-wrap items-center gap-2 sm:col-span-4">
+            <div className={cn("flex flex-wrap items-center gap-2", showStorefrontFilter ? "sm:col-span-5" : "sm:col-span-4")}>
               <button
                 type="button"
                 onClick={() => setLowStockOnly((prev) => !prev)}
@@ -462,10 +533,10 @@ export function ProductsRoute(): React.JSX.Element {
               <table className="w-full table-fixed border-collapse text-sm">
                 <colgroup>
                   <col className="w-[4%]" />
-                  <col className="w-[27%]" />
-                  <col className="w-[11%]" />
-                  <col className="w-[9%]" />
-                  <col className="w-[9%]" />
+                  <col className="w-[34%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[8%]" />
                   <col className="w-[15%]" />
                 </colgroup>
                 <thead>
@@ -506,12 +577,12 @@ export function ProductsRoute(): React.JSX.Element {
                         <div className="flex items-center gap-3">
                           <ProductThumbnail imagePath={product.imagePath} />
                           <div className="min-w-0">
-                            <p className="truncate font-extrabold" title={product.name}>
+                            <p className="line-clamp-2 font-extrabold leading-snug" title={product.name}>
                               {product.name}
                             </p>
                             <p className="truncate text-xs tabular-nums text-muted">{product.sku}</p>
-                            <span className="truncate px-4 py-3 text-sm font-semibold text-muted">
-                        {product.categoryName ?? "Uncategorized"}
+                            <span className="truncate text-sm font-semibold text-muted">
+                              {product.categoryName ?? "Uncategorized"}
                             </span>
                           </div>
                         </div>

@@ -5,6 +5,7 @@ import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { Field, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { ExpenseCategory } from "@shared/types/expense-category";
 
 type FormState = { name: string; description: string };
@@ -52,13 +53,17 @@ export function ExpenseCategoriesManagerModal({
     try {
       if (editingCategory) {
         await window.blueLedger.expenseCategory.update(editingCategory.id, form);
+        showSuccessToast(`Category "${form.name}" updated`);
       } else {
         await window.blueLedger.expenseCategory.create(form);
+        showSuccessToast(`Category "${form.name}" created`);
       }
       setFormOpen(false);
       await onChanged();
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to save category"));
+      const message = getErrorMessage(err, "Failed to save category");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }
@@ -67,13 +72,14 @@ export function ExpenseCategoriesManagerModal({
   async function handleToggleStatus(category: ExpenseCategory): Promise<void> {
     setActionError(null);
     try {
-      await window.blueLedger.expenseCategory.setStatus(
-        category.id,
-        category.status === "active" ? "inactive" : "active"
-      );
+      const nextStatus = category.status === "active" ? "inactive" : "active";
+      await window.blueLedger.expenseCategory.setStatus(category.id, nextStatus);
+      showSuccessToast(`Category "${category.name}" ${nextStatus === "active" ? "activated" : "deactivated"}`);
       await onChanged();
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to update status"));
+      const message = getErrorMessage(err, "Failed to update status");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 

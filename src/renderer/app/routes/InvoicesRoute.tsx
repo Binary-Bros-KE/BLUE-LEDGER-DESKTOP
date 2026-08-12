@@ -57,6 +57,7 @@ import type { Customer } from "@shared/types/customer";
 import type { Supplier } from "@shared/types/supplier";
 import type { ExportListRequest } from "@shared/types/export";
 import type { InvoiceListItem, InvoiceSummary } from "@shared/types/invoice";
+import type { InvoiceCancellation } from "@shared/types/invoice-cancellation";
 import { isStorefrontType, type Location } from "@shared/types/location";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import type { ProductListItem } from "@shared/types/product";
@@ -166,10 +167,16 @@ export function InvoicesRoute(): React.JSX.Element {
   const canCreate = can("sales", "create");
   const canEdit = can("sales", "edit");
   const canExport = can("sales", "export");
+  // Cancelling outright (no approval step) is gated the same as approving one — whoever can approve
+  // someone else's cancellation request can just as well skip the request step themselves. Matches
+  // Manager/Super Admin's default role grants; Cashier/Storekeeper have no "approvals" access at all,
+  // so they only ever see the canEdit-gated Request Cancel button below.
+  const canApproveDirectly = can("approvals", "approve");
   const confirm = useConfirm();
 
   const [summary, setSummary] = useState<InvoiceSummary | null>(null);
   const [invoices, setInvoices] = useState<InvoiceListItem[] | null>(null);
+  const [invoiceCancellations, setInvoiceCancellations] = useState<InvoiceCancellation[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<ProductListItem[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
@@ -187,6 +194,12 @@ export function InvoicesRoute(): React.JSX.Element {
 
   const [viewingSale, setViewingSale] = useState<Sale | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
+
+  const [cancelRequestSale, setCancelRequestSale] = useState<Sale | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelNotes, setCancelNotes] = useState("");
+  const [cancelRequestSaving, setCancelRequestSaving] = useState(false);
+  const [cancelRequestError, setCancelRequestError] = useState<string | null>(null);
   const [printingThermal, setPrintingThermal] = useState(false);
   const [sharing, setSharing] = useState(false);
 
@@ -241,20 +254,23 @@ export function InvoicesRoute(): React.JSX.Element {
   const loadAll = useCallback(async () => {
     setLoadError(null);
     try {
-      const [summaryResult, invoiceList, customerList, productList, methodList, supplierList] = await Promise.all([
-        window.blueLedger.invoice.summary(),
-        window.blueLedger.invoice.list(),
-        window.blueLedger.customer.list(),
-        window.blueLedger.product.list(),
-        window.blueLedger.paymentMethod.list(),
-        window.blueLedger.supplier.list()
-      ]);
+      const [summaryResult, invoiceList, customerList, productList, methodList, supplierList, cancellationList] =
+        await Promise.all([
+          window.blueLedger.invoice.summary(),
+          window.blueLedger.invoice.list(),
+          window.blueLedger.customer.list(),
+          window.blueLedger.product.list(),
+          window.blueLedger.paymentMethod.list(),
+          window.blueLedger.supplier.list(),
+          window.blueLedger.invoiceCancellation.list()
+        ]);
       setSuppliers(supplierList);
       setSummary(summaryResult);
       setInvoices(invoiceList);
       setCustomers(customerList);
       setProducts(productList);
       setPaymentMethods(methodList);
+      setInvoiceCancellations(cancellationList);
     } catch (err) {
       setLoadError(getErrorMessage(err, "Failed to load invoices"));
     }
@@ -276,6 +292,21 @@ export function InvoicesRoute(): React.JSX.Element {
     () => paymentMethods.filter((method) => method.isActive).sort((a, b) => a.sortOrder - b.sortOrder),
     [paymentMethods]
   );
+
+  // An approved cancellation is already reflected by the invoice's own paymentStatus turning
+  // "cancelled" (see invoice-cancellation-service.ts), so this only needs to surface the two states
+  // that AREN'T visible anywhere else: a request still awaiting a decision, and one that was turned
+  // down (same "Pending Approval"/"X Rejected" pattern ReceiptsRoute already uses for void/return).
+  const cancellationStatusBySaleId = useMemo(() => {
+    const map = new Map<string, { pending: boolean; rejected: boolean }>();
+    for (const cancellation of invoiceCancellations) {
+      const entry = map.get(cancellation.saleId) ?? { pending: false, rejected: false };
+      if (cancellation.status === "pending_approval") entry.pending = true;
+      if (cancellation.status === "rejected") entry.rejected = true;
+      map.set(cancellation.saleId, entry);
+    }
+    return map;
+  }, [invoiceCancellations]);
   const selectedRecordMethod = activePaymentMethods.find((method) => method.id === paymentMethodId) ?? null;
   const selectedMarkPaidMethod = activePaymentMethods.find((method) => method.id === markPaidMethodId) ?? null;
   const selectedInitialMethod = activePaymentMethods.find((method) => method.id === initialPaymentMethodId) ?? null;
@@ -510,21 +541,53 @@ export function InvoicesRoute(): React.JSX.Element {
     if (!viewingSale) return;
     const confirmed = await confirm({
       title: "Cancel this invoice?",
-      message: `Cancel invoice ${viewingSale.invoiceNumber}? This can't be undone.`,
+      message: `Cancel invoice ${viewingSale.invoiceNumber}? This restocks every item and, if anything was paid, records a refund. This can't be undone.`,
       tone: "danger",
       confirmLabel: "Cancel Invoice"
     });
     if (!confirmed) return;
     setActionError(null);
     try {
-      await window.blueLedger.invoice.cancel(viewingSale.id);
+      await window.blueLedger.invoice.cancel(viewingSale.id, {});
       await refreshViewing(viewingSale.id);
       await loadAll();
-      showSuccessToast("Invoice cancelled");
+      showSuccessToast("Invoice cancelled — stock restored and any payment reversed");
     } catch (err) {
       const message = getErrorMessage(err, "Failed to cancel invoice");
       setActionError(message);
       showErrorToast(message);
+    }
+  }
+
+  function openCancelRequestModal(): void {
+    if (!viewingSale) return;
+    setCancelRequestSale(viewingSale);
+    setCancelReason("");
+    setCancelNotes("");
+    setCancelRequestError(null);
+  }
+
+  async function handleSubmitCancelRequest(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    if (!cancelRequestSale) return;
+    setCancelRequestSaving(true);
+    setCancelRequestError(null);
+    try {
+      await window.blueLedger.invoiceCancellation.request({
+        saleId: cancelRequestSale.id,
+        reason: cancelReason,
+        notes: cancelNotes
+      });
+      setCancelRequestSale(null);
+      await refreshViewing(cancelRequestSale.id);
+      await loadAll();
+      showSuccessToast("Cancellation request submitted");
+    } catch (err) {
+      const message = getErrorMessage(err, "Failed to submit cancellation request");
+      setCancelRequestError(message);
+      showErrorToast(message);
+    } finally {
+      setCancelRequestSaving(false);
     }
   }
 
@@ -1048,9 +1111,18 @@ export function InvoicesRoute(): React.JSX.Element {
                         {formatCents(invoice.balanceDueCents)}
                       </td>
                       <td className="px-3 py-2.5">
-                        <DashedPill tone={statusTone(invoice.paymentStatus)}>
-                          {statusLabel(invoice.paymentStatus)}
-                        </DashedPill>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <DashedPill tone={statusTone(invoice.paymentStatus)}>
+                            {statusLabel(invoice.paymentStatus)}
+                          </DashedPill>
+                          {cancellationStatusBySaleId.get(invoice.id)?.pending && (
+                            <DashedPill tone="accent">Cancellation Pending</DashedPill>
+                          )}
+                          {!cancellationStatusBySaleId.get(invoice.id)?.pending &&
+                            cancellationStatusBySaleId.get(invoice.id)?.rejected && (
+                              <DashedPill tone="neutral">Cancellation Rejected</DashedPill>
+                            )}
+                        </div>
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center justify-end gap-2">
@@ -1101,6 +1173,13 @@ export function InvoicesRoute(): React.JSX.Element {
             <div className="flex flex-wrap items-center gap-2">
               <DashedPill tone={statusTone(viewingSale.paymentStatus)}>{statusLabel(viewingSale.paymentStatus)}</DashedPill>
               <DashedPill tone="accent">{transactionTypeLabel(viewingSale.transactionType)}</DashedPill>
+              {cancellationStatusBySaleId.get(viewingSale.id)?.pending && (
+                <DashedPill tone="accent">Cancellation Pending</DashedPill>
+              )}
+              {!cancellationStatusBySaleId.get(viewingSale.id)?.pending &&
+                cancellationStatusBySaleId.get(viewingSale.id)?.rejected && (
+                  <DashedPill tone="neutral">Cancellation Rejected</DashedPill>
+                )}
             </div>
 
             <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
@@ -1130,14 +1209,16 @@ export function InvoicesRoute(): React.JSX.Element {
               <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Products</p>
               <div className="mt-2 space-y-1.5">
                 {viewingSale.items.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between rounded-lg border border-line px-3 py-2">
+                  <div key={item.id} className="flex items-start justify-between gap-2 rounded-lg border border-line px-3 py-2">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-bold text-ink">{item.productName}</p>
+                      <p className="line-clamp-2 text-sm font-bold leading-snug text-ink" title={item.productName}>
+                        {item.productName}
+                      </p>
                       <p className="text-[11px] font-semibold text-muted">
                         {item.quantity} x {currency} {formatCents(item.unitPriceCents)}
                       </p>
                     </div>
-                    <p className="flex-none text-sm font-extrabold text-ink">{formatCents(item.lineTotalCents)}</p>
+                    <p className="mt-0.5 flex-none text-sm font-extrabold text-ink">{formatCents(item.lineTotalCents)}</p>
                   </div>
                 ))}
               </div>
@@ -1155,12 +1236,14 @@ export function InvoicesRoute(): React.JSX.Element {
                   {viewingSale.items
                     .filter((item) => item.isLocallySourced)
                     .map((item) => (
-                      <div key={item.id} className="flex items-center justify-between gap-2 text-xs">
+                      <div key={item.id} className="flex items-start justify-between gap-2 text-xs">
                         <div className="min-w-0">
-                          <p className="truncate font-bold text-ink">{item.productName}</p>
+                          <p className="line-clamp-2 font-bold leading-snug text-ink" title={item.productName}>
+                            {item.productName}
+                          </p>
                           <p className="truncate text-muted">{item.localSupplierName ?? "No supplier recorded"}</p>
                         </div>
-                        <span className="flex-none font-bold tabular-nums text-ink">
+                        <span className="mt-0.5 flex-none font-bold tabular-nums text-ink">
                           Cost {item.localCostCents !== null ? formatCents(item.localCostCents) : "—"}
                         </span>
                       </div>
@@ -1378,20 +1461,93 @@ export function InvoicesRoute(): React.JSX.Element {
               </div>
             )}
 
-            {canEdit && viewingSale.paymentStatus !== "cancelled" && (
-              <div className="mt-2">
-                <Button
-                  type="button"
-                  onClick={() => void handleCancelInvoice()}
-                  className="h-9 w-full border border-danger/30 bg-white text-xs text-danger shadow-none hover:bg-danger-soft"
-                >
-                  <X className="mr-1.5 size-3.5" aria-hidden="true" />
-                  Cancel Invoice
-                </Button>
+            {(canApproveDirectly || canEdit) && viewingSale.paymentStatus !== "cancelled" && (
+              <div className={cn("mt-2 grid gap-2", canApproveDirectly && canEdit ? "grid-cols-2" : "grid-cols-1")}>
+                {canApproveDirectly && (
+                  <Button
+                    type="button"
+                    onClick={() => void handleCancelInvoice()}
+                    className="h-9 border border-danger/30 bg-white text-xs text-danger shadow-none hover:bg-danger-soft"
+                  >
+                    <X className="mr-1.5 size-3.5" aria-hidden="true" />
+                    Cancel Invoice
+                  </Button>
+                )}
+                {canEdit && (
+                  <Button
+                    type="button"
+                    onClick={openCancelRequestModal}
+                    disabled={Boolean(cancellationStatusBySaleId.get(viewingSale.id)?.pending)}
+                    className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Ban className="mr-1.5 size-3.5" aria-hidden="true" />
+                    {cancellationStatusBySaleId.get(viewingSale.id)?.pending ? "Cancellation Requested" : "Request Cancel"}
+                  </Button>
+                )}
               </div>
             )}
           </div>
         ) : null}
+      </Modal>
+
+      <Modal
+        open={cancelRequestSale !== null}
+        onClose={() => setCancelRequestSale(null)}
+        title="Request Invoice Cancellation"
+        description="A manager must approve this before anything changes — stock and money both stay exactly as they are until then."
+        widthClassName="max-w-md"
+      >
+        {cancelRequestSale && (
+          <form onSubmit={handleSubmitCancelRequest}>
+            {cancelRequestError && (
+              <div className="mb-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
+                {cancelRequestError}
+              </div>
+            )}
+
+            <div className="rounded-lg border border-line bg-soft px-3.5 py-2.5">
+              <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Cancelling</p>
+              <p className="mt-0.5 text-sm font-bold text-ink">
+                {cancelRequestSale.invoiceNumber} · {formatCents(cancelRequestSale.grandTotalCents)}
+              </p>
+            </div>
+
+            <Field
+              label="Reason"
+              value={cancelReason}
+              onChange={setCancelReason}
+              placeholder="e.g. Customer changed their mind"
+              required
+              className="mt-4"
+            />
+            <TextAreaField
+              label="Notes"
+              value={cancelNotes}
+              onChange={setCancelNotes}
+              placeholder="Optional additional detail"
+              className="mt-4"
+              rows={2}
+            />
+
+            <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
+              <Button
+                type="button"
+                onClick={() => setCancelRequestSale(null)}
+                className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={cancelRequestSaving}
+                className="h-9 border border-danger bg-danger text-xs text-white shadow-none hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {cancelRequestSaving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
+                {cancelRequestSaving ? "Submitting..." : "Submit Request"}
+              </Button>
+            </div>
+          </form>
+        )}
       </Modal>
 
       <Modal
@@ -1689,7 +1845,18 @@ export function InvoicesRoute(): React.JSX.Element {
               <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Products</span>
               <button
                 type="button"
-                onClick={() => setQuickCreateProductOpen(true)}
+                onClick={() => {
+                  // Without a storefront, the popup has nowhere to seed opening stock — its own
+                  // Stock Quantity field just silently doesn't render (see
+                  // QuickCreateProductModal's storefrontId prop), which looked like a random,
+                  // unexplained bug rather than this. Same guard/message as submitting the
+                  // invoice itself (below), just earlier.
+                  if (session && !session.branch && !createStorefrontId) {
+                    setCreateError("Choose a storefront above before adding a new product");
+                    return;
+                  }
+                  setQuickCreateProductOpen(true);
+                }}
                 className="flex items-center gap-1 text-[11px] font-extrabold uppercase text-accent hover:underline cursor-pointer"
               >
                 <Plus className="size-3" aria-hidden="true" />
@@ -1730,7 +1897,9 @@ export function InvoicesRoute(): React.JSX.Element {
                   <div key={line.productId} className="rounded-lg border border-line p-2.5">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-extrabold text-ink">{line.name}</p>
+                        <p className="line-clamp-2 text-sm font-extrabold leading-snug text-ink" title={line.name}>
+                          {line.name}
+                        </p>
                         <p className="text-[11px] font-semibold text-muted">@ {formatCents(pricing.unitPriceCents)}</p>
                       </div>
                       <button

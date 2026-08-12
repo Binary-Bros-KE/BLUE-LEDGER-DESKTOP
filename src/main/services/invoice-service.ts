@@ -26,7 +26,7 @@ import { computePaymentStatus } from "@shared/lib/invoice";
 import { optionalText } from "@shared/schemas/common";
 import { createInvoiceSchema, recordPaymentSchema, type CreateInvoiceInput } from "@shared/schemas/invoice";
 import type { InvoiceListItem, InvoiceSummary } from "@shared/types/invoice";
-import type { PaymentStatus, Sale, SalePayment, TransactionType } from "@shared/types/sale";
+import type { Sale, SalePayment, TransactionType } from "@shared/types/sale";
 
 const markPaidSchema = z.object({
   paymentMethodId: z.string().trim().min(1, "Select a payment method"),
@@ -68,7 +68,8 @@ function requireActivePaymentMethod(
   return { id: method.id, name: method.name, requiresReference: Boolean(method.requires_reference) };
 }
 
-function requireInvoiceRow(id: string, tenantId: string): SaleRow {
+/** Exported for invoice-cancellation-service.ts — same lookup, no reason to duplicate it. */
+export function requireInvoiceRow(id: string, tenantId: string): SaleRow {
   const row = saleRepository.findSaleRowById(id);
   if (!row || row.tenant_id !== tenantId) {
     throw new Error("Invoice not found");
@@ -346,18 +347,9 @@ export function markInvoicePaid(saleId: string, input: unknown): Sale {
   });
 }
 
-/** Writes off the invoice without touching inventory — use the Void workflow if stock must be reversed. */
-export function cancelInvoice(saleId: string): Sale {
-  requirePermission("sales", "edit");
-  const { tenantId } = getCurrentTenant();
-  const row = requireInvoiceRow(saleId, tenantId);
-  if (row.payment_status === "cancelled") {
-    throw new Error("This invoice is already cancelled");
-  }
-
-  saleRepository.updateSalePaymentStatusRow(saleId, "cancelled" satisfies PaymentStatus);
-  return getSaleDetail(saleId);
-}
+// Direct invoice cancellation (restock + refund) now lives in invoice-cancellation-service.ts's
+// cancelInvoiceDirect — moved out of this file specifically to avoid a circular import (that service
+// needs requireInvoiceRow from here; this file calling back into it would create a cycle).
 
 /** Creates a fresh unpaid invoice with the same customer, items, and terms — for recurring billing.
  * No storefront prompt needed even for a no-branch (Super Admin) session — the duplicate belongs at

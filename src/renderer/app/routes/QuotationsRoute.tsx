@@ -1032,14 +1032,16 @@ export function QuotationsRoute(): React.JSX.Element {
               <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Products</p>
               <div className="mt-2 space-y-1.5">
                 {viewingQuotation.items.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between rounded-lg border border-line px-3 py-2">
+                  <div key={item.id} className="flex items-start justify-between gap-2 rounded-lg border border-line px-3 py-2">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-bold text-ink">{item.productName}</p>
+                      <p className="line-clamp-2 text-sm font-bold leading-snug text-ink" title={item.productName}>
+                        {item.productName}
+                      </p>
                       <p className="text-[11px] font-semibold text-muted">
                         {item.quantity} x {currency} {formatCents(item.unitPriceCents)}
                       </p>
                     </div>
-                    <p className="flex-none text-sm font-extrabold text-ink">{formatCents(item.lineTotalCents)}</p>
+                    <p className="mt-0.5 flex-none text-sm font-extrabold text-ink">{formatCents(item.lineTotalCents)}</p>
                   </div>
                 ))}
               </div>
@@ -1057,12 +1059,14 @@ export function QuotationsRoute(): React.JSX.Element {
                   {viewingQuotation.items
                     .filter((item) => item.isLocallySourced)
                     .map((item) => (
-                      <div key={item.id} className="flex items-center justify-between gap-2 text-xs">
+                      <div key={item.id} className="flex items-start justify-between gap-2 text-xs">
                         <div className="min-w-0">
-                          <p className="truncate font-bold text-ink">{item.productName}</p>
+                          <p className="line-clamp-2 font-bold leading-snug text-ink" title={item.productName}>
+                            {item.productName}
+                          </p>
                           <p className="truncate text-muted">{item.localSupplierName ?? "No supplier recorded"}</p>
                         </div>
-                        <span className="flex-none font-bold tabular-nums text-ink">
+                        <span className="mt-0.5 flex-none font-bold tabular-nums text-ink">
                           Cost {item.localCostCents !== null ? formatCents(item.localCostCents) : "—"}
                         </span>
                       </div>
@@ -1316,12 +1320,14 @@ export function QuotationsRoute(): React.JSX.Element {
                   <div
                     key={item.productId}
                     className={cn(
-                      "flex items-center justify-between gap-2 rounded-lg border px-3 py-2",
+                      "flex items-start justify-between gap-2 rounded-lg border px-3 py-2",
                       item.sufficient ? "border-line" : "border-danger/40 bg-danger-soft"
                     )}
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-bold text-ink">{item.productName}</p>
+                      <p className="line-clamp-2 text-sm font-bold leading-snug text-ink" title={item.productName}>
+                        {item.productName}
+                      </p>
                       <p className="text-[11px] font-semibold text-muted">
                         Requested {item.requestedQuantity} · Available {item.availableQuantity}
                         {!item.sufficient && " · Insufficient stock"}
@@ -1336,7 +1342,7 @@ export function QuotationsRoute(): React.JSX.Element {
                         onChange={(event) =>
                           setQuantityEdits((prev) => ({ ...prev, [item.productId]: Number(event.target.value) }))
                         }
-                        className="h-8 w-16 flex-none rounded-md border border-danger/40 text-center text-xs font-bold outline-none focus:border-danger"
+                        className="mt-0.5 h-8 w-16 flex-none rounded-md border border-danger/40 text-center text-xs font-bold outline-none focus:border-danger"
                       />
                     )}
                   </div>
@@ -1421,12 +1427,14 @@ export function QuotationsRoute(): React.JSX.Element {
                   <div
                     key={item.productId}
                     className={cn(
-                      "flex items-center justify-between gap-2 rounded-lg border px-3 py-2",
+                      "flex items-start justify-between gap-2 rounded-lg border px-3 py-2",
                       item.sufficient ? "border-line" : "border-danger/40 bg-danger-soft"
                     )}
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-bold text-ink">{item.productName}</p>
+                      <p className="line-clamp-2 text-sm font-bold leading-snug text-ink" title={item.productName}>
+                        {item.productName}
+                      </p>
                       <p className="text-[11px] font-semibold text-muted">
                         Requested {item.requestedQuantity} · Available {item.availableQuantity}
                         {!item.sufficient && " · Insufficient stock"}
@@ -1441,7 +1449,7 @@ export function QuotationsRoute(): React.JSX.Element {
                         onChange={(event) =>
                           setQuantityEdits((prev) => ({ ...prev, [item.productId]: Number(event.target.value) }))
                         }
-                        className="h-8 w-16 flex-none rounded-md border border-danger/40 text-center text-xs font-bold outline-none focus:border-danger"
+                        className="mt-0.5 h-8 w-16 flex-none rounded-md border border-danger/40 text-center text-xs font-bold outline-none focus:border-danger"
                       />
                     )}
                   </div>
@@ -1558,7 +1566,17 @@ export function QuotationsRoute(): React.JSX.Element {
               <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Products</span>
               <button
                 type="button"
-                onClick={() => setQuickCreateProductOpen(true)}
+                onClick={() => {
+                  // Without a storefront, the popup has nowhere to seed opening stock — its own
+                  // Stock Quantity field just silently doesn't render (see
+                  // QuickCreateProductModal's storefrontId prop). Same guard/message as
+                  // submitting the quotation itself (below), just earlier.
+                  if (session && !session.branch && !createStorefrontId) {
+                    setCreateError("Choose a storefront above before adding a new product");
+                    return;
+                  }
+                  setQuickCreateProductOpen(true);
+                }}
                 className="flex items-center gap-1 text-[11px] font-extrabold uppercase text-accent hover:underline cursor-pointer"
               >
                 <Plus className="size-3" aria-hidden="true" />
@@ -1599,7 +1617,9 @@ export function QuotationsRoute(): React.JSX.Element {
                   <div key={line.productId} className="rounded-lg border border-line p-2.5">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-extrabold text-ink">{line.name}</p>
+                        <p className="line-clamp-2 text-sm font-extrabold leading-snug text-ink" title={line.name}>
+                          {line.name}
+                        </p>
                         <p className="text-[11px] font-semibold text-muted">@ {formatCents(pricing.unitPriceCents)}</p>
                       </div>
                       <button

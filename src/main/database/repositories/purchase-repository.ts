@@ -24,6 +24,7 @@ export type PurchaseRow = {
   subtotal_cents: number;
   discount_amount_cents: number;
   tax_amount_cents: number;
+  shipping_cost_cents: number;
   grand_total_cents: number;
   payment_method_id: string | null;
   payment_reference: string | null;
@@ -308,6 +309,7 @@ export function insertPurchaseRow(input: {
   subtotalCents: number;
   discountAmountCents: number;
   taxAmountCents: number;
+  shippingCostCents: number;
   grandTotalCents: number;
   notes: string | null;
   attachmentPath: string | null;
@@ -321,10 +323,10 @@ export function insertPurchaseRow(input: {
       `
       INSERT INTO purchases (
         id, tenant_id, purchase_number, supplier_id, supplier_invoice_number, location_id, status,
-        tax_type, subtotal_cents, discount_amount_cents, tax_amount_cents, grand_total_cents,
+        tax_type, subtotal_cents, discount_amount_cents, tax_amount_cents, shipping_cost_cents, grand_total_cents,
         notes, attachment_path, ordered_at, created_by, created_at, updated_at, sync_status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
     `
     )
     .run(
@@ -339,6 +341,7 @@ export function insertPurchaseRow(input: {
       input.subtotalCents,
       input.discountAmountCents,
       input.taxAmountCents,
+      input.shippingCostCents,
       input.grandTotalCents,
       input.notes,
       input.attachmentPath,
@@ -365,6 +368,7 @@ export function updatePurchaseRow(
     subtotalCents: number;
     discountAmountCents: number;
     taxAmountCents: number;
+    shippingCostCents: number;
     grandTotalCents: number;
     notes: string | null;
     attachmentPath: string | null;
@@ -383,6 +387,7 @@ export function updatePurchaseRow(
         subtotal_cents = ?,
         discount_amount_cents = ?,
         tax_amount_cents = ?,
+        shipping_cost_cents = ?,
         grand_total_cents = ?,
         notes = ?,
         attachment_path = ?,
@@ -399,6 +404,7 @@ export function updatePurchaseRow(
       input.subtotalCents,
       input.discountAmountCents,
       input.taxAmountCents,
+      input.shippingCostCents,
       input.grandTotalCents,
       input.notes,
       input.attachmentPath,
@@ -594,6 +600,7 @@ export function mapPurchaseDetailRow(row: PurchaseDetailRow, items: PurchaseItem
     subtotalCents: row.subtotal_cents,
     discountAmountCents: row.discount_amount_cents,
     taxAmountCents: row.tax_amount_cents,
+    shippingCostCents: row.shipping_cost_cents,
     grandTotalCents: row.grand_total_cents,
     paymentMethodId: row.payment_method_id,
     paymentMethodName: row.payment_method_name,

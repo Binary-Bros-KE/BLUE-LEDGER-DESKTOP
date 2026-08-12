@@ -2247,6 +2247,68 @@ const migrations = [
       -- page load.
       CREATE INDEX IF NOT EXISTS idx_stock_movements_reference ON stock_movements(reference_type, reference_id);
     `
+  },
+  {
+    version: 64,
+    name: "invoice_cancellations",
+    sql: `
+      -- Same shape as sale_voids (request/approve/reject against a sale, no line items of its own) —
+      -- see invoice-cancellation-service.ts's own doc comment for why a genuinely separate entity
+      -- from sale_voids: an invoice cancellation always restocks AND (if anything was paid) reverses
+      -- the payment as a real ledger entry, which sale_voids never does — different enough behavior
+      -- to deserve its own table/audit trail rather than overloading sale_voids' meaning. Covers BOTH
+      -- the immediate "Cancel Invoice" action (inserted pre-approved, requested_by == approved_by)
+      -- and the manager-approval "Request Cancel" workflow (inserted pending, approved later) — one
+      -- table, one code path, so getPaymentTransactions only ever has one place to look for "was this
+      -- invoice's payment reversed, and when".
+      CREATE TABLE IF NOT EXISTS invoice_cancellations (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        sale_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending_approval' CHECK (status IN ('pending_approval', 'approved', 'rejected')),
+        reason TEXT NOT NULL,
+        notes TEXT,
+        requested_by TEXT NOT NULL,
+        requested_at TEXT NOT NULL,
+        approved_by TEXT,
+        approved_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        synced_updated_at TEXT,
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (sale_id) REFERENCES sales(id),
+        FOREIGN KEY (requested_by) REFERENCES employees(id),
+        FOREIGN KEY (approved_by) REFERENCES employees(id)
+      );
+
+      CREATE INDEX idx_invoice_cancellations_tenant_status ON invoice_cancellations(tenant_id, status);
+      CREATE INDEX idx_invoice_cancellations_sale ON invoice_cancellations(sale_id);
+
+      CREATE TRIGGER trg_invoice_cancellations_sync_ai AFTER INSERT ON invoice_cancellations BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'invoice_cancellations', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_invoice_cancellations_sync_au AFTER UPDATE ON invoice_cancellations WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'invoice_cancellations', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_invoice_cancellations_sync_ad AFTER DELETE ON invoice_cancellations BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'invoice_cancellations', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+    `
+  },
+  {
+    version: 65,
+    name: "purchase_shipping_cost",
+    sql: `
+      -- Freight/delivery cost for the whole order — see Purchase.shippingCostCents' own doc comment
+      -- (shared/types/purchase.ts). Added on top of grand_total_cents, never folded into any single
+      -- line's own cost.
+      ALTER TABLE purchases ADD COLUMN shipping_cost_cents INTEGER NOT NULL DEFAULT 0;
+    `
   }
 ] as const;
 

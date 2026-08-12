@@ -3,6 +3,7 @@ import { Loader2, Search } from "lucide-react";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { showErrorToast } from "@renderer/shared/lib/toast";
 import type { Customer } from "@shared/types/customer";
 import type { CustomerPurchaseHistoryEntry } from "@shared/types/customer-report";
 
@@ -52,7 +53,11 @@ export function CustomerPurchaseHistorySection(): React.JSX.Element {
     window.blueLedger.report
       .customerPurchaseHistory({ customerId: customer.id })
       .then(setHistory)
-      .catch((err: unknown) => setError(getErrorMessage(err, "Failed to load purchase history")))
+      .catch((err: unknown) => {
+        const message = getErrorMessage(err, "Failed to load purchase history");
+        setError(message);
+        showErrorToast(message);
+      })
       .finally(() => setLoading(false));
   }
 

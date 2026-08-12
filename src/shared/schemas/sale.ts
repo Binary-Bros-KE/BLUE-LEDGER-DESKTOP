@@ -31,7 +31,22 @@ export const saleCartInputSchema = z.object({
   /** Only ever read when the signed-in session has no assigned branch (see
    * sale-service.ts's requireActiveSession) — ignored otherwise, same as the renderer only
    * showing a storefront picker in that case. */
-  locationId: optionalText(64)
+  locationId: optionalText(64),
+  /** Only meaningful for a merely-held sale — a cashier may have already picked a payment method,
+   * jotted a reference, or entered an amount before deciding to hold instead of complete, and losing
+   * that on resume would be the same "everything should stay put" gap this schema already closes for
+   * price overrides/discounts/delivery. checkoutInputSchema below re-declares paymentMethodId as
+   * required, since actually completing a sale really does need one. */
+  paymentMethodId: optionalText(64),
+  paymentReference: optionalText(120),
+  amountReceivedCents: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(100_000_000)
+    .nullable()
+    .optional()
+    .transform((value) => (value === undefined ? null : value))
 });
 
 export type SaleCartInput = z.infer<typeof saleCartInputSchema>;

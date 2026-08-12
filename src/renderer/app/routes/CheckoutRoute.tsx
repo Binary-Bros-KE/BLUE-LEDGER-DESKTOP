@@ -85,6 +85,11 @@ type OpenSaleDraft = {
   items: CartLine[];
   serviceCharges: ServiceChargeDraft[];
   delivery: DeliveryDraft | null;
+  // Per-draft, not global — every open ticket keeps its own payment choice, same as its own items/
+  // customer/delivery, so switching between tabs (or holding and coming back) never wipes it.
+  paymentMethodId: string;
+  paymentReference: string;
+  amountReceived: string;
   createdAt: number;
 };
 
@@ -130,10 +135,6 @@ export function CheckoutRoute(): React.JSX.Element {
   const [suspending, setSuspending] = useState(false);
   const [completing, setCompleting] = useState(false);
 
-  const [paymentMethodId, setPaymentMethodId] = useState("");
-  const [paymentReference, setPaymentReference] = useState("");
-  const [amountReceived, setAmountReceived] = useState("");
-
   const [mpesaConfigured, setMpesaConfigured] = useState(false);
   const [mpesaPhone, setMpesaPhone] = useState("");
   const [mpesaState, setMpesaState] = useState<"idle" | "sending" | "awaiting" | "success" | "error">("idle");
@@ -174,6 +175,10 @@ export function CheckoutRoute(): React.JSX.Element {
         setSuppliers(supplierList);
         setAutoPrintOnSale(printerSettings?.enabled === true && printerSettings.autoPrintOnSale === true);
 
+        const taxConfig = {
+          vatRatePercent: tenantContext?.vatRatePercent ?? 16,
+          pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true
+        };
         const drafts = await Promise.all(
           pendingList.map(async (pending) => {
             const full = await window.blueLedger.sale.get(pending.id);
@@ -184,23 +189,30 @@ export function CheckoutRoute(): React.JSX.Element {
               status: "suspended",
               customerId: full.customerId,
               notes: full.notes ?? "",
-              items: full.items.map((item) => ({
-                productId: item.productId,
-                name: item.productName,
-                sku: item.sku,
-                quantity: item.quantity,
-                discount: fromCents(item.discountAmountCents),
-                // Deliberately NOT restored from the held sale's own frozen unit price — resuming a
-                // held cart always re-prices from the product's current live data (same as it always
-                // has), and a markup is a fresh, per-checkout cashier decision, not a sticky
-                // attribute of the held draft.
-                priceOverride: "",
-                // Unlike priceOverride, this IS a sticky fact about the line, not a pricing decision
-                // — it was bought from another shop or it wasn't.
-                isLocallySourced: item.isLocallySourced,
-                localCost: item.localCostCents !== null ? fromCents(item.localCostCents) : "",
-                localSupplierId: item.localSupplierId
-              })),
+              items: full.items.map((item) => {
+                // Restored whenever the sale's frozen price differs from what the product would
+                // naturally price at today (no override applied) — that gap can only come from a
+                // deliberate cashier override, so it's sticky across hold/resume just like every
+                // other line attribute. Equal-to-natural stays "" so the line still re-prices live
+                // if the product's own price changes later, same as a brand-new cart line would.
+                const product = productList.find((candidate) => candidate.id === item.productId);
+                const naturalUnitPriceCents = product
+                  ? computeLinePricing(product, item.quantity, 0, taxConfig, null).unitPriceCents
+                  : item.unitPriceCents;
+                return {
+                  productId: item.productId,
+                  name: item.productName,
+                  sku: item.sku,
+                  quantity: item.quantity,
+                  discount: fromCents(item.discountAmountCents),
+                  priceOverride: naturalUnitPriceCents !== item.unitPriceCents ? fromCents(item.unitPriceCents) : "",
+                  // Unlike priceOverride, this IS a sticky fact about the line, not a pricing decision
+                  // — it was bought from another shop or it wasn't.
+                  isLocallySourced: item.isLocallySourced,
+                  localCost: item.localCostCents !== null ? fromCents(item.localCostCents) : "",
+                  localSupplierId: item.localSupplierId
+                };
+              }),
               serviceCharges: full.serviceCharges.map((charge) => ({
                 key: charge.id,
                 name: charge.name,
@@ -221,6 +233,9 @@ export function CheckoutRoute(): React.JSX.Element {
                   cost: fromCents(full.deliveryDraft.costCents)
                 }
                 : null,
+              paymentMethodId: full.paymentMethodId ?? "",
+              paymentReference: full.paymentReference ?? "",
+              amountReceived: full.amountReceivedCents !== null ? fromCents(full.amountReceivedCents) : "",
               createdAt: new Date(full.createdAt).getTime()
             };
             return draft;
@@ -263,12 +278,6 @@ export function CheckoutRoute(): React.JSX.Element {
       cancelled = true;
     };
   }, [effectiveLocationId]);
-
-  useEffect(() => {
-    setPaymentMethodId("");
-    setPaymentReference("");
-    setAmountReceived("");
-  }, [activeKey]);
 
   const stockByProductId = useMemo(() => {
     const map = new Map<string, number>();
@@ -352,7 +361,7 @@ export function CheckoutRoute(): React.JSX.Element {
     () => paymentMethods.filter((method) => method.isActive).sort((a, b) => a.sortOrder - b.sortOrder),
     [paymentMethods]
   );
-  const selectedPaymentMethod = activePaymentMethods.find((method) => method.id === paymentMethodId) ?? null;
+  const selectedPaymentMethod = activePaymentMethods.find((method) => method.id === activeDraft?.paymentMethodId) ?? null;
 
   // Resets the STK flow every time the payment method (or active draft) changes, so switching away
   // from M-Pesa and back never carries over a stale checkoutRequestId from a previous attempt.
@@ -369,7 +378,7 @@ export function CheckoutRoute(): React.JSX.Element {
       setMpesaPhone("");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paymentMethodId, activeKey]);
+  }, [activeDraft?.paymentMethodId, activeKey]);
 
   // Passive auto-poll while showing "waiting for customer to enter PIN" — reads ONLY the
   // transaction's own current status as already written by SERVER's Safaricom callback. Deliberately
@@ -389,7 +398,7 @@ export function CheckoutRoute(): React.JSX.Element {
           if (result.status === "success") {
             setMpesaState("success");
             setMpesaMessage(mpesaFriendlyMessage(result.status));
-            if (result.mpesaReceiptNumber) setPaymentReference(result.mpesaReceiptNumber);
+            if (result.mpesaReceiptNumber) updateActivePaymentReference(result.mpesaReceiptNumber);
           } else {
             setMpesaState("error");
             setMpesaMessage(mpesaFriendlyMessage(result.status));
@@ -417,7 +426,7 @@ export function CheckoutRoute(): React.JSX.Element {
       if (result.status === "success") {
         setMpesaState("success");
         setMpesaMessage(mpesaFriendlyMessage(result.status));
-        if (result.mpesaReceiptNumber) setPaymentReference(result.mpesaReceiptNumber);
+        if (result.mpesaReceiptNumber) updateActivePaymentReference(result.mpesaReceiptNumber);
       } else if (result.status !== "pending") {
         setMpesaState("error");
         setMpesaMessage(mpesaFriendlyMessage(result.status));
@@ -482,6 +491,9 @@ export function CheckoutRoute(): React.JSX.Element {
       items: [],
       serviceCharges: [],
       delivery: null,
+      paymentMethodId: "",
+      paymentReference: "",
+      amountReceived: "",
       createdAt: Date.now()
     };
   }
@@ -632,6 +644,21 @@ export function CheckoutRoute(): React.JSX.Element {
     setOpenSales((prev) => prev.map((draft) => (draft.key === activeKey ? { ...draft, delivery: next } : draft)));
   }
 
+  function updateActivePaymentMethod(value: string): void {
+    if (!activeKey) return;
+    setOpenSales((prev) => prev.map((draft) => (draft.key === activeKey ? { ...draft, paymentMethodId: value } : draft)));
+  }
+
+  function updateActivePaymentReference(value: string): void {
+    if (!activeKey) return;
+    setOpenSales((prev) => prev.map((draft) => (draft.key === activeKey ? { ...draft, paymentReference: value } : draft)));
+  }
+
+  function updateActiveAmountReceived(value: string): void {
+    if (!activeKey) return;
+    setOpenSales((prev) => prev.map((draft) => (draft.key === activeKey ? { ...draft, amountReceived: value } : draft)));
+  }
+
   function selectCustomerForActiveDraft(customerId: string | null): void {
     if (!activeKey) return;
     setOpenSales((prev) => prev.map((draft) => (draft.key === activeKey ? { ...draft, customerId } : draft)));
@@ -725,6 +752,9 @@ export function CheckoutRoute(): React.JSX.Element {
           localSupplierId: line.localSupplierId
         })),
         ...buildExtrasPayload(activeDraft),
+        paymentMethodId: activeDraft.paymentMethodId || undefined,
+        paymentReference: activeDraft.paymentReference || undefined,
+        amountReceivedCents: activeDraft.amountReceived.trim() === "" ? null : toCents(activeDraft.amountReceived),
         locationId: session && !session.branch ? storefrontId : undefined
       });
       const suspendedKey = activeDraft.key;
@@ -768,9 +798,9 @@ export function CheckoutRoute(): React.JSX.Element {
           localSupplierId: line.localSupplierId
         })),
         ...buildExtrasPayload(activeDraft),
-        paymentMethodId,
-        paymentReference,
-        amountReceivedCents: amountReceived.trim() === "" ? null : toCents(amountReceived),
+        paymentMethodId: activeDraft.paymentMethodId,
+        paymentReference: activeDraft.paymentReference,
+        amountReceivedCents: activeDraft.amountReceived.trim() === "" ? null : toCents(activeDraft.amountReceived),
         locationId: session && !session.branch ? storefrontId : undefined
       });
       const completedKey = activeDraft.key;
@@ -794,7 +824,8 @@ export function CheckoutRoute(): React.JSX.Element {
     }
   }
 
-  const amountReceivedCents = amountReceived.trim() === "" ? null : toCents(amountReceived);
+  const amountReceivedCents =
+    activeDraft && activeDraft.amountReceived.trim() !== "" ? toCents(activeDraft.amountReceived) : null;
   const changeDueCents =
     activeTotals && amountReceivedCents !== null ? amountReceivedCents - activeTotals.grandTotalCents : null;
 
@@ -1012,7 +1043,9 @@ export function CheckoutRoute(): React.JSX.Element {
                         <div key={line.productId} className="rounded-lg border border-line p-2.5">
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
-                              <p className="truncate text-sm font-extrabold text-ink">{line.name}</p>
+                              <p className="line-clamp-2 text-sm font-extrabold leading-snug text-ink" title={line.name}>
+                                {line.name}
+                              </p>
                               <p className="text-[11px] font-semibold tabular-nums text-muted">
                                 {line.quantity} × {formatCents(pricing.unitPriceCents)}
                               </p>
@@ -1206,10 +1239,10 @@ export function CheckoutRoute(): React.JSX.Element {
                         <button
                           key={method.id}
                           type="button"
-                          onClick={() => setPaymentMethodId(method.id)}
+                          onClick={() => updateActivePaymentMethod(method.id)}
                           className={cn(
                             "h-9 rounded-lg border px-3.5 text-xs font-extrabold transition cursor-pointer",
-                            paymentMethodId === method.id
+                            activeDraft?.paymentMethodId === method.id
                               ? "border-teal bg-teal text-white"
                               : "border-line bg-white text-ink hover:bg-soft"
                           )}
@@ -1290,8 +1323,8 @@ export function CheckoutRoute(): React.JSX.Element {
                   {selectedPaymentMethod?.requiresReference && (
                     <Field
                       label="Reference"
-                      value={paymentReference}
-                      onChange={setPaymentReference}
+                      value={activeDraft?.paymentReference ?? ""}
+                      onChange={updateActivePaymentReference}
                       placeholder="e.g. M-Pesa code, transaction ID"
                       required
                       className="mt-3"
@@ -1302,8 +1335,8 @@ export function CheckoutRoute(): React.JSX.Element {
                     <Field
                       label="Amount Received"
                       type="number"
-                      value={amountReceived}
-                      onChange={setAmountReceived}
+                      value={activeDraft?.amountReceived ?? ""}
+                      onChange={updateActiveAmountReceived}
                       placeholder={fromCents(totals.grandTotalCents)}
                     />
                     <div>
@@ -1346,7 +1379,7 @@ export function CheckoutRoute(): React.JSX.Element {
                     </Button>
                     <Button
                       type="submit"
-                      disabled={totals.lines.length === 0 || completing || !paymentMethodId}
+                      disabled={totals.lines.length === 0 || completing || !activeDraft?.paymentMethodId}
                       className="h-10 bg-teal text-xs hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {completing ? (

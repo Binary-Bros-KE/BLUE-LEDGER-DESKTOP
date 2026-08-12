@@ -5,6 +5,7 @@ import { Field, SelectField, TextAreaField } from "@renderer/shared/components/f
 import { Modal } from "@renderer/shared/components/Modal";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { MainStoreProductRow } from "@shared/types/main-store";
 
 type Mode = "receive" | "distribute" | "return" | "reallocate" | "damage" | "adjust";
@@ -39,9 +40,13 @@ export function MainStoreStockModal({
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  function resetForm(): void {
+  function resetForm(next: Mode): void {
     setReceiveTarget("main_store");
-    setStorefrontId("");
+    // Distribute/Return only offer real storefronts (no blank "Unallocated" option), so defaulting
+    // to "" here left the <select> DOM showing the first storefront while the state stayed empty —
+    // the false "choose a storefront" error on submit. Every other mode's dropdown DOES include a
+    // blank option, so "" stays a valid, in-sync default there.
+    setStorefrontId(next === "distribute" || next === "return" ? (product.storefronts[0]?.storefrontId ?? "") : "");
     setFromStorefrontId("");
     setToStorefrontId(product.storefronts[0]?.storefrontId ?? "");
     setQuantity("");
@@ -52,7 +57,7 @@ export function MainStoreStockModal({
   function switchMode(next: Mode): void {
     setMode(next);
     setNotice(null);
-    resetForm();
+    resetForm(next);
   }
 
   const storefrontOptions = product.storefronts.map((entry) => ({
@@ -91,7 +96,9 @@ export function MainStoreStockModal({
     // (the shelf is genuinely empty), unlike every other mode here which moves a positive amount.
     const quantityValid = mode === "adjust" ? Number.isFinite(quantityNumber) && quantityNumber >= 0 : Number.isFinite(quantityNumber) && quantityNumber > 0;
     if (!quantityValid) {
-      setActionError(mode === "adjust" ? "Enter the quantity you counted (0 or more)" : "Enter a quantity greater than 0");
+      const message = mode === "adjust" ? "Enter the quantity you counted (0 or more)" : "Enter a quantity greater than 0";
+      setActionError(message);
+      showErrorToast(message);
       setSaving(false);
       return;
     }
@@ -152,10 +159,15 @@ export function MainStoreStockModal({
         });
       }
       onChanged();
-      resetForm();
-      setNotice(mode === "adjust" && quantityNumber === currentBucketQuantity ? "Count matched — no change needed." : "Saved.");
+      resetForm(mode);
+      const successMessage =
+        mode === "adjust" && quantityNumber === currentBucketQuantity ? "Count matched — no change needed." : "Saved.";
+      setNotice(successMessage);
+      showSuccessToast(successMessage);
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to update stock"));
+      const message = getErrorMessage(err, "Failed to update stock");
+      setActionError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }

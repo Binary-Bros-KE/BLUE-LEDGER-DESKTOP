@@ -3,6 +3,7 @@ import { ArrowRight, Loader2 } from "lucide-react";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { showErrorToast } from "@renderer/shared/lib/toast";
 import { useUiStore } from "@renderer/shared/stores/ui-store";
 import { DashboardActionCard } from "@renderer/app/routes/dashboard/DashboardActionCard";
 import { DashboardShell } from "@renderer/app/routes/dashboard/DashboardShell";
@@ -73,7 +74,11 @@ export function CashierDashboard(): React.JSX.Element {
           myApprovedCount: myVoids.filter((v) => v.status === "approved").length + myReturns.filter((r) => r.status === "approved").length,
         });
       } catch (err) {
-        if (!cancelled) setError(getErrorMessage(err, "Failed to load the dashboard"));
+        if (!cancelled) {
+          const message = getErrorMessage(err, "Failed to load the dashboard");
+          setError(message);
+          showErrorToast(message);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }

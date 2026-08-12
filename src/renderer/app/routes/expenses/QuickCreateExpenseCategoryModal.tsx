@@ -4,6 +4,7 @@ import { Button } from "@renderer/shared/components/Button";
 import { Field, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { ExpenseCategory } from "@shared/types/expense-category";
 
 /** The fast path for adding a category mid-expense-entry — full management (edit, activate,
@@ -34,10 +35,13 @@ export function QuickCreateExpenseCategoryModal({
     setError(null);
     try {
       const category = await window.blueLedger.expenseCategory.create({ name, description });
+      showSuccessToast(`Category "${category.name}" created`);
       reset();
       onCreated(category);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to create category"));
+      const message = getErrorMessage(err, "Failed to create category");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }

@@ -6,6 +6,7 @@ import { LineItemEditor, toLineDrafts, toLineItems, type LineDraft } from "@rend
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { EmployeeListItem } from "@shared/types/employee";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import type { Salary } from "@shared/types/salary";
@@ -108,10 +109,12 @@ export function SalaryFormModal({
 
     if (!employeeId) {
       setError("Select an employee");
+      showErrorToast("Select an employee");
       return;
     }
     if (netPayCents < 0) {
       setError("Net pay can't be negative — reduce the deductions");
+      showErrorToast("Net pay can't be negative — reduce the deductions");
       return;
     }
 
@@ -130,10 +133,13 @@ export function SalaryFormModal({
       const salary = completingDraft
         ? await window.blueLedger.salary.complete(completingDraft.id, payload)
         : await window.blueLedger.salary.create(payload);
+      showSuccessToast(completingDraft ? "Payslip completed" : "Salary processed");
       await onProcessed(salary);
       onClose();
     } catch (err) {
-      setError(getErrorMessage(err, completingDraft ? "Failed to complete payslip" : "Failed to process salary"));
+      const message = getErrorMessage(err, completingDraft ? "Failed to complete payslip" : "Failed to process salary");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }

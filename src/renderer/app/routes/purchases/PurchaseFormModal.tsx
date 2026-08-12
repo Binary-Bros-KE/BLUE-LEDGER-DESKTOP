@@ -5,6 +5,7 @@ import { Field, SelectField, TextAreaField } from "@renderer/shared/components/f
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { computeLineTax, type TenantTaxConfig } from "@shared/lib/tax-calculation";
 import type { Location } from "@shared/types/location";
 import { TAX_TYPE_OPTIONS, type Product, type ProductListItem, type ProductTaxType } from "@shared/types/product";
@@ -76,6 +77,7 @@ export function PurchaseFormModal({
   const [supplierSearch, setSupplierSearch] = useState("");
   const [locationId, setLocationId] = useState("");
   const [supplierInvoiceNumber, setSupplierInvoiceNumber] = useState("");
+  const [shippingCost, setShippingCost] = useState("");
   const [notes, setNotes] = useState("");
   const [attachmentPath, setAttachmentPath] = useState<string | null>(null);
   const [attachmentBusy, setAttachmentBusy] = useState(false);
@@ -94,6 +96,7 @@ export function PurchaseFormModal({
       setSupplierId(editingPurchase.supplierId);
       setLocationId(editingPurchase.locationId);
       setSupplierInvoiceNumber(editingPurchase.supplierInvoiceNumber ?? "");
+      setShippingCost(editingPurchase.shippingCostCents > 0 ? fromCents(editingPurchase.shippingCostCents) : "");
       setNotes(editingPurchase.notes ?? "");
       setAttachmentPath(editingPurchase.attachmentPath);
       setItems(
@@ -111,6 +114,7 @@ export function PurchaseFormModal({
       setSupplierId(null);
       setLocationId("");
       setSupplierInvoiceNumber("");
+      setShippingCost("");
       setNotes("");
       setAttachmentPath(null);
       setItems([]);
@@ -149,14 +153,17 @@ export function PurchaseFormModal({
       discountAmountCents += item.discountAmountCents;
       taxAmountCents += lineTaxCents(item, tenantTaxConfig);
     }
+    const shippingCostCents = shippingCost.trim() ? toCents(shippingCost) : 0;
     return {
       subtotalCents,
       discountAmountCents,
       taxAmountCents,
+      shippingCostCents,
       // Tax is already inside subtotalCents (cost is tax-inclusive) — never added again here.
-      grandTotalCents: subtotalCents - discountAmountCents
+      // Shipping is added on top, unlike discount — it increases the total.
+      grandTotalCents: subtotalCents - discountAmountCents + shippingCostCents
     };
-  }, [items, tenantTaxConfig]);
+  }, [items, shippingCost, tenantTaxConfig]);
 
   function addItemLine(product: ProductListItem): void {
     setItems((prev) => {
@@ -181,7 +188,9 @@ export function PurchaseFormModal({
       const relativePath = await window.blueLedger.purchase.pickAttachment();
       if (relativePath) setAttachmentPath(relativePath);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to attach file"));
+      const message = getErrorMessage(err, "Failed to attach file");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setAttachmentBusy(false);
     }
@@ -192,7 +201,9 @@ export function PurchaseFormModal({
     try {
       await window.blueLedger.purchase.openAttachment(attachmentPath);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to open attachment"));
+      const message = getErrorMessage(err, "Failed to open attachment");
+      setError(message);
+      showErrorToast(message);
     }
   }
 
@@ -201,14 +212,17 @@ export function PurchaseFormModal({
 
     if (!supplierId) {
       setError("Select a supplier");
+      showErrorToast("Select a supplier");
       return;
     }
     if (!locationId) {
       setError("Select a destination location");
+      showErrorToast("Select a destination location");
       return;
     }
     if (items.length === 0) {
       setError("Add at least one product");
+      showErrorToast("Add at least one product");
       return;
     }
 
@@ -217,6 +231,7 @@ export function PurchaseFormModal({
       supplierId,
       supplierInvoiceNumber,
       locationId,
+      shippingCostCents: shippingCost.trim() ? toCents(shippingCost) : 0,
       notes,
       attachmentPath,
       items: items.map((item) => ({
@@ -235,10 +250,13 @@ export function PurchaseFormModal({
       } else {
         await window.blueLedger.purchase.create(payload);
       }
+      showSuccessToast(editingPurchase ? "Purchase updated" : "Purchase created");
       await onSaved();
       onClose();
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to save purchase"));
+      const message = getErrorMessage(err, "Failed to save purchase");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(null);
     }
@@ -388,7 +406,9 @@ export function PurchaseFormModal({
                   <div key={line.productId} className="rounded-lg border border-line p-2.5">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-extrabold text-ink">{line.name}</p>
+                        <p className="line-clamp-2 text-sm font-extrabold leading-snug text-ink" title={line.name}>
+                          {line.name}
+                        </p>
                         <p className="text-[11px] font-semibold text-muted">{line.sku}</p>
                       </div>
                       <button
@@ -478,6 +498,15 @@ export function PurchaseFormModal({
             </div>
           </div>
 
+          <Field
+            label="Shipping Cost"
+            type="number"
+            value={shippingCost}
+            onChange={setShippingCost}
+            placeholder="0.00"
+            className="mt-4 max-w-xs"
+          />
+
           <TextAreaField label="Notes" value={notes} onChange={setNotes} className="mt-4" rows={2} />
 
           <div className="mt-4">
@@ -533,6 +562,12 @@ export function PurchaseFormModal({
               <span className="font-semibold">Tax (included in Total)</span>
               <span className="font-bold tabular-nums">{formatCents(totals.taxAmountCents)}</span>
             </div>
+            {totals.shippingCostCents > 0 && (
+              <div className="flex justify-between text-muted">
+                <span className="font-semibold">Shipping</span>
+                <span className="font-bold tabular-nums">+{formatCents(totals.shippingCostCents)}</span>
+              </div>
+            )}
             <div className="flex justify-between text-base font-extrabold text-ink">
               <span>Total</span>
               <span>{formatCents(totals.grandTotalCents)}</span>

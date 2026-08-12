@@ -7,6 +7,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { getDashboardVariant } from "@renderer/shared/lib/dashboard-role";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { fromCents, toCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { Expense } from "@shared/types/expense";
 import type { ExpenseCategory } from "@shared/types/expense-category";
 import { isStorefrontType, type Location } from "@shared/types/location";
@@ -127,7 +128,9 @@ export function LocalPurchaseFormModal({
       const relativePath = await window.blueLedger.localPurchase.pickAttachment();
       if (relativePath) updateField("attachmentPath", relativePath);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to attach file"));
+      const message = getErrorMessage(err, "Failed to attach file");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setAttachmentBusy(false);
     }
@@ -138,7 +141,9 @@ export function LocalPurchaseFormModal({
     try {
       await window.blueLedger.localPurchase.openAttachment(form.attachmentPath);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to open attachment"));
+      const message = getErrorMessage(err, "Failed to open attachment");
+      setError(message);
+      showErrorToast(message);
     }
   }
 
@@ -165,10 +170,13 @@ export function LocalPurchaseFormModal({
       } else {
         await window.blueLedger.localPurchase.create(payload);
       }
+      showSuccessToast(editingPurchase ? "Daily expense updated" : "Daily expense created");
       await onSaved();
       onClose();
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to save daily expense"));
+      const message = getErrorMessage(err, "Failed to save daily expense");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }

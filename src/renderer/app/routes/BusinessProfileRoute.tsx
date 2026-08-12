@@ -17,6 +17,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { logoBoxClassName } from "@renderer/shared/lib/logo";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { LOGO_RATIO_OPTIONS, type LogoRatio } from "@shared/types/logo";
 import {
   BUSINESS_TYPE_OPTIONS,
@@ -151,8 +152,11 @@ export function BusinessProfileRoute(): React.JSX.Element {
       setProfile(updated);
       setForm(toFormState(updated));
       setSavedAt(Date.now());
+      showSuccessToast("Business profile saved");
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to save business profile"));
+      const message = getErrorMessage(err, "Failed to save business profile");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }

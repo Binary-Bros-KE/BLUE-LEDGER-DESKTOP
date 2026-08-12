@@ -14,6 +14,7 @@ import { cn } from "@renderer/shared/lib/cn";
 import { getDashboardVariant } from "@renderer/shared/lib/dashboard-role";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { fromCents, toCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import {
   EMPLOYEE_STATUS_OPTIONS,
   GENDER_OPTIONS,
@@ -150,7 +151,9 @@ export function EmployeesRoute(): React.JSX.Element {
       setRoles(roleList);
       setLocations(locationList);
     } catch (err) {
-      setLoadError(getErrorMessage(err, "Failed to load employees"));
+      const message = getErrorMessage(err, "Failed to load employees");
+      setLoadError(message);
+      showErrorToast(message);
     }
   }, []);
 
@@ -261,7 +264,9 @@ export function EmployeesRoute(): React.JSX.Element {
         updateField("photoPath", relativePath);
       }
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to attach photo"));
+      const message = getErrorMessage(err, "Failed to attach photo");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setPhotoBusy(false);
     }
@@ -321,13 +326,17 @@ export function EmployeesRoute(): React.JSX.Element {
     try {
       if (editingId) {
         await window.blueLedger.employee.update(editingId, payload);
+        showSuccessToast(`Employee "${form.firstName} ${form.lastName}" updated`);
       } else {
         await window.blueLedger.employee.create(payload);
+        showSuccessToast(`Employee "${form.firstName} ${form.lastName}" created`);
       }
       await loadAll();
       setModalOpen(false);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to save employee"));
+      const message = getErrorMessage(err, "Failed to save employee");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }
@@ -337,9 +346,12 @@ export function EmployeesRoute(): React.JSX.Element {
     setActionError(null);
     try {
       await window.blueLedger.employee.setStatus(employee.id, status);
+      showSuccessToast(`${employee.firstName} ${employee.lastName}'s status set to ${status}`);
       await loadAll();
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to update status"));
+      const message = getErrorMessage(err, "Failed to update status");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 
@@ -350,9 +362,12 @@ export function EmployeesRoute(): React.JSX.Element {
 
     try {
       await window.blueLedger.employee.delete(employee.id);
+      showSuccessToast(`Employee "${fullName}" deleted`);
       await loadAll();
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to delete employee"));
+      const message = getErrorMessage(err, "Failed to delete employee");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 

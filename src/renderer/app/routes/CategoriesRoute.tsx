@@ -8,6 +8,7 @@ import { Modal } from "@renderer/shared/components/Modal";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import {
   CATEGORY_COLOR_SWATCHES,
   type Category,
@@ -98,7 +99,9 @@ export function CategoriesRoute(): React.JSX.Element {
       const list = await window.blueLedger.category.list();
       setCategories(list);
     } catch (err) {
-      setLoadError(getErrorMessage(err, "Failed to load categories"));
+      const message = getErrorMessage(err, "Failed to load categories");
+      setLoadError(message);
+      showErrorToast(message);
     }
   }, []);
 
@@ -148,13 +151,17 @@ export function CategoriesRoute(): React.JSX.Element {
     try {
       if (editingId) {
         await window.blueLedger.category.update(editingId, form);
+        showSuccessToast(`Category "${form.name}" updated`);
       } else {
         await window.blueLedger.category.create({ ...form, parentId: parentContext.parentId });
+        showSuccessToast(`Category "${form.name}" created`);
       }
       await loadCategories();
       setModalOpen(false);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to save category"));
+      const message = getErrorMessage(err, "Failed to save category");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }
@@ -162,8 +169,13 @@ export function CategoriesRoute(): React.JSX.Element {
 
   async function handleToggleStatus(node: CategoryTreeNode): Promise<void> {
     const nextStatus = node.status === "active" ? "inactive" : "active";
-    await window.blueLedger.category.setStatus(node.id, nextStatus);
-    await loadCategories();
+    try {
+      await window.blueLedger.category.setStatus(node.id, nextStatus);
+      showSuccessToast(`Category "${node.name}" ${nextStatus === "active" ? "activated" : "deactivated"}`);
+      await loadCategories();
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Failed to update status"));
+    }
   }
 
   async function handleDelete(node: CategoryTreeNode): Promise<void> {
@@ -171,9 +183,12 @@ export function CategoriesRoute(): React.JSX.Element {
     if (!window.confirm(`Delete "${node.name}"? This can't be undone.`)) return;
     try {
       await window.blueLedger.category.delete(node.id);
+      showSuccessToast(`Category "${node.name}" deleted`);
       await loadCategories();
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to delete category"));
+      const message = getErrorMessage(err, "Failed to delete category");
+      setError(message);
+      showErrorToast(message);
     }
   }
 

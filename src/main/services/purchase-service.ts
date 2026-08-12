@@ -46,6 +46,7 @@ type PreparedPurchaseCart = {
   subtotalCents: number;
   discountAmountCents: number;
   taxAmountCents: number;
+  shippingCostCents: number;
   grandTotalCents: number;
 };
 
@@ -90,7 +91,7 @@ function assertUniqueSupplierInvoiceNumber(
   }
 }
 
-function prepareCart(tenantId: string, items: PurchaseItemInput[]): PreparedPurchaseCart {
+function prepareCart(tenantId: string, items: PurchaseItemInput[], shippingCostCents: number): PreparedPurchaseCart {
   const tenantTaxConfig = getCurrentTenant();
 
   const preparedItems: PreparedPurchaseItem[] = items.map((item) => {
@@ -131,9 +132,11 @@ function prepareCart(tenantId: string, items: PurchaseItemInput[]): PreparedPurc
     subtotalCents,
     discountAmountCents,
     taxAmountCents,
+    shippingCostCents,
     // Tax is already inside subtotalCents (cost is tax-inclusive) — never added again here, same
-    // fix as sale-service.ts's prepareCart.
-    grandTotalCents: subtotalCents - discountAmountCents
+    // fix as sale-service.ts's prepareCart. Shipping is a whole-order add-on, unlike discount —
+    // it increases the total, it never reduces it.
+    grandTotalCents: subtotalCents - discountAmountCents + shippingCostCents
   };
 }
 
@@ -178,7 +181,7 @@ export function createPurchase(input: unknown): Purchase {
   assertLocationBelongsToTenant(tenantId, parsed.locationId);
   assertUniqueSupplierInvoiceNumber(tenantId, parsed.supplierId, parsed.supplierInvoiceNumber);
 
-  const cart = prepareCart(tenantId, parsed.items);
+  const cart = prepareCart(tenantId, parsed.items, parsed.shippingCostCents);
   const purchaseId = `purchase_${randomUUID()}`;
   const now = new Date().toISOString();
 
@@ -195,6 +198,7 @@ export function createPurchase(input: unknown): Purchase {
       subtotalCents: cart.subtotalCents,
       discountAmountCents: cart.discountAmountCents,
       taxAmountCents: cart.taxAmountCents,
+      shippingCostCents: cart.shippingCostCents,
       grandTotalCents: cart.grandTotalCents,
       notes: parsed.notes,
       attachmentPath: parsed.attachmentPath,
@@ -242,7 +246,7 @@ export function updatePurchase(id: string, input: unknown): Purchase {
   assertLocationBelongsToTenant(tenantId, parsed.locationId);
   assertUniqueSupplierInvoiceNumber(tenantId, parsed.supplierId, parsed.supplierInvoiceNumber, id);
 
-  const cart = prepareCart(tenantId, parsed.items);
+  const cart = prepareCart(tenantId, parsed.items, parsed.shippingCostCents);
   const now = new Date().toISOString();
 
   if (existing.attachment_path && existing.attachment_path !== parsed.attachmentPath) {
@@ -258,6 +262,7 @@ export function updatePurchase(id: string, input: unknown): Purchase {
       subtotalCents: cart.subtotalCents,
       discountAmountCents: cart.discountAmountCents,
       taxAmountCents: cart.taxAmountCents,
+      shippingCostCents: cart.shippingCostCents,
       grandTotalCents: cart.grandTotalCents,
       notes: parsed.notes,
       attachmentPath: parsed.attachmentPath

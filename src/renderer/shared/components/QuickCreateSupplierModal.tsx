@@ -4,6 +4,7 @@ import { Button } from "@renderer/shared/components/Button";
 import { Field } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { Supplier } from "@shared/types/supplier";
 
 /** The fast path for adding a supplier mid-purchase or mid-checkout (a locally-sourced sale line) —
@@ -42,10 +43,13 @@ export function QuickCreateSupplierModal({
         phone1,
         paymentOption: "cash"
       });
+      showSuccessToast(`Supplier "${supplier.businessName}" created`);
       reset();
       onCreated(supplier);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to create supplier"));
+      const message = getErrorMessage(err, "Failed to create supplier");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }

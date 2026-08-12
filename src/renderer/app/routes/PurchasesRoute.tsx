@@ -22,6 +22,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { showErrorToast } from "@renderer/shared/lib/toast";
 import {
   ALL_YEARS_VALUE,
   buildAvailableYears,
@@ -133,7 +134,9 @@ export function PurchasesRoute(): React.JSX.Element {
       setLocations(locationList);
       setPaymentMethods(methodList);
     } catch (err) {
-      setLoadError(getErrorMessage(err, "Failed to load purchases"));
+      const message = getErrorMessage(err, "Failed to load purchases");
+      setLoadError(message);
+      showErrorToast(message);
     }
   }, []);
 
@@ -286,7 +289,9 @@ export function PurchasesRoute(): React.JSX.Element {
       const purchase = await window.blueLedger.purchase.get(id);
       setViewingPurchase(purchase);
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to load purchase"));
+      const message = getErrorMessage(err, "Failed to load purchase");
+      setActionError(message);
+      showErrorToast(message);
     } finally {
       setViewLoading(false);
     }
@@ -316,7 +321,9 @@ export function PurchasesRoute(): React.JSX.Element {
       setFormOpen(true);
       setViewingPurchase(null);
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to load purchase"));
+      const message = getErrorMessage(err, "Failed to load purchase");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 

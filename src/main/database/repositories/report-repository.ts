@@ -151,6 +151,53 @@ export function findPaymentTransactionRows(
     .all(tenantId, startIso, endIsoExclusive, locationId, locationId) as PaymentTransactionSourceRow[];
 }
 
+export type ApprovedInvoiceCancellationRow = {
+  id: string;
+  sale_id: string;
+  approved_at: string;
+  invoice_number: string | null;
+  location_name: string;
+  customer_name: string | null;
+  payments: string;
+};
+
+/**
+ * Every APPROVED invoice cancellation whose `approved_at` falls in range — the raw material
+ * getPaymentTransactions (report-service.ts) turns into one "out" refund row per original payment
+ * on the invoice, mirroring how the "in" side already turns the SAME `payments` JSON into one row
+ * per payment. Only 'approved' rows ever appear here — a still-pending or rejected cancellation
+ * request hasn't reversed anything yet, so it must never show up as a refund.
+ */
+export function findApprovedInvoiceCancellationRows(
+  tenantId: string,
+  locationId: string | null,
+  startIso: string,
+  endIsoExclusive: string
+): ApprovedInvoiceCancellationRow[] {
+  return getDatabase()
+    .prepare(
+      `
+      SELECT
+        ic.id,
+        ic.sale_id,
+        ic.approved_at,
+        s.invoice_number,
+        l.location_name AS location_name,
+        c.name AS customer_name,
+        s.payments
+      FROM invoice_cancellations ic
+      JOIN sales s ON s.id = ic.sale_id
+      JOIN locations l ON l.id = s.location_id
+      LEFT JOIN customers c ON c.id = s.customer_id
+      WHERE ic.tenant_id = ? AND ic.status = 'approved'
+        AND ic.approved_at >= ? AND ic.approved_at < ?
+        AND (? IS NULL OR s.location_id = ?)
+      ORDER BY ic.approved_at DESC
+    `
+    )
+    .all(tenantId, startIso, endIsoExclusive, locationId, locationId) as ApprovedInvoiceCancellationRow[];
+}
+
 export type SaleItemProfitRow = {
   sale_id: string;
   product_id: string;

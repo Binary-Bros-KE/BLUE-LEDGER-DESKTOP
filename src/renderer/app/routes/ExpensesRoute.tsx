@@ -25,6 +25,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import {
   ALL_YEARS_VALUE,
   buildAvailableYears,
@@ -109,7 +110,9 @@ export function ExpensesRoute(): React.JSX.Element {
       setPaymentMethods(methodList);
       setRecurringBills(recurringBillList);
     } catch (err) {
-      setLoadError(getErrorMessage(err, "Failed to load expenses"));
+      const message = getErrorMessage(err, "Failed to load expenses");
+      setLoadError(message);
+      showErrorToast(message);
     }
   }, []);
 
@@ -253,7 +256,9 @@ export function ExpensesRoute(): React.JSX.Element {
       setEditingExpense(expense);
       setFormOpen(true);
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to load expense"));
+      const message = getErrorMessage(err, "Failed to load expense");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 
@@ -265,9 +270,12 @@ export function ExpensesRoute(): React.JSX.Element {
     setActionError(null);
     try {
       await window.blueLedger.expense.archive(expense.id);
+      showSuccessToast(`Expense ${expense.expenseNumber} archived`);
       await loadAll();
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to archive expense"));
+      const message = getErrorMessage(err, "Failed to archive expense");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 
@@ -275,9 +283,12 @@ export function ExpensesRoute(): React.JSX.Element {
     setActionError(null);
     try {
       await window.blueLedger.expense.restore(expense.id);
+      showSuccessToast(`Expense ${expense.expenseNumber} restored`);
       await loadAll();
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to restore expense"));
+      const message = getErrorMessage(err, "Failed to restore expense");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 
@@ -286,9 +297,12 @@ export function ExpensesRoute(): React.JSX.Element {
     setActionError(null);
     try {
       await window.blueLedger.expense.delete(expense.id);
+      showSuccessToast(`Expense ${expense.expenseNumber} deleted`);
       await loadAll();
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to delete expense"));
+      const message = getErrorMessage(err, "Failed to delete expense");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 

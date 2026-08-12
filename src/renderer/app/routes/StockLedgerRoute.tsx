@@ -10,6 +10,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { showErrorToast } from "@renderer/shared/lib/toast";
 import {
   ALL_YEARS_VALUE,
   buildAvailableYears,
@@ -62,7 +63,9 @@ export function StockLedgerRoute(): React.JSX.Element {
       const result = await window.blueLedger.stockMovement.listAll({ limit });
       setMovements(result);
     } catch (err) {
-      setLoadError(getErrorMessage(err, "Failed to load stock movements"));
+      const message = getErrorMessage(err, "Failed to load stock movements");
+      setLoadError(message);
+      showErrorToast(message);
     }
   }, []);
 

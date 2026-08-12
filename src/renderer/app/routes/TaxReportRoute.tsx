@@ -8,6 +8,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { showErrorToast } from "@renderer/shared/lib/toast";
 import { taxBreakdownLabel } from "@shared/lib/tax-calculation";
 import type { DateRangeInput, SalesReportMode } from "@shared/types/report";
 import type { ReportExportRequest, ReportExportSection } from "@shared/types/report-export";
@@ -21,7 +22,14 @@ function TopProductsTable({ title, rows }: { title: string; rows: TaxTopProductR
     <div className="mt-4">
       <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">{title}</p>
       <div className="mt-1.5 overflow-x-auto rounded-lg border border-line">
-        <table className="w-full min-w-[600px] table-fixed border-collapse text-sm">
+        <table className="w-full min-w-[680px] table-fixed border-collapse text-sm">
+          <colgroup>
+            <col className="w-[40%]" />
+            <col className="w-[12%]" />
+            <col className="w-[16%]" />
+            <col className="w-[16%]" />
+            <col className="w-[16%]" />
+          </colgroup>
           <thead>
             <tr className="bg-primary text-white">
               <th className="px-3 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider">Product</th>
@@ -34,9 +42,11 @@ function TopProductsTable({ title, rows }: { title: string; rows: TaxTopProductR
           <tbody>
             {rows.map((row) => (
               <tr key={`${row.productId}-${row.taxType}`} className="border-t border-line odd:bg-white even:bg-soft/50">
-                <td className="truncate px-3 py-2 text-xs font-bold text-ink">
-                  {row.productName}
-                  <span className="ml-1.5 font-semibold text-muted">{row.sku}</span>
+                <td className="px-3 py-2 text-xs font-bold text-ink">
+                  <p className="line-clamp-2 leading-snug" title={row.productName}>
+                    {row.productName}
+                  </p>
+                  <p className="mt-0.5 font-semibold text-muted">{row.sku}</p>
                 </td>
                 <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-muted">{row.quantitySold}</td>
                 <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-muted">{formatCents(row.netCents)}</td>
@@ -83,7 +93,9 @@ export function TaxReportRoute(): React.JSX.Element {
       const result = await window.blueLedger.report.taxBreakdown(range);
       setData(result);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to load the tax report"));
+      const message = getErrorMessage(err, "Failed to load the tax report");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setLoading(false);
     }

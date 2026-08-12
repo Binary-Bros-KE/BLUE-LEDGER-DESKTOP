@@ -71,12 +71,32 @@ function assertUniqueFields(
   }
 }
 
-export function listProducts(): ProductListItem[] {
+/**
+ * Pass a storefrontId to slice the catalog down to just that storefront's ACTUALLY STOCKED products
+ * (a real inventory row at that location — the same membership test the Inventory Report's own
+ * per-location sections use), with totalStock reflecting only that storefront's own quantity — used
+ * by the Products tab's storefront filter. Only meaningful for a caller with full multi-storefront
+ * visibility (no branch scope, typically Super Admin): a branch-scoped caller (e.g. a storefront
+ * Manager) is always locked to their own storefront regardless of what's passed, same as before this
+ * parameter existed — and that automatic restriction deliberately stays on the older, more lenient
+ * "sellable here" test (storefront tag, or untagged) so Checkout/Invoices/Quotations keep showing a
+ * product the moment it's created, before any stock has physically been distributed to it.
+ */
+export function listProducts(storefrontId?: string | null): ProductListItem[] {
   requirePermission("products", "view");
   const { tenantId } = getCurrentTenant();
-  const locationId = getCurrentBranchScope();
+  const branchScope = getCurrentBranchScope();
+  const requestedLocationId = storefrontId ?? null;
+  if (!branchScope && requestedLocationId) {
+    const location = locationRepository.findLocationRowById(requestedLocationId);
+    if (!location || location.tenant_id !== tenantId) {
+      throw new Error("Storefront not found");
+    }
+  }
+  const locationId = branchScope ?? requestedLocationId;
+  const requireInventoryRow = !branchScope && requestedLocationId !== null;
   return productRepository
-    .findAllProductRows(tenantId, locationId)
+    .findAllProductRows(tenantId, locationId, requireInventoryRow)
     .map(productRepository.mapProductListRow);
 }
 

@@ -10,6 +10,7 @@ import { getDashboardVariant } from "@renderer/shared/lib/dashboard-role";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { showErrorToast } from "@renderer/shared/lib/toast";
 import {
   ALL_YEARS_VALUE,
   buildAvailableYears,
@@ -92,7 +93,9 @@ export function SalariesRoute(): React.JSX.Element {
       setPaymentMethods(methodList);
       setLocations(locationList);
     } catch (err) {
-      setLoadError(getErrorMessage(err, "Failed to load salaries"));
+      const message = getErrorMessage(err, "Failed to load salaries");
+      setLoadError(message);
+      showErrorToast(message);
     }
     // Requires "salaries:create" server-side — kept separate so a viewer-only role (canViewAll but
     // not canProcess) doesn't fail the whole page load just because this narrower list is off-limits.

@@ -6,6 +6,7 @@ import { HorizontalBarList } from "@renderer/shared/components/charts/Horizontal
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { showErrorToast } from "@renderer/shared/lib/toast";
 import { useUiStore } from "@renderer/shared/stores/ui-store";
 import { DashboardActionCard } from "@renderer/app/routes/dashboard/DashboardActionCard";
 import { DashboardShell } from "@renderer/app/routes/dashboard/DashboardShell";
@@ -87,7 +88,11 @@ export function StorekeeperDashboard(): React.JSX.Element {
 
         setData({ inventoryData, productsNeedingReallocation, outstandingPurchases });
       } catch (err) {
-        if (!cancelled) setError(getErrorMessage(err, "Failed to load the dashboard"));
+        if (!cancelled) {
+          const message = getErrorMessage(err, "Failed to load the dashboard");
+          setError(message);
+          showErrorToast(message);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -194,7 +199,7 @@ export function StorekeeperDashboard(): React.JSX.Element {
                 <table className="w-full table-fixed border-collapse text-sm">
                   <thead>
                     <tr className="border-b border-line bg-soft/60 text-[11px] font-bold uppercase tracking-wide text-muted">
-                      <th className="px-3 py-2 text-left">Product</th>
+                      <th className="w-[50%] px-3 py-2 text-left">Product</th>
                       <th className="w-28 px-3 py-2 text-right">At Main Store</th>
                       <th className="px-3 py-2 text-left">Low at</th>
                     </tr>
@@ -204,7 +209,7 @@ export function StorekeeperDashboard(): React.JSX.Element {
                       const lowStorefronts = row.storefronts.filter((sf) => sf.isLow).map((sf) => sf.storefrontName);
                       return (
                         <tr key={row.productId} className="border-t border-line odd:bg-white even:bg-soft/50 first:border-t-0">
-                          <td className="truncate px-3 py-2 font-bold text-ink" title={row.productName}>
+                          <td className="line-clamp-2 px-3 py-2 leading-snug font-bold text-ink" title={row.productName}>
                             {row.productName}
                           </td>
                           <td className="px-3 py-2 text-right font-bold tabular-nums text-ink">{row.unallocatedQuantity}</td>
@@ -236,7 +241,13 @@ export function StorekeeperDashboard(): React.JSX.Element {
               <p className="px-4 pb-4 text-sm font-semibold text-muted">No stock movements recorded yet.</p>
             ) : (
               <div className="max-h-[360px] overflow-y-auto">
-                <table className="w-full min-w-[520px] table-fixed border-collapse text-sm">
+                <table className="w-full min-w-[560px] table-fixed border-collapse text-sm">
+                  <colgroup>
+                    <col className="w-[40%]" />
+                    <col className="w-[24%]" />
+                    <col className="w-[20%]" />
+                    <col className="w-[16%]" />
+                  </colgroup>
                   <thead className="sticky top-0">
                     <tr className="bg-primary text-white">
                       <th className="px-4 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider">Product</th>
@@ -250,10 +261,10 @@ export function StorekeeperDashboard(): React.JSX.Element {
                       const type = movement.movementType as StockMovementType;
                       return (
                         <tr key={movement.id} className="border-t border-line odd:bg-white even:bg-soft/50">
-                          <td className="truncate px-4 py-2.5 font-bold text-ink" title={movement.productName}>
-                            {movement.productName}
+                          <td className="px-4 py-2.5 font-bold text-ink" title={movement.productName}>
+                            <p className="line-clamp-2 leading-snug">{movement.productName}</p>
                             {movement.performedByName && (
-                              <span className="ml-1.5 font-semibold text-muted">· {movement.performedByName}</span>
+                              <p className="mt-0.5 text-[11px] font-semibold text-muted">{movement.performedByName}</p>
                             )}
                           </td>
                           <td className="px-4 py-2.5">

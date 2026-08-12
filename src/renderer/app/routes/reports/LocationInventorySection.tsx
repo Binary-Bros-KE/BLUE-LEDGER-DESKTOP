@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import { ReportExportMenu } from "@renderer/shared/components/ReportExportMenu";
 import { cn } from "@renderer/shared/lib/cn";
 import { formatCents } from "@renderer/shared/lib/money";
 import type { LocationInventorySection as LocationInventorySectionData, LocationProductRow } from "@shared/types/inventory-report";
+import type { ReportExportRequest } from "@shared/types/report-export";
 import { InventoryMovementHistoryTable } from "./InventoryMovementHistoryTable";
 
 function money(cents: number): string {
@@ -81,9 +83,11 @@ function SegmentedButton({ active, onClick, children }: { active: boolean; onCli
 export function LocationInventorySection({
   section,
   onSelectProduct,
+  exportRequest,
 }: {
   section: LocationInventorySectionData;
   onSelectProduct: (productId: string) => void;
+  exportRequest?: ReportExportRequest | null;
 }): React.JSX.Element {
   const [mainStoreFilter, setMainStoreFilter] = useState<MainStoreFilter>("all");
   const [storefrontFilter, setStorefrontFilter] = useState<StorefrontFilter>("all");
@@ -105,6 +109,7 @@ export function LocationInventorySection({
             <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-primary">Main Store</span>
           )}
         </div>
+        {exportRequest && <ReportExportMenu request={exportRequest} />}
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">

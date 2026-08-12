@@ -9,6 +9,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { InventoryBalance } from "@shared/types/inventory";
 import type { Location } from "@shared/types/location";
 import type { ProductListItem } from "@shared/types/product";
@@ -101,7 +102,9 @@ export function ProductDetailModal({
       setOverview(overviewResult);
       setMovements(movementsResult);
     } catch (err) {
-      setLoadError(getErrorMessage(err, "Failed to load inventory data"));
+      const message = getErrorMessage(err, "Failed to load inventory data");
+      setLoadError(message);
+      showErrorToast(message);
     }
   }, [product.id]);
 
@@ -128,6 +131,7 @@ export function ProductDetailModal({
     const magnitude = Number(singleForm.quantity);
     if (!Number.isFinite(magnitude) || magnitude === 0) {
       setRecordError("Enter a quantity");
+      showErrorToast("Enter a quantity");
       setRecording(false);
       return;
     }
@@ -147,10 +151,13 @@ export function ProductDetailModal({
         quantityChange,
         notes: singleForm.notes
       });
+      showSuccessToast("Stock movement recorded");
       setSingleForm(emptySingleForm(locations));
       await refresh();
     } catch (err) {
-      setRecordError(getErrorMessage(err, "Failed to record movement"));
+      const message = getErrorMessage(err, "Failed to record movement");
+      setRecordError(message);
+      showErrorToast(message);
     } finally {
       setRecording(false);
     }
@@ -164,11 +171,13 @@ export function ProductDetailModal({
     const quantity = Number(transferForm.quantity);
     if (!Number.isFinite(quantity) || quantity <= 0) {
       setRecordError("Enter a quantity greater than 0");
+      showErrorToast("Enter a quantity greater than 0");
       setRecording(false);
       return;
     }
     if (transferForm.fromLocationId === transferForm.toLocationId) {
       setRecordError("Choose two different locations");
+      showErrorToast("Choose two different locations");
       setRecording(false);
       return;
     }
@@ -181,10 +190,13 @@ export function ProductDetailModal({
         quantity,
         notes: transferForm.notes
       });
+      showSuccessToast("Stock transferred");
       setTransferForm(emptyTransferForm(locations));
       await refresh();
     } catch (err) {
-      setRecordError(getErrorMessage(err, "Failed to record transfer"));
+      const message = getErrorMessage(err, "Failed to record transfer");
+      setRecordError(message);
+      showErrorToast(message);
     } finally {
       setRecording(false);
     }

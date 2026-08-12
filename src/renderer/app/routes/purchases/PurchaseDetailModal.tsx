@@ -9,6 +9,7 @@ import { Modal } from "@renderer/shared/components/Modal";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, toCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { ExportListRequest } from "@shared/types/export";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import { TAX_TYPE_OPTIONS } from "@shared/types/product";
@@ -132,6 +133,7 @@ export function PurchaseDetailModal({
         { label: "Subtotal", value: formatCents(purchase.subtotalCents) },
         { label: "Discount", value: formatCents(purchase.discountAmountCents) },
         { label: "Tax", value: formatCents(purchase.taxAmountCents) },
+        ...(purchase.shippingCostCents > 0 ? [{ label: "Shipping", value: formatCents(purchase.shippingCostCents) }] : []),
         { label: "Total", value: formatCents(purchase.grandTotalCents) },
         { label: "Amount Paid", value: formatCents(purchase.amountPaidCents) }
       ],
@@ -144,50 +146,59 @@ export function PurchaseDetailModal({
     setReceivingQuantities((prev) => ({ ...prev, [itemId]: value }));
   }
 
-  /** Fills every still-outstanding line's "Receive Today" field with its own full remaining
-   * quantity — for the common case of a delivery that arrived complete, so the user doesn't have
-   * to type the same remaining number into every row by hand before hitting Receive Goods. */
-  function handleReceiveAll(): void {
+  async function submitReceive(quantities: Record<string, string>): Promise<void> {
     setActionError(null);
-    setReceivingQuantities((prev) => {
-      const next = { ...prev };
-      for (const item of purchase.items) {
-        if (item.remainingQuantity > 0) next[item.id] = String(item.remainingQuantity);
-      }
-      return next;
-    });
-  }
-
-  async function handleReceiveGoods(): Promise<void> {
-    setActionError(null);
-    const entries = Object.entries(receivingQuantities)
+    const entries = Object.entries(quantities)
       .map(([purchaseItemId, value]) => ({ purchaseItemId, receivingQuantity: Math.floor(Number(value) || 0) }))
       .filter((entry) => entry.receivingQuantity > 0);
 
     if (entries.length === 0) {
       setActionError("Enter at least one quantity to receive");
+      showErrorToast("Enter at least one quantity to receive");
       return;
     }
 
     setReceiveSaving(true);
     try {
       await window.blueLedger.purchase.receiveGoods(purchase.id, { items: entries });
+      showSuccessToast("Goods received");
       setReceivingQuantities({});
       await onChanged();
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to receive goods"));
+      const message = getErrorMessage(err, "Failed to receive goods");
+      setActionError(message);
+      showErrorToast(message);
     } finally {
       setReceiveSaving(false);
     }
+  }
+
+  async function handleReceiveGoods(): Promise<void> {
+    await submitReceive(receivingQuantities);
+  }
+
+  /** Fills every still-outstanding line to its own full remaining quantity AND receives them
+   * immediately — one click for the common case of a delivery that arrived complete, instead of the
+   * old two-step "fill every row, then scroll down and click Receive Goods separately". */
+  async function handleReceiveAll(): Promise<void> {
+    const fullQuantities = { ...receivingQuantities };
+    for (const item of purchase.items) {
+      if (item.remainingQuantity > 0) fullQuantities[item.id] = String(item.remainingQuantity);
+    }
+    setReceivingQuantities(fullQuantities);
+    await submitReceive(fullQuantities);
   }
 
   async function handleMarkOrdered(): Promise<void> {
     setActionError(null);
     try {
       await window.blueLedger.purchase.markOrdered(purchase.id);
+      showSuccessToast("Purchase marked as ordered");
       await onChanged();
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to mark as ordered"));
+      const message = getErrorMessage(err, "Failed to mark as ordered");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 
@@ -196,9 +207,12 @@ export function PurchaseDetailModal({
     setActionError(null);
     try {
       await window.blueLedger.purchase.cancel(purchase.id);
+      showSuccessToast("Purchase cancelled");
       await onChanged();
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to cancel purchase"));
+      const message = getErrorMessage(err, "Failed to cancel purchase");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 
@@ -207,7 +221,9 @@ export function PurchaseDetailModal({
     try {
       await window.blueLedger.purchase.openAttachment(purchase.attachmentPath);
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to open attachment"));
+      const message = getErrorMessage(err, "Failed to open attachment");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 
@@ -231,10 +247,13 @@ export function PurchaseDetailModal({
         reference: paymentReference,
         notes: paymentNotes
       });
+      showSuccessToast("Payment recorded");
       setRecordPaymentOpen(false);
       await onChanged();
     } catch (err) {
-      setPaymentError(getErrorMessage(err, "Failed to record payment"));
+      const message = getErrorMessage(err, "Failed to record payment");
+      setPaymentError(message);
+      showErrorToast(message);
     } finally {
       setPaymentSaving(false);
     }
@@ -257,10 +276,13 @@ export function PurchaseDetailModal({
         reference: markPaidReference,
         notes: null
       });
+      showSuccessToast("Purchase marked as paid");
       setMarkPaidOpen(false);
       await onChanged();
     } catch (err) {
-      setMarkPaidError(getErrorMessage(err, "Failed to mark as paid"));
+      const message = getErrorMessage(err, "Failed to mark as paid");
+      setMarkPaidError(message);
+      showErrorToast(message);
     } finally {
       setMarkPaidSaving(false);
     }
@@ -273,7 +295,7 @@ export function PurchaseDetailModal({
         onClose={onClose}
         title={purchase.purchaseNumber}
         description={`${purchase.supplierName} · ${purchase.locationName}`}
-        widthClassName="max-w-3xl"
+        widthClassName="max-w-4xl"
       >
         {actionError && (
           <div className="mb-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
@@ -331,15 +353,25 @@ export function PurchaseDetailModal({
             {canReceive && canEdit && (
               <button
                 type="button"
-                onClick={handleReceiveAll}
-                className="text-[11px] font-extrabold uppercase text-accent hover:underline cursor-pointer"
+                onClick={() => void handleReceiveAll()}
+                disabled={receiveSaving}
+                className="text-[11px] font-extrabold uppercase text-accent hover:underline disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
               >
                 Receive All
               </button>
             )}
           </div>
           <div className="mt-2 overflow-x-auto rounded-lg border border-line">
-            <table className="w-full min-w-[640px] table-fixed border-collapse text-sm">
+            <table className="w-full min-w-[760px] table-fixed border-collapse text-sm">
+              <colgroup>
+                <col className="w-[26%]" />
+                <col className="w-[10%]" />
+                <col className="w-[10%]" />
+                <col className="w-[10%]" />
+                <col className="w-[13%]" />
+                <col className="w-[15%]" />
+                {canReceive && <col className="w-[16%]" />}
+              </colgroup>
               <thead>
                 <tr className="bg-primary text-white">
                   <th className="px-3 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider">Product</th>
@@ -358,7 +390,9 @@ export function PurchaseDetailModal({
               <tbody>
                 {purchase.items.map((item) => (
                   <tr key={item.id} className="border-t border-line odd:bg-white even:bg-soft/50">
-                    <td className="truncate px-3 py-2 font-bold text-ink">{item.productName}</td>
+                    <td className="line-clamp-2 px-3 py-2 leading-snug font-bold text-ink" title={item.productName}>
+                      {item.productName}
+                    </td>
                     <td className="px-3 py-2 text-right tabular-nums text-muted">{item.orderedQuantity}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-muted">{item.receivedQuantity}</td>
                     <td className="px-3 py-2 text-right tabular-nums font-bold text-ink">{item.remainingQuantity}</td>
@@ -435,6 +469,12 @@ export function PurchaseDetailModal({
             <span className="font-semibold">Tax (included in Total)</span>
             <span className="font-bold tabular-nums">{formatCents(purchase.taxAmountCents)}</span>
           </div>
+          {purchase.shippingCostCents > 0 && (
+            <div className="flex justify-between text-muted">
+              <span className="font-semibold">Shipping</span>
+              <span className="font-bold tabular-nums">+{formatCents(purchase.shippingCostCents)}</span>
+            </div>
+          )}
           <div className="flex justify-between text-base font-extrabold text-ink">
             <span>Total</span>
             <span>{formatCents(purchase.grandTotalCents)}</span>

@@ -400,9 +400,15 @@ export function getSalesFinancialOverview(input: unknown): SalesFinancialOvervie
   const serviceChargeCostsDocumentCount = serviceChargeCosts.documentCount;
   const previousServiceChargeCosts = reportRepository.findServiceChargeCostsInRange(tenantId, locationId, previousStartIso, previousEndIsoExclusive);
 
-  const totalExpensesCents = generalExpensesCents + purchasesPaidCents + salariesPaidCents + serviceChargeCostsCents;
+  // Capital (a purchase's goods + shipping, once paid) is deliberately never counted as an
+  // "expense" here — netRevenueCents above already nets out the cost of whatever actually sold
+  // (computeNetRevenueCents), so also subtracting the full cash cost of inventory the moment it's
+  // bought would double-count it: a large restock would swing profit deeply negative even though
+  // most of that stock hasn't sold yet. purchasesPaidCents is still returned below as its own
+  // "Total Capital Invested" figure — informational only, never folded into profit.
+  const totalExpensesCents = generalExpensesCents + salariesPaidCents + serviceChargeCostsCents;
   const previousTotalExpensesCents =
-    previousGeneralExpenses.totalCents + previousPurchasesPaid.cents + previousSalaries.totalCents + previousServiceChargeCosts.totalCents;
+    previousGeneralExpenses.totalCents + previousSalaries.totalCents + previousServiceChargeCosts.totalCents;
 
   const netProfitCents = netRevenueCents - totalExpensesCents;
   const previousNetProfitCents = previousNetRevenueCents - previousTotalExpensesCents;
@@ -664,6 +670,39 @@ export function getPaymentTransactions(input: unknown): PaymentTransactionRow[] 
         direction: "in",
         amountCents: row.grand_total_cents,
         status
+      });
+    }
+  }
+
+  // Reverses of the exact "in" rows just built above — one "out" row per original payment on any
+  // invoice whose cancellation has been approved, dated at the cancellation (not the original
+  // payment), carrying that SAME payment's own reference so a refund is traceable back to what it's
+  // reversing. Gated the same as the "in" rows above (whoever could see the payment come in should
+  // see it go back out), not folded into the stricter "reports:view"-only money-OUT block below —
+  // this reverses SALE revenue, it isn't a business expense category like purchases/expenses/
+  // salaries. See invoice-cancellation-service.ts's own doc comment for why this is computed live
+  // from invoice_cancellations + the invoice's existing payments, not a separately stored field.
+  const cancellationRows = reportRepository.findApprovedInvoiceCancellationRows(
+    tenantId,
+    locationId,
+    startIso,
+    endIsoExclusive
+  );
+  for (const row of cancellationRows) {
+    for (const payment of parseSalePaymentsJson(row.payments)) {
+      results.push({
+        id: `${row.id}:${payment.id}`,
+        transactionCode: payment.reference ?? row.invoice_number ?? row.sale_id,
+        occurredAt: row.approved_at,
+        locationName: row.location_name,
+        paymentMethodName: payment.paymentMethodName,
+        processedByName: payment.receivedByName,
+        partyName: row.customer_name ?? "Walk-in customer",
+        partyLabel: "Customer",
+        sourceType: "invoice_refund",
+        direction: "out",
+        amountCents: payment.amountCents,
+        status: "complete"
       });
     }
   }

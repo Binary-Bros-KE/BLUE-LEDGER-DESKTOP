@@ -7,6 +7,7 @@ import { StatTile } from "@renderer/shared/components/StatTile";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { showErrorToast } from "@renderer/shared/lib/toast";
 import { todayIso } from "@renderer/app/routes/reports/salesReportDate";
 import { ALL_YEARS_VALUE, currentYear, yearFilterOptions } from "@renderer/shared/lib/year-filter";
 import type { ExportListRequest } from "@shared/types/export";
@@ -78,7 +79,9 @@ export function TransactionsRoute(): React.JSX.Element {
       const result = await window.blueLedger.report.paymentTransactions({ startDate: from, endDate: to });
       setTransactions(result);
     } catch (err) {
-      setLoadError(getErrorMessage(err, "Failed to load transactions"));
+      const message = getErrorMessage(err, "Failed to load transactions");
+      setLoadError(message);
+      showErrorToast(message);
     }
   }, []);
 

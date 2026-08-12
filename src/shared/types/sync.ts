@@ -22,6 +22,7 @@ export type SyncEntity =
   | "recurring_bills"
   | "sale_voids"
   | "sale_returns"
+  | "invoice_cancellations"
   | "quotations"
   | "purchases"
   | "stock_movements"

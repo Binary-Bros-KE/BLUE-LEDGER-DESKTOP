@@ -3,6 +3,7 @@ import { Loader2, Package } from "lucide-react";
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { showErrorToast } from "@renderer/shared/lib/toast";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { TAX_TYPE_OPTIONS, type ProductListItem, type ProductStockSummary } from "@shared/types/product";
 
@@ -33,7 +34,11 @@ export function ProductInfoModal({ product, onClose }: { product: ProductListIte
         const result = await window.blueLedger.product.stockSummary(product.id);
         if (!cancelled) setSummary(result);
       } catch (err) {
-        if (!cancelled) setSummaryError(getErrorMessage(err, "Failed to load stock info"));
+        if (!cancelled) {
+          const message = getErrorMessage(err, "Failed to load stock info");
+          setSummaryError(message);
+          showErrorToast(message);
+        }
       }
     })();
     return () => {

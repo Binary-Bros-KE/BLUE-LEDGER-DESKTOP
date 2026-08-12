@@ -18,6 +18,7 @@ import { Modal } from "@renderer/shared/components/Modal";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import type { BillingMpesaTransactionStatus } from "@shared/types/billing-mpesa";
 import type { BillingPesapalTransactionStatus } from "@shared/types/billing-pesapal";
@@ -114,11 +115,13 @@ export function PayNowModal({
     if (result.status === "success") {
       setState("success");
       setMessage(MPESA_MESSAGES.success);
+      showSuccessToast(MPESA_MESSAGES.success);
       void window.blueLedger.activation.heartbeat().then(() => hydrate());
       onPaymentSuccess?.();
     } else {
       setState("error");
       setMessage(MPESA_MESSAGES[result.status]);
+      showErrorToast(MPESA_MESSAGES[result.status]);
     }
   }
 
@@ -148,11 +151,13 @@ export function PayNowModal({
     if (result.status === "success") {
       setPesapalState("success");
       setPesapalMessage(PESAPAL_MESSAGES.success);
+      showSuccessToast(PESAPAL_MESSAGES.success);
       void window.blueLedger.activation.heartbeat().then(() => hydrate());
       onPaymentSuccess?.();
     } else {
       setPesapalState("error");
       setPesapalMessage(PESAPAL_MESSAGES[result.status]);
+      showErrorToast(PESAPAL_MESSAGES[result.status]);
     }
   }
 
@@ -208,6 +213,7 @@ export function PayNowModal({
     if (phone.trim().length < 9) {
       setState("error");
       setMessage("Enter a valid phone number");
+      showErrorToast("Enter a valid phone number");
       return;
     }
     setState("sending");
@@ -218,8 +224,10 @@ export function PayNowModal({
       setState("awaiting");
       setMessage(MPESA_MESSAGES.pending);
     } catch (err) {
+      const message = getErrorMessage(err, "Failed to send STK push");
       setState("error");
-      setMessage(getErrorMessage(err, "Failed to send STK push"));
+      setMessage(message);
+      showErrorToast(message);
     }
   }
 
@@ -242,8 +250,10 @@ export function PayNowModal({
       setPesapalState("awaiting");
       setPesapalMessage(PESAPAL_MESSAGES.pending);
     } catch (err) {
+      const message = getErrorMessage(err, "Failed to start payment");
       setPesapalState("error");
-      setPesapalMessage(getErrorMessage(err, "Failed to start payment"));
+      setPesapalMessage(message);
+      showErrorToast(message);
     }
   }
 

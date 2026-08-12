@@ -84,6 +84,12 @@ export type Purchase = {
   subtotalCents: number;
   discountAmountCents: number;
   taxAmountCents: number;
+  /** Freight/delivery cost to bring the order in — added on top of the goods cost, never per-line
+   * (it's a whole-order cost, not attributable to one product), and deliberately excluded from each
+   * item's own unitCostCents/COGS. Part of "capital" (see report-service.ts's
+   * getSalesFinancialOverview) — informational in the "Total Capital Invested" report figure, never
+   * deducted from profit. */
+  shippingCostCents: number;
   grandTotalCents: number;
   paymentMethodId: string | null;
   paymentMethodName: string | null;

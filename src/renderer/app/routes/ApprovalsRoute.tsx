@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Ban, CheckCircle2, ClipboardCheck, Eye, Loader2, Undo2, XCircle } from "lucide-react";
+import { Ban, CheckCircle2, ClipboardCheck, Eye, FileX2, Loader2, Undo2, XCircle } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
+import { InvoicePreview } from "@renderer/shared/components/InvoicePreview";
 import { Modal } from "@renderer/shared/components/Modal";
 import { ReceiptPreview } from "@renderer/shared/components/ReceiptPreview";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
@@ -12,13 +13,15 @@ import { formatCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { isStorefrontType, type Location } from "@shared/types/location";
+import type { InvoiceCancellation } from "@shared/types/invoice-cancellation";
 import type { Sale } from "@shared/types/sale";
 import type { SaleReturn } from "@shared/types/sale-return";
 import type { SaleVoid } from "@shared/types/sale-void";
 
 type ApprovalEntry =
   | { kind: "return"; id: string; data: SaleReturn }
-  | { kind: "void"; id: string; data: SaleVoid };
+  | { kind: "void"; id: string; data: SaleVoid }
+  | { kind: "invoice_cancellation"; id: string; data: InvoiceCancellation };
 
 type DecisionAction = "approve" | "reject";
 
@@ -31,8 +34,17 @@ function formatDate(value: string): string {
 }
 
 function entryAmountCents(entry: ApprovalEntry): number {
-  if (entry.kind === "void") return entry.data.saleGrandTotalCents;
-  return entry.data.items.reduce((sum, item) => sum + item.lineTotalCents, 0);
+  if (entry.kind === "return") return entry.data.items.reduce((sum, item) => sum + item.lineTotalCents, 0);
+  return entry.data.saleGrandTotalCents;
+}
+
+/** SaleVoid/SaleReturn both key their document number off `receiptNumber` (the sales table only
+ * ever populates ONE of receipt_number/invoice_number per row, and void/return can technically
+ * apply to either kind) — InvoiceCancellation only ever applies to an invoice, so its own type names
+ * the field `invoiceNumber` for clarity rather than reusing a misleading "receipt" name. This is the
+ * one place that difference needs bridging, rather than every JSX call site below doing it inline. */
+function entryDocumentNumber(entry: ApprovalEntry): string | null {
+  return entry.kind === "invoice_cancellation" ? entry.data.invoiceNumber : entry.data.receiptNumber;
 }
 
 export function ApprovalsRoute(): React.JSX.Element {
@@ -42,6 +54,7 @@ export function ApprovalsRoute(): React.JSX.Element {
 
   const [returns, setReturns] = useState<SaleReturn[] | null>(null);
   const [voids, setVoids] = useState<SaleVoid[] | null>(null);
+  const [invoiceCancellations, setInvoiceCancellations] = useState<InvoiceCancellation[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [locations, setLocations] = useState<Location[]>([]);
@@ -61,12 +74,14 @@ export function ApprovalsRoute(): React.JSX.Element {
   const loadAll = useCallback(async () => {
     setLoadError(null);
     try {
-      const [returnList, voidList] = await Promise.all([
+      const [returnList, voidList, cancellationList] = await Promise.all([
         window.blueLedger.saleReturn.list(),
-        window.blueLedger.saleVoid.list()
+        window.blueLedger.saleVoid.list(),
+        window.blueLedger.invoiceCancellation.list()
       ]);
       setReturns(returnList);
       setVoids(voidList);
+      setInvoiceCancellations(cancellationList);
     } catch (err) {
       setLoadError(getErrorMessage(err, "Failed to load approvals"));
     }
@@ -91,13 +106,16 @@ export function ApprovalsRoute(): React.JSX.Element {
         .map((item): ApprovalEntry => ({ kind: "return", id: item.id, data: item })),
       ...(voids ?? [])
         .filter((item) => item.status === "pending_approval")
-        .map((item): ApprovalEntry => ({ kind: "void", id: item.id, data: item }))
+        .map((item): ApprovalEntry => ({ kind: "void", id: item.id, data: item })),
+      ...(invoiceCancellations ?? [])
+        .filter((item) => item.status === "pending_approval")
+        .map((item): ApprovalEntry => ({ kind: "invoice_cancellation", id: item.id, data: item }))
     ];
     const filtered = locationFilter ? entries.filter((entry) => entry.data.locationId === locationFilter) : entries;
     return filtered.sort(
       (a, b) => new Date(b.data.requestedAt).getTime() - new Date(a.data.requestedAt).getTime()
     );
-  }, [returns, voids, locationFilter]);
+  }, [returns, voids, invoiceCancellations, locationFilter]);
 
   const decidedEntries = useMemo<ApprovalEntry[]>(() => {
     const entries: ApprovalEntry[] = [
@@ -106,13 +124,16 @@ export function ApprovalsRoute(): React.JSX.Element {
         .map((item): ApprovalEntry => ({ kind: "return", id: item.id, data: item })),
       ...(voids ?? [])
         .filter((item) => item.status !== "pending_approval")
-        .map((item): ApprovalEntry => ({ kind: "void", id: item.id, data: item }))
+        .map((item): ApprovalEntry => ({ kind: "void", id: item.id, data: item })),
+      ...(invoiceCancellations ?? [])
+        .filter((item) => item.status !== "pending_approval")
+        .map((item): ApprovalEntry => ({ kind: "invoice_cancellation", id: item.id, data: item }))
     ];
     const filtered = locationFilter ? entries.filter((entry) => entry.data.locationId === locationFilter) : entries;
     return filtered
       .sort((a, b) => new Date(b.data.approvedAt ?? 0).getTime() - new Date(a.data.approvedAt ?? 0).getTime())
       .slice(0, 20);
-  }, [returns, voids, locationFilter]);
+  }, [returns, voids, invoiceCancellations, locationFilter]);
 
   function openDecision(entry: ApprovalEntry, action: DecisionAction): void {
     setDecisionEntry({ entry, action });
@@ -133,14 +154,17 @@ export function ApprovalsRoute(): React.JSX.Element {
       if (entry.kind === "return") {
         if (action === "approve") await window.blueLedger.saleReturn.approve(entry.id, payload);
         else await window.blueLedger.saleReturn.reject(entry.id, payload);
-      } else {
+      } else if (entry.kind === "void") {
         if (action === "approve") await window.blueLedger.saleVoid.approve(entry.id, payload);
         else await window.blueLedger.saleVoid.reject(entry.id, payload);
+      } else {
+        if (action === "approve") await window.blueLedger.invoiceCancellation.approve(entry.id, payload);
+        else await window.blueLedger.invoiceCancellation.reject(entry.id, payload);
       }
       setDecisionEntry(null);
       closeView();
       await loadAll();
-      const kindLabel = entry.kind === "return" ? "Return" : "Void";
+      const kindLabel = entry.kind === "return" ? "Return" : entry.kind === "void" ? "Void" : "Cancellation";
       showSuccessToast(`${kindLabel} ${action === "approve" ? "approved" : "rejected"}`);
     } catch (err) {
       const message = getErrorMessage(err, "Failed to record decision");
@@ -172,7 +196,7 @@ export function ApprovalsRoute(): React.JSX.Element {
     setViewingSale(null);
   }
 
-  const loading = returns === null || voids === null;
+  const loading = returns === null || voids === null || invoiceCancellations === null;
 
   return (
     <motion.div
@@ -203,7 +227,7 @@ export function ApprovalsRoute(): React.JSX.Element {
               Returns &amp; Voids
             </h2>
             <p className="mt-1 text-xs font-semibold text-muted">
-              Nothing changes on a sale or in inventory until a request here is approved.
+              Nothing changes on a sale, in inventory, or in the money ledger until a request here is approved.
             </p>
           </div>
           {showStorefrontFilter && (
@@ -238,7 +262,7 @@ export function ApprovalsRoute(): React.JSX.Element {
               </div>
               <h3 className="mt-4 text-lg font-extrabold">Nothing awaiting approval</h3>
               <p className="mt-1 max-w-sm text-sm font-semibold text-muted">
-                Return and void requests from the Receipts screen will show up here.
+                Return and void requests from Receipts, and cancellation requests from Invoices, will show up here.
               </p>
             </div>
           ) : (
@@ -248,11 +272,15 @@ export function ApprovalsRoute(): React.JSX.Element {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <DashedPill tone={entry.kind === "void" ? "danger" : "warning"}>
-                          {entry.kind === "void" ? "Void Request" : "Return Request"}
+                        <DashedPill tone={entry.kind === "return" ? "warning" : "danger"}>
+                          {entry.kind === "void"
+                            ? "Void Request"
+                            : entry.kind === "return"
+                              ? "Return Request"
+                              : "Cancellation Request"}
                         </DashedPill>
                         <span className="text-xs font-bold tabular-nums text-muted">
-                          {entry.data.receiptNumber ?? "—"}
+                          {entryDocumentNumber(entry) ?? "—"}
                         </span>
                         {showStorefrontFilter && <DashedPill tone="accent">{entry.data.locationName}</DashedPill>}
                       </div>
@@ -321,11 +349,13 @@ export function ApprovalsRoute(): React.JSX.Element {
                 <div className="flex min-w-0 items-center gap-2">
                   {entry.kind === "void" ? (
                     <Ban className="size-3.5 flex-none text-muted" aria-hidden="true" />
-                  ) : (
+                  ) : entry.kind === "return" ? (
                     <Undo2 className="size-3.5 flex-none text-muted" aria-hidden="true" />
+                  ) : (
+                    <FileX2 className="size-3.5 flex-none text-muted" aria-hidden="true" />
                   )}
                   <p className="truncate text-xs font-bold text-ink">
-                    {entry.data.receiptNumber ?? "—"}
+                    {entryDocumentNumber(entry) ?? "—"}
                     {showStorefrontFilter && ` · ${entry.data.locationName}`} · {entry.data.reason}
                   </p>
                 </div>
@@ -352,7 +382,7 @@ export function ApprovalsRoute(): React.JSX.Element {
       <Modal
         open={viewingEntry !== null}
         onClose={closeView}
-        title={viewingEntry?.data.receiptNumber ?? "Receipt"}
+        title={(viewingEntry ? entryDocumentNumber(viewingEntry) : null) ?? "Receipt"}
         description="Everything about this sale — review it before deciding."
         widthClassName="max-w-lg"
       >
@@ -365,8 +395,12 @@ export function ApprovalsRoute(): React.JSX.Element {
             ) : viewingSale ? (
               <div>
                 <div className="mb-4 flex flex-wrap items-center gap-2">
-                  <DashedPill tone={viewingEntry.kind === "void" ? "danger" : "warning"}>
-                    {viewingEntry.kind === "void" ? "Void Request" : "Return Request"}
+                  <DashedPill tone={viewingEntry.kind === "return" ? "warning" : "danger"}>
+                    {viewingEntry.kind === "void"
+                      ? "Void Request"
+                      : viewingEntry.kind === "return"
+                        ? "Return Request"
+                        : "Cancellation Request"}
                   </DashedPill>
                   <DashedPill
                     tone={
@@ -398,7 +432,12 @@ export function ApprovalsRoute(): React.JSX.Element {
                   )}
                 </div>
 
-                {tenantContext && <ReceiptPreview sale={viewingSale} tenant={tenantContext} />}
+                {tenantContext && viewingEntry.kind === "invoice_cancellation" && (
+                  <InvoicePreview sale={viewingSale} tenant={tenantContext} />
+                )}
+                {tenantContext && viewingEntry.kind !== "invoice_cancellation" && (
+                  <ReceiptPreview sale={viewingSale} tenant={tenantContext} />
+                )}
 
                 {viewingEntry.data.status === "pending_approval" && (
                   <div className="mt-4 grid grid-cols-2 gap-2 border-t border-line pt-4">
@@ -451,7 +490,9 @@ export function ApprovalsRoute(): React.JSX.Element {
               {decisionEntry.action === "approve"
                 ? decisionEntry.entry.kind === "void"
                   ? "This will void the sale and restock every item."
-                  : "This will restock the selected items. Approving assumes the customer has already been refunded in cash — the reports will reduce this sale's revenue accordingly."
+                  : decisionEntry.entry.kind === "return"
+                    ? "This will restock the selected items. Approving assumes the customer has already been refunded in cash — the reports will reduce this sale's revenue accordingly."
+                    : "This will cancel the invoice, restock every item, and — if anything was paid — record a refund in Transactions."
                 : "This request will be marked rejected — nothing changes."}
             </p>
             <TextAreaField

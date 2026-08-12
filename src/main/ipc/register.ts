@@ -38,7 +38,6 @@ import {
   readManagedProductImagePreview
 } from "@main/services/image-service";
 import {
-  cancelInvoice,
   createInvoice,
   duplicateInvoice,
   getInvoiceSummary,
@@ -46,6 +45,14 @@ import {
   markInvoicePaid,
   recordInvoicePayment
 } from "@main/services/invoice-service";
+import {
+  approveInvoiceCancel,
+  cancelInvoiceDirect,
+  getInvoiceCancellation,
+  listInvoiceCancellations,
+  rejectInvoiceCancel,
+  requestInvoiceCancel
+} from "@main/services/invoice-cancellation-service";
 import {
   getInventoryOverview,
   listAllStockMovements,
@@ -427,7 +434,7 @@ export function registerIpcHandlers(): void {
     setCategoryStatus(id, status)
   );
   ipcMain.handle(ipcChannels.categoryDelete, (_event, id: string) => deleteCategory(id));
-  ipcMain.handle(ipcChannels.productList, () => listProducts());
+  ipcMain.handle(ipcChannels.productList, (_event, storefrontId?: string | null) => listProducts(storefrontId));
   ipcMain.handle(ipcChannels.productNextSku, () => nextProductSku());
   ipcMain.handle(ipcChannels.productStockSummary, (_event, id: string) => getProductStockSummary(id));
   ipcMain.handle(ipcChannels.productGet, (_event, id: string) => getProduct(id));
@@ -621,11 +628,20 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.invoiceRecordPayment, (_event, id: string, input: unknown) =>
     recordInvoicePayment(id, input)
   );
-  ipcMain.handle(ipcChannels.invoiceCancel, (_event, id: string) => cancelInvoice(id));
+  ipcMain.handle(ipcChannels.invoiceCancel, (_event, id: string, input: unknown) => cancelInvoiceDirect(id, input));
   ipcMain.handle(ipcChannels.invoiceMarkPaid, (_event, id: string, input: unknown) =>
     markInvoicePaid(id, input)
   );
   ipcMain.handle(ipcChannels.invoiceDuplicate, (_event, id: string) => duplicateInvoice(id));
+  ipcMain.handle(ipcChannels.invoiceCancellationList, () => listInvoiceCancellations());
+  ipcMain.handle(ipcChannels.invoiceCancellationGet, (_event, id: string) => getInvoiceCancellation(id));
+  ipcMain.handle(ipcChannels.invoiceCancellationRequest, (_event, input: unknown) => requestInvoiceCancel(input));
+  ipcMain.handle(ipcChannels.invoiceCancellationApprove, (_event, id: string, input: unknown) =>
+    approveInvoiceCancel(id, input)
+  );
+  ipcMain.handle(ipcChannels.invoiceCancellationReject, (_event, id: string, input: unknown) =>
+    rejectInvoiceCancel(id, input)
+  );
   ipcMain.handle(ipcChannels.quotationList, () => listQuotations());
   ipcMain.handle(ipcChannels.quotationSummary, () => getQuotationSummary());
   ipcMain.handle(ipcChannels.quotationGet, (_event, id: string) => getQuotation(id));

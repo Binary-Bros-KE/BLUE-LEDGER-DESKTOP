@@ -21,6 +21,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import {
   ALL_YEARS_VALUE,
   buildAvailableYears,
@@ -96,7 +97,9 @@ export function LocalPurchasesRoute(): React.JSX.Element {
       setLocations(locationList);
       setPaymentMethods(methodList);
     } catch (err) {
-      setLoadError(getErrorMessage(err, "Failed to load daily expenses"));
+      const message = getErrorMessage(err, "Failed to load daily expenses");
+      setLoadError(message);
+      showErrorToast(message);
     }
   }, []);
 
@@ -240,7 +243,9 @@ export function LocalPurchasesRoute(): React.JSX.Element {
       setEditingPurchase(purchase);
       setFormOpen(true);
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to load daily expense"));
+      const message = getErrorMessage(err, "Failed to load daily expense");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 
@@ -248,9 +253,12 @@ export function LocalPurchasesRoute(): React.JSX.Element {
     setActionError(null);
     try {
       await window.blueLedger.localPurchase.archive(purchase.id);
+      showSuccessToast(`Daily expense ${purchase.expenseNumber} archived`);
       await loadAll();
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to archive daily expense"));
+      const message = getErrorMessage(err, "Failed to archive daily expense");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 
@@ -258,9 +266,12 @@ export function LocalPurchasesRoute(): React.JSX.Element {
     setActionError(null);
     try {
       await window.blueLedger.localPurchase.restore(purchase.id);
+      showSuccessToast(`Daily expense ${purchase.expenseNumber} restored`);
       await loadAll();
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to restore daily expense"));
+      const message = getErrorMessage(err, "Failed to restore daily expense");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 

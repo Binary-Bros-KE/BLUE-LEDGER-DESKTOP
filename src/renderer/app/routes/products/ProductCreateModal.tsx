@@ -8,6 +8,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { getDashboardVariant } from "@renderer/shared/lib/dashboard-role";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { toCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import type { Category } from "@shared/types/category";
 import { isStorefrontType, type Location } from "@shared/types/location";
@@ -177,7 +178,9 @@ export function ProductCreateModal({
       const relativePath = await window.blueLedger.product.pickImage();
       if (relativePath) updateField("imagePath", relativePath);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to attach image"));
+      const message = getErrorMessage(err, "Failed to attach image");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setImageBusy(false);
     }
@@ -185,8 +188,20 @@ export function ProductCreateModal({
 
   async function handleSubmit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
-    setSaving(true);
     setError(null);
+
+    // Same check the schema enforces server-side (productCreateSchema) — caught here first so the
+    // person filling this out sees it immediately instead of after a round trip. A minimum price
+    // above the selling price can never actually be sold — checkout/invoices/quotations would
+    // reject every sale of this product outright the moment it's created this way.
+    if (form.minimumPrice.trim() && toCents(form.minimumPrice) > toCents(form.sellingPrice)) {
+      const message = "Minimum price can't be higher than the selling price";
+      setError(message);
+      showErrorToast(message);
+      return;
+    }
+
+    setSaving(true);
 
     const openingStockEntries = Object.entries(openingStock)
       .map(([locationId, quantity]) => ({ locationId, quantity: Number(quantity) || 0 }))
@@ -219,9 +234,12 @@ export function ProductCreateModal({
         imagePath: form.imagePath,
         openingStock: openingStockEntries
       });
+      showSuccessToast(`Product "${product.name}" created`);
       onCreated(product);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to create product"));
+      const message = getErrorMessage(err, "Failed to create product");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }

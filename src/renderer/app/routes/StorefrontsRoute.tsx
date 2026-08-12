@@ -22,6 +22,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { logoBoxClassName } from "@renderer/shared/lib/logo";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import {
   LOCATION_TYPE_OPTIONS,
   STOREFRONT_TYPE_OPTIONS,
@@ -158,7 +159,9 @@ export function StorefrontsRoute(): React.JSX.Element {
       // manageable storefront someone chose to create, is just confusing clutter, not useful info.
       setLocations(list.filter((location) => location.locationType !== "distribution_center"));
     } catch (err) {
-      setLoadError(getErrorMessage(err, "Failed to load storefronts"));
+      const message = getErrorMessage(err, "Failed to load storefronts");
+      setLoadError(message);
+      showErrorToast(message);
     }
   }, []);
 
@@ -192,7 +195,9 @@ export function StorefrontsRoute(): React.JSX.Element {
         updateField("logoPath", relativePath);
       }
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to attach logo"));
+      const message = getErrorMessage(err, "Failed to attach logo");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setLogoBusy(false);
     }
@@ -222,13 +227,17 @@ export function StorefrontsRoute(): React.JSX.Element {
     try {
       if (editingId) {
         await window.blueLedger.location.update(editingId, payload);
+        showSuccessToast(`Location "${form.locationName}" updated`);
       } else {
         await window.blueLedger.location.create(payload);
+        showSuccessToast(`Location "${form.locationName}" created`);
       }
       await loadLocations();
       setModalOpen(false);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to save location"));
+      const message = getErrorMessage(err, "Failed to save location");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }
@@ -236,8 +245,13 @@ export function StorefrontsRoute(): React.JSX.Element {
 
   async function handleToggleStatus(location: Location): Promise<void> {
     const nextStatus = location.status === "active" ? "inactive" : "active";
-    await window.blueLedger.location.setStatus(location.id, nextStatus);
-    await loadLocations();
+    try {
+      await window.blueLedger.location.setStatus(location.id, nextStatus);
+      showSuccessToast(`"${location.locationName}" ${nextStatus === "active" ? "activated" : "deactivated"}`);
+      await loadLocations();
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Failed to update status"));
+    }
   }
 
   return (

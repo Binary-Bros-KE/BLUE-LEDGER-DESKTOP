@@ -168,16 +168,18 @@ export function RevenueSummaryBlock({
             </div>
             <ol className="mt-2 space-y-2">
               {overview.topProducts.map((product, index) => (
-                <li key={product.productId} className="flex items-center justify-between gap-3 text-sm">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="grid size-5 flex-none place-items-center rounded-full bg-soft text-[10px] font-extrabold text-muted">
+                <li key={product.productId} className="flex items-start justify-between gap-3 text-sm">
+                  <div className="flex min-w-0 items-start gap-2">
+                    <span className="mt-0.5 grid size-5 flex-none place-items-center rounded-full bg-soft text-[10px] font-extrabold text-muted">
                       {index + 1}
                     </span>
-                    <span className="truncate font-bold text-ink">{product.productName}</span>
+                    <span className="line-clamp-2 font-bold leading-snug text-ink" title={product.productName}>
+                      {product.productName}
+                    </span>
                   </div>
-                  <div className="flex flex-none items-center gap-3">
-                    <span className="text-xs font-semibold text-muted">{product.quantitySold} sold</span>
-                    <span className="w-20 text-right text-xs font-bold tabular-nums text-ink">{money(product.revenueCents)}</span>
+                  <div className="flex flex-none items-start gap-3">
+                    <span className="mt-0.5 text-xs font-semibold text-muted">{product.quantitySold} sold</span>
+                    <span className="mt-0.5 w-20 text-right text-xs font-bold tabular-nums text-ink">{money(product.revenueCents)}</span>
                   </div>
                 </li>
               ))}
@@ -241,9 +243,6 @@ export function ExpenseSummaryBlock({
           <span>{money(overview.generalExpensesCents)}</span>
           <span className="text-xs font-semibold text-muted">({overview.generalExpensesDocumentCount} expense records)</span>
           <span className="text-muted">+</span>
-          <span>{money(overview.purchasesPaidCents)}</span>
-          <span className="text-xs font-semibold text-muted">({overview.purchasesPaidDocumentCount} supplier payments)</span>
-          <span className="text-muted">+</span>
           <span>{money(overview.salariesPaidCents)}</span>
           <span className="text-xs font-semibold text-muted">({overview.salariesPaidDocumentCount} payslips)</span>
           {overview.serviceChargeCostsCents > 0 && (
@@ -264,7 +263,9 @@ export function ExpenseSummaryBlock({
           Service-charge cost is the internal, never-printed cost side of a custom charge added on a sale — this is
           what tells you whether that service is actually profitable. Delivery cost shows up below instead, under
           Expenses by category ("Delivery Costs") — it's booked as a real expense the moment a sale or invoice
-          with a delivery is created.
+          with a delivery is created. Supplier payments (capital) aren&rsquo;t counted here — see Total Capital
+          Invested above: item-level cost of goods sold already accounts for what actually sold, so counting the
+          full purchase cost again the moment it's paid would double it up.
         </p>
       </div>
 

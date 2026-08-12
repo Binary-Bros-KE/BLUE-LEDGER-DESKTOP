@@ -8,6 +8,7 @@ import { Modal } from "@renderer/shared/components/Modal";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import {
   PERMISSION_ACTIONS,
   PERMISSION_ACTION_LABELS,
@@ -65,7 +66,9 @@ export function RolesRoute(): React.JSX.Element {
       const list = await window.blueLedger.role.list();
       setRoles(list);
     } catch (err) {
-      setLoadError(getErrorMessage(err, "Failed to load roles"));
+      const message = getErrorMessage(err, "Failed to load roles");
+      setLoadError(message);
+      showErrorToast(message);
     }
   }, []);
 
@@ -160,13 +163,17 @@ export function RolesRoute(): React.JSX.Element {
     try {
       if (editingRole) {
         await window.blueLedger.role.update(editingRole.id, payload);
+        showSuccessToast(`Role "${form.roleName}" updated`);
       } else {
         await window.blueLedger.role.create(payload);
+        showSuccessToast(`Role "${form.roleName}" created`);
       }
       await loadRoles();
       setModalOpen(false);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to save role"));
+      const message = getErrorMessage(err, "Failed to save role");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }
@@ -178,9 +185,12 @@ export function RolesRoute(): React.JSX.Element {
 
     try {
       await window.blueLedger.role.delete(role.id);
+      showSuccessToast(`Role "${role.roleName}" deleted`);
       await loadRoles();
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to delete role"));
+      const message = getErrorMessage(err, "Failed to delete role");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 

@@ -7,6 +7,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { getDashboardVariant } from "@renderer/shared/lib/dashboard-role";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { fromCents, toCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import type { Category } from "@shared/types/category";
 import type { Location } from "@shared/types/location";
@@ -129,7 +130,9 @@ export function ProductEditModal({
       const relativePath = await window.blueLedger.product.pickImage();
       if (relativePath) updateField("imagePath", relativePath);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to attach image"));
+      const message = getErrorMessage(err, "Failed to attach image");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setImageBusy(false);
     }
@@ -137,8 +140,19 @@ export function ProductEditModal({
 
   async function handleSubmit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
-    setSaving(true);
     setError(null);
+
+    // Same check the schema enforces server-side (productUpdateSchema) — caught here first so it's
+    // immediate. A minimum price above the selling price can never actually be sold —
+    // checkout/invoices/quotations would reject every sale of this product outright.
+    if (form.minimumPrice.trim() && toCents(form.minimumPrice) > toCents(form.sellingPrice)) {
+      const message = "Minimum price can't be higher than the selling price";
+      setError(message);
+      showErrorToast(message);
+      return;
+    }
+
+    setSaving(true);
 
     try {
       await window.blueLedger.product.update(product.id, {
@@ -165,9 +179,12 @@ export function ProductEditModal({
         allowNegativeStock: form.allowNegativeStock,
         imagePath: form.imagePath
       });
+      showSuccessToast(`Product "${form.name}" updated`);
       onSaved();
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to save product"));
+      const message = getErrorMessage(err, "Failed to save product");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }

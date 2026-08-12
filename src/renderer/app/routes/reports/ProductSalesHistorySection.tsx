@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Loader2, Search } from "lucide-react";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { showErrorToast } from "@renderer/shared/lib/toast";
 import type { ProductListItem } from "@shared/types/product";
 import type { ProductSalesHistoryEntry } from "@shared/types/product-report";
 
@@ -51,7 +52,11 @@ export function ProductSalesHistorySection(): React.JSX.Element {
     window.blueLedger.report
       .productSalesHistory({ productId: product.id })
       .then(setHistory)
-      .catch((err: unknown) => setError(getErrorMessage(err, "Failed to load sales history")))
+      .catch((err: unknown) => {
+        const message = getErrorMessage(err, "Failed to load sales history");
+        setError(message);
+        showErrorToast(message);
+      })
       .finally(() => setLoading(false));
   }
 
@@ -86,10 +91,12 @@ export function ProductSalesHistorySection(): React.JSX.Element {
                 key={product.id}
                 type="button"
                 onClick={() => selectProduct(product)}
-                className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-soft cursor-pointer"
+                className="flex w-full items-start justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-soft cursor-pointer"
               >
-                <span className="truncate font-bold text-ink">{product.name}</span>
-                <span className="flex-none text-xs font-semibold text-muted">{product.sku}</span>
+                <span className="line-clamp-2 font-bold leading-snug text-ink" title={product.name}>
+                  {product.name}
+                </span>
+                <span className="mt-0.5 flex-none text-xs font-semibold text-muted">{product.sku}</span>
               </button>
             ))}
           </div>

@@ -9,6 +9,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { showErrorToast } from "@renderer/shared/lib/toast";
 import { taxBreakdownLabel } from "@shared/lib/tax-calculation";
 import { useUiStore } from "@renderer/shared/stores/ui-store";
 import type { ReportExportRequest, ReportExportSection } from "@shared/types/report-export";
@@ -164,7 +165,9 @@ export function SalesReportRoute(): React.JSX.Element {
       setTaxReport(taxReportResult);
       setLocalSourcingReport(localSourcingReportResult);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to load the sales report"));
+      const message = getErrorMessage(err, "Failed to load the sales report");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setLoading(false);
     }
@@ -242,13 +245,22 @@ export function SalesReportRoute(): React.JSX.Element {
             tone: "danger",
             label: "Total Expenses",
             value: money(overview.totalExpensesCents),
-            caption: deltaCaption("Expenses + supplier payments + salaries actually paid", overview.totalExpensesChangePercent)
+            caption: deltaCaption(
+              "Expenses + salaries actually paid — capital excluded, see Total Capital Invested",
+              overview.totalExpensesChangePercent
+            )
           },
           {
             tone: overview.netProfitCents >= 0 ? "success" : "danger",
             label: "Net Profit",
             value: money(overview.netProfitCents),
             caption: deltaCaption("Net Revenue − Total Expenses", overview.netProfitChangePercent)
+          },
+          {
+            tone: "warning",
+            label: "Total Capital Invested",
+            value: money(overview.purchasesPaidCents),
+            caption: `Purchases (goods + shipping) actually paid to suppliers this period · ${overview.purchasesPaidDocumentCount} supplier payment${overview.purchasesPaidDocumentCount === 1 ? "" : "s"} — not counted in Total Expenses`
           }
         ]
       },

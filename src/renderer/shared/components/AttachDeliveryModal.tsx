@@ -6,6 +6,7 @@ import { Field, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { toCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { Rider } from "@shared/types/rider";
 import type { SaleDelivery } from "@shared/types/sale";
 
@@ -55,9 +56,12 @@ export function AttachDeliveryModal({
         feeCents: draft.fee.trim() ? toCents(draft.fee) : 0,
         costCents: draft.cost.trim() ? toCents(draft.cost) : 0
       });
+      showSuccessToast("Delivery attached");
       onAttached(delivery);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to attach delivery"));
+      const message = getErrorMessage(err, "Failed to attach delivery");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }

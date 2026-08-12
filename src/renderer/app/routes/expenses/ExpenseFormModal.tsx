@@ -7,6 +7,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { getDashboardVariant } from "@renderer/shared/lib/dashboard-role";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { fromCents, toCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { Expense } from "@shared/types/expense";
 import type { ExpenseCategory } from "@shared/types/expense-category";
 import { isStorefrontType, type Location } from "@shared/types/location";
@@ -131,7 +132,9 @@ export function ExpenseFormModal({
       const relativePath = await window.blueLedger.expense.pickAttachment();
       if (relativePath) updateField("attachmentPath", relativePath);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to attach file"));
+      const message = getErrorMessage(err, "Failed to attach file");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setAttachmentBusy(false);
     }
@@ -142,7 +145,9 @@ export function ExpenseFormModal({
     try {
       await window.blueLedger.expense.openAttachment(form.attachmentPath);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to open attachment"));
+      const message = getErrorMessage(err, "Failed to open attachment");
+      setError(message);
+      showErrorToast(message);
     }
   }
 
@@ -169,10 +174,13 @@ export function ExpenseFormModal({
       } else {
         await window.blueLedger.expense.create(payload);
       }
+      showSuccessToast(editingExpense ? "Expense updated" : "Expense created");
       await onSaved();
       onClose();
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to save expense"));
+      const message = getErrorMessage(err, "Failed to save expense");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }

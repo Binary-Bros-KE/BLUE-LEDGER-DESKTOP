@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { KeyRound, Loader2 } from "lucide-react";
 import { Field } from "@renderer/shared/components/form-fields";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 
 const PUNCH_COUNT = 3;
@@ -23,9 +24,12 @@ export function ActivationRoute(): React.JSX.Element {
     setError(null);
     try {
       await window.blueLedger.activation.activate(licenseKey);
+      showSuccessToast("Installation activated");
       await hydrate();
     } catch (err) {
-      setError(getErrorMessage(err, "Activation failed"));
+      const message = getErrorMessage(err, "Activation failed");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSubmitting(false);
     }

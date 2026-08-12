@@ -67,12 +67,11 @@ export async function createMainWindow(): Promise<BrowserWindow> {
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: true,
-      // Reachable via Ctrl+Shift+I / F12 even in a packaged build — never auto-opened, but a
-      // stuck/blank window in production is otherwise completely unobservable (no console, no way
-      // to see the actual error). Low-risk for offline B2B desktop software: anyone able to press
-      // this shortcut already has physical/remote access to the machine, at which point DevTools
-      // grants them nothing they didn't already have.
-      devTools: true
+      // Only reachable via Ctrl+Shift+I / F12 in a local dev build. Was left on in packaged builds
+      // for a while to debug a production-only issue; disabled again now that it's resolved and no
+      // errors are outstanding — a stray Ctrl+Shift+I from a real user (which happened) is more
+      // likely than the low-probability "need to debug a live install" case it existed for.
+      devTools: isDev
     }
   });
 

@@ -5,6 +5,7 @@ import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
+import { QuickCreateProductModal } from "@renderer/shared/components/QuickCreateProductModal";
 import { StatTile } from "@renderer/shared/components/StatTile";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
@@ -76,6 +77,7 @@ export function GoodsReceivedRoute(): React.JSX.Element {
   const [productSearch, setProductSearch] = useState("");
   const [createSaving, setCreateSaving] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [quickCreateProductOpen, setQuickCreateProductOpen] = useState(false);
 
   const [allocationSummary, setAllocationSummary] = useState<MainStoreAllocationSummary[]>([]);
   const [storefrontStock, setStorefrontStock] = useState<LocationStockLevel[]>([]);
@@ -630,7 +632,17 @@ export function GoodsReceivedRoute(): React.JSX.Element {
             />
           ) : null}
 
-          <span className="mt-4 block text-[11px] font-extrabold uppercase tracking-wider text-muted">Products</span>
+          <div className="mt-4 flex items-center justify-between">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Products</span>
+            <button
+              type="button"
+              onClick={() => setQuickCreateProductOpen(true)}
+              className="flex items-center gap-1 text-[11px] font-extrabold uppercase text-accent hover:underline cursor-pointer"
+            >
+              <Plus className="size-3" aria-hidden="true" />
+              New Product
+            </button>
+          </div>
           <div className="relative mt-1.5">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden="true" />
             <input
@@ -864,6 +876,20 @@ export function GoodsReceivedRoute(): React.JSX.Element {
           </div>
         ) : null}
       </Modal>
+
+      <QuickCreateProductModal
+        open={quickCreateProductOpen}
+        onClose={() => setQuickCreateProductOpen(false)}
+        onCreated={(product) => {
+          // No storefrontId passed — same as Purchases: this receipt IS the "receive stock" step,
+          // so the new product starts at zero stock and gets its quantity set right here in the
+          // draft items table below, not inside the popup.
+          const listItem = { ...product, categoryName: null, categoryColor: null, totalStock: 0 };
+          setProducts((prev) => [...prev, listItem]);
+          addDraftItem(listItem);
+          setQuickCreateProductOpen(false);
+        }}
+      />
     </motion.div>
   );
 }

@@ -5,6 +5,7 @@ import { SelectField, TextAreaField } from "@renderer/shared/components/form-fie
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, toCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { EmployeeListItem } from "@shared/types/employee";
 import type { Salary } from "@shared/types/salary";
 
@@ -74,10 +75,12 @@ export function SalaryAdvanceModal({
 
     if (!employeeId) {
       setError("Select an employee");
+      showErrorToast("Select an employee");
       return;
     }
     if (lineItems.length === 0) {
       setError("Add at least one deduction (e.g. the advance amount)");
+      showErrorToast("Add at least one deduction (e.g. the advance amount)");
       return;
     }
 
@@ -89,10 +92,13 @@ export function SalaryAdvanceModal({
         deductions: lineItems,
         notes
       });
+      showSuccessToast("Advance recorded");
       await onRecorded(salary);
       onClose();
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to record advance"));
+      const message = getErrorMessage(err, "Failed to record advance");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }

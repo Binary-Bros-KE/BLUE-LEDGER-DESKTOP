@@ -5,6 +5,7 @@ import { Field } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { toCents } from "@renderer/shared/lib/money";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { Product } from "@shared/types/product";
 
 /** The fast path for adding a product mid-purchase, mid-invoice, or mid-quotation — only SKU, name,
@@ -80,10 +81,13 @@ export function QuickCreateProductModal({
         allowNegativeStock: false,
         openingStock
       });
+      showSuccessToast(`Product "${product.name}" created`);
       reset();
       onCreated(product);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to create product"));
+      const message = getErrorMessage(err, "Failed to create product");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }
@@ -98,7 +102,7 @@ export function QuickCreateProductModal({
       }}
       title="New Product"
       description="Just enough to add it to this purchase — refine pricing and details later from Products."
-      widthClassName="max-w-md"
+      widthClassName="max-w-2xl"
     >
       <form onSubmit={handleSubmit}>
         {error && (
@@ -107,7 +111,7 @@ export function QuickCreateProductModal({
           </div>
         )}
 
-        <div className="space-y-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="SKU" value={sku} onChange={setSku} placeholder="e.g. SKU-001" required />
           <Field
             label="Barcode (optional)"
@@ -118,7 +122,14 @@ export function QuickCreateProductModal({
             }}
             placeholder="Click here, then scan — or leave blank"
           />
-          <Field label="Product Name" value={name} onChange={setName} placeholder="e.g. 20L Cooking Oil" required />
+          <Field
+            label="Product Name"
+            value={name}
+            onChange={setName}
+            placeholder="e.g. 20L Cooking Oil"
+            required
+            className="sm:col-span-2"
+          />
           <Field
             label="Buying Price (Cost)"
             type="number"
@@ -141,6 +152,7 @@ export function QuickCreateProductModal({
               value={stockQuantity}
               onChange={setStockQuantity}
               placeholder="0"
+              className="sm:col-span-2"
             />
           )}
         </div>

@@ -630,13 +630,15 @@ export function StockRequestsRoute(): React.JSX.Element {
               {createItems.map((item) => (
                 <div
                   key={item.productId}
-                  className="flex items-center justify-between gap-2 rounded-lg border border-dashed border-line bg-soft/40 px-3 py-2"
+                  className="flex items-start justify-between gap-2 rounded-lg border border-dashed border-line bg-soft/40 px-3 py-2"
                 >
                   <div className="min-w-0">
-                    <p className="truncate text-xs font-extrabold text-ink">{item.productName}</p>
+                    <p className="line-clamp-2 text-xs font-extrabold leading-snug text-ink" title={item.productName}>
+                      {item.productName}
+                    </p>
                     <p className="text-[10px] font-semibold text-muted">{item.sku}</p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="mt-0.5 flex items-center gap-2">
                     <input
                       type="number"
                       min={1}

@@ -8,6 +8,7 @@ import { Modal } from "@renderer/shared/components/Modal";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { PaymentMethod } from "@shared/types/payment-method";
 
 type FormState = {
@@ -63,7 +64,9 @@ export function PaymentMethodsRoute(): React.JSX.Element {
       const list = await window.blueLedger.paymentMethod.list();
       setMethods(list);
     } catch (err) {
-      setLoadError(getErrorMessage(err, "Failed to load payment methods"));
+      const message = getErrorMessage(err, "Failed to load payment methods");
+      setLoadError(message);
+      showErrorToast(message);
     }
   }, []);
 
@@ -116,13 +119,17 @@ export function PaymentMethodsRoute(): React.JSX.Element {
     try {
       if (editingMethod) {
         await window.blueLedger.paymentMethod.update(editingMethod.id, payload);
+        showSuccessToast(`Payment method "${form.name}" updated`);
       } else {
         await window.blueLedger.paymentMethod.create(payload);
+        showSuccessToast(`Payment method "${form.name}" created`);
       }
       await loadMethods();
       setModalOpen(false);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to save payment method"));
+      const message = getErrorMessage(err, "Failed to save payment method");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }
@@ -132,9 +139,12 @@ export function PaymentMethodsRoute(): React.JSX.Element {
     setActionError(null);
     try {
       await window.blueLedger.paymentMethod.setActive(method.id, !method.isActive);
+      showSuccessToast(`"${method.name}" ${method.isActive ? "deactivated" : "activated"}`);
       await loadMethods();
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to update status"));
+      const message = getErrorMessage(err, "Failed to update status");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 
@@ -144,9 +154,12 @@ export function PaymentMethodsRoute(): React.JSX.Element {
 
     try {
       await window.blueLedger.paymentMethod.delete(method.id);
+      showSuccessToast(`Payment method "${method.name}" deleted`);
       await loadMethods();
     } catch (err) {
-      setActionError(getErrorMessage(err, "Failed to delete payment method"));
+      const message = getErrorMessage(err, "Failed to delete payment method");
+      setActionError(message);
+      showErrorToast(message);
     }
   }
 

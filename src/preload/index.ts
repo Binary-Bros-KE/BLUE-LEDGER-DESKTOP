@@ -74,7 +74,7 @@ const api: BlueLedgerApi = {
     delete: (id) => invoke("category:delete", id)
   },
   product: {
-    list: () => invoke("product:list"),
+    list: (storefrontId) => invoke("product:list", storefrontId),
     nextSku: () => invoke("product:next-sku"),
     stockSummary: (id) => invoke("product:stock-summary", id),
     get: (id) => invoke("product:get", id),
@@ -236,9 +236,16 @@ const api: BlueLedgerApi = {
     summary: () => invoke("invoice:summary"),
     create: (input) => invoke("invoice:create", input),
     recordPayment: (id, input) => invoke("invoice:record-payment", id, input),
-    cancel: (id) => invoke("invoice:cancel", id),
+    cancel: (id, input) => invoke("invoice:cancel", id, input),
     markPaid: (id, input) => invoke("invoice:mark-paid", id, input),
     duplicate: (id) => invoke("invoice:duplicate", id)
+  },
+  invoiceCancellation: {
+    list: () => invoke("invoice-cancellation:list"),
+    get: (id) => invoke("invoice-cancellation:get", id),
+    request: (input) => invoke("invoice-cancellation:request", input),
+    approve: (id, input) => invoke("invoice-cancellation:approve", id, input),
+    reject: (id, input) => invoke("invoice-cancellation:reject", id, input)
   },
   quotation: {
     list: () => invoke("quotation:list"),

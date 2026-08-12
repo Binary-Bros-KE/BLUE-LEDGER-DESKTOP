@@ -366,9 +366,12 @@ export function suspendSale(input: unknown): { id: string } {
       discountAmountCents: cart.discountAmountCents,
       taxAmountCents: cart.taxAmountCents,
       grandTotalCents: cart.grandTotalCents,
-      paymentMethodId: null,
-      paymentReference: null,
-      amountReceivedCents: null,
+      // A cashier may have already picked a payment method, jotted a reference, or entered an amount
+      // before deciding to hold instead of complete — carried through so it's still there on resume,
+      // same as everything else about the held cart.
+      paymentMethodId: parsed.paymentMethodId ?? null,
+      paymentReference: parsed.paymentReference ?? null,
+      amountReceivedCents: parsed.amountReceivedCents ?? null,
       changeGivenCents: null,
       notes: parsed.notes,
       completedAt: null,

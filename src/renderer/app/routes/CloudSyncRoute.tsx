@@ -8,6 +8,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import { SYNC_STATUS_COPY } from "@renderer/shared/lib/sync-status";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type {
   EntitySyncOverviewRow,
   SyncConflictItem,
@@ -103,7 +104,9 @@ export function CloudSyncRoute(): React.JSX.Element {
       setReconciliations(reconciliationsResult);
       setEntityOverview(entityOverviewResult);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to load sync status"));
+      const message = getErrorMessage(err, "Failed to load sync status");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setLoading(false);
     }
@@ -127,8 +130,11 @@ export function CloudSyncRoute(): React.JSX.Element {
       setQueue(queueResult);
       setConflicts(conflictsResult);
       setEntityOverview(entityOverviewResult);
+      showSuccessToast("Sync complete");
     } catch (err) {
-      setError(getErrorMessage(err, "Sync failed"));
+      const message = getErrorMessage(err, "Sync failed");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSyncing(false);
     }
@@ -139,9 +145,12 @@ export function CloudSyncRoute(): React.JSX.Element {
     setError(null);
     try {
       await window.blueLedger.sync.resolveConflict(id, resolution);
+      showSuccessToast("Conflict resolved");
       await load();
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to resolve conflict"));
+      const message = getErrorMessage(err, "Failed to resolve conflict");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setResolvingId(null);
     }
@@ -282,8 +291,11 @@ export function CloudSyncRoute(): React.JSX.Element {
               to this device.
             </p>
             <p className="mt-1 text-xs font-semibold">
-              These reference something that no longer exists in the cloud (e.g. a deleted storefront) — contact
-              support so the underlying data can be corrected.
+              Each one kept failing to reference something else it needs for several minutes straight — usually
+              because that something (a product, a storefront) was deleted from the cloud. On a device doing its
+              very first full sync, this can also just mean it needed more time to catch up; a Sync Now after a
+              few minutes may clear it on its own. If it's still here after that, contact support so the
+              underlying data can be corrected.
             </p>
           </div>
         </div>

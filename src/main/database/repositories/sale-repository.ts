@@ -80,6 +80,11 @@ export type SaleItemDetailRow = SaleItemRow & {
   product_name: string;
   sku: string;
   local_supplier_name: string | null;
+  /** Whether THIS product is stock-tracked at all — needed by invoice-cancellation-service.ts to
+   * mirror insertInvoiceFromCart's own deduction condition (`track_stock && !isLocallySourced`)
+   * exactly when restocking on cancel; without it, cancelling would credit phantom stock for
+   * products that were never actually deducted in the first place. */
+  track_stock: number;
 };
 
 export type PendingSaleListRow = {
@@ -363,7 +368,7 @@ export function findSaleItemDetailRows(saleId: string): SaleItemDetailRow[] {
   return getDatabase()
     .prepare(
       `
-      SELECT si.*, p.name AS product_name, p.sku AS sku, sup.business_name AS local_supplier_name
+      SELECT si.*, p.name AS product_name, p.sku AS sku, p.track_stock AS track_stock, sup.business_name AS local_supplier_name
       FROM sale_items si
       JOIN products p ON p.id = si.product_id
       LEFT JOIN suppliers sup ON sup.id = si.local_supplier_id

@@ -6,6 +6,7 @@ import { Modal } from "@renderer/shared/components/Modal";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { showErrorToast } from "@renderer/shared/lib/toast";
 import { CUSTOMER_TYPE_OPTIONS, type Customer } from "@shared/types/customer";
 import type { CustomerPurchaseHistoryEntry } from "@shared/types/customer-report";
 
@@ -63,7 +64,11 @@ export function CustomerDetailModal({
         const result = await window.blueLedger.report.customerPurchaseHistory({ customerId: customer.id });
         if (!cancelled) setHistory(result);
       } catch (err) {
-        if (!cancelled) setError(getErrorMessage(err, "Failed to load purchase history"));
+        if (!cancelled) {
+          const message = getErrorMessage(err, "Failed to load purchase history");
+          setError(message);
+          showErrorToast(message);
+        }
       }
     })();
     return () => {

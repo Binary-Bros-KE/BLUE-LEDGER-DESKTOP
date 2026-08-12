@@ -4,6 +4,7 @@ import { Button } from "@renderer/shared/components/Button";
 import { SelectField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { showErrorToast } from "@renderer/shared/lib/toast";
 import { TAX_TYPE_OPTIONS, type ProductTaxType } from "@shared/types/product";
 
 /**
@@ -36,7 +37,9 @@ export function BulkTaxCategoryModal({
       await onApplied(updatedCount);
       onClose();
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to update tax category"));
+      const message = getErrorMessage(err, "Failed to update tax category");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }

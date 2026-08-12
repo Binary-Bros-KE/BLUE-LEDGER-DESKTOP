@@ -34,7 +34,7 @@ export const productOpeningStockEntrySchema = z.object({
   quantity: z.coerce.number().int().min(0)
 });
 
-export const productCreateSchema = z.object({
+const productFieldsSchema = z.object({
   sku: z
     .string()
     .trim()
@@ -62,11 +62,28 @@ export const productCreateSchema = z.object({
   reorderLevel: z.coerce.number().int().min(0).max(1_000_000),
   trackStock: z.boolean(),
   allowNegativeStock: z.boolean(),
-  imagePath: optionalText(500),
-  openingStock: z.array(productOpeningStockEntrySchema).optional().default([])
+  imagePath: optionalText(500)
 });
 
-export const productUpdateSchema = productCreateSchema.omit({ openingStock: true });
+/** A minimum price ABOVE the selling price is never sellable at all — checkout/invoices/quotations
+ * all reject the sale outright the moment isPriceBelowMinimum (cart-pricing.ts) sees the normal
+ * price under it, with no way to complete the transaction. Rejected here at the source instead of
+ * letting a broken product ever get saved — equal is fine (selling exactly at the floor isn't
+ * "below" it), only strictly above is blocked. */
+function minimumPriceNotAboveSelling(data: { minimumPriceCents: number | null; sellingPriceCents: number }): boolean {
+  return data.minimumPriceCents === null || data.minimumPriceCents <= data.sellingPriceCents;
+}
+
+const MINIMUM_PRICE_REFINEMENT_OPTS = {
+  message: "Minimum price can't be higher than the selling price",
+  path: ["minimumPriceCents"] as PropertyKey[]
+};
+
+export const productCreateSchema = productFieldsSchema
+  .extend({ openingStock: z.array(productOpeningStockEntrySchema).optional().default([]) })
+  .refine(minimumPriceNotAboveSelling, MINIMUM_PRICE_REFINEMENT_OPTS);
+
+export const productUpdateSchema = productFieldsSchema.refine(minimumPriceNotAboveSelling, MINIMUM_PRICE_REFINEMENT_OPTS);
 
 /** Backfill tool for a tenant onboarded before tax categories existed — every product bulk-set to
  * one category in a few clicks instead of one-by-one, or a re-import that would just create

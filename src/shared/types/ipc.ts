@@ -49,6 +49,7 @@ import type { DeliveryInput } from "../schemas/charges";
 import type { PendingSaleListItem, Sale, SaleDelivery, SaleListItem } from "./sale";
 import type { SaleReturn } from "./sale-return";
 import type { SaleVoid } from "./sale-void";
+import type { InvoiceCancellation } from "./invoice-cancellation";
 import type { RecurringBill } from "./recurring-bill";
 import type { StockMovement, StockMovementFeedItem, StockTransferResult } from "./stock-movement";
 import type { StockReceipt, StockReceiptListItem } from "./stock-receipt";
@@ -242,7 +243,7 @@ export type IpcInvokeMap = {
     result: { id: string };
   };
   "product:list": {
-    args: [];
+    args: [storefrontId?: string | null];
     result: ProductListItem[];
   };
   "product:next-sku": {
@@ -746,7 +747,7 @@ export type IpcInvokeMap = {
     result: Sale;
   };
   "invoice:cancel": {
-    args: [string];
+    args: [string, Record<string, unknown>];
     result: Sale;
   };
   "invoice:mark-paid": {
@@ -756,6 +757,26 @@ export type IpcInvokeMap = {
   "invoice:duplicate": {
     args: [string];
     result: Sale;
+  };
+  "invoice-cancellation:list": {
+    args: [];
+    result: InvoiceCancellation[];
+  };
+  "invoice-cancellation:get": {
+    args: [string];
+    result: InvoiceCancellation;
+  };
+  "invoice-cancellation:request": {
+    args: [Record<string, unknown>];
+    result: InvoiceCancellation;
+  };
+  "invoice-cancellation:approve": {
+    args: [string, Record<string, unknown>];
+    result: InvoiceCancellation;
+  };
+  "invoice-cancellation:reject": {
+    args: [string, Record<string, unknown>];
+    result: InvoiceCancellation;
   };
   "quotation:list": {
     args: [];
@@ -1254,7 +1275,7 @@ export type BlueLedgerApi = {
     delete: (id: string) => Promise<IpcInvokeMap["category:delete"]["result"]>;
   };
   product: {
-    list: () => Promise<IpcInvokeMap["product:list"]["result"]>;
+    list: (storefrontId?: string | null) => Promise<IpcInvokeMap["product:list"]["result"]>;
     nextSku: () => Promise<IpcInvokeMap["product:next-sku"]["result"]>;
     stockSummary: (id: string) => Promise<IpcInvokeMap["product:stock-summary"]["result"]>;
     get: (id: string) => Promise<IpcInvokeMap["product:get"]["result"]>;
@@ -1508,12 +1529,30 @@ export type BlueLedgerApi = {
       id: string,
       input: Record<string, unknown>
     ) => Promise<IpcInvokeMap["invoice:record-payment"]["result"]>;
-    cancel: (id: string) => Promise<IpcInvokeMap["invoice:cancel"]["result"]>;
+    cancel: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["invoice:cancel"]["result"]>;
     markPaid: (
       id: string,
       input: Record<string, unknown>
     ) => Promise<IpcInvokeMap["invoice:mark-paid"]["result"]>;
     duplicate: (id: string) => Promise<IpcInvokeMap["invoice:duplicate"]["result"]>;
+  };
+  invoiceCancellation: {
+    list: () => Promise<IpcInvokeMap["invoice-cancellation:list"]["result"]>;
+    get: (id: string) => Promise<IpcInvokeMap["invoice-cancellation:get"]["result"]>;
+    request: (
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["invoice-cancellation:request"]["result"]>;
+    approve: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["invoice-cancellation:approve"]["result"]>;
+    reject: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["invoice-cancellation:reject"]["result"]>;
   };
   quotation: {
     list: () => Promise<IpcInvokeMap["quotation:list"]["result"]>;

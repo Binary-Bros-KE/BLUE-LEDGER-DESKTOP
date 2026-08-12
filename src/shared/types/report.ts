@@ -128,6 +128,12 @@ export type SalesFinancialOverview = {
   // --- Expense breakdown: what Total Expenses is actually built from ---
   generalExpensesCents: number;
   generalExpensesDocumentCount: number;
+  /** Actual cash paid to suppliers in the period (goods + shipping, from each purchase's own
+   * payments) — this IS "Total Capital Invested," shown as its own figure. Deliberately NEVER
+   * folded into totalExpensesCents/netProfitCents (see report-service.ts's
+   * getSalesFinancialOverview) — netRevenueCents already nets out the cost of what actually sold via
+   * item-level COGS, so also deducting the full cash cost of inventory the moment it's bought would
+   * double-count it. Purely informational. */
   purchasesPaidCents: number;
   purchasesPaidDocumentCount: number;
   salariesPaidCents: number;
@@ -177,7 +183,7 @@ export type PaymentTransactionStatus = "complete" | "failed";
  * an expense, or a salary payout). */
 export type PaymentTransactionDirection = "in" | "out";
 
-export type PaymentTransactionSourceType = "sale" | "purchase" | "expense" | "salary";
+export type PaymentTransactionSourceType = "sale" | "invoice_refund" | "purchase" | "expense" | "salary";
 
 /** What `partyName` represents, per source — the OTHER side of the transaction from the business
  * itself: who paid us (Customer), who we paid (Supplier/Employee), or what an expense was for. */

@@ -750,12 +750,14 @@ export function ReceiptsRoute(): React.JSX.Element {
                   {viewingSale.items
                     .filter((item) => item.isLocallySourced)
                     .map((item) => (
-                      <div key={item.id} className="flex items-center justify-between gap-2 text-xs">
+                      <div key={item.id} className="flex items-start justify-between gap-2 text-xs">
                         <div className="min-w-0">
-                          <p className="truncate font-bold text-ink">{item.productName}</p>
+                          <p className="line-clamp-2 font-bold leading-snug text-ink" title={item.productName}>
+                            {item.productName}
+                          </p>
                           <p className="truncate text-muted">{item.localSupplierName ?? "No supplier recorded"}</p>
                         </div>
-                        <span className="flex-none font-bold tabular-nums text-ink">
+                        <span className="mt-0.5 flex-none font-bold tabular-nums text-ink">
                           Cost {item.localCostCents !== null ? formatCents(item.localCostCents) : "—"}
                         </span>
                       </div>
@@ -859,9 +861,11 @@ export function ReceiptsRoute(): React.JSX.Element {
                 const remaining = remainingReturnableQuantity(item.id, item.quantity);
                 return (
                   <div key={item.id} className="rounded-lg border border-line p-3">
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-extrabold text-ink">{item.productName}</p>
+                        <p className="line-clamp-2 text-sm font-extrabold leading-snug text-ink" title={item.productName}>
+                          {item.productName}
+                        </p>
                         <p className="text-[11px] font-semibold text-muted">
                           Sold {item.quantity} · {remaining} eligible for return
                         </p>
@@ -878,7 +882,7 @@ export function ReceiptsRoute(): React.JSX.Element {
                             [item.id]: Math.max(0, Math.min(remaining, Number(event.target.value)))
                           }))
                         }
-                        className="h-9 w-20 rounded-lg border border-line px-2 text-center text-sm font-bold outline-none focus:border-accent disabled:cursor-not-allowed disabled:bg-soft"
+                        className="mt-0.5 h-9 w-20 flex-none rounded-lg border border-line px-2 text-center text-sm font-bold outline-none focus:border-accent disabled:cursor-not-allowed disabled:bg-soft"
                       />
                     </div>
                   </div>

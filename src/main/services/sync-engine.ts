@@ -8,6 +8,7 @@ import * as employeeRepository from "@main/database/repositories/employee-reposi
 import * as expenseCategoryRepository from "@main/database/repositories/expense-category-repository";
 import * as expenseRepository from "@main/database/repositories/expense-repository";
 import * as inventoryRepository from "@main/database/repositories/inventory-repository";
+import * as invoiceCancellationRepository from "@main/database/repositories/invoice-cancellation-repository";
 import * as locationRepository from "@main/database/repositories/location-repository";
 import * as mainStoreAllocationRepository from "@main/database/repositories/main-store-allocation-repository";
 import * as paymentMethodRepository from "@main/database/repositories/payment-method-repository";
@@ -69,6 +70,7 @@ const SYNC_ENTITIES: SyncEntity[] = [
   "purchases",
   "sale_returns",
   "sale_voids",
+  "invoice_cancellations",
   "expenses",
   "salaries",
   "recurring_bills"
@@ -116,6 +118,7 @@ const CONFLICT_AWARE_ENTITIES = new Set<SyncEntity>([
   "salaries",
   "recurring_bills",
   "sale_voids",
+  "invoice_cancellations",
   "sales",
   "quotations",
   "purchases",
@@ -858,6 +861,26 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       baseUpdatedAt: row.synced_updated_at
     };
   },
+  // Same shape as sale_voids — see invoice-cancellation-service.ts's own doc comment for why this is
+  // a genuinely separate entity rather than a reuse of sale_voids.
+  invoice_cancellations: (id) => {
+    const row = invoiceCancellationRepository.findInvoiceCancellationRowById(id);
+    if (!row) return null;
+    return {
+      id: row.id,
+      saleId: row.sale_id,
+      status: row.status,
+      reason: row.reason,
+      notes: row.notes,
+      requestedBy: row.requested_by,
+      requestedAt: row.requested_at,
+      approvedBy: row.approved_by,
+      approvedAt: row.approved_at,
+      localCreatedAt: row.created_at,
+      localUpdatedAt: row.updated_at,
+      baseUpdatedAt: row.synced_updated_at
+    };
+  },
   sale_returns: (id) => {
     const row = saleReturnRepository.findSaleReturnRowById(id);
     if (!row) return null;
@@ -1035,6 +1058,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       subtotalCents: row.subtotal_cents,
       discountAmountCents: row.discount_amount_cents,
       taxAmountCents: row.tax_amount_cents,
+      shippingCostCents: row.shipping_cost_cents,
       grandTotalCents: row.grand_total_cents,
       paymentMethodId: row.payment_method_id,
       paymentReference: row.payment_reference,
@@ -1640,6 +1664,19 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
   },
   sale_voids: {
     table: "sale_voids",
+    columns: [
+      { local: "sale_id", cloud: "saleId", refEntity: "sales", refNotNull: true },
+      { local: "status", cloud: "status" },
+      { local: "reason", cloud: "reason" },
+      { local: "notes", cloud: "notes" },
+      { local: "requested_by", cloud: "requestedBy", refEntity: "employees", refNotNull: true },
+      { local: "requested_at", cloud: "requestedAt" },
+      { local: "approved_by", cloud: "approvedBy", refEntity: "employees" },
+      { local: "approved_at", cloud: "approvedAt" }
+    ]
+  },
+  invoice_cancellations: {
+    table: "invoice_cancellations",
     columns: [
       { local: "sale_id", cloud: "saleId", refEntity: "sales", refNotNull: true },
       { local: "status", cloud: "status" },
@@ -2367,6 +2404,7 @@ const PURCHASE_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?:
   { local: "subtotal_cents", cloud: "subtotalCents" },
   { local: "discount_amount_cents", cloud: "discountAmountCents" },
   { local: "tax_amount_cents", cloud: "taxAmountCents" },
+  { local: "shipping_cost_cents", cloud: "shippingCostCents" },
   { local: "grand_total_cents", cloud: "grandTotalCents" },
   { local: "payment_method_id", cloud: "paymentMethodId", refEntity: "payment_methods" },
   { local: "payment_reference", cloud: "paymentReference" },
@@ -2633,27 +2671,43 @@ async function fetchPull(
   }
 }
 
-/** A row still failing after this many separate PULL CYCLES (not the 2 in-page passes below — full
- * cycles, ~20s apart per bootstrap.ts's SYNC_INTERVAL_MS) is no longer treated as "just hasn't
- * arrived yet" — every genuinely transient case (a dependency sitting a few pages behind in the SAME
- * cycle, a same-page ordering quirk) resolves within the first cycle or two via the retry below. Past
- * this threshold it's a permanent gap (e.g. a stock_movement referencing a storefront that's since
- * been deleted from the cloud entirely — confirmed live: the referenced location_id doesn't exist in
- * EITHER the local DB or a fresh full pull of the cloud's own locations table), and the row gets
- * quarantined instead — see recordPullOrphanAttempt below. */
+/** A row still failing after this many separate PULL CYCLES (not the 2 in-page passes below) is no
+ * longer treated as "just hasn't arrived yet". Combined with ORPHAN_MIN_AGE_MS below — see that
+ * constant's own comment for why attempt count ALONE turned out not to be a reliable signal. */
 const ORPHAN_QUARANTINE_THRESHOLD = 3;
+
+/** A row isn't quarantined until it's ALSO been failing for at least this long in wall-clock time,
+ * not just this many attempts — found live on a brand-new device's first-ever full historical sync:
+ * `main_store_allocations` (product_id is a refNotNull field — see resolveRef, which unlike
+ * resolveRefOrNull never verifies the referenced row actually exists locally before using it) hit
+ * ORPHAN_QUARANTINE_THRESHOLD attempts in under 30 seconds — several sync cycles fired in rapid
+ * succession right at cold-start, well before "products" (which syncs first and genuinely did have
+ * the referenced rows, confirmed by direct inspection) had realistic time to land relative to a
+ * dependent entity synced right after it. A device with months of history across ~20 entities can
+ * legitimately take several minutes to fully catch up on its very first sync; 3 rapid-fire attempts
+ * inside that window is not the same signal as 3 attempts spread over a device's normal, already-
+ * caught-up operation (the case this quarantine mechanism was actually built for — a genuinely
+ * deleted cloud reference). Both conditions must hold before giving up on a row. */
+const ORPHAN_MIN_AGE_MS = 5 * 60 * 1000;
 
 /** Records (or bumps the attempt count on) a row that's still failing after the in-page retry below.
  * Table is local-only, diagnostic, and deliberately has no FK constraints of its own — it must be
  * able to hold any orphaned payload without itself becoming a second thing that can fail to insert.
- * Returns the new attempt count so the caller can decide whether to quarantine yet. */
-function recordPullOrphanAttempt(entity: SyncEntity, rowId: string, error: unknown, payload: Record<string, unknown>): number {
+ * Returns the new attempt count and how long ago this row first started failing, so the caller can
+ * decide whether to quarantine yet. */
+function recordPullOrphanAttempt(
+  entity: SyncEntity,
+  rowId: string,
+  error: unknown,
+  payload: Record<string, unknown>
+): { attempts: number; ageMs: number } {
   const db = getDatabase();
   const now = new Date().toISOString();
   const existing = db
-    .prepare("SELECT attempts FROM sync_pull_orphans WHERE entity = ? AND row_id = ?")
-    .get(entity, rowId) as { attempts: number } | undefined;
+    .prepare("SELECT attempts, first_seen_at FROM sync_pull_orphans WHERE entity = ? AND row_id = ?")
+    .get(entity, rowId) as { attempts: number; first_seen_at: string } | undefined;
   const attempts = (existing?.attempts ?? 0) + 1;
+  const firstSeenAt = existing?.first_seen_at ?? now;
   const errorMessage = error instanceof Error ? error.message : String(error);
   db.prepare(
     `INSERT INTO sync_pull_orphans (entity, row_id, attempts, last_error, payload_json, first_seen_at, last_seen_at)
@@ -2662,7 +2716,7 @@ function recordPullOrphanAttempt(entity: SyncEntity, rowId: string, error: unkno
        attempts = excluded.attempts, last_error = excluded.last_error,
        payload_json = excluded.payload_json, last_seen_at = excluded.last_seen_at`
   ).run(entity, rowId, attempts, errorMessage, JSON.stringify(payload), now, now);
-  return attempts;
+  return { attempts, ageMs: new Date(now).getTime() - new Date(firstSeenAt).getTime() };
 }
 
 /** Clears any quarantine record for a row that just applied successfully — covers the case where a
@@ -2725,12 +2779,12 @@ async function pullEntity(tenantId: string, deviceId: string, entity: SyncEntity
       const stillBlocking: Array<Record<string, unknown>> = [];
       for (const row of remaining) {
         const rowId = row.id as string;
-        const attempts = recordPullOrphanAttempt(entity, rowId, lastErrors.get(rowId), row);
-        if (attempts >= ORPHAN_QUARANTINE_THRESHOLD) {
+        const { attempts, ageMs } = recordPullOrphanAttempt(entity, rowId, lastErrors.get(rowId), row);
+        if (attempts >= ORPHAN_QUARANTINE_THRESHOLD && ageMs >= ORPHAN_MIN_AGE_MS) {
           console.error(
-            `[sync] ${entity} row ${rowId} permanently quarantined after ${attempts} pull cycles of the same ` +
-              "failure — it references data that no longer exists in the cloud. Skipping it so the rest of " +
-              `${entity} can keep syncing; see sync_pull_orphans for details.`
+            `[sync] ${entity} row ${rowId} permanently quarantined after ${attempts} pull cycles over ` +
+              `${Math.round(ageMs / 1000)}s of the same failure — it references data that no longer exists in ` +
+              `the cloud. Skipping it so the rest of ${entity} can keep syncing; see sync_pull_orphans for details.`
           );
         } else {
           stillBlocking.push(row);
@@ -2782,7 +2836,13 @@ export async function checkDrift(): Promise<DriftReport | null> {
 
   const localCounts: Partial<Record<SyncEntity, number>> = {};
   for (const entity of SYNC_ENTITIES) {
-    const row = getDatabase().prepare(`SELECT COUNT(*) as count FROM ${entity}`).get() as { count: number };
+    // A merely-held sale (sale_status = 'pending') deliberately never reaches the outbox at all —
+    // see trg_sales_sync_ai/au's own WHEN clause in migrate.ts — so it will never exist in the
+    // cloud either, by design, for as long as it's just sitting open in Checkout. Counting it here
+    // would report a permanent false "drift" any time a cashier has an open ticket at the moment of
+    // the check, indistinguishable from a genuine stuck row.
+    const where = entity === "sales" ? " WHERE sale_status != 'pending'" : "";
+    const row = getDatabase().prepare(`SELECT COUNT(*) as count FROM ${entity}${where}`).get() as { count: number };
     localCounts[entity] = row.count;
   }
 

@@ -4,6 +4,7 @@ import { Button } from "@renderer/shared/components/Button";
 import { Field } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { CATEGORY_COLOR_SWATCHES, type Category } from "@shared/types/category";
 
 /** The fast path for adding a category mid-product-creation — just a name. Color/sort order/parent
@@ -39,10 +40,13 @@ export function QuickCreateCategoryModal({
         sortOrder: 0,
         parentId: null
       });
+      showSuccessToast(`Category "${category.name}" created`);
       reset();
       onCreated(category);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to create category"));
+      const message = getErrorMessage(err, "Failed to create category");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }

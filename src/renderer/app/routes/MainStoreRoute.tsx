@@ -27,6 +27,7 @@ import { StatTile } from "@renderer/shared/components/StatTile";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { Category } from "@shared/types/category";
 import type { ExportListRequest } from "@shared/types/export";
 import { isStorefrontType, type Location } from "@shared/types/location";
@@ -93,7 +94,9 @@ export function MainStoreRoute(): React.JSX.Element {
       setLocations(locationList);
       setCategories(categoryList);
     } catch (err) {
-      setLoadError(getErrorMessage(err, "Failed to load storefronts"));
+      const message = getErrorMessage(err, "Failed to load storefronts");
+      setLoadError(message);
+      showErrorToast(message);
     }
   }, []);
 
@@ -113,7 +116,9 @@ export function MainStoreRoute(): React.JSX.Element {
       const result = await window.blueLedger.mainStore.listProductRows();
       setRows(result);
     } catch (err) {
-      setLoadError(getErrorMessage(err, "Failed to load products"));
+      const message = getErrorMessage(err, "Failed to load products");
+      setLoadError(message);
+      showErrorToast(message);
     }
   }, []);
 
@@ -160,8 +165,11 @@ export function MainStoreRoute(): React.JSX.Element {
     const totalProducts = rows.length;
     const totalAtMainStore = rows.reduce((sum, row) => sum + row.totalAtMainStore, 0);
     const unallocatedUnits = rows.reduce((sum, row) => sum + row.unallocatedQuantity, 0);
-    const lowStockAlerts = rows.filter((row) => row.hasLowStock).length;
-    const outOfStockAlerts = rows.filter((row) => rowHasOutOfStock(row)).length;
+    // A deactivated product shouldn't count toward reorder alerts — nobody is buying it, so its
+    // shelf running low/out isn't something anyone needs to act on.
+    const activeRows = rows.filter((row) => row.status === "active");
+    const lowStockAlerts = activeRows.filter((row) => row.hasLowStock).length;
+    const outOfStockAlerts = activeRows.filter((row) => rowHasOutOfStock(row)).length;
     return { totalProducts, totalAtMainStore, unallocatedUnits, lowStockAlerts, outOfStockAlerts };
   }, [rows]);
 
@@ -225,6 +233,7 @@ export function MainStoreRoute(): React.JSX.Element {
     setCreateOpen(false);
     await loadRows();
     setNotice("Product created.");
+    showSuccessToast("Product created.");
   }
 
   async function handleToggleStatus(row: MainStoreProductRow): Promise<void> {
@@ -233,9 +242,13 @@ export function MainStoreRoute(): React.JSX.Element {
     try {
       await window.blueLedger.product.setStatus(row.productId, nextStatus);
       await loadRows();
-      setNotice(nextStatus === "active" ? "Product activated." : "Product deactivated.");
+      const message = nextStatus === "active" ? "Product activated." : "Product deactivated.";
+      setNotice(message);
+      showSuccessToast(message);
     } catch (err) {
-      setRowActionError(getErrorMessage(err, "Failed to update product status"));
+      const message = getErrorMessage(err, "Failed to update product status");
+      setRowActionError(message);
+      showErrorToast(message);
     }
   }
 
@@ -245,7 +258,9 @@ export function MainStoreRoute(): React.JSX.Element {
       const product = await window.blueLedger.product.get(row.productId);
       setEditingProduct(product);
     } catch (err) {
-      setRowActionError(getErrorMessage(err, "Failed to load product"));
+      const message = getErrorMessage(err, "Failed to load product");
+      setRowActionError(message);
+      showErrorToast(message);
     }
   }
 
@@ -253,6 +268,7 @@ export function MainStoreRoute(): React.JSX.Element {
     await loadRows();
     setEditingProduct(null);
     setNotice("Product updated.");
+    showSuccessToast("Product updated.");
   }
 
   return (
@@ -406,7 +422,9 @@ export function MainStoreRoute(): React.JSX.Element {
                       <ProductThumbnail imagePath={row.imagePath} />
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <p className="truncate text-sm font-extrabold text-ink">{row.productName}</p>
+                          <p className="line-clamp-2 text-sm font-extrabold leading-snug text-ink" title={row.productName}>
+                            {row.productName}
+                          </p>
                           {row.status === "inactive" && <DashedPill tone="neutral">Inactive</DashedPill>}
                           {row.hasLowStock && <LowStockBadge />}
                           {rowHasOutOfStock(row) && <OutOfStockBadge />}

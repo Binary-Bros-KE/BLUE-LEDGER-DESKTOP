@@ -5,6 +5,7 @@ import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { Modal } from "@renderer/shared/components/Modal";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { showErrorToast } from "@renderer/shared/lib/toast";
 import { STOCK_MOVEMENT_TYPE_OPTIONS, type StockMovement, type StockMovementType } from "@shared/types/stock-movement";
 
 const INCREASING_TYPES = new Set<StockMovementType>(["purchase", "transfer_in", "return", "opening_stock"]);
@@ -40,7 +41,11 @@ export function ProductHistoryModal({
         if (!cancelled) setMovements(result);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(getErrorMessage(err, "Failed to load history"));
+        if (!cancelled) {
+          const message = getErrorMessage(err, "Failed to load history");
+          setError(message);
+          showErrorToast(message);
+        }
       });
     return () => {
       cancelled = true;

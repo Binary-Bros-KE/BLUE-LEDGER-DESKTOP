@@ -5,6 +5,7 @@ import { Button } from "@renderer/shared/components/Button";
 import { CheckboxField } from "@renderer/shared/components/form-fields";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { ColumnMappingStep } from "@renderer/app/routes/import/ColumnMappingStep";
 import { EntityPicker } from "@renderer/app/routes/import/EntityPicker";
 import { ImportPreviewTable } from "@renderer/app/routes/import/ImportPreviewTable";
@@ -74,7 +75,9 @@ export function ImportRoute(): React.JSX.Element {
         });
         setPreview(result);
       } catch (err) {
-        setError(getErrorMessage(err, "Failed to preview the file"));
+        const message = getErrorMessage(err, "Failed to preview the file");
+        setError(message);
+        showErrorToast(message);
       } finally {
         setLoadingPreview(false);
       }
@@ -101,7 +104,9 @@ export function ImportRoute(): React.JSX.Element {
       setFieldDefaults({});
       setStep("map");
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to read that file"));
+      const message = getErrorMessage(err, "Failed to read that file");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setLoadingFile(false);
     }
@@ -121,8 +126,11 @@ export function ImportRoute(): React.JSX.Element {
       });
       setCommitResult(result);
       setStep("results");
+      showSuccessToast(`Import complete — ${result.created} created, ${result.updated} updated`);
     } catch (err) {
-      setError(getErrorMessage(err, "Import failed"));
+      const message = getErrorMessage(err, "Import failed");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setCommitting(false);
     }

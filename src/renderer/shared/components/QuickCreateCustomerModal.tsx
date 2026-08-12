@@ -4,6 +4,7 @@ import { Button } from "@renderer/shared/components/Button";
 import { Field } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { Customer } from "@shared/types/customer";
 
 /** The fast path for adding a customer mid-sale/invoice/quotation — only name and phone. Everything
@@ -39,10 +40,13 @@ export function QuickCreateCustomerModal({
         phone,
         customerType: "retail"
       });
+      showSuccessToast(`Customer "${customer.name}" created`);
       reset();
       onCreated(customer);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to create customer"));
+      const message = getErrorMessage(err, "Failed to create customer");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setSaving(false);
     }

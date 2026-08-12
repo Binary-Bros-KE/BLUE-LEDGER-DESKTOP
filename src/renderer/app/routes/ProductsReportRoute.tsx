@@ -6,6 +6,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { showErrorToast } from "@renderer/shared/lib/toast";
 import type { DateRangeInput, SalesReportMode } from "@shared/types/report";
 import type { ProductsPerformanceReport } from "@shared/types/product-report";
 import type { ReportExportRequest, ReportExportSection } from "@shared/types/report-export";
@@ -47,7 +48,9 @@ export function ProductsReportRoute(): React.JSX.Element {
       const result = await window.blueLedger.report.productsPerformance({ ...range, slowMovingLimit: limit });
       setData(result);
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to load the products report"));
+      const message = getErrorMessage(err, "Failed to load the products report");
+      setError(message);
+      showErrorToast(message);
     } finally {
       setLoading(false);
     }

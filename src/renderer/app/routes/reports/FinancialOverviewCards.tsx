@@ -98,12 +98,12 @@ export function OverviewCard({
   );
 }
 
-/** The 4-card "Financial Overview": all cash in, profit on goods sold, what it
- * cost to run the business, and what's left — each card names its own formula
- * so the numbers are never a black box. Net Profit's tone follows its sign. */
+/** The Financial Overview cards: all cash in, profit on goods sold, what it cost to run the
+ * business, what's left, and how much cash is tied up in stock — each card names its own formula so
+ * the numbers are never a black box. Net Profit's tone follows its sign. */
 export function FinancialOverviewCards({ overview }: { overview: SalesFinancialOverview }): React.JSX.Element {
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
       <OverviewCard
         tone="primary"
         label="Total Revenue"
@@ -122,7 +122,7 @@ export function FinancialOverviewCards({ overview }: { overview: SalesFinancialO
         tone="danger"
         label="Total Expenses"
         valueCents={overview.totalExpensesCents}
-        formula="Expenses + supplier payments + salaries actually paid"
+        formula="Expenses + salaries actually paid — capital excluded, see Total Capital Invested"
         deltaPercent={overview.totalExpensesChangePercent}
       />
       <OverviewCard
@@ -131,6 +131,13 @@ export function FinancialOverviewCards({ overview }: { overview: SalesFinancialO
         valueCents={overview.netProfitCents}
         formula="Net Revenue − Total Expenses"
         deltaPercent={overview.netProfitChangePercent}
+      />
+      <OverviewCard
+        tone="warning"
+        label="Total Capital Invested"
+        valueCents={overview.purchasesPaidCents}
+        formula="Purchases (goods + shipping) actually paid to suppliers this period"
+        footnote={`${overview.purchasesPaidDocumentCount} supplier payment${overview.purchasesPaidDocumentCount === 1 ? "" : "s"} — not counted in Total Expenses`}
       />
     </div>
   );
