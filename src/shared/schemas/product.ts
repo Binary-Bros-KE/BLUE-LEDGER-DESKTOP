@@ -31,7 +31,13 @@ const nullablePriceCents = z.coerce
 
 export const productOpeningStockEntrySchema = z.object({
   locationId: z.string().trim().min(1),
-  quantity: z.coerce.number().int().min(0)
+  quantity: z.coerce.number().int().min(0),
+  // Only meaningful when locationId is the tenant's Main Store — passed straight through to
+  // applyValidatedStockMovement's own allocationStorefrontId (see inventory-service.ts): a real
+  // storefront id earmarks this quantity for that shop, null targets the "unallocated" bucket
+  // precisely, and omitting the field entirely (every caller before Products import) falls back to
+  // the older, less precise clamped-unallocated behavior — still correct, just not bucket-aware.
+  allocationStorefrontId: z.string().trim().min(1).nullable().optional()
 });
 
 const productFieldsSchema = z.object({

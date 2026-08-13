@@ -224,7 +224,8 @@ export function createProduct(input: unknown): Product {
           referenceType: "product_creation",
           referenceId: productId,
           performedBy,
-          notes: null
+          notes: null,
+          allocationStorefrontId: entry.allocationStorefrontId ?? null
         },
         tenantId
       );

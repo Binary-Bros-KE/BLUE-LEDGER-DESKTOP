@@ -358,6 +358,41 @@ function buildRowCandidate(
         }
         break;
       }
+      case "mainStoreStock": {
+        // Products-only, same "opening stock is only for a brand-new product" reasoning as
+        // "stockQuantity" above — silently dropped for an update via the same schema-omission.
+        if (!blank) {
+          const quantity = parseNumber(raw);
+          if (quantity === null || quantity < 0) {
+            errors.push(`${field.label} must be a non-negative number`);
+          } else if (quantity === 0) {
+            // Zero is legitimate (nothing sitting at Main Store) — same reasoning as stockQuantity.
+          } else {
+            const mainStore = locationRepository.findMainStoreLocationRow(tenantId);
+            if (!mainStore) {
+              errors.push(`${field.label} needs a Main Store location, but this tenant doesn't have one set up`);
+              break;
+            }
+            const allocationChoice = candidate.mainStoreStockAllocation as string | null | undefined;
+            let allocationStorefrontId: string | null = null;
+            if (allocationChoice === "allocated") {
+              const storefrontId = candidate.storefrontId as string | null | undefined;
+              if (!storefrontId) {
+                errors.push(
+                  `${field.label} is set to allocate to a Storefront, but none resolved for this row (map a Storefront column, or set a default storefront for all rows)`
+                );
+                break;
+              }
+              allocationStorefrontId = storefrontId;
+            }
+            const existingOpeningStock = Array.isArray(candidate.openingStock)
+              ? (candidate.openingStock as Array<{ locationId: string; quantity: number; allocationStorefrontId?: string | null }>)
+              : [];
+            candidate.openingStock = [...existingOpeningStock, { locationId: mainStore.id, quantity, allocationStorefrontId }];
+          }
+        }
+        break;
+      }
     }
   }
 

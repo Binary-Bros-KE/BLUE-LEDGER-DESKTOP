@@ -15,8 +15,14 @@ export const IMPORT_ENTITY_OPTIONS: Array<{ value: ImportEntityType; label: stri
  * "stockQuantity" is Products-only and depends on "storefront" having already resolved earlier in
  * the same field list (see PRODUCT_FIELDS' own ordering comment) — it turns into the same
  * `openingStock: [{locationId, quantity}]` shape createProduct's own "New Product" form already
- * sends, so an imported row gets real stock the exact same way a manually-created product does. */
-export type ImportFieldKind = "text" | "number" | "money" | "boolean" | "enum" | "category" | "storefront" | "stockQuantity";
+ * sends, so an imported row gets real stock the exact same way a manually-created product does.
+ * "mainStoreStock" is the same idea but for stock sitting at the tenant's Main Store instead of a
+ * storefront — it depends on "mainStoreStockAllocation" (a plain "enum") having already resolved
+ * earlier in the same field list, and (only when that choice is "allocated") on "storefront" too,
+ * since "allocated" means earmarked for whichever storefront that field resolved to. Appends a
+ * SECOND `openingStock` entry (targeting Main Store's own location id) alongside whatever
+ * "stockQuantity" already added for the storefront — a product can arrive with stock at both. */
+export type ImportFieldKind = "text" | "number" | "money" | "boolean" | "enum" | "category" | "storefront" | "stockQuantity" | "mainStoreStock";
 
 export type ImportFieldDefinition = {
   /** Matches the underlying create-schema's own field name (sku, name, buyingPriceCents, ...). */
@@ -32,6 +38,14 @@ export type ImportFieldDefinition = {
   enumOptions?: ReadonlyArray<{ value: string; label: string }>;
 };
 
+/** Whether stock recorded at Main Store (via "mainStoreStockQuantity") sits in the general
+ * "unallocated" bucket or is earmarked for the row's own resolved storefront — the exact same two
+ * states the Main Store screen's own allocation breakdown already tracks. */
+const MAIN_STORE_STOCK_ALLOCATION_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "unallocated", label: "Unallocated (sitting at Main Store)" },
+  { value: "allocated", label: "Allocated to the Storefront above" }
+];
+
 const PRODUCT_FIELDS: ImportFieldDefinition[] = [
   // Not required — same as the "New Product" form, a blank cell gets an auto-generated "PROD-..."
   // SKU at import time (see import-service.ts's buildRowCandidate) instead of blocking the row.
@@ -43,6 +57,14 @@ const PRODUCT_FIELDS: ImportFieldDefinition[] = [
   // order, and this one reads candidate.storefrontId (already resolved by "storefront"'s own case)
   // to know which location the imported quantity belongs to.
   { key: "openingStockQuantity", label: "Stock Quantity (At Hand)", required: false, kind: "stockQuantity", aliases: ["stock", "stock quantity", "quantity", "qty", "quantity in stock", "at hand", "stock on hand", "current stock", "opening stock"] },
+  // Must come AFTER "storefront" and BEFORE "mainStoreStockQuantity" — see that field's own
+  // ordering comment. A plain enum field otherwise (no custom parsing case needed).
+  { key: "mainStoreStockAllocation", label: "Store Stock Allocation", required: false, kind: "enum", aliases: ["allocation", "store stock allocation", "allocation status", "store stock status"], enumOptions: MAIN_STORE_STOCK_ALLOCATION_OPTIONS },
+  // Must come AFTER both "storefront" and "mainStoreStockAllocation" above — buildRowCandidate
+  // resolves fields in this exact array order, and this one reads candidate.mainStoreStockAllocation
+  // (and, only when that's "allocated", candidate.storefrontId) to know which allocation bucket at
+  // Main Store the quantity belongs in.
+  { key: "mainStoreStockQuantity", label: "Store Stock (At Main Store)", required: false, kind: "mainStoreStock", aliases: ["store stock", "warehouse stock", "main store stock", "stock in store", "stock at store", "store quantity", "warehouse quantity", "hq stock"] },
   // Nullable/optional on purpose — a lot of real import files (especially migrated from another
   // system) never tracked this at all, and there's no safe value to guess on their behalf.
   { key: "unitOfMeasure", label: "Unit of Measure", required: false, kind: "enum", aliases: ["unit of measure", "uom", "unit", "units"], enumOptions: UNIT_OF_MEASURE_OPTIONS },
