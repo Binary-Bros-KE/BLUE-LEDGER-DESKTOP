@@ -26,7 +26,7 @@ import {
   type DeliveryDraft,
   type ServiceChargeDraft
 } from "@renderer/shared/components/ExtraChargesSection";
-import { Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
+import { CheckboxField, Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { QuickCreateCustomerModal } from "@renderer/shared/components/QuickCreateCustomerModal";
 import { QuickCreateProductModal } from "@renderer/shared/components/QuickCreateProductModal";
@@ -170,6 +170,7 @@ export function QuotationsRoute(): React.JSX.Element {
   const [quickCreateProductOpen, setQuickCreateProductOpen] = useState(false);
   const [createValidUntil, setCreateValidUntil] = useState(addDaysIso(7));
   const [createNotes, setCreateNotes] = useState("");
+  const [createIncludeTaxBreakdown, setCreateIncludeTaxBreakdown] = useState(true);
   const [createItems, setCreateItems] = useState<CartLine[]>([]);
   const [createServiceCharges, setCreateServiceCharges] = useState<ServiceChargeDraft[]>([]);
   const [createDelivery, setCreateDelivery] = useState<DeliveryDraft | null>(null);
@@ -399,6 +400,17 @@ export function QuotationsRoute(): React.JSX.Element {
     }
   }
 
+  async function handleToggleTaxBreakdown(next: boolean): Promise<void> {
+    if (!viewingQuotation) return;
+    try {
+      const updated = await window.blueLedger.quotation.setIncludeTaxBreakdown(viewingQuotation.id, next);
+      setViewingQuotation(updated);
+      showSuccessToast(next ? "Tax breakdown will now show on this quotation" : "Tax breakdown hidden on this quotation");
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Failed to update the tax breakdown setting"));
+    }
+  }
+
   async function handlePrintThermal(): Promise<void> {
     if (!viewingQuotation) return;
     setPrintingThermal(true);
@@ -586,6 +598,7 @@ export function QuotationsRoute(): React.JSX.Element {
     setCustomerSearch("");
     setCreateValidUntil(addDaysIso(7));
     setCreateNotes("");
+    setCreateIncludeTaxBreakdown(true);
     setCreateItems([]);
     setCreateServiceCharges([]);
     setCreateDelivery(null);
@@ -700,6 +713,7 @@ export function QuotationsRoute(): React.JSX.Element {
         customerId: createCustomerId,
         validUntil: createValidUntil,
         notes: createNotes,
+        includeTaxBreakdown: createIncludeTaxBreakdown,
         locationId: session && !session.branch ? createStorefrontId : undefined,
         items: createItems.map((line) => ({
           productId: line.productId,
@@ -1026,6 +1040,15 @@ export function QuotationsRoute(): React.JSX.Element {
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Valid Until</p>
                 <p className="mt-0.5 text-sm font-bold text-ink">{formatDate(viewingQuotation.validUntil)}</p>
               </div>
+            </div>
+
+            <div className="mt-4">
+              <CheckboxField
+                label="Include tax information"
+                description="Shows the Tax Breakdown section on this quotation's print, download, and share"
+                checked={viewingQuotation.includeTaxBreakdown}
+                onChange={(checked) => void handleToggleTaxBreakdown(checked)}
+              />
             </div>
 
             <div className="mt-4">
@@ -1724,6 +1747,15 @@ export function QuotationsRoute(): React.JSX.Element {
           </div>
 
           <TextAreaField label="Notes" value={createNotes} onChange={setCreateNotes} className="mt-4" rows={2} />
+
+          <div className="mt-4">
+            <CheckboxField
+              label="Include tax information"
+              description="Shows the Tax Breakdown section on this quotation's print, download, and share — can still be changed later from the quotation's own detail view"
+              checked={createIncludeTaxBreakdown}
+              onChange={setCreateIncludeTaxBreakdown}
+            />
+          </div>
 
           <ExtraChargesSection
             serviceCharges={createServiceCharges}

@@ -57,6 +57,9 @@ export type Quotation = {
   grandTotalCents: number;
   validUntil: string;
   notes: string | null;
+  /** Whether the "Tax Breakdown" section prints/downloads/shares on this specific quotation — see
+   * Sale["includeTaxBreakdown"]'s own doc comment (shared/types/sale.ts), the identical concept. */
+  includeTaxBreakdown: boolean;
   convertedSaleId: string | null;
   convertedAt: string | null;
   createdAt: string;

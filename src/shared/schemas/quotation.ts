@@ -22,6 +22,9 @@ export const quotationCreateSchema = z
     customerId: z.string().trim().min(1, "Select a customer"),
     validUntil: z.string().trim().min(1, "Valid-until date is required"),
     notes: optionalText(1000),
+    /** Whether the "Tax Breakdown" section prints/downloads/shares on this quotation — see
+     * Sale["includeTaxBreakdown"]'s own doc comment, the identical concept. */
+    includeTaxBreakdown: z.coerce.boolean().optional().default(true),
     // No .min(1) here — a quotation for pure service/labour work (no physical product involved) is
     // valid on its own. The refine below is what actually enforces "there must be SOMETHING to
     // quote", accepting either products or service charges.

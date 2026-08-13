@@ -192,7 +192,7 @@ function writeReceiptToPrinter(printerInstance: ThermalPrinter, vm: ReceiptViewM
   printerInstance.bold(false);
   printerInstance.drawLine();
 
-  if (vm.taxBreakdown.length > 0) {
+  if (vm.includeTaxBreakdown && vm.taxBreakdown.length > 0) {
     printerInstance.println("Tax Breakdown");
     for (const entry of vm.taxBreakdown) {
       printerInstance.leftRight(
@@ -455,7 +455,7 @@ function buildReceiptHtml(vm: ReceiptViewModel): string {
       ${vm.discountAmountCents > 0 ? `<tr><td class="label">Discount</td><td class="right">-${money(vm.discountAmountCents)}</td></tr>` : ""}
       <tr class="grand"><td class="label">Total</td><td class="right">${money(vm.grandTotalCents)}</td></tr>
     </table>
-    ${buildTaxBreakdownHtml(vm.taxBreakdown, vm.vatRatePercent, (cents) => money(cents), "items")}
+    ${vm.includeTaxBreakdown ? buildTaxBreakdownHtml(vm.taxBreakdown, vm.vatRatePercent, (cents) => money(cents), "items") : ""}
     <hr/>
     <p class="muted">
       Payment: ${escapeHtml(vm.paymentMethodName ?? "-")}
@@ -678,7 +678,7 @@ function buildReceiptLetterheadHtml(vm: ReceiptViewModel, logo: DocumentLogo): s
       </table>
     </div>
 
-    ${buildTaxBreakdownHtml(vm.taxBreakdown, vm.vatRatePercent, (cents) => money(cents), "tax-breakdown")}
+    ${vm.includeTaxBreakdown ? buildTaxBreakdownHtml(vm.taxBreakdown, vm.vatRatePercent, (cents) => money(cents), "tax-breakdown") : ""}
 
     <div class="payment">
       <p class="label" style="font-size:10px;text-transform:uppercase;color:#83795f;font-weight:bold;">Payment</p>
@@ -1241,7 +1241,7 @@ function buildInvoiceHtml(
         : ""
     }
 
-    ${buildTaxBreakdownHtml(computeTaxBreakdown(sale.items), business.vatRatePercent, (cents) => money(cents), "tax-breakdown")}
+    ${sale.includeTaxBreakdown ? buildTaxBreakdownHtml(computeTaxBreakdown(sale.items), business.vatRatePercent, (cents) => money(cents), "tax-breakdown") : ""}
 
     ${sale.invoiceNotes ? `<div class="notes"><strong>Notes</strong><p>${escapeHtml(sale.invoiceNotes)}</p></div>` : ""}
 
@@ -1416,7 +1416,7 @@ function buildInvoiceThermalHtml(sale: Sale, business: DocumentBusinessInfo): st
       <tr><td class="label">Amount Paid</td><td class="right">${money(sale.amountPaidCents)}</td></tr>
       <tr class="balance"><td class="label">Balance Due</td><td class="right">${money(sale.balanceDueCents)}</td></tr>
     </table>
-    ${buildTaxBreakdownHtml(computeTaxBreakdown(sale.items), business.vatRatePercent, (cents) => money(cents), "items")}
+    ${sale.includeTaxBreakdown ? buildTaxBreakdownHtml(computeTaxBreakdown(sale.items), business.vatRatePercent, (cents) => money(cents), "items") : ""}
     ${sale.invoiceNotes ? `<hr/><p class="muted">Notes: ${escapeHtml(sale.invoiceNotes)}</p>` : ""}
     <hr/>
     <p class="center muted">${escapeHtml(business.invoiceFooter ?? "Thank you for your business!")}</p>
@@ -1593,7 +1593,7 @@ function buildQuotationHtml(
       </table>
     </div>
 
-    ${buildTaxBreakdownHtml(computeTaxBreakdown(quotation.items), business.vatRatePercent, (cents) => money(cents), "tax-breakdown")}
+    ${quotation.includeTaxBreakdown ? buildTaxBreakdownHtml(computeTaxBreakdown(quotation.items), business.vatRatePercent, (cents) => money(cents), "tax-breakdown") : ""}
 
     ${quotation.notes ? `<div class="notes"><strong>Notes</strong><p>${escapeHtml(quotation.notes)}</p></div>` : ""}
 
@@ -1767,7 +1767,7 @@ function buildQuotationThermalHtml(quotation: Quotation, business: DocumentBusin
       ${quotation.discountAmountCents > 0 ? `<tr><td class="label">Discount</td><td class="right">-${money(quotation.discountAmountCents)}</td></tr>` : ""}
       <tr class="grand"><td class="label">Total</td><td class="right">${money(quotation.grandTotalCents)}</td></tr>
     </table>
-    ${buildTaxBreakdownHtml(computeTaxBreakdown(quotation.items), business.vatRatePercent, (cents) => money(cents), "items")}
+    ${quotation.includeTaxBreakdown ? buildTaxBreakdownHtml(computeTaxBreakdown(quotation.items), business.vatRatePercent, (cents) => money(cents), "items") : ""}
     ${quotation.notes ? `<hr/><p class="muted">Notes: ${escapeHtml(quotation.notes)}</p>` : ""}
     <hr/>
     <p class="center muted">${escapeHtml(business.quotationFooter ?? "Thank you for considering us!")}</p>

@@ -27,7 +27,7 @@ import {
   type DeliveryDraft,
   type ServiceChargeDraft
 } from "@renderer/shared/components/ExtraChargesSection";
-import { Field, TextAreaField } from "@renderer/shared/components/form-fields";
+import { CheckboxField, Field, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { ProductInfoModal } from "@renderer/shared/components/ProductInfoModal";
 import { QuickCreateCustomerModal } from "@renderer/shared/components/QuickCreateCustomerModal";
@@ -90,6 +90,9 @@ type OpenSaleDraft = {
   paymentMethodId: string;
   paymentReference: string;
   amountReceived: string;
+  // Per-draft, same reasoning as paymentMethodId above — carried through suspend/resume so a cashier
+  // who already unchecked this before holding the sale doesn't have to redo it.
+  includeTaxBreakdown: boolean;
   createdAt: number;
 };
 
@@ -236,6 +239,7 @@ export function CheckoutRoute(): React.JSX.Element {
               paymentMethodId: full.paymentMethodId ?? "",
               paymentReference: full.paymentReference ?? "",
               amountReceived: full.amountReceivedCents !== null ? fromCents(full.amountReceivedCents) : "",
+              includeTaxBreakdown: full.includeTaxBreakdown,
               createdAt: new Date(full.createdAt).getTime()
             };
             return draft;
@@ -494,6 +498,7 @@ export function CheckoutRoute(): React.JSX.Element {
       paymentMethodId: "",
       paymentReference: "",
       amountReceived: "",
+      includeTaxBreakdown: true,
       createdAt: Date.now()
     };
   }
@@ -659,6 +664,11 @@ export function CheckoutRoute(): React.JSX.Element {
     setOpenSales((prev) => prev.map((draft) => (draft.key === activeKey ? { ...draft, amountReceived: value } : draft)));
   }
 
+  function updateActiveIncludeTaxBreakdown(value: boolean): void {
+    if (!activeKey) return;
+    setOpenSales((prev) => prev.map((draft) => (draft.key === activeKey ? { ...draft, includeTaxBreakdown: value } : draft)));
+  }
+
   function selectCustomerForActiveDraft(customerId: string | null): void {
     if (!activeKey) return;
     setOpenSales((prev) => prev.map((draft) => (draft.key === activeKey ? { ...draft, customerId } : draft)));
@@ -755,6 +765,7 @@ export function CheckoutRoute(): React.JSX.Element {
         paymentMethodId: activeDraft.paymentMethodId || undefined,
         paymentReference: activeDraft.paymentReference || undefined,
         amountReceivedCents: activeDraft.amountReceived.trim() === "" ? null : toCents(activeDraft.amountReceived),
+        includeTaxBreakdown: activeDraft.includeTaxBreakdown,
         locationId: session && !session.branch ? storefrontId : undefined
       });
       const suspendedKey = activeDraft.key;
@@ -801,6 +812,7 @@ export function CheckoutRoute(): React.JSX.Element {
         paymentMethodId: activeDraft.paymentMethodId,
         paymentReference: activeDraft.paymentReference,
         amountReceivedCents: activeDraft.amountReceived.trim() === "" ? null : toCents(activeDraft.amountReceived),
+        includeTaxBreakdown: activeDraft.includeTaxBreakdown,
         locationId: session && !session.branch ? storefrontId : undefined
       });
       const completedKey = activeDraft.key;
@@ -1229,6 +1241,15 @@ export function CheckoutRoute(): React.JSX.Element {
                     )}
                     tenantTaxConfig={{ vatRatePercent: tenantContext?.vatRatePercent ?? 16, pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true }}
                   />
+
+                  <div className="mt-3">
+                    <CheckboxField
+                      label="Include tax information"
+                      description="Shows the Tax Breakdown section on this sale's receipt (print, download, and share)"
+                      checked={activeDraft?.includeTaxBreakdown ?? true}
+                      onChange={updateActiveIncludeTaxBreakdown}
+                    />
+                  </div>
 
                   <div className="mt-3">
                     <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">

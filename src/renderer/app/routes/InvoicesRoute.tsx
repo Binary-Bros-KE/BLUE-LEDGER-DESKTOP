@@ -27,7 +27,7 @@ import {
   type DeliveryDraft,
   type ServiceChargeDraft
 } from "@renderer/shared/components/ExtraChargesSection";
-import { Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
+import { CheckboxField, Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { QuickCreateCustomerModal } from "@renderer/shared/components/QuickCreateCustomerModal";
 import { QuickCreateProductModal } from "@renderer/shared/components/QuickCreateProductModal";
@@ -240,6 +240,7 @@ export function InvoicesRoute(): React.JSX.Element {
   const [createTransactionType, setCreateTransactionType] = useState<"invoice" | "wholesale_sale">("invoice");
   const [createDueDate, setCreateDueDate] = useState(todayIsoDate());
   const [createNotes, setCreateNotes] = useState("");
+  const [createIncludeTaxBreakdown, setCreateIncludeTaxBreakdown] = useState(true);
   const [createItems, setCreateItems] = useState<CartLine[]>([]);
   const [createServiceCharges, setCreateServiceCharges] = useState<ServiceChargeDraft[]>([]);
   const [createDelivery, setCreateDelivery] = useState<DeliveryDraft | null>(null);
@@ -627,6 +628,17 @@ export function InvoicesRoute(): React.JSX.Element {
     }
   }
 
+  async function handleToggleTaxBreakdown(next: boolean): Promise<void> {
+    if (!viewingSale) return;
+    try {
+      const updated = await window.blueLedger.sale.setIncludeTaxBreakdown(viewingSale.id, next);
+      setViewingSale(updated);
+      showSuccessToast(next ? "Tax breakdown will now show on this invoice" : "Tax breakdown hidden on this invoice");
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Failed to update the tax breakdown setting"));
+    }
+  }
+
   async function handlePrintThermal(): Promise<void> {
     if (!viewingSale) return;
     setPrintingThermal(true);
@@ -729,6 +741,7 @@ export function InvoicesRoute(): React.JSX.Element {
     setCreateTransactionType("invoice");
     setCreateDueDate(todayIsoDate());
     setCreateNotes("");
+    setCreateIncludeTaxBreakdown(true);
     setCreateItems([]);
     setCreateServiceCharges([]);
     setCreateDelivery(null);
@@ -848,6 +861,7 @@ export function InvoicesRoute(): React.JSX.Element {
         transactionType: createTransactionType,
         dueDate: createDueDate,
         invoiceNotes: createNotes,
+        includeTaxBreakdown: createIncludeTaxBreakdown,
         locationId: session && !session.branch ? createStorefrontId : undefined,
         items: createItems.map((line) => ({
           productId: line.productId,
@@ -1203,6 +1217,15 @@ export function InvoicesRoute(): React.JSX.Element {
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Due Date</p>
                 <p className="mt-0.5 text-sm font-bold text-ink">{formatDate(viewingSale.dueDate)}</p>
               </div>
+            </div>
+
+            <div className="mt-4">
+              <CheckboxField
+                label="Include tax information"
+                description="Shows the Tax Breakdown section on this invoice's print, download, and share"
+                checked={viewingSale.includeTaxBreakdown}
+                onChange={(checked) => void handleToggleTaxBreakdown(checked)}
+              />
             </div>
 
             <div className="mt-4">
@@ -2004,6 +2027,15 @@ export function InvoicesRoute(): React.JSX.Element {
           </div>
 
           <TextAreaField label="Invoice Notes" value={createNotes} onChange={setCreateNotes} className="mt-4" rows={2} />
+
+          <div className="mt-4">
+            <CheckboxField
+              label="Include tax information"
+              description="Shows the Tax Breakdown section on this invoice's print, download, and share — can still be changed later from the invoice's own detail view"
+              checked={createIncludeTaxBreakdown}
+              onChange={setCreateIncludeTaxBreakdown}
+            />
+          </div>
 
           <ExtraChargesSection
             serviceCharges={createServiceCharges}

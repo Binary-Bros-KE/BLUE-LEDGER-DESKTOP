@@ -33,6 +33,9 @@ export const createInvoiceSchema = z
     transactionType: z.enum(["invoice", "wholesale_sale"]),
     dueDate: z.string().trim().min(1, "Due date is required"),
     invoiceNotes: optionalText(1000),
+    /** Whether the "Tax Breakdown" section prints/downloads/shares on this invoice — see
+     * Sale["includeTaxBreakdown"]'s own doc comment. */
+    includeTaxBreakdown: z.coerce.boolean().optional().default(true),
     // No .min(1) here — an invoice for pure service/labour work (no physical product involved) is
     // valid on its own. The refine below is what actually enforces "there must be SOMETHING to
     // bill", accepting either products or service charges.

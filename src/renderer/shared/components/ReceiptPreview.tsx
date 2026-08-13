@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Eye, Loader2, Printer, Share2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
+import { CheckboxField } from "@renderer/shared/components/form-fields";
 import { ShareModal } from "@renderer/shared/components/ShareModal";
+import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { buildReceiptViewModel, formatReceiptCents } from "@shared/lib/receipt";
@@ -16,6 +18,28 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
   const [sharing, setSharing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Toggleable even after the receipt already exists — a cashier will sometimes forget to set this
+  // at checkout. Tracked locally (not re-fetched from `sale`) so the on-screen preview and every
+  // subsequent Print/Preview/Share on THIS screen reflect the change immediately.
+  const [includeTaxBreakdown, setIncludeTaxBreakdown] = useState(sale.includeTaxBreakdown);
+  const [togglingTax, setTogglingTax] = useState(false);
+
+  useEffect(() => {
+    setIncludeTaxBreakdown(sale.includeTaxBreakdown);
+  }, [sale.id, sale.includeTaxBreakdown]);
+
+  async function handleToggleTaxBreakdown(next: boolean): Promise<void> {
+    setTogglingTax(true);
+    try {
+      await window.blueLedger.sale.setIncludeTaxBreakdown(sale.id, next);
+      setIncludeTaxBreakdown(next);
+      showSuccessToast(next ? "Tax breakdown will now show on this receipt" : "Tax breakdown hidden on this receipt");
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Failed to update the tax breakdown setting"));
+    } finally {
+      setTogglingTax(false);
+    }
+  }
   // The receipt must show THIS SALE's own storefront identity, never the tenant-wide Business
   // Profile's — a storefront's name/address/phone/header/footer only fall back to the tenant default
   // when the storefront hasn't set its own (see resolveDocumentBusiness in printer-service.ts, which
@@ -37,15 +61,18 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
     };
   }, [sale.locationId]);
 
-  const vm = buildReceiptViewModel(sale, {
-    businessName: location?.locationName ?? tenant.businessName,
-    physicalAddress: location?.physicalAddress ?? tenant.physicalAddress,
-    primaryPhone: location?.phone ?? tenant.primaryPhone,
-    receiptHeader: location?.receiptHeader ?? tenant.receiptHeader,
-    receiptFooter: location?.receiptFooter ?? tenant.receiptFooter,
-    currency: tenant.currency,
-    vatRatePercent: tenant.vatRatePercent
-  });
+  const vm = buildReceiptViewModel(
+    { ...sale, includeTaxBreakdown },
+    {
+      businessName: location?.locationName ?? tenant.businessName,
+      physicalAddress: location?.physicalAddress ?? tenant.physicalAddress,
+      primaryPhone: location?.phone ?? tenant.primaryPhone,
+      receiptHeader: location?.receiptHeader ?? tenant.receiptHeader,
+      receiptFooter: location?.receiptFooter ?? tenant.receiptFooter,
+      currency: tenant.currency,
+      vatRatePercent: tenant.vatRatePercent
+    }
+  );
 
   const money = (cents: number | null): string => `${vm.currency} ${formatReceiptCents(cents)}`;
 
@@ -162,7 +189,7 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
           </tbody>
         </table>
 
-        {vm.taxBreakdown.length > 0 && (
+        {vm.includeTaxBreakdown && vm.taxBreakdown.length > 0 && (
           <table className="mt-2 w-full border-collapse text-[10px]">
             <thead>
               <tr>
@@ -217,6 +244,15 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
 
         <div className="my-2 border-t border-dashed border-line" />
         <p className="text-center text-[10px] text-muted">{vm.receiptFooter ?? "Thank you for your business!"}</p>
+      </div>
+
+      <div className={cn("mt-3 rounded-lg border border-line bg-soft/60 px-3 py-2.5", togglingTax && "pointer-events-none opacity-60")}>
+        <CheckboxField
+          label="Include tax information"
+          description="Shows the Tax Breakdown section on this receipt's print, download, and share"
+          checked={includeTaxBreakdown}
+          onChange={(checked) => void handleToggleTaxBreakdown(checked)}
+        />
       </div>
 
       <div className="mt-4 grid grid-cols-3 gap-2">

@@ -374,6 +374,7 @@ export function suspendSale(input: unknown): { id: string } {
       amountReceivedCents: parsed.amountReceivedCents ?? null,
       changeGivenCents: null,
       notes: parsed.notes,
+      includeTaxBreakdown: parsed.includeTaxBreakdown,
       completedAt: null,
       // No delivery_notes row (and no number allocated) while merely held — see persistCartExtras'
       // own doc comment for why. Just the raw cart input, stashed for the Checkout screen to
@@ -424,6 +425,21 @@ export function deletePendingSale(id: string): { id: string } {
   return { id };
 }
 
+/** Toggles the "Tax Breakdown" section on/off for an already-created sale (receipt or invoice) —
+ * the "toggle even after creation" half of this feature, for a cashier who forgot to set it up
+ * front. Works regardless of sale status (pending/completed/cancelled), since even a historical
+ * receipt might need re-printing/re-sharing without tax info. */
+export function setSaleIncludeTaxBreakdown(id: string, includeTaxBreakdown: boolean): Sale {
+  requirePermission("sales", "edit");
+  const { tenantId } = getCurrentTenant();
+  const row = saleRepository.findSaleRowById(id);
+  if (!row || row.tenant_id !== tenantId) {
+    throw new Error("Sale not found");
+  }
+  saleRepository.updateSaleIncludeTaxBreakdownRow(id, includeTaxBreakdown);
+  return getSaleDetail(id);
+}
+
 /**
  * Inserts a completed sale from an already-priced cart — shared by checkout (which prices the cart
  * itself from live product data) and quotation conversion (which carries over the quotation's frozen
@@ -441,6 +457,10 @@ export function insertCompletedSaleFromCart(input: {
   amountReceivedCents: number | null;
   notes: string | null;
   resumeSaleId?: string | null;
+  /** Defaults to true (today's behavior) when omitted — see the include_tax_breakdown migration's
+   * own doc comment. Quotation conversion passes the source quotation's own choice through instead
+   * of defaulting, so converting doesn't silently reset it. */
+  includeTaxBreakdown?: boolean;
 }): Sale {
   const { tenantId, employeeId, locationId, cart } = input;
 
@@ -475,6 +495,7 @@ export function insertCompletedSaleFromCart(input: {
       amountReceivedCents: input.amountReceivedCents,
       changeGivenCents,
       notes: input.notes,
+      includeTaxBreakdown: input.includeTaxBreakdown,
       completedAt: now
     });
 
@@ -571,6 +592,7 @@ export function completeSale(input: unknown): Sale {
     paymentReference: parsed.paymentReference,
     amountReceivedCents: parsed.amountReceivedCents,
     notes: parsed.notes,
-    resumeSaleId: parsed.resumeSaleId
+    resumeSaleId: parsed.resumeSaleId,
+    includeTaxBreakdown: parsed.includeTaxBreakdown
   });
 }

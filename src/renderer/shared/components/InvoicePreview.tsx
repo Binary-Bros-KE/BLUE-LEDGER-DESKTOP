@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Eye, Loader2, Printer, Share2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
+import { CheckboxField } from "@renderer/shared/components/form-fields";
 import { ShareModal } from "@renderer/shared/components/ShareModal";
+import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
@@ -28,6 +30,26 @@ export function InvoicePreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
   const [previewing, setPreviewing] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Toggleable even after the invoice already exists — see ReceiptPreview's own identical field.
+  const [includeTaxBreakdown, setIncludeTaxBreakdown] = useState(sale.includeTaxBreakdown);
+  const [togglingTax, setTogglingTax] = useState(false);
+
+  useEffect(() => {
+    setIncludeTaxBreakdown(sale.includeTaxBreakdown);
+  }, [sale.id, sale.includeTaxBreakdown]);
+
+  async function handleToggleTaxBreakdown(next: boolean): Promise<void> {
+    setTogglingTax(true);
+    try {
+      await window.blueLedger.sale.setIncludeTaxBreakdown(sale.id, next);
+      setIncludeTaxBreakdown(next);
+      showSuccessToast(next ? "Tax breakdown will now show on this invoice" : "Tax breakdown hidden on this invoice");
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Failed to update the tax breakdown setting"));
+    } finally {
+      setTogglingTax(false);
+    }
+  }
 
   const money = (cents: number | null): string => `${tenant.currency} ${formatCents(cents)}`;
 
@@ -140,6 +162,15 @@ export function InvoicePreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <div className={cn("mt-3 rounded-lg border border-line bg-soft/60 px-3 py-2.5", togglingTax && "pointer-events-none opacity-60")}>
+        <CheckboxField
+          label="Include tax information"
+          description="Shows the Tax Breakdown section on this invoice's print, download, and share"
+          checked={includeTaxBreakdown}
+          onChange={(checked) => void handleToggleTaxBreakdown(checked)}
+        />
       </div>
 
       <div className="mt-4 grid grid-cols-3 gap-2">

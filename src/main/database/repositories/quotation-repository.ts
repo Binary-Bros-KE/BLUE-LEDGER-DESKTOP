@@ -23,6 +23,7 @@ export type QuotationRow = {
   grand_total_cents: number;
   valid_until: string;
   notes: string | null;
+  include_tax_breakdown: number;
   converted_sale_id: string | null;
   converted_at: string | null;
   created_at: string;
@@ -153,6 +154,9 @@ export function insertQuotationRow(input: {
   grandTotalCents: number;
   validUntil: string;
   notes: string | null;
+  /** Defaults to true (today's behavior) when omitted — see the include_tax_breakdown migration's
+   * own doc comment. */
+  includeTaxBreakdown?: boolean;
 }): QuotationRow {
   const now = new Date().toISOString();
 
@@ -162,9 +166,9 @@ export function insertQuotationRow(input: {
       INSERT INTO quotations (
         id, tenant_id, quotation_number, customer_id, location_id, employee_id, status,
         subtotal_cents, discount_amount_cents, tax_amount_cents, grand_total_cents,
-        valid_until, notes, created_at, updated_at, sync_status
+        valid_until, notes, created_at, updated_at, sync_status, include_tax_breakdown
       )
-      VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
     `
     )
     .run(
@@ -181,7 +185,8 @@ export function insertQuotationRow(input: {
       input.validUntil,
       input.notes,
       now,
-      now
+      now,
+      input.includeTaxBreakdown === false ? 0 : 1
     );
 
   const row = findQuotationRowById(input.id);
@@ -257,6 +262,9 @@ export function updateQuotationRow(
     grandTotalCents: number;
     validUntil: string;
     notes: string | null;
+    /** Defaults to true (today's behavior) when omitted — see the include_tax_breakdown migration's
+     * own doc comment. */
+    includeTaxBreakdown?: boolean;
   }
 ): QuotationRow {
   const now = new Date().toISOString();
@@ -272,6 +280,7 @@ export function updateQuotationRow(
         grand_total_cents = ?,
         valid_until = ?,
         notes = ?,
+        include_tax_breakdown = ?,
         sync_status = 'pending',
         updated_at = ?
       WHERE id = ?
@@ -285,6 +294,7 @@ export function updateQuotationRow(
       input.grandTotalCents,
       input.validUntil,
       input.notes,
+      input.includeTaxBreakdown === false ? 0 : 1,
       now,
       id
     );
@@ -306,6 +316,20 @@ export function updateQuotationStatusRow(id: string, status: QuotationStatus): Q
   const row = findQuotationRowById(id);
   if (!row) {
     throw new Error("Quotation not found after status update");
+  }
+  return row;
+}
+
+export function updateQuotationIncludeTaxBreakdownRow(id: string, includeTaxBreakdown: boolean): QuotationRow {
+  const now = new Date().toISOString();
+
+  getDatabase()
+    .prepare("UPDATE quotations SET include_tax_breakdown = ?, sync_status = 'pending', updated_at = ? WHERE id = ?")
+    .run(includeTaxBreakdown ? 1 : 0, now, id);
+
+  const row = findQuotationRowById(id);
+  if (!row) {
+    throw new Error("Quotation not found after tax-breakdown-toggle update");
   }
   return row;
 }
@@ -388,6 +412,7 @@ export function mapQuotationDetailRow(
     grandTotalCents: row.grand_total_cents,
     validUntil: row.valid_until,
     notes: row.notes,
+    includeTaxBreakdown: row.include_tax_breakdown === 1,
     convertedSaleId: row.converted_sale_id,
     convertedAt: row.converted_at,
     createdAt: row.created_at,

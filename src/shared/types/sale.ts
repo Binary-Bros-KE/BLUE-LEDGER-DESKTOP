@@ -134,6 +134,10 @@ export type Sale = {
   amountReceivedCents: number | null;
   changeGivenCents: number | null;
   notes: string | null;
+  /** Whether the "Tax Breakdown" section prints/downloads/shares on this specific document — set at
+   * creation (Checkout/Invoice/Quotation form), editable afterward from the document's own detail
+   * view. Defaults to true. See printer-service.ts's buildTaxBreakdownHtml callers. */
+  includeTaxBreakdown: boolean;
   invoiceNumber: string | null;
   invoiceDate: string | null;
   dueDate: string | null;

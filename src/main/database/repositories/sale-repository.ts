@@ -35,6 +35,7 @@ export type SaleRow = {
   amount_received_cents: number | null;
   change_given_cents: number | null;
   notes: string | null;
+  include_tax_breakdown: number;
   invoice_number: string | null;
   invoice_date: string | null;
   due_date: string | null;
@@ -418,6 +419,9 @@ export function insertSaleRow(input: {
   amountReceivedCents: number | null;
   changeGivenCents: number | null;
   notes: string | null;
+  /** Defaults to true (today's behavior) when omitted/undefined — see the include_tax_breakdown
+   * migration's own doc comment. */
+  includeTaxBreakdown?: boolean | undefined;
   completedAt: string | null;
   /** JSON-serialized DeliveryInput for a held sale's own delivery draft, or null — see
    * Sale["deliveryDraft"]'s own doc comment. Always null for a completed sale (its delivery, if
@@ -439,9 +443,9 @@ export function insertSaleRow(input: {
         subtotal_cents, discount_amount_cents, tax_amount_cents, grand_total_cents,
         payment_method_id, payment_reference, amount_received_cents, change_given_cents,
         notes, completed_at, created_at, updated_at, sync_status, amount_paid_cents, balance_due_cents,
-        delivery_draft_json
+        delivery_draft_json, include_tax_breakdown
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
     `
     )
     .run(
@@ -466,7 +470,8 @@ export function insertSaleRow(input: {
       now,
       amountPaidCents,
       balanceDueCents,
-      input.deliveryDraftJson ?? null
+      input.deliveryDraftJson ?? null,
+      input.includeTaxBreakdown === false ? 0 : 1
     );
 
   const row = findSaleRowById(input.id);
@@ -549,6 +554,9 @@ export function insertInvoiceRow(input: {
   paymentStatus: PaymentStatus;
   invoiceNotes: string | null;
   payments: SalePayment[];
+  /** Defaults to true (today's behavior) when omitted/undefined — see the include_tax_breakdown
+   * migration's own doc comment. */
+  includeTaxBreakdown?: boolean | undefined;
 }): SaleRow {
   const now = new Date().toISOString();
 
@@ -559,9 +567,10 @@ export function insertInvoiceRow(input: {
         id, tenant_id, location_id, employee_id, customer_id, sale_status, transaction_type,
         subtotal_cents, discount_amount_cents, tax_amount_cents, grand_total_cents,
         invoice_number, invoice_date, due_date, amount_paid_cents, balance_due_cents,
-        payment_status, invoice_notes, payments, completed_at, created_at, updated_at, sync_status
+        payment_status, invoice_notes, payments, completed_at, created_at, updated_at, sync_status,
+        include_tax_breakdown
       )
-      VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
     `
     )
     .run(
@@ -585,7 +594,8 @@ export function insertInvoiceRow(input: {
       JSON.stringify(input.payments),
       now,
       now,
-      now
+      now,
+      input.includeTaxBreakdown === false ? 0 : 1
     );
 
   const row = findSaleRowById(input.id);
@@ -644,6 +654,20 @@ export function updateSalePaymentStatusRow(id: string, paymentStatus: PaymentSta
   const row = findSaleRowById(id);
   if (!row) {
     throw new Error("Sale not found after status update");
+  }
+  return row;
+}
+
+export function updateSaleIncludeTaxBreakdownRow(id: string, includeTaxBreakdown: boolean): SaleRow {
+  const now = new Date().toISOString();
+
+  getDatabase()
+    .prepare("UPDATE sales SET include_tax_breakdown = ?, sync_status = 'pending', updated_at = ? WHERE id = ?")
+    .run(includeTaxBreakdown ? 1 : 0, now, id);
+
+  const row = findSaleRowById(id);
+  if (!row) {
+    throw new Error("Sale not found after tax-breakdown-toggle update");
   }
   return row;
 }
@@ -721,6 +745,7 @@ export function mapSaleDetailRow(
     amountReceivedCents: row.amount_received_cents,
     changeGivenCents: row.change_given_cents,
     notes: row.notes,
+    includeTaxBreakdown: row.include_tax_breakdown === 1,
     invoiceNumber: row.invoice_number,
     invoiceDate: row.invoice_date,
     dueDate: row.due_date,

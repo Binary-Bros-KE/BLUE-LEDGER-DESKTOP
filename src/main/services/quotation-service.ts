@@ -141,7 +141,8 @@ export function createQuotation(input: unknown): Quotation {
       taxAmountCents: cart.taxAmountCents,
       grandTotalCents: cart.grandTotalCents,
       validUntil: parsed.validUntil,
-      notes: parsed.notes
+      notes: parsed.notes,
+      includeTaxBreakdown: parsed.includeTaxBreakdown
     });
 
     for (const item of cart.items) {
@@ -198,7 +199,8 @@ export function updateQuotation(id: string, input: unknown): Quotation {
       taxAmountCents: cart.taxAmountCents,
       grandTotalCents: cart.grandTotalCents,
       validUntil: parsed.validUntil,
-      notes: parsed.notes
+      notes: parsed.notes,
+      includeTaxBreakdown: parsed.includeTaxBreakdown
     });
 
     quotationRepository.deleteQuotationItemsForQuotationRow(id);
@@ -268,6 +270,20 @@ export function setQuotationStatus(id: string, status: QuotationStatus): Quotati
   }
 
   quotationRepository.updateQuotationStatusRow(id, status);
+  return getQuotationDetail(id);
+}
+
+/** Toggles the "Tax Breakdown" section on/off for an already-created quotation — the "toggle even
+ * after creation" half of this feature. Works regardless of status (draft/sent/accepted/converted),
+ * unlike editing the quotation's own line items which is draft-only. */
+export function setQuotationIncludeTaxBreakdown(id: string, includeTaxBreakdown: boolean): Quotation {
+  requirePermission("quotations", "edit");
+  const { tenantId } = getCurrentTenant();
+  const row = quotationRepository.findQuotationRowById(id);
+  if (!row || row.tenant_id !== tenantId) {
+    throw new Error("Quotation not found");
+  }
+  quotationRepository.updateQuotationIncludeTaxBreakdownRow(id, includeTaxBreakdown);
   return getQuotationDetail(id);
 }
 
@@ -447,7 +463,10 @@ export function convertQuotationToSale(id: string, input: unknown): Sale {
     paymentMethodId: parsed.paymentMethodId,
     paymentReference: parsed.paymentReference,
     amountReceivedCents: parsed.amountReceivedCents,
-    notes: quotation.notes
+    notes: quotation.notes,
+    // Carried over, not re-decided — converting shouldn't silently reset the customer's chosen
+    // presentation for what is, from their side, the same document going final.
+    includeTaxBreakdown: quotation.includeTaxBreakdown
   });
 
   quotationRepository.markQuotationConvertedRow(quotation.id, sale.id);
@@ -473,7 +492,8 @@ export function convertQuotationToInvoice(id: string, input: unknown): Sale {
     dueDate: parsed.dueDate,
     invoiceNotes: quotation.notes,
     cart,
-    initialPayment: null
+    initialPayment: null,
+    includeTaxBreakdown: quotation.includeTaxBreakdown
   });
 
   quotationRepository.markQuotationConvertedRow(quotation.id, saleId);

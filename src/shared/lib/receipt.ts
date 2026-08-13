@@ -36,6 +36,10 @@ export type ReceiptViewModel = {
    * into grandTotalCents. See taxBreakdown for the printable category breakdown. */
   taxAmountCents: number;
   taxBreakdown: TaxBreakdownEntry[];
+  /** Whether the Tax Breakdown section should actually render — see Sale["includeTaxBreakdown"]'s
+   * own doc comment. taxBreakdown itself is always computed regardless, so a caller that ignores
+   * this flag (there should be none) still gets correct data. */
+  includeTaxBreakdown: boolean;
   vatRatePercent: number;
   grandTotalCents: number;
   paymentMethodName: string | null;
@@ -97,6 +101,7 @@ export function buildReceiptViewModel(sale: Sale, business: ReceiptBusinessInfo)
     discountAmountCents: sale.discountAmountCents,
     taxAmountCents: sale.taxAmountCents,
     taxBreakdown: computeTaxBreakdown(sale.items),
+    includeTaxBreakdown: sale.includeTaxBreakdown,
     vatRatePercent: business.vatRatePercent,
     grandTotalCents: sale.grandTotalCents,
     paymentMethodName: sale.paymentMethodName,

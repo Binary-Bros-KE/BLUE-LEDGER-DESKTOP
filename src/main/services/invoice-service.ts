@@ -156,6 +156,9 @@ export function insertInvoiceFromCart(input: {
   invoiceNotes: string | null;
   cart: PreparedCart;
   initialPayment: { paymentMethodId: string; amountCents: number; reference: string | null } | null;
+  /** Defaults to true (today's behavior) when omitted — see the include_tax_breakdown migration's
+   * own doc comment. */
+  includeTaxBreakdown?: boolean;
 }): string {
   const { tenantId, employeeId, locationId } = input;
   const saleId = `sale_${randomUUID()}`;
@@ -223,7 +226,8 @@ export function insertInvoiceFromCart(input: {
       balanceDueCents,
       paymentStatus,
       invoiceNotes: input.invoiceNotes,
-      payments
+      payments,
+      includeTaxBreakdown: input.includeTaxBreakdown
     });
 
     for (const item of input.cart.items) {
@@ -318,7 +322,8 @@ export function createInvoice(input: unknown): Sale {
     dueDate: parsed.dueDate,
     invoiceNotes: parsed.invoiceNotes,
     cart,
-    initialPayment: parsed.initialPayment
+    initialPayment: parsed.initialPayment,
+    includeTaxBreakdown: parsed.includeTaxBreakdown
   });
 
   return getSaleDetail(saleId);
@@ -398,7 +403,10 @@ export function duplicateInvoice(saleId: string): Sale {
     dueDate: newDueDate,
     invoiceNotes: original.invoiceNotes,
     cart,
-    initialPayment: null
+    initialPayment: null,
+    // Carried over, not re-decided — same "duplicate is a faithful copy" reasoning as unitPriceCents
+    // above, not the schema's own default.
+    includeTaxBreakdown: original.includeTaxBreakdown
   });
 
   return getSaleDetail(saleId2);

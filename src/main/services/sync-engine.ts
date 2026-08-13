@@ -753,6 +753,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       amountPaidCents: row.amount_paid_cents,
       balanceDueCents: row.balance_due_cents,
       invoiceNotes: row.invoice_notes,
+      includeTaxBreakdown: Boolean(row.include_tax_breakdown),
       payments: JSON.parse(row.payments) as unknown,
       items,
       serviceCharges,
@@ -1001,6 +1002,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       grandTotalCents: row.grand_total_cents,
       validUntil: row.valid_until,
       notes: row.notes,
+      includeTaxBreakdown: Boolean(row.include_tax_breakdown),
       convertedSaleId: row.converted_sale_id,
       convertedAt: row.converted_at,
       items,
@@ -2024,6 +2026,7 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         "tenant_id",
         ...SALE_HEADER_COLUMNS.map((c) => c.local),
         "payments",
+        "include_tax_breakdown",
         "created_at",
         "updated_at",
         "sync_status",
@@ -2040,6 +2043,12 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
             : (row[c.cloud] as SQLInputValue)
         ),
         JSON.stringify(row.payments ?? []),
+        // Bound separately from SALE_HEADER_COLUMNS (like "payments" above) rather than folded into
+        // that array — it has no "bool" type concept (unlike the generic ColumnMap/toLocalValue path
+        // other entities use), so a raw JS true/false would otherwise get bound straight to node:sqlite
+        // for an INTEGER column. Missing on an older device's pre-this-feature payload defaults to 1,
+        // matching the column's own DEFAULT 1.
+        row.includeTaxBreakdown === false ? 0 : 1,
         localCreatedAt,
         localUpdatedAt,
         "synced",
@@ -2051,6 +2060,7 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
       const setClauses = [
         ...SALE_HEADER_COLUMNS.map((c) => `${c.local} = ?`),
         "payments = ?",
+        "include_tax_breakdown = ?",
         "updated_at = ?",
         "sync_status = 'synced'",
         "last_synced_at = ?",
@@ -2063,6 +2073,7 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
             : (row[c.cloud] as SQLInputValue)
         ),
         JSON.stringify(row.payments ?? []),
+        row.includeTaxBreakdown === false ? 0 : 1,
         localUpdatedAt,
         now,
         ...(isConflictAware ? [localUpdatedAt] : []),
@@ -2324,6 +2335,16 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
     if (!localTenantId) return;
 
     const db = getDatabase();
+    // Follow-up UPDATE rather than folded into QUOTATION_HEADER_COLUMNS — that array has no "bool"
+    // type concept (unlike the generic ColumnMap/toLocalValue path other entities use), so a raw JS
+    // true/false would otherwise get bound straight to node:sqlite for an INTEGER column. Only runs
+    // when the header upsert above actually applied (guarded by the !localTenantId return), so a
+    // skipped-as-stale pull never overwrites this separately. Missing on an older device's
+    // pre-this-feature payload defaults to 1, matching the column's own DEFAULT 1.
+    db.prepare("UPDATE quotations SET include_tax_breakdown = ? WHERE id = ?").run(
+      row.includeTaxBreakdown === false ? 0 : 1,
+      id
+    );
 
     db.prepare("DELETE FROM quotation_items WHERE quotation_id = ?").run(id);
     const items = (row.items as Array<Record<string, unknown>>) ?? [];

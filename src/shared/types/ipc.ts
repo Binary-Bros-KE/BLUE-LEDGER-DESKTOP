@@ -690,6 +690,10 @@ export type IpcInvokeMap = {
     args: [Record<string, unknown>];
     result: Sale;
   };
+  "sale:set-include-tax-breakdown": {
+    args: [string, boolean];
+    result: Sale;
+  };
   "sale-void:list": {
     args: [];
     result: SaleVoid[];
@@ -804,6 +808,10 @@ export type IpcInvokeMap = {
   };
   "quotation:set-status": {
     args: [string, QuotationStatus];
+    result: Quotation;
+  };
+  "quotation:set-include-tax-breakdown": {
+    args: [string, boolean];
     result: Quotation;
   };
   "quotation:check-stock": {
@@ -1494,6 +1502,10 @@ export type BlueLedgerApi = {
     suspend: (input: Record<string, unknown>) => Promise<IpcInvokeMap["sale:suspend"]["result"]>;
     deletePending: (id: string) => Promise<IpcInvokeMap["sale:delete-pending"]["result"]>;
     complete: (input: Record<string, unknown>) => Promise<IpcInvokeMap["sale:complete"]["result"]>;
+    setIncludeTaxBreakdown: (
+      id: string,
+      includeTaxBreakdown: boolean
+    ) => Promise<IpcInvokeMap["sale:set-include-tax-breakdown"]["result"]>;
   };
   saleVoid: {
     list: () => Promise<IpcInvokeMap["sale-void:list"]["result"]>;
@@ -1568,6 +1580,10 @@ export type BlueLedgerApi = {
       id: string,
       status: QuotationStatus
     ) => Promise<IpcInvokeMap["quotation:set-status"]["result"]>;
+    setIncludeTaxBreakdown: (
+      id: string,
+      includeTaxBreakdown: boolean
+    ) => Promise<IpcInvokeMap["quotation:set-include-tax-breakdown"]["result"]>;
     checkStock: (id: string) => Promise<IpcInvokeMap["quotation:check-stock"]["result"]>;
     convertToSale: (
       id: string,

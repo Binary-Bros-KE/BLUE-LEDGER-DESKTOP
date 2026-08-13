@@ -2309,6 +2309,21 @@ const migrations = [
       -- line's own cost.
       ALTER TABLE purchases ADD COLUMN shipping_cost_cents INTEGER NOT NULL DEFAULT 0;
     `
+  },
+  {
+    version: 66,
+    name: "document_include_tax_breakdown",
+    sql: `
+      -- Per-document toggle for whether the "Tax Breakdown" section prints/downloads/shares on a
+      -- receipt, invoice, or quotation — a few tenants' customers don't want it shown. Defaults to 1
+      -- (today's behavior, unchanged) so nothing existing looks different until someone actually
+      -- turns it off. Set once at creation (Checkout/Invoice/Quotation), editable afterward from each
+      -- document's own detail view since a cashier will sometimes forget at creation time. Synced to
+      -- SERVER (see sync-engine.ts's PAYLOAD_BUILDERS) so the public share link and Owner App reflect
+      -- the same choice, not just this device's own printed/downloaded copy.
+      ALTER TABLE sales ADD COLUMN include_tax_breakdown INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE quotations ADD COLUMN include_tax_breakdown INTEGER NOT NULL DEFAULT 1;
+    `
   }
 ] as const;
 
