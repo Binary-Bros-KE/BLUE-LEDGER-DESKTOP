@@ -1,5 +1,5 @@
 import * as taxReportRepository from "@main/database/repositories/tax-report-repository";
-import { getCurrentBranchScope, requirePermission } from "@main/services/auth-service";
+import { requirePermission, resolveReportLocationScope } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { dateRangeInputSchema } from "@shared/schemas/report";
 import type { ProductTaxType } from "@shared/types/product";
@@ -92,9 +92,9 @@ function topByProduct(lines: NettedLine[], sortKey: "taxCents" | "grossCents"): 
  * Sales Report (under Debtors/Creditors) and as its own standalone Tax Report route. */
 export function getTaxReport(input: unknown): TaxReport {
   requirePermission("reports", "view");
-  const { startDate, endDate } = dateRangeInputSchema.parse(input);
+  const { startDate, endDate, locationId: explicitLocationId } = dateRangeInputSchema.parse(input);
   const { tenantId, vatRatePercent } = getCurrentTenant();
-  const locationId = getCurrentBranchScope();
+  const locationId = resolveReportLocationScope(explicitLocationId);
 
   const startIso = startOfDayIso(startDate);
   const endIsoExclusive = startOfDayIso(addDaysIso(endDate, 1));

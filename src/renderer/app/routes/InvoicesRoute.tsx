@@ -231,6 +231,10 @@ export function InvoicesRoute(): React.JSX.Element {
   const [markPaidError, setMarkPaidError] = useState<string | null>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
+  // Non-null while the create modal is actually editing an existing invoice in place, rather than
+  // creating a new one — reuses the same modal/state/submit-button rather than a second near-
+  // identical form (the two only differ in a few gated sections, see the JSX below).
+  const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
   const [createCustomerId, setCreateCustomerId] = useState<string | null>(null);
   // Only ever consulted when session.branch is null (see StorefrontPicker/requireActiveSession).
   const [createStorefrontId, setCreateStorefrontId] = useState("");
@@ -735,6 +739,7 @@ export function InvoicesRoute(): React.JSX.Element {
   const initialPaymentCents = includeInitialPayment && initialPaymentAmount.trim() !== "" ? toCents(initialPaymentAmount) : 0;
 
   function openCreateModal(): void {
+    setEditingInvoiceId(null);
     setCreateCustomerId(null);
     setCreateStorefrontId("");
     setCustomerSearch("");
@@ -745,6 +750,66 @@ export function InvoicesRoute(): React.JSX.Element {
     setCreateItems([]);
     setCreateServiceCharges([]);
     setCreateDelivery(null);
+    setProductSearch("");
+    setIncludeInitialPayment(false);
+    setInitialPaymentMethodId("");
+    setInitialPaymentAmount("");
+    setInitialPaymentReference("");
+    setCreateError(null);
+    setCreateOpen(true);
+  }
+
+  /** Prefills the same create-invoice form/state in place of a blank one — only reachable while the
+   * invoice is fully unpaid (see updateInvoice's own requireEditableUnpaidInvoice). The storefront and
+   * "record an initial payment" sections stay hidden in this mode (see the JSX below) — a storefront
+   * is fixed at creation, and a payment can't be recorded through an edit. */
+  function openEditInvoice(sale: Sale): void {
+    setEditingInvoiceId(sale.id);
+    setCreateCustomerId(sale.customerId);
+    setCreateStorefrontId(sale.locationId);
+    setCustomerSearch("");
+    setCreateTransactionType(sale.transactionType === "wholesale_sale" ? "wholesale_sale" : "invoice");
+    setCreateDueDate(sale.dueDate ?? todayIsoDate());
+    setCreateNotes(sale.invoiceNotes ?? "");
+    setCreateIncludeTaxBreakdown(sale.includeTaxBreakdown);
+    setCreateItems(
+      sale.items.map((item) => ({
+        productId: item.productId,
+        name: item.productName,
+        sku: item.sku,
+        quantity: item.quantity,
+        discountAmountCents: item.discountAmountCents,
+        // Pre-filled with the item's own current price so re-submitting without touching this line
+        // keeps its price exactly as it was — same "don't silently re-price from the product's
+        // CURRENT price" reasoning as duplicateInvoice's own cart-building (see invoice-service.ts).
+        priceOverride: fromCents(item.unitPriceCents),
+        isLocallySourced: item.isLocallySourced,
+        localCost: item.localCostCents !== null ? fromCents(item.localCostCents) : "",
+        localSupplierId: item.localSupplierId
+      }))
+    );
+    setCreateServiceCharges(
+      sale.serviceCharges.map((charge) => ({
+        key: crypto.randomUUID(),
+        name: charge.name,
+        fee: fromCents(charge.feeCents),
+        cost: fromCents(charge.costCents)
+      }))
+    );
+    setCreateDelivery(
+      sale.delivery
+        ? {
+          riderId: sale.delivery.riderId,
+          recipientName: sale.delivery.recipientName,
+          country: sale.delivery.country ?? "",
+          town: sale.delivery.town ?? "",
+          physicalAddress: sale.delivery.physicalAddress,
+          notes: sale.delivery.notes ?? "",
+          fee: fromCents(sale.delivery.feeCents),
+          cost: fromCents(sale.delivery.costCents)
+        }
+        : null
+    );
     setProductSearch("");
     setIncludeInitialPayment(false);
     setInitialPaymentMethodId("");
@@ -849,60 +914,70 @@ export function InvoicesRoute(): React.JSX.Element {
       setCreateSaving(false);
       return;
     }
-    if (session && !session.branch && !createStorefrontId) {
+    if (!editingInvoiceId && session && !session.branch && !createStorefrontId) {
       setCreateError("Choose a storefront for this invoice");
       setCreateSaving(false);
       return;
     }
 
-    try {
-      await window.blueLedger.invoice.create({
-        customerId: createCustomerId,
-        transactionType: createTransactionType,
-        dueDate: createDueDate,
-        invoiceNotes: createNotes,
-        includeTaxBreakdown: createIncludeTaxBreakdown,
-        locationId: session && !session.branch ? createStorefrontId : undefined,
-        items: createItems.map((line) => ({
-          productId: line.productId,
-          quantity: line.quantity,
-          discountAmountCents: line.discountAmountCents,
-          unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined,
-          isLocallySourced: line.isLocallySourced,
-          localCostCents: line.isLocallySourced && line.localCost.trim() ? toCents(line.localCost) : undefined,
-          localSupplierId: line.localSupplierId
-        })),
-        serviceCharges: createServiceCharges.map((charge) => ({
-          name: charge.name,
-          feeCents: toCents(charge.fee),
-          costCents: toCents(charge.cost)
-        })),
-        delivery: createDelivery
+    const payload = {
+      customerId: createCustomerId,
+      transactionType: createTransactionType,
+      dueDate: createDueDate,
+      invoiceNotes: createNotes,
+      includeTaxBreakdown: createIncludeTaxBreakdown,
+      locationId: session && !session.branch ? createStorefrontId : undefined,
+      items: createItems.map((line) => ({
+        productId: line.productId,
+        quantity: line.quantity,
+        discountAmountCents: line.discountAmountCents,
+        unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined,
+        isLocallySourced: line.isLocallySourced,
+        localCostCents: line.isLocallySourced && line.localCost.trim() ? toCents(line.localCost) : undefined,
+        localSupplierId: line.localSupplierId
+      })),
+      serviceCharges: createServiceCharges.map((charge) => ({
+        name: charge.name,
+        feeCents: toCents(charge.fee),
+        costCents: toCents(charge.cost)
+      })),
+      delivery: createDelivery
+        ? {
+          riderId: createDelivery.riderId,
+          recipientName: createDelivery.recipientName,
+          country: createDelivery.country,
+          town: createDelivery.town,
+          physicalAddress: createDelivery.physicalAddress,
+          notes: createDelivery.notes,
+          feeCents: toCents(createDelivery.fee),
+          costCents: toCents(createDelivery.cost)
+        }
+        : null,
+      initialPayment:
+        includeInitialPayment && initialPaymentMethodId && initialPaymentCents > 0
           ? {
-            riderId: createDelivery.riderId,
-            recipientName: createDelivery.recipientName,
-            country: createDelivery.country,
-            town: createDelivery.town,
-            physicalAddress: createDelivery.physicalAddress,
-            notes: createDelivery.notes,
-            feeCents: toCents(createDelivery.fee),
-            costCents: toCents(createDelivery.cost)
+            paymentMethodId: initialPaymentMethodId,
+            amountCents: initialPaymentCents,
+            reference: initialPaymentReference
           }
-          : null,
-        initialPayment:
-          includeInitialPayment && initialPaymentMethodId && initialPaymentCents > 0
-            ? {
-              paymentMethodId: initialPaymentMethodId,
-              amountCents: initialPaymentCents,
-              reference: initialPaymentReference
-            }
-            : null
-      });
-      setCreateOpen(false);
-      await loadAll();
-      showSuccessToast("Invoice created");
+          : null
+    };
+
+    try {
+      if (editingInvoiceId) {
+        const updated = await window.blueLedger.invoice.update(editingInvoiceId, payload);
+        setCreateOpen(false);
+        await loadAll();
+        if (viewingSale?.id === editingInvoiceId) setViewingSale(updated);
+        showSuccessToast("Invoice updated");
+      } else {
+        await window.blueLedger.invoice.create(payload);
+        setCreateOpen(false);
+        await loadAll();
+        showSuccessToast("Invoice created");
+      }
     } catch (err) {
-      const message = getErrorMessage(err, "Failed to create invoice");
+      const message = getErrorMessage(err, editingInvoiceId ? "Failed to update invoice" : "Failed to create invoice");
       setCreateError(message);
       showErrorToast(message);
     } finally {
@@ -1471,18 +1546,30 @@ export function InvoicesRoute(): React.JSX.Element {
               hasDeliveryNote={viewingSale.delivery !== null}
             />
 
-            {canCreate && (
-              <div className="mt-2">
-                <Button
-                  type="button"
-                  onClick={() => void handleDuplicateInvoice()}
-                  className="h-9 w-full border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
-                >
-                  <Copy className="mr-1.5 size-3.5" aria-hidden="true" />
-                  Duplicate Invoice
-                </Button>
+            {(canEdit && viewingSale.amountPaidCents === 0 && viewingSale.paymentStatus !== "cancelled") || canCreate ? (
+              <div className={cn("mt-2 grid gap-2", canEdit && viewingSale.amountPaidCents === 0 && viewingSale.paymentStatus !== "cancelled" && canCreate ? "grid-cols-2" : "grid-cols-1")}>
+                {canEdit && viewingSale.amountPaidCents === 0 && viewingSale.paymentStatus !== "cancelled" && (
+                  <Button
+                    type="button"
+                    onClick={() => openEditInvoice(viewingSale)}
+                    className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+                  >
+                    <FileText className="mr-1.5 size-3.5" aria-hidden="true" />
+                    Edit Invoice
+                  </Button>
+                )}
+                {canCreate && (
+                  <Button
+                    type="button"
+                    onClick={() => void handleDuplicateInvoice()}
+                    className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+                  >
+                    <Copy className="mr-1.5 size-3.5" aria-hidden="true" />
+                    Duplicate Invoice
+                  </Button>
+                )}
               </div>
-            )}
+            ) : null}
 
             {(canApproveDirectly || canEdit) && viewingSale.paymentStatus !== "cancelled" && (
               <div className={cn("mt-2 grid gap-2", canApproveDirectly && canEdit ? "grid-cols-2" : "grid-cols-1")}>
@@ -1775,8 +1862,12 @@ export function InvoicesRoute(): React.JSX.Element {
       <Modal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        title="New Invoice"
-        description="Goods are considered delivered now — payment can be collected in full or over time."
+        title={editingInvoiceId ? "Edit Invoice" : "New Invoice"}
+        description={
+          editingInvoiceId
+            ? "Only available while nothing has been paid yet — the storefront and items are re-priced from scratch on save."
+            : "Goods are considered delivered now — payment can be collected in full or over time."
+        }
         widthClassName="max-w-2xl"
       >
         <form onSubmit={submitCreateInvoice}>
@@ -1786,7 +1877,7 @@ export function InvoicesRoute(): React.JSX.Element {
             </div>
           )}
 
-          {session && !session.branch && (
+          {!editingInvoiceId && session && !session.branch && (
             <div className="mb-4">
               <StorefrontPicker value={createStorefrontId} onChange={setCreateStorefrontId} />
             </div>
@@ -2045,41 +2136,43 @@ export function InvoicesRoute(): React.JSX.Element {
             customerName={selectedCreateCustomer?.name ?? ""}
           />
 
-          <div className="mt-4">
-            <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-line bg-soft px-3.5 py-2.5">
-              <input
-                type="checkbox"
-                checked={includeInitialPayment}
-                onChange={(event) => setIncludeInitialPayment(event.target.checked)}
-                className="size-4 accent-primary"
-              />
-              <span className="text-sm font-bold text-ink">Record an initial payment now</span>
-            </label>
-
-            {includeInitialPayment && (
-              <div className="mt-3 grid grid-cols-2 gap-4">
-                <SelectField
-                  label="Payment Method"
-                  value={initialPaymentMethodId}
-                  onChange={setInitialPaymentMethodId}
-                  options={[
-                    { value: "", label: "Select payment method" },
-                    ...activePaymentMethods.map((method) => ({ value: method.id, label: method.name }))
-                  ]}
+          {!editingInvoiceId && (
+            <div className="mt-4">
+              <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-line bg-soft px-3.5 py-2.5">
+                <input
+                  type="checkbox"
+                  checked={includeInitialPayment}
+                  onChange={(event) => setIncludeInitialPayment(event.target.checked)}
+                  className="size-4 accent-primary"
                 />
-                <Field label="Amount" type="number" value={initialPaymentAmount} onChange={setInitialPaymentAmount} placeholder="0.00" />
-                {selectedInitialMethod?.requiresReference && (
-                  <Field
-                    label="Reference"
-                    value={initialPaymentReference}
-                    onChange={setInitialPaymentReference}
-                    placeholder="e.g. M-Pesa code"
-                    className="col-span-2"
+                <span className="text-sm font-bold text-ink">Record an initial payment now</span>
+              </label>
+
+              {includeInitialPayment && (
+                <div className="mt-3 grid grid-cols-2 gap-4">
+                  <SelectField
+                    label="Payment Method"
+                    value={initialPaymentMethodId}
+                    onChange={setInitialPaymentMethodId}
+                    options={[
+                      { value: "", label: "Select payment method" },
+                      ...activePaymentMethods.map((method) => ({ value: method.id, label: method.name }))
+                    ]}
                   />
-                )}
-              </div>
-            )}
-          </div>
+                  <Field label="Amount" type="number" value={initialPaymentAmount} onChange={setInitialPaymentAmount} placeholder="0.00" />
+                  {selectedInitialMethod?.requiresReference && (
+                    <Field
+                      label="Reference"
+                      value={initialPaymentReference}
+                      onChange={setInitialPaymentReference}
+                      placeholder="e.g. M-Pesa code"
+                      className="col-span-2"
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="mt-4 space-y-1 border-t border-line pt-4 text-sm">
             <div className="flex justify-between text-muted">
@@ -2141,7 +2234,7 @@ export function InvoicesRoute(): React.JSX.Element {
             </Button>
             <Button type="submit" disabled={createSaving} className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50">
               {createSaving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
-              {createSaving ? "Creating..." : "Create Invoice"}
+              {editingInvoiceId ? (createSaving ? "Saving..." : "Save Changes") : createSaving ? "Creating..." : "Create Invoice"}
             </Button>
           </div>
         </form>

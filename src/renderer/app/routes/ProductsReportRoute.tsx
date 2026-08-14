@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Loader2, Package } from "lucide-react";
 import { ReportExportMenu } from "@renderer/shared/components/ReportExportMenu";
+import { ReportStorefrontFilter } from "@renderer/shared/components/ReportStorefrontFilter";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
+import { useReportLocationFilter } from "@renderer/shared/hooks/use-report-location-filter";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
@@ -19,6 +21,7 @@ import { SlowMovingProductsTable } from "./reports/SlowMovingProductsTable";
 export function ProductsReportRoute(): React.JSX.Element {
   const { can } = usePermissions();
   const canExport = can("reports", "export");
+  const locationFilter = useReportLocationFilter();
   const [mode, setMode] = useState<SalesReportMode>("monthly");
   const [anchor, setAnchor] = useState<string>(() => defaultAnchorForMode("monthly"));
   const [customRange, setCustomRange] = useState<DateRangeInput>(() => ({
@@ -41,11 +44,11 @@ export function ProductsReportRoute(): React.JSX.Element {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async (range: DateRangeInput, limit: number) => {
+  const load = useCallback(async (range: DateRangeInput, limit: number, locationId: string | null) => {
     setLoading(true);
     setError(null);
     try {
-      const result = await window.blueLedger.report.productsPerformance({ ...range, slowMovingLimit: limit });
+      const result = await window.blueLedger.report.productsPerformance({ ...range, slowMovingLimit: limit, locationId });
       setData(result);
     } catch (err) {
       const message = getErrorMessage(err, "Failed to load the products report");
@@ -57,8 +60,8 @@ export function ProductsReportRoute(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    void load(resolvedRange, slowMovingLimit);
-  }, [resolvedRange.startDate, resolvedRange.endDate, slowMovingLimit, load]);
+    void load(resolvedRange, slowMovingLimit, locationFilter.locationId);
+  }, [resolvedRange.startDate, resolvedRange.endDate, slowMovingLimit, locationFilter.locationId, load]);
 
   const reportExportRequest = useMemo<ReportExportRequest | null>(() => {
     if (!data) return null;
@@ -153,14 +156,17 @@ export function ProductsReportRoute(): React.JSX.Element {
       </div>
 
       <div className="rounded-lg border border-line bg-white p-5 shadow-soft">
-        <SalesModeSelector
-          mode={mode}
-          onModeChange={handleModeChange}
-          anchor={anchor}
-          onAnchorChange={setAnchor}
-          customRange={customRange}
-          onCustomRangeChange={setCustomRange}
-        />
+        <div className="flex flex-wrap items-center gap-3">
+          <SalesModeSelector
+            mode={mode}
+            onModeChange={handleModeChange}
+            anchor={anchor}
+            onAnchorChange={setAnchor}
+            customRange={customRange}
+            onCustomRangeChange={setCustomRange}
+          />
+          <ReportStorefrontFilter filter={locationFilter} />
+        </div>
 
         {error && (
           <div className="mt-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">{error}</div>

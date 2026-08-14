@@ -57,6 +57,15 @@ export const createInvoiceSchema = z
 
 export type CreateInvoiceInput = z.infer<typeof createInvoiceSchema>;
 
+/** Same shape as create — an invoice edit re-prices the whole cart from scratch, same as
+ * quotationUpdateSchema does for quotations. `initialPayment`/`locationId` are simply never read by
+ * updateInvoice (a payment can't be recorded through an edit, and an invoice's storefront is fixed
+ * at creation), not stripped from the schema — no value duplicating createInvoiceSchema's shape by
+ * hand just to omit two unused fields. */
+export const updateInvoiceSchema = createInvoiceSchema;
+
+export type UpdateInvoiceInput = z.infer<typeof updateInvoiceSchema>;
+
 export const recordPaymentSchema = z.object({
   paymentMethodId: z.string().trim().min(1, "Select a payment method"),
   amountCents: z.coerce.number().int().positive("Amount must be greater than 0"),

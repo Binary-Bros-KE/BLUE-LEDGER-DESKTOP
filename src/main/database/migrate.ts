@@ -2324,6 +2324,98 @@ const migrations = [
       ALTER TABLE sales ADD COLUMN include_tax_breakdown INTEGER NOT NULL DEFAULT 1;
       ALTER TABLE quotations ADD COLUMN include_tax_breakdown INTEGER NOT NULL DEFAULT 1;
     `
+  },
+  {
+    version: 67,
+    name: "quotation_walk_in_customer",
+    sql: `
+      -- A quotation is non-binding (no money/credit at stake, unlike an invoice) — same reasoning
+      -- Checkout's own walk-in sales already rely on (see sales.customer_id, already nullable since
+      -- that table's very first migration). This was the one document type left requiring a real
+      -- customer, which meant a quotation whose customer became genuinely unresolvable during sync
+      -- (see resolveRef vs resolveRefOrNull in sync-engine.ts) failed to apply at all and eventually
+      -- got permanently skipped — the whole quotation silently vanished from that device, not just its
+      -- customer name. SQLite has no ALTER COLUMN, so this rebuilds the table with customer_id no
+      -- longer NOT NULL; every other column/constraint/index is unchanged. Invoices deliberately keep
+      -- requiring a real customer — this migration only touches quotations.
+      CREATE TABLE quotations_new (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        quotation_number TEXT NOT NULL,
+        customer_id TEXT,
+        location_id TEXT NOT NULL,
+        employee_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'sent', 'accepted', 'rejected', 'expired', 'converted')),
+        subtotal_cents INTEGER NOT NULL DEFAULT 0,
+        discount_amount_cents INTEGER NOT NULL DEFAULT 0,
+        tax_amount_cents INTEGER NOT NULL DEFAULT 0,
+        grand_total_cents INTEGER NOT NULL DEFAULT 0,
+        valid_until TEXT NOT NULL,
+        notes TEXT,
+        converted_sale_id TEXT,
+        converted_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        synced_updated_at TEXT,
+        include_tax_breakdown INTEGER NOT NULL DEFAULT 1,
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (customer_id) REFERENCES customers(id),
+        FOREIGN KEY (location_id) REFERENCES locations(id),
+        FOREIGN KEY (employee_id) REFERENCES employees(id),
+        FOREIGN KEY (converted_sale_id) REFERENCES sales(id)
+      );
+
+      INSERT INTO quotations_new (
+        id, tenant_id, quotation_number, customer_id, location_id, employee_id, status,
+        subtotal_cents, discount_amount_cents, tax_amount_cents, grand_total_cents, valid_until,
+        notes, converted_sale_id, converted_at, created_at, updated_at, sync_status, last_synced_at,
+        synced_updated_at, include_tax_breakdown
+      )
+      SELECT
+        id, tenant_id, quotation_number, customer_id, location_id, employee_id, status,
+        subtotal_cents, discount_amount_cents, tax_amount_cents, grand_total_cents, valid_until,
+        notes, converted_sale_id, converted_at, created_at, updated_at, sync_status, last_synced_at,
+        synced_updated_at, include_tax_breakdown
+      FROM quotations;
+
+      DROP TABLE quotations;
+      -- Renaming quotations_new to the exact name ("quotations") that OTHER tables' triggers
+      -- already reference in their body (quotation_items/sale_service_charges/delivery_notes' own
+      -- reenqueue triggers, all untouched by the DROP above since they're bound to those OTHER
+      -- tables) makes SQLite's default rename behavior try to rewrite/re-validate every trigger
+      -- referencing the name mid-batch — and fail with "no such table: main.quotations", confirmed
+      -- live. legacy_alter_table disables that rewrite pass for a plain rename (nothing here
+      -- actually needs the rewrite: no trigger/view is bound to the OLD "quotations" name in a way
+      -- that needs updating, they already say "quotations" and keep working unchanged once the
+      -- table exists again under that same name).
+      PRAGMA legacy_alter_table = ON;
+      ALTER TABLE quotations_new RENAME TO quotations;
+      PRAGMA legacy_alter_table = OFF;
+
+      CREATE UNIQUE INDEX idx_quotations_tenant_number ON quotations(tenant_id, quotation_number);
+      CREATE INDEX idx_quotations_tenant_status ON quotations(tenant_id, status);
+      CREATE INDEX idx_quotations_location ON quotations(location_id);
+      CREATE INDEX idx_quotations_customer ON quotations(customer_id);
+
+      -- DROP TABLE above silently dropped every trigger bound directly to quotations (SQLite ties a
+      -- trigger to its target table) — recreated verbatim from migration 39's originals. Triggers on
+      -- OTHER tables that merely SELECT FROM quotations inside their body (quotation_items,
+      -- sale_service_charges, delivery_notes) are untouched — they were never bound to this table.
+      CREATE TRIGGER trg_quotations_sync_ai AFTER INSERT ON quotations BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'quotations', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_quotations_sync_au AFTER UPDATE ON quotations WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'quotations', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_quotations_sync_ad AFTER DELETE ON quotations BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'quotations', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+    `
   }
 ] as const;
 

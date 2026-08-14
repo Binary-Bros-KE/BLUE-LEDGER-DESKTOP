@@ -31,6 +31,7 @@ import type { Salary } from "./salary";
 import type {
   CancelledPurchasesReport,
   DateRangeInput,
+  LocationScopeInput,
   MySaleEntry,
   PaymentTransactionRow,
   SalesByEmployeeRow,
@@ -746,6 +747,10 @@ export type IpcInvokeMap = {
     args: [Record<string, unknown>];
     result: Sale;
   };
+  "invoice:update": {
+    args: [string, Record<string, unknown>];
+    result: Sale;
+  };
   "invoice:record-payment": {
     args: [string, Record<string, unknown>];
     result: Sale;
@@ -1066,6 +1071,10 @@ export type IpcInvokeMap = {
     args: [];
     result: SyncSnapshot;
   };
+  "sync:retry-orphans": {
+    args: [];
+    result: SyncSnapshot;
+  };
   "sync:list-conflicts": {
     args: [];
     result: SyncConflictItem[];
@@ -1143,7 +1152,7 @@ export type IpcInvokeMap = {
     result: SalesByPaymentMethodRow[];
   };
   "report:inventory-data": {
-    args: [];
+    args: [LocationScopeInput];
     result: InventoryReportData;
   };
   "report:products-performance": {
@@ -1163,11 +1172,11 @@ export type IpcInvokeMap = {
     result: CustomerPurchaseHistoryEntry[];
   };
   "report:outstanding-invoices": {
-    args: [];
+    args: [LocationScopeInput];
     result: OutstandingInvoicesSummary;
   };
   "report:outstanding-purchases": {
-    args: [];
+    args: [LocationScopeInput];
     result: OutstandingPurchasesSummary;
   };
   "report:supplier-purchase-history": {
@@ -1537,6 +1546,7 @@ export type BlueLedgerApi = {
     list: () => Promise<IpcInvokeMap["invoice:list"]["result"]>;
     summary: () => Promise<IpcInvokeMap["invoice:summary"]["result"]>;
     create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["invoice:create"]["result"]>;
+    update: (id: string, input: Record<string, unknown>) => Promise<IpcInvokeMap["invoice:update"]["result"]>;
     recordPayment: (
       id: string,
       input: Record<string, unknown>
@@ -1717,6 +1727,7 @@ export type BlueLedgerApi = {
     getSnapshot: () => Promise<IpcInvokeMap["sync:get-snapshot"]["result"]>;
     listQueue: (input?: { limit?: number }) => Promise<IpcInvokeMap["sync:list-queue"]["result"]>;
     runNow: () => Promise<IpcInvokeMap["sync:run-now"]["result"]>;
+    retryOrphans: () => Promise<IpcInvokeMap["sync:retry-orphans"]["result"]>;
     listConflicts: () => Promise<IpcInvokeMap["sync:list-conflicts"]["result"]>;
     resolveConflict: (
       id: string,
@@ -1755,15 +1766,15 @@ export type BlueLedgerApi = {
     salesByStorefront: (range: DateRangeInput) => Promise<SalesByStorefrontRow[]>;
     salesByEmployee: (range: DateRangeInput) => Promise<SalesByEmployeeRow[]>;
     salesByPaymentMethod: (range: DateRangeInput) => Promise<SalesByPaymentMethodRow[]>;
-    inventoryData: () => Promise<InventoryReportData>;
+    inventoryData: (input: LocationScopeInput) => Promise<InventoryReportData>;
     productsPerformance: (
       range: DateRangeInput & { slowMovingLimit?: number }
     ) => Promise<ProductsPerformanceReport>;
     productSalesHistory: (input: { productId: string }) => Promise<ProductSalesHistoryEntry[]>;
     topCustomers: (range: DateRangeInput) => Promise<TopCustomerRow[]>;
     customerPurchaseHistory: (input: { customerId: string }) => Promise<CustomerPurchaseHistoryEntry[]>;
-    outstandingInvoices: () => Promise<OutstandingInvoicesSummary>;
-    outstandingPurchases: () => Promise<OutstandingPurchasesSummary>;
+    outstandingInvoices: (input: LocationScopeInput) => Promise<OutstandingInvoicesSummary>;
+    outstandingPurchases: (input: LocationScopeInput) => Promise<OutstandingPurchasesSummary>;
     supplierPurchaseHistory: (input: { supplierId: string }) => Promise<SupplierPurchaseHistoryEntry[]>;
     supplierSpendBreakdown: (input: DateRangeInput) => Promise<SupplierSpendRow[]>;
     taxBreakdown: (range: DateRangeInput) => Promise<TaxReport>;

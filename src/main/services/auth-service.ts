@@ -183,3 +183,16 @@ export function getCurrentEmployeeName(): string | null {
 export function getCurrentBranchScope(): string | null {
   return currentSession?.branch?.id ?? null;
 }
+
+/**
+ * Report-only variant of getCurrentBranchScope: a branch-scoped session always gets its own
+ * branch regardless of what's passed in (prevents a crafted IPC payload from letting a
+ * branch-scoped Manager peek at another branch's reports). Only a branch-less session (Super
+ * Admin) can actually narrow anything — passing a storefront id there scopes to just that one;
+ * passing null/undefined keeps the existing "every location" behavior.
+ */
+export function resolveReportLocationScope(explicitLocationId?: string | null): string | null {
+  const branchScope = getCurrentBranchScope();
+  if (branchScope !== null) return branchScope;
+  return explicitLocationId ?? null;
+}

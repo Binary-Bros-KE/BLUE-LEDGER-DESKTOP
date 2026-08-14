@@ -1,7 +1,7 @@
 import * as customerReportRepository from "@main/database/repositories/customer-report-repository";
-import { getCurrentBranchScope, requirePermission, requirePermissionAnyOf } from "@main/services/auth-service";
+import { getCurrentBranchScope, requirePermission, requirePermissionAnyOf, resolveReportLocationScope } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
-import { dateRangeInputSchema } from "@shared/schemas/report";
+import { dateRangeInputSchema, locationScopeInputSchema } from "@shared/schemas/report";
 import { customerPurchaseHistoryInputSchema } from "@shared/schemas/customer-report";
 import type {
   CustomerPurchaseHistoryEntry,
@@ -41,9 +41,9 @@ function addDaysIso(dateStr: string, days: number): string {
  * shouldn't be silently dropped just because it's not tied to a customer record. */
 export function getTopCustomers(input: unknown): TopCustomerRow[] {
   requirePermission("reports", "view");
-  const { startDate, endDate } = dateRangeInputSchema.parse(input);
+  const { startDate, endDate, locationId: explicitLocationId } = dateRangeInputSchema.parse(input);
   const { tenantId } = getCurrentTenant();
-  const locationId = getCurrentBranchScope();
+  const locationId = resolveReportLocationScope(explicitLocationId);
 
   const startIso = startOfDayIso(startDate);
   const endIsoExclusive = startOfDayIso(addDaysIso(endDate, 1));
@@ -111,10 +111,11 @@ export function getCustomerPurchaseHistory(input: unknown): CustomerPurchaseHist
 /** Every currently-outstanding invoice — a live balance-sheet snapshot,
  * deliberately not scoped to any selected period (see the same reasoning
  * behind Sales Report's Debtors section). */
-export function getOutstandingInvoices(): OutstandingInvoicesSummary {
+export function getOutstandingInvoices(input: unknown): OutstandingInvoicesSummary {
   requirePermission("reports", "view");
+  const { locationId: explicitLocationId } = locationScopeInputSchema.parse(input);
   const { tenantId } = getCurrentTenant();
-  const locationId = getCurrentBranchScope();
+  const locationId = resolveReportLocationScope(explicitLocationId);
 
   const today = localTodayIso();
   const rows = customerReportRepository.findOutstandingInvoices(tenantId, locationId);

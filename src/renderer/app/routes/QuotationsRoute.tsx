@@ -162,7 +162,14 @@ export function QuotationsRoute(): React.JSX.Element {
   const [printingThermal, setPrintingThermal] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
+  // Non-null while the create modal is actually editing an existing draft in place — see
+  // InvoicesRoute.tsx's identical pattern for the same reasoning (one form, not two near-duplicates).
+  const [editingQuotationId, setEditingQuotationId] = useState<string | null>(null);
   const [createCustomerId, setCreateCustomerId] = useState<string | null>(null);
+  // createCustomerId alone can't distinguish "hasn't picked yet" (show the search box) from
+  // "explicitly chose Walk-in Customer" (both are null) — this tracks whether ANY choice (a real
+  // customer OR Walk-in) has been made, so the picker collapses into a summary card either way.
+  const [createCustomerChosen, setCreateCustomerChosen] = useState(false);
   // Only ever consulted when session.branch is null (see StorefrontPicker/requireActiveSession).
   const [createStorefrontId, setCreateStorefrontId] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
@@ -247,7 +254,7 @@ export function QuotationsRoute(): React.JSX.Element {
     if (term) {
       list = list.filter((quotation) => {
         const haystack =
-          `${quotation.quotationNumber} ${quotation.customerName} ${quotation.employeeName} ${quotation.createdAt}`.toLowerCase();
+          `${quotation.quotationNumber} ${quotation.customerName ?? "Walk-in Customer"} ${quotation.employeeName} ${quotation.createdAt}`.toLowerCase();
         return haystack.includes(term);
       });
     }
@@ -297,7 +304,7 @@ export function QuotationsRoute(): React.JSX.Element {
       ],
       rows: filteredQuotations.map((quotation) => ({
         quotationNumber: quotation.quotationNumber,
-        customer: quotation.customerName,
+        customer: quotation.customerName ?? "Walk-in Customer",
         storefront: quotation.locationName,
         salesperson: quotation.employeeName,
         created: formatDate(quotation.createdAt),
@@ -593,7 +600,9 @@ export function QuotationsRoute(): React.JSX.Element {
   }, [createLinePricing, createServiceCharges, createDelivery]);
 
   function openCreateModal(): void {
+    setEditingQuotationId(null);
     setCreateCustomerId(null);
+    setCreateCustomerChosen(false);
     setCreateStorefrontId("");
     setCustomerSearch("");
     setCreateValidUntil(addDaysIso(7));
@@ -602,6 +611,60 @@ export function QuotationsRoute(): React.JSX.Element {
     setCreateItems([]);
     setCreateServiceCharges([]);
     setCreateDelivery(null);
+    setProductSearch("");
+    setCreateError(null);
+    setCreateOpen(true);
+  }
+
+  /** Prefills the same create-quotation form/state in place of a blank one — only reachable while
+   * status is "draft" (see updateQuotation's own requireEditableDraft). The storefront section stays
+   * hidden in this mode — a quotation's storefront is fixed at creation. */
+  function openEditQuotation(quotation: Quotation): void {
+    setEditingQuotationId(quotation.id);
+    setCreateCustomerId(quotation.customerId);
+    setCreateCustomerChosen(true);
+    setCreateStorefrontId(quotation.locationId);
+    setCustomerSearch("");
+    setCreateValidUntil(quotation.validUntil);
+    setCreateNotes(quotation.notes ?? "");
+    setCreateIncludeTaxBreakdown(quotation.includeTaxBreakdown);
+    setCreateItems(
+      quotation.items.map((item) => ({
+        productId: item.productId,
+        name: item.productName,
+        sku: item.sku,
+        quantity: item.quantity,
+        discountAmountCents: item.discountAmountCents,
+        // Pre-filled with the item's own current price so re-submitting without touching this line
+        // keeps its price exactly as it was — same reasoning as InvoicesRoute's openEditInvoice.
+        priceOverride: fromCents(item.unitPriceCents),
+        isLocallySourced: item.isLocallySourced,
+        localCost: item.localCostCents !== null ? fromCents(item.localCostCents) : "",
+        localSupplierId: item.localSupplierId
+      }))
+    );
+    setCreateServiceCharges(
+      quotation.serviceCharges.map((charge) => ({
+        key: crypto.randomUUID(),
+        name: charge.name,
+        fee: fromCents(charge.feeCents),
+        cost: fromCents(charge.costCents)
+      }))
+    );
+    setCreateDelivery(
+      quotation.delivery
+        ? {
+          riderId: quotation.delivery.riderId,
+          recipientName: quotation.delivery.recipientName,
+          country: quotation.delivery.country ?? "",
+          town: quotation.delivery.town ?? "",
+          physicalAddress: quotation.delivery.physicalAddress,
+          notes: quotation.delivery.notes ?? "",
+          fee: fromCents(quotation.delivery.feeCents),
+          cost: fromCents(quotation.delivery.costCents)
+        }
+        : null
+    );
     setProductSearch("");
     setCreateError(null);
     setCreateOpen(true);
@@ -692,61 +755,68 @@ export function QuotationsRoute(): React.JSX.Element {
     setCreateSaving(true);
     setCreateError(null);
 
-    if (!createCustomerId) {
-      setCreateError("Select a customer");
-      setCreateSaving(false);
-      return;
-    }
+    // No "select a customer" guard — a quotation is non-binding, so Walk-in Customer (createCustomerId
+    // left null) is a valid, intentional choice here, unlike invoice creation.
     if (createItems.length === 0 && createServiceCharges.length === 0) {
       setCreateError("Add at least one product or service charge");
       setCreateSaving(false);
       return;
     }
-    if (session && !session.branch && !createStorefrontId) {
+    if (!editingQuotationId && session && !session.branch && !createStorefrontId) {
       setCreateError("Choose a storefront for this quotation");
       setCreateSaving(false);
       return;
     }
 
+    const payload = {
+      customerId: createCustomerId,
+      validUntil: createValidUntil,
+      notes: createNotes,
+      includeTaxBreakdown: createIncludeTaxBreakdown,
+      locationId: session && !session.branch ? createStorefrontId : undefined,
+      items: createItems.map((line) => ({
+        productId: line.productId,
+        quantity: line.quantity,
+        discountAmountCents: line.discountAmountCents,
+        unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined,
+        isLocallySourced: line.isLocallySourced,
+        localCostCents: line.isLocallySourced && line.localCost.trim() ? toCents(line.localCost) : undefined,
+        localSupplierId: line.localSupplierId
+      })),
+      serviceCharges: createServiceCharges.map((charge) => ({
+        name: charge.name,
+        feeCents: toCents(charge.fee),
+        costCents: toCents(charge.cost)
+      })),
+      delivery: createDelivery
+        ? {
+          riderId: createDelivery.riderId,
+          recipientName: createDelivery.recipientName,
+          country: createDelivery.country,
+          town: createDelivery.town,
+          physicalAddress: createDelivery.physicalAddress,
+          notes: createDelivery.notes,
+          feeCents: toCents(createDelivery.fee),
+          costCents: toCents(createDelivery.cost)
+        }
+        : null
+    };
+
     try {
-      await window.blueLedger.quotation.create({
-        customerId: createCustomerId,
-        validUntil: createValidUntil,
-        notes: createNotes,
-        includeTaxBreakdown: createIncludeTaxBreakdown,
-        locationId: session && !session.branch ? createStorefrontId : undefined,
-        items: createItems.map((line) => ({
-          productId: line.productId,
-          quantity: line.quantity,
-          discountAmountCents: line.discountAmountCents,
-          unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined,
-          isLocallySourced: line.isLocallySourced,
-          localCostCents: line.isLocallySourced && line.localCost.trim() ? toCents(line.localCost) : undefined,
-          localSupplierId: line.localSupplierId
-        })),
-        serviceCharges: createServiceCharges.map((charge) => ({
-          name: charge.name,
-          feeCents: toCents(charge.fee),
-          costCents: toCents(charge.cost)
-        })),
-        delivery: createDelivery
-          ? {
-            riderId: createDelivery.riderId,
-            recipientName: createDelivery.recipientName,
-            country: createDelivery.country,
-            town: createDelivery.town,
-            physicalAddress: createDelivery.physicalAddress,
-            notes: createDelivery.notes,
-            feeCents: toCents(createDelivery.fee),
-            costCents: toCents(createDelivery.cost)
-          }
-          : null
-      });
-      setCreateOpen(false);
-      await loadAll();
-      showSuccessToast("Quotation created");
+      if (editingQuotationId) {
+        const updated = await window.blueLedger.quotation.update(editingQuotationId, payload);
+        setCreateOpen(false);
+        await loadAll();
+        if (viewingQuotation?.id === editingQuotationId) setViewingQuotation(updated);
+        showSuccessToast("Quotation updated");
+      } else {
+        await window.blueLedger.quotation.create(payload);
+        setCreateOpen(false);
+        await loadAll();
+        showSuccessToast("Quotation created");
+      }
     } catch (err) {
-      const message = getErrorMessage(err, "Failed to create quotation");
+      const message = getErrorMessage(err, editingQuotationId ? "Failed to update quotation" : "Failed to create quotation");
       setCreateError(message);
       showErrorToast(message);
     } finally {
@@ -948,7 +1018,7 @@ export function QuotationsRoute(): React.JSX.Element {
                       <td className="truncate px-3 py-2.5 text-xs font-bold tabular-nums text-ink">
                         <div className="flex flex-col">
                           <span className="text-muted">{quotation.quotationNumber}</span>
-                          <span>{quotation.customerName}</span>
+                          <span>{quotation.customerName ?? "Walk-in Customer"}</span>
                         </div>
                       </td>
                       <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">
@@ -1022,7 +1092,7 @@ export function QuotationsRoute(): React.JSX.Element {
             <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
               <div className="rounded-lg border border-line bg-soft px-3 py-2.5">
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Customer</p>
-                <p className="mt-0.5 truncate text-sm font-bold text-ink">{viewingQuotation.customerName}</p>
+                <p className="mt-0.5 truncate text-sm font-bold text-ink">{viewingQuotation.customerName ?? "Walk-in Customer"}</p>
               </div>
               <div className="rounded-lg border border-line bg-soft px-3 py-2.5">
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Storefront</p>
@@ -1246,8 +1316,16 @@ export function QuotationsRoute(): React.JSX.Element {
             />
 
             {canEdit && viewingQuotation.status === "draft" && (
-              <div className="mt-2">
-                <Button type="button" onClick={() => void handleSetStatus("sent")} className="h-9 w-full text-xs">
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  onClick={() => openEditQuotation(viewingQuotation)}
+                  className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+                >
+                  <FileText className="mr-1.5 size-3.5" aria-hidden="true" />
+                  Edit Quotation
+                </Button>
+                <Button type="button" onClick={() => void handleSetStatus("sent")} className="h-9 text-xs">
                   <Send className="mr-1.5 size-3.5" aria-hidden="true" />
                   Mark as Sent
                 </Button>
@@ -1507,8 +1585,12 @@ export function QuotationsRoute(): React.JSX.Element {
       <Modal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        title="New Quotation"
-        description="A price offer for a customer — nothing here affects stock or payments until it's converted."
+        title={editingQuotationId ? "Edit Quotation" : "New Quotation"}
+        description={
+          editingQuotationId
+            ? "Only available while this quotation is still a draft — items are re-priced from scratch on save."
+            : "A price offer for a customer — nothing here affects stock or payments until it's converted."
+        }
         widthClassName="max-w-2xl"
       >
         <form onSubmit={submitCreateQuotation}>
@@ -1518,7 +1600,7 @@ export function QuotationsRoute(): React.JSX.Element {
             </div>
           )}
 
-          {session && !session.branch && (
+          {!editingQuotationId && session && !session.branch && (
             <div className="mb-4">
               <StorefrontPicker value={createStorefrontId} onChange={setCreateStorefrontId} />
             </div>
@@ -1536,15 +1618,18 @@ export function QuotationsRoute(): React.JSX.Element {
                 New Customer
               </button>
             </div>
-            {selectedCreateCustomer ? (
+            {createCustomerChosen ? (
               <div className="mt-1.5 flex items-center justify-between rounded-lg border border-line bg-soft px-3.5 py-2.5">
                 <div>
-                  <p className="text-sm font-extrabold text-ink">{selectedCreateCustomer.name}</p>
-                  <p className="text-[11px] font-semibold text-muted">{selectedCreateCustomer.phone}</p>
+                  <p className="text-sm font-extrabold text-ink">{selectedCreateCustomer ? selectedCreateCustomer.name : "Walk-in Customer"}</p>
+                  {selectedCreateCustomer && <p className="text-[11px] font-semibold text-muted">{selectedCreateCustomer.phone}</p>}
                 </div>
                 <button
                   type="button"
-                  onClick={() => setCreateCustomerId(null)}
+                  onClick={() => {
+                    setCreateCustomerId(null);
+                    setCreateCustomerChosen(false);
+                  }}
                   className="text-[11px] font-extrabold uppercase text-accent hover:underline cursor-pointer"
                 >
                   Change
@@ -1557,27 +1642,37 @@ export function QuotationsRoute(): React.JSX.Element {
                   type="text"
                   value={customerSearch}
                   onChange={(event) => setCustomerSearch(event.target.value)}
-                  placeholder="Search customer by name or phone"
+                  placeholder="Search by name or phone — or keep it as a walk-in quotation."
                   className="h-10 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
                 />
-                {filteredCustomers.length > 0 && (
-                  <div className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-line bg-white shadow-soft">
-                    {filteredCustomers.map((customer) => (
-                      <button
-                        key={customer.id}
-                        type="button"
-                        onClick={() => {
-                          setCreateCustomerId(customer.id);
-                          setCustomerSearch("");
-                        }}
-                        className="flex w-full items-center justify-between px-3.5 py-2 text-left text-sm hover:bg-soft cursor-pointer"
-                      >
-                        <span className="font-bold text-ink">{customer.name}</span>
-                        <span className="text-xs font-semibold text-muted">{customer.phone}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <div className="mt-1.5 max-h-48 overflow-y-auto rounded-lg border border-line bg-white shadow-soft">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCreateCustomerId(null);
+                      setCreateCustomerChosen(true);
+                      setCustomerSearch("");
+                    }}
+                    className="flex w-full items-center px-3.5 py-2 text-left text-sm font-extrabold text-teal hover:bg-teal/10 cursor-pointer"
+                  >
+                    Walk-in Customer
+                  </button>
+                  {filteredCustomers.map((customer) => (
+                    <button
+                      key={customer.id}
+                      type="button"
+                      onClick={() => {
+                        setCreateCustomerId(customer.id);
+                        setCreateCustomerChosen(true);
+                        setCustomerSearch("");
+                      }}
+                      className="flex w-full items-center justify-between border-t border-line px-3.5 py-2 text-left text-sm hover:bg-soft cursor-pointer"
+                    >
+                      <span className="font-bold text-ink">{customer.name}</span>
+                      <span className="text-xs font-semibold text-muted">{customer.phone}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -1809,7 +1904,7 @@ export function QuotationsRoute(): React.JSX.Element {
             </Button>
             <Button type="submit" disabled={createSaving} className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50">
               {createSaving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
-              {createSaving ? "Creating..." : "Create Quotation"}
+              {editingQuotationId ? (createSaving ? "Saving..." : "Save Changes") : createSaving ? "Creating..." : "Create Quotation"}
             </Button>
           </div>
         </form>
@@ -1821,6 +1916,7 @@ export function QuotationsRoute(): React.JSX.Element {
         onCreated={(customer) => {
           setCustomers((prev) => [...prev, customer]);
           setCreateCustomerId(customer.id);
+          setCreateCustomerChosen(true);
           setCustomerSearch("");
           setQuickCreateCustomerOpen(false);
         }}

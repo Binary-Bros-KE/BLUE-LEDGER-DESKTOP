@@ -1,7 +1,8 @@
 import * as inventoryReportRepository from "@main/database/repositories/inventory-report-repository";
 import type { CurrentStockRow, StockMovementReportRowRaw } from "@main/database/repositories/inventory-report-repository";
-import { getCurrentBranchScope, requirePermissionAnyOf } from "@main/services/auth-service";
+import { requirePermissionAnyOf, resolveReportLocationScope } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
+import { locationScopeInputSchema } from "@shared/schemas/report";
 import type {
   InventoryOverviewStats,
   InventoryReportData,
@@ -58,13 +59,14 @@ function toMovementRow(row: StockMovementReportRowRaw): StockMovementReportRow {
  * branch-scoped manager's `rows` only ever contains their own location, so
  * they naturally get exactly one section back with no extra filtering logic.
  */
-export function getInventoryReportData(): InventoryReportData {
+export function getInventoryReportData(input: unknown): InventoryReportData {
   requirePermissionAnyOf([
     ["reports", "view"],
     ["inventory", "view"]
   ]);
+  const { locationId: explicitLocationId } = locationScopeInputSchema.parse(input);
   const { tenantId } = getCurrentTenant();
-  const locationId = getCurrentBranchScope();
+  const locationId = resolveReportLocationScope(explicitLocationId);
 
   const rows = inventoryReportRepository.findCurrentStockRows(tenantId, locationId);
 

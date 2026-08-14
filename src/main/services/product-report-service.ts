@@ -1,5 +1,5 @@
 import * as productReportRepository from "@main/database/repositories/product-report-repository";
-import { getCurrentBranchScope, requirePermission } from "@main/services/auth-service";
+import { getCurrentBranchScope, requirePermission, resolveReportLocationScope } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { productSalesHistoryInputSchema, productsPerformanceInputSchema } from "@shared/schemas/product-report";
 import type {
@@ -35,9 +35,9 @@ function addDaysIso(dateStr: string, days: number): string {
  * zero sales in the period entirely) for one resolved date range. */
 export function getProductsPerformanceReport(input: unknown): ProductsPerformanceReport {
   requirePermission("reports", "view");
-  const { startDate, endDate, slowMovingLimit } = productsPerformanceInputSchema.parse(input);
+  const { startDate, endDate, slowMovingLimit, locationId: explicitLocationId } = productsPerformanceInputSchema.parse(input);
   const { tenantId } = getCurrentTenant();
-  const locationId = getCurrentBranchScope();
+  const locationId = resolveReportLocationScope(explicitLocationId);
 
   const startIso = startOfDayIso(startDate);
   const endIsoExclusive = startOfDayIso(addDaysIso(endDate, 1));

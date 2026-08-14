@@ -13,7 +13,7 @@ export type QuotationRow = {
   id: string;
   tenant_id: string;
   quotation_number: string;
-  customer_id: string;
+  customer_id: string | null;
   location_id: string;
   employee_id: string;
   status: string;
@@ -34,7 +34,7 @@ export type QuotationRow = {
 };
 
 export type QuotationDetailRow = QuotationRow & {
-  customer_name: string;
+  customer_name: string | null;
   location_name: string;
   employee_name: string;
 };
@@ -70,7 +70,7 @@ const DETAIL_SELECT = `
     l.location_name AS location_name,
     (e.first_name || ' ' || e.last_name) AS employee_name
   FROM quotations q
-  JOIN customers c ON c.id = q.customer_id
+  LEFT JOIN customers c ON c.id = q.customer_id
   JOIN locations l ON l.id = q.location_id
   JOIN employees e ON e.id = q.employee_id
 `;
@@ -145,7 +145,7 @@ export function insertQuotationRow(input: {
   id: string;
   tenantId: string;
   quotationNumber: string;
-  customerId: string;
+  customerId: string | null;
   locationId: string;
   employeeId: string;
   subtotalCents: number;
@@ -255,7 +255,7 @@ export function deleteQuotationItemsForQuotationRow(quotationId: string): void {
 export function updateQuotationRow(
   id: string,
   input: {
-    customerId: string;
+    customerId: string | null;
     subtotalCents: number;
     discountAmountCents: number;
     taxAmountCents: number;

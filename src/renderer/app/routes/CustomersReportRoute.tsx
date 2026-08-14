@@ -3,7 +3,9 @@ import { motion } from "framer-motion";
 import { Loader2, Users } from "lucide-react";
 import { categoricalColor } from "@renderer/shared/components/charts/chartTokens";
 import { ReportExportMenu } from "@renderer/shared/components/ReportExportMenu";
+import { ReportStorefrontFilter } from "@renderer/shared/components/ReportStorefrontFilter";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
+import { useReportLocationFilter } from "@renderer/shared/hooks/use-report-location-filter";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
@@ -20,6 +22,7 @@ import { TopCustomersTable } from "./reports/TopCustomersTable";
 export function CustomersReportRoute(): React.JSX.Element {
   const { can } = usePermissions();
   const canExport = can("reports", "export");
+  const locationFilter = useReportLocationFilter();
   const [mode, setMode] = useState<SalesReportMode>("monthly");
   const [anchor, setAnchor] = useState<string>(() => defaultAnchorForMode("monthly"));
   const [customRange, setCustomRange] = useState<DateRangeInput>(() => ({
@@ -42,13 +45,13 @@ export function CustomersReportRoute(): React.JSX.Element {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async (range: DateRangeInput) => {
+  const load = useCallback(async (range: DateRangeInput, locationId: string | null) => {
     setLoading(true);
     setError(null);
     try {
       const [topCustomersResult, outstandingResult] = await Promise.all([
-        window.blueLedger.report.topCustomers(range),
-        window.blueLedger.report.outstandingInvoices(),
+        window.blueLedger.report.topCustomers({ ...range, locationId }),
+        window.blueLedger.report.outstandingInvoices({ locationId }),
       ]);
       setTopCustomers(topCustomersResult);
       setOutstanding(outstandingResult);
@@ -62,8 +65,8 @@ export function CustomersReportRoute(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    void load(resolvedRange);
-  }, [resolvedRange.startDate, resolvedRange.endDate, load]);
+    void load(resolvedRange, locationFilter.locationId);
+  }, [resolvedRange.startDate, resolvedRange.endDate, locationFilter.locationId, load]);
 
   const reportExportRequest = useMemo<ReportExportRequest | null>(() => {
     if (!topCustomers) return null;
@@ -173,14 +176,17 @@ export function CustomersReportRoute(): React.JSX.Element {
       </div>
 
       <div className="rounded-lg border border-line bg-white p-5 shadow-soft">
-        <SalesModeSelector
-          mode={mode}
-          onModeChange={handleModeChange}
-          anchor={anchor}
-          onAnchorChange={setAnchor}
-          customRange={customRange}
-          onCustomRangeChange={setCustomRange}
-        />
+        <div className="flex flex-wrap items-center gap-3">
+          <SalesModeSelector
+            mode={mode}
+            onModeChange={handleModeChange}
+            anchor={anchor}
+            onAnchorChange={setAnchor}
+            customRange={customRange}
+            onCustomRangeChange={setCustomRange}
+          />
+          <ReportStorefrontFilter filter={locationFilter} />
+        </div>
 
         {error && (
           <div className="mt-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">{error}</div>

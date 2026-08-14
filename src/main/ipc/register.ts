@@ -43,7 +43,8 @@ import {
   getInvoiceSummary,
   listInvoices,
   markInvoicePaid,
-  recordInvoicePayment
+  recordInvoicePayment,
+  updateInvoice
 } from "@main/services/invoice-service";
 import {
   approveInvoiceCancel,
@@ -282,6 +283,7 @@ import {
   listRecentReconciliations,
   listSyncQueue,
   resolveConflict,
+  retryOrphanedRecords,
   runSyncNow
 } from "@main/services/sync-service";
 import { commitImport, pickImportFile, previewImport } from "@main/services/import-service";
@@ -630,6 +632,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.invoiceList, () => listInvoices());
   ipcMain.handle(ipcChannels.invoiceSummary, () => getInvoiceSummary());
   ipcMain.handle(ipcChannels.invoiceCreate, (_event, input: unknown) => createInvoice(input));
+  ipcMain.handle(ipcChannels.invoiceUpdate, (_event, id: string, input: unknown) => updateInvoice(id, input));
   ipcMain.handle(ipcChannels.invoiceRecordPayment, (_event, id: string, input: unknown) =>
     recordInvoicePayment(id, input)
   );
@@ -779,6 +782,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.recurringBillDelete, (_event, id: string) => deleteRecurringBill(id));
   ipcMain.handle(ipcChannels.syncGetSnapshot, () => getSyncSnapshot());
   ipcMain.handle(ipcChannels.syncRunNow, () => runSyncNow());
+  ipcMain.handle(ipcChannels.syncRetryOrphans, () => retryOrphanedRecords());
   ipcMain.handle(ipcChannels.syncListQueue, (_event, input?: { limit?: number }) =>
     listSyncQueue(input?.limit)
   );
@@ -817,13 +821,13 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.reportSalesByPaymentMethod, (_event, range: unknown) =>
     getSalesByPaymentMethod(range)
   );
-  ipcMain.handle(ipcChannels.reportInventoryData, () => getInventoryReportData());
+  ipcMain.handle(ipcChannels.reportInventoryData, (_event, input: unknown) => getInventoryReportData(input));
   ipcMain.handle(ipcChannels.reportProductsPerformance, (_event, range: unknown) => getProductsPerformanceReport(range));
   ipcMain.handle(ipcChannels.reportProductSalesHistory, (_event, input: unknown) => getProductSalesHistory(input));
   ipcMain.handle(ipcChannels.reportTopCustomers, (_event, range: unknown) => getTopCustomers(range));
   ipcMain.handle(ipcChannels.reportCustomerPurchaseHistory, (_event, input: unknown) => getCustomerPurchaseHistory(input));
-  ipcMain.handle(ipcChannels.reportOutstandingInvoices, () => getOutstandingInvoices());
-  ipcMain.handle(ipcChannels.reportOutstandingPurchases, () => getOutstandingPurchases());
+  ipcMain.handle(ipcChannels.reportOutstandingInvoices, (_event, input: unknown) => getOutstandingInvoices(input));
+  ipcMain.handle(ipcChannels.reportOutstandingPurchases, (_event, input: unknown) => getOutstandingPurchases(input));
   ipcMain.handle(ipcChannels.reportSupplierPurchaseHistory, (_event, input: unknown) => getSupplierPurchaseHistory(input));
   ipcMain.handle(ipcChannels.reportSupplierSpendBreakdown, (_event, input: unknown) => getSupplierSpendBreakdown(input));
   ipcMain.handle(ipcChannels.reportTaxBreakdown, (_event, range: unknown) => getTaxReport(range));

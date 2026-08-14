@@ -20,6 +20,7 @@ export const productsPerformanceInputSchema = z
       .trim()
       .regex(/^\d{4}-\d{2}-\d{2}$/, "End date must be in YYYY-MM-DD format"),
     slowMovingLimit: z.coerce.number().int().min(1).max(500).optional(),
+    locationId: z.string().trim().min(1).nullish(),
   })
   .refine((value) => value.startDate <= value.endDate, {
     message: "Start date must be on or before the end date",

@@ -672,6 +672,68 @@ export function updateSaleIncludeTaxBreakdownRow(id: string, includeTaxBreakdown
   return row;
 }
 
+/** Rewrites an invoice's header content — customer/type/due date/notes/totals — as part of an
+ * in-place edit. Items themselves are handled separately by the caller (deleteSaleItemsForSaleRow +
+ * fresh insertSaleItemRow calls), same split as updateQuotationRow/deleteQuotationItemsForQuotationRow. */
+export function updateInvoiceContentRow(input: {
+  id: string;
+  customerId: string;
+  transactionType: TransactionType;
+  dueDate: string;
+  subtotalCents: number;
+  discountAmountCents: number;
+  taxAmountCents: number;
+  grandTotalCents: number;
+  balanceDueCents: number;
+  paymentStatus: PaymentStatus;
+  invoiceNotes: string | null;
+  includeTaxBreakdown?: boolean | undefined;
+}): SaleRow {
+  const now = new Date().toISOString();
+
+  getDatabase()
+    .prepare(
+      `
+      UPDATE sales SET
+        customer_id = ?,
+        transaction_type = ?,
+        due_date = ?,
+        subtotal_cents = ?,
+        discount_amount_cents = ?,
+        tax_amount_cents = ?,
+        grand_total_cents = ?,
+        balance_due_cents = ?,
+        payment_status = ?,
+        invoice_notes = ?,
+        include_tax_breakdown = ?,
+        sync_status = 'pending',
+        updated_at = ?
+      WHERE id = ?
+    `
+    )
+    .run(
+      input.customerId,
+      input.transactionType,
+      input.dueDate,
+      input.subtotalCents,
+      input.discountAmountCents,
+      input.taxAmountCents,
+      input.grandTotalCents,
+      input.balanceDueCents,
+      input.paymentStatus,
+      input.invoiceNotes,
+      input.includeTaxBreakdown === false ? 0 : 1,
+      now,
+      input.id
+    );
+
+  const row = findSaleRowById(input.id);
+  if (!row) {
+    throw new Error("Invoice not found after update");
+  }
+  return row;
+}
+
 export function deleteSaleItemsForSaleRow(saleId: string): void {
   getDatabase().prepare("DELETE FROM sale_items WHERE sale_id = ?").run(saleId);
 }

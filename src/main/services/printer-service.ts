@@ -1548,7 +1548,7 @@ function buildQuotationHtml(
 
     <div class="bill-to">
       <p class="label">Quoted To</p>
-      <p class="name">${escapeHtml(quotation.customerName)}</p>
+      <p class="name">${escapeHtml(quotation.customerName ?? "Walk-in Customer")}</p>
     </div>
 
     <table class="meta-table">
@@ -1746,7 +1746,7 @@ function buildQuotationThermalHtml(quotation: Quotation, business: DocumentBusin
     <p class="center muted">${escapeHtml(quotation.quotationNumber)} &middot; ${escapeHtml(quotationStatusLabel(quotation.status))}</p>
     <hr/>
     <p class="muted">
-      Quoted To: ${escapeHtml(quotation.customerName)}<br/>
+      Quoted To: ${escapeHtml(quotation.customerName ?? "Walk-in Customer")}<br/>
       Date Prepared: ${formatInvoiceDate(quotation.createdAt)}<br/>
       Valid Until: ${formatInvoiceDate(quotation.validUntil)}<br/>
       Storefront: ${escapeHtml(quotation.locationName)} &middot; Prepared By: ${escapeHtml(quotation.employeeName)}

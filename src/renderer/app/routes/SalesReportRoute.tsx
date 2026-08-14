@@ -5,7 +5,9 @@ import { categoricalColor } from "@renderer/shared/components/charts/chartTokens
 import { HorizontalBarList } from "@renderer/shared/components/charts/HorizontalBarList";
 import { TrendAreaChart } from "@renderer/shared/components/charts/TrendAreaChart";
 import { ReportExportMenu } from "@renderer/shared/components/ReportExportMenu";
+import { ReportStorefrontFilter } from "@renderer/shared/components/ReportStorefrontFilter";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
+import { useReportLocationFilter } from "@renderer/shared/hooks/use-report-location-filter";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
@@ -99,6 +101,7 @@ export function SalesReportRoute(): React.JSX.Element {
   const setActiveNavKey = useUiStore((state) => state.setActiveNavKey);
   const { can } = usePermissions();
   const canExport = can("reports", "export");
+  const locationFilter = useReportLocationFilter();
 
   const [mode, setMode] = useState<SalesReportMode>("daily");
   const [anchor, setAnchor] = useState<string>(() => defaultAnchorForMode("daily"));
@@ -130,10 +133,12 @@ export function SalesReportRoute(): React.JSX.Element {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async (range: DateRangeInput, trend: typeof trendInput) => {
+  const load = useCallback(async (range: DateRangeInput, trend: typeof trendInput, locationId: string | null) => {
     setLoading(true);
     setError(null);
     try {
+      const scopedRange = { ...range, locationId };
+      const scopedTrend = { ...trend, locationId };
       const [
         overviewResult,
         transactionsResult,
@@ -145,15 +150,15 @@ export function SalesReportRoute(): React.JSX.Element {
         taxReportResult,
         localSourcingReportResult
       ] = await Promise.all([
-          window.blueLedger.report.salesFinancialOverview(range),
-          window.blueLedger.report.salesTransactions(range),
-          window.blueLedger.report.salesTrendWindow(trend),
-          window.blueLedger.report.salesByStorefront(range),
-          window.blueLedger.report.salesByEmployee(range),
-          window.blueLedger.report.salesByPaymentMethod(range),
-          window.blueLedger.report.cancelledPurchases(range),
-          window.blueLedger.report.taxBreakdown(range),
-          window.blueLedger.report.localSourcing(range),
+          window.blueLedger.report.salesFinancialOverview(scopedRange),
+          window.blueLedger.report.salesTransactions(scopedRange),
+          window.blueLedger.report.salesTrendWindow(scopedTrend),
+          window.blueLedger.report.salesByStorefront(scopedRange),
+          window.blueLedger.report.salesByEmployee(scopedRange),
+          window.blueLedger.report.salesByPaymentMethod(scopedRange),
+          window.blueLedger.report.cancelledPurchases(scopedRange),
+          window.blueLedger.report.taxBreakdown(scopedRange),
+          window.blueLedger.report.localSourcing(scopedRange),
         ]);
       setOverview(overviewResult);
       setTransactions(transactionsResult);
@@ -174,9 +179,9 @@ export function SalesReportRoute(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    void load(resolvedRange, trendInput);
+    void load(resolvedRange, trendInput, locationFilter.locationId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedRange.startDate, resolvedRange.endDate, JSON.stringify(trendInput), load]);
+  }, [resolvedRange.startDate, resolvedRange.endDate, JSON.stringify(trendInput), locationFilter.locationId, load]);
 
   const trendPoints = useMemo(
     () => trendWindow?.points.map((p) => ({ label: p.periodLabel, value: p.revenueCents, isSelected: p.isSelected })) ?? [],
@@ -606,7 +611,7 @@ export function SalesReportRoute(): React.JSX.Element {
           {canExport && reportExportRequest && <ReportExportMenu request={reportExportRequest} />}
         </div>
 
-        <div className="mt-5">
+        <div className="mt-5 flex flex-wrap items-center gap-3">
           <SalesModeSelector
             mode={mode}
             onModeChange={handleModeChange}
@@ -615,6 +620,7 @@ export function SalesReportRoute(): React.JSX.Element {
             customRange={customRange}
             onCustomRangeChange={setCustomRange}
           />
+          <ReportStorefrontFilter filter={locationFilter} />
         </div>
 
         {error && (

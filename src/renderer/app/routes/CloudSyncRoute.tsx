@@ -85,6 +85,7 @@ export function CloudSyncRoute(): React.JSX.Element {
   const [entityOverview, setEntityOverview] = useState<EntitySyncOverviewRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [retryingOrphans, setRetryingOrphans] = useState(false);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -137,6 +138,33 @@ export function CloudSyncRoute(): React.JSX.Element {
       showErrorToast(message);
     } finally {
       setSyncing(false);
+    }
+  }
+
+  /** "Retry Orphaned Records" — unlike Sync Now, this actually rewinds every entity currently stuck
+   * in sync_pull_orphans back to a full re-pull (see resyncOrphanedEntities' own doc comment for why
+   * a plain sync can never recover a quarantined row on its own). */
+  async function handleRetryOrphans(): Promise<void> {
+    setRetryingOrphans(true);
+    setError(null);
+    try {
+      const result = await window.blueLedger.sync.retryOrphans();
+      setSnapshot(result);
+      const [queueResult, conflictsResult, entityOverviewResult] = await Promise.all([
+        window.blueLedger.sync.listQueue({ limit: 25 }),
+        window.blueLedger.sync.listConflicts(),
+        window.blueLedger.sync.getEntityOverview()
+      ]);
+      setQueue(queueResult);
+      setConflicts(conflictsResult);
+      setEntityOverview(entityOverviewResult);
+      showSuccessToast("Retrying orphaned records — this may take a few sync cycles to fully clear");
+    } catch (err) {
+      const message = getErrorMessage(err, "Failed to retry orphaned records");
+      setError(message);
+      showErrorToast(message);
+    } finally {
+      setRetryingOrphans(false);
     }
   }
 
@@ -285,18 +313,32 @@ export function CloudSyncRoute(): React.JSX.Element {
       {snapshot.orphanedPullCount > 0 && (
         <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm font-bold text-warning">
           <AlertTriangle className="mt-0.5 size-4 flex-none" aria-hidden="true" />
-          <div>
+          <div className="flex-1">
             <p>
               {snapshot.orphanedPullCount} {snapshot.orphanedPullCount === 1 ? "record" : "records"} could not sync
               to this device.
             </p>
             <p className="mt-1 text-xs font-semibold">
               Each one kept failing to reference something else it needs for several minutes straight — usually
-              because that something (a product, a storefront) was deleted from the cloud. On a device doing its
-              very first full sync, this can also just mean it needed more time to catch up; a Sync Now after a
-              few minutes may clear it on its own. If it's still here after that, contact support so the
-              underlying data can be corrected.
+              because that something (a product, a storefront) hadn't landed locally yet on a device's first full
+              sync of a large tenant, not because it was actually deleted. A plain Sync Now can't recover these on
+              its own once this device has given up on them — use Retry below to force a full re-check.
             </p>
+            {canRunSync && (
+              <Button
+                type="button"
+                onClick={() => void handleRetryOrphans()}
+                disabled={retryingOrphans || syncing || snapshot.status === "not_activated"}
+                className="mt-2.5 h-8 border border-warning/40 bg-white text-xs text-warning shadow-none hover:bg-warning/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {retryingOrphans ? (
+                  <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <RefreshCw className="mr-1.5 size-3.5" aria-hidden="true" />
+                )}
+                {retryingOrphans ? "Retrying..." : "Retry Orphaned Records"}
+              </Button>
+            )}
           </div>
         </div>
       )}

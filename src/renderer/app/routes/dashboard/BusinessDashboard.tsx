@@ -65,7 +65,7 @@ export function BusinessDashboard({ isBusinessWide }: { isBusinessWide: boolean 
             window.blueLedger.sale.listPending(),
             window.blueLedger.report.salesByStorefront(range),
             window.blueLedger.report.salesByEmployee(range),
-            window.blueLedger.report.inventoryData(),
+            window.blueLedger.report.inventoryData({ locationId: null }),
             window.blueLedger.saleVoid.list(),
             window.blueLedger.saleReturn.list(),
             window.blueLedger.recurringBill.list().catch(() => []),

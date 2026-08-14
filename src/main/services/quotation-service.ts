@@ -51,7 +51,10 @@ function generateQuotationNumber(tenantId: string): string {
   });
 }
 
-function assertCustomerExists(tenantId: string, customerId: string): void {
+/** No-op for a walk-in quotation (customerId null) — see Quotation["customerId"]'s own doc comment
+ * for why that's a valid, intentional state here. */
+function assertCustomerExists(tenantId: string, customerId: string | null): void {
+  if (!customerId) return;
   const customer = customerRepository.findCustomerRowById(customerId);
   if (!customer || customer.tenant_id !== tenantId) {
     throw new Error("Customer not found");
@@ -480,6 +483,16 @@ export function convertQuotationToInvoice(id: string, input: unknown): Sale {
   requirePermission("sales", "create");
   const parsed: ConvertToInvoiceInput = convertToInvoiceSchema.parse(input);
   const { quotation, tenantId, employeeId, locationId } = requireAcceptedQuotationAtActiveBranch(id);
+
+  // Unlike converting to a sale/receipt (walk-in is completely normal there), an invoice is a credit
+  // document — the software needs someone real to bill and track a balance against. A walk-in
+  // quotation converting to a walk-in invoice would create exactly the "who do we collect this from"
+  // problem the Checkout-style Walk-in Customer option was deliberately kept OUT of invoice creation
+  // to avoid (see Quotation["customerId"]'s own doc comment). Caught here, not left to whatever
+  // insertInvoiceFromCart/the local NOT NULL-less-but-still-required-by-convention field would do.
+  if (!quotation.customerId) {
+    throw new Error("This quotation has no customer — pick a customer before converting it to an invoice.");
+  }
 
   const cart = buildConversionCart(quotation.id, tenantId, parsed.quantityOverrides);
 

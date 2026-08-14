@@ -43,8 +43,11 @@ export type Quotation = {
   id: QuotationId;
   tenantId: string;
   quotationNumber: string;
-  customerId: string;
-  customerName: string;
+  /** Null means a walk-in quotation — no money/credit is ever at stake for a quote, unlike an
+   * invoice, so (unlike Sale's own identical field) this is intentionally selectable in the UI, not
+   * just a sync-safety fallback. See QuotationsRoute.tsx's Walk-in Customer picker option. */
+  customerId: string | null;
+  customerName: string | null;
   locationId: string;
   locationName: string;
   employeeId: string;
@@ -75,7 +78,7 @@ export type Quotation = {
 export type QuotationListItem = {
   id: QuotationId;
   quotationNumber: string;
-  customerName: string;
+  customerName: string | null;
   locationId: string;
   locationName: string;
   employeeName: string;

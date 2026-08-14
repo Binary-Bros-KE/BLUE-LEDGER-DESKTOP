@@ -1,7 +1,7 @@
 import * as supplierReportRepository from "@main/database/repositories/supplier-report-repository";
-import { getCurrentBranchScope, requirePermission, requirePermissionAnyOf } from "@main/services/auth-service";
+import { getCurrentBranchScope, requirePermission, requirePermissionAnyOf, resolveReportLocationScope } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
-import { dateRangeInputSchema } from "@shared/schemas/report";
+import { dateRangeInputSchema, locationScopeInputSchema } from "@shared/schemas/report";
 import { supplierPurchaseHistoryInputSchema } from "@shared/schemas/supplier-report";
 import type {
   OutstandingPurchaseRow,
@@ -33,9 +33,9 @@ function addDaysIso(dateStr: string, days: number): string {
  * bought from the most," not just who's been paid so far (see getOutstandingPurchases for that). */
 export function getSupplierSpendBreakdown(input: unknown): SupplierSpendRow[] {
   requirePermission("reports", "view");
-  const { startDate, endDate } = dateRangeInputSchema.parse(input);
+  const { startDate, endDate, locationId: explicitLocationId } = dateRangeInputSchema.parse(input);
   const { tenantId } = getCurrentTenant();
-  const locationId = getCurrentBranchScope();
+  const locationId = resolveReportLocationScope(explicitLocationId);
 
   const startIso = startOfDayIso(startDate);
   const endIsoExclusive = startOfDayIso(addDaysIso(endDate, 1));
@@ -56,13 +56,14 @@ export function getSupplierSpendBreakdown(input: unknown): SupplierSpendRow[] {
 /** Every currently-outstanding purchase — a live balance-sheet snapshot,
  * deliberately not scoped to any selected period (same reasoning as Sales
  * Report's Creditors section). */
-export function getOutstandingPurchases(): OutstandingPurchasesSummary {
+export function getOutstandingPurchases(input: unknown): OutstandingPurchasesSummary {
   requirePermissionAnyOf([
     ["reports", "view"],
     ["purchases", "view"]
   ]);
+  const { locationId: explicitLocationId } = locationScopeInputSchema.parse(input);
   const { tenantId } = getCurrentTenant();
-  const locationId = getCurrentBranchScope();
+  const locationId = resolveReportLocationScope(explicitLocationId);
 
   const now = Date.now();
   const rows = supplierReportRepository.findOutstandingPurchases(tenantId, locationId);

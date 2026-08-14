@@ -75,9 +75,9 @@ export function StorekeeperDashboard(): React.JSX.Element {
       setError(null);
       try {
         const [inventoryData, mainStoreRows, outstandingPurchases] = await Promise.all([
-          window.blueLedger.report.inventoryData(),
+          window.blueLedger.report.inventoryData({ locationId: null }),
           window.blueLedger.mainStore.listProductRows(),
-          window.blueLedger.report.outstandingPurchases(),
+          window.blueLedger.report.outstandingPurchases({ locationId: null }),
         ]);
 
         if (cancelled) return;

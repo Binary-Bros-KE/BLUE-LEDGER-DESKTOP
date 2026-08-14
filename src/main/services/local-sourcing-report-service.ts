@@ -1,5 +1,5 @@
 import * as localSourcingReportRepository from "@main/database/repositories/local-sourcing-report-repository";
-import { getCurrentBranchScope, requirePermission } from "@main/services/auth-service";
+import { requirePermission, resolveReportLocationScope } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { dateRangeInputSchema } from "@shared/schemas/report";
 import type {
@@ -123,9 +123,9 @@ function bySupplier(lines: NettedLine[]): LocalSourcingSupplierTotal[] {
  * feature: "total cost, net revenue from local purchase sales, local purchases by supplier." */
 export function getLocalSourcingReport(input: unknown): LocalSourcingReport {
   requirePermission("reports", "view");
-  const { startDate, endDate } = dateRangeInputSchema.parse(input);
+  const { startDate, endDate, locationId: explicitLocationId } = dateRangeInputSchema.parse(input);
   const { tenantId } = getCurrentTenant();
-  const locationId = getCurrentBranchScope();
+  const locationId = resolveReportLocationScope(explicitLocationId);
 
   const startIso = startOfDayIso(startDate);
   const endIsoExclusive = startOfDayIso(addDaysIso(endDate, 1));

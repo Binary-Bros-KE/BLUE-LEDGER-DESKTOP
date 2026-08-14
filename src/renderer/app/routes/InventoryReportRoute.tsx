@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Boxes, Loader2 } from "lucide-react";
 import { ReportExportMenu } from "@renderer/shared/components/ReportExportMenu";
+import { ReportStorefrontFilter } from "@renderer/shared/components/ReportStorefrontFilter";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
+import { useReportLocationFilter } from "@renderer/shared/hooks/use-report-location-filter";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import { showErrorToast } from "@renderer/shared/lib/toast";
@@ -89,6 +91,7 @@ function buildLocationExportSections(section: LocationInventorySectionData): Rep
 export function InventoryReportRoute(): React.JSX.Element {
   const { can } = usePermissions();
   const canExport = can("reports", "export");
+  const locationFilter = useReportLocationFilter();
   const [data, setData] = useState<InventoryReportData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -100,7 +103,7 @@ export function InventoryReportRoute(): React.JSX.Element {
       setLoading(true);
       setError(null);
       try {
-        const result = await window.blueLedger.report.inventoryData();
+        const result = await window.blueLedger.report.inventoryData({ locationId: locationFilter.locationId });
         if (!cancelled) setData(result);
       } catch (err) {
         if (!cancelled) {
@@ -115,7 +118,7 @@ export function InventoryReportRoute(): React.JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [locationFilter.locationId]);
 
   // One export request per location, scoped to just that section — powers the "Export" button on
   // each storefront's own card, distinct from the "export everything" button in the page header.
@@ -208,7 +211,10 @@ export function InventoryReportRoute(): React.JSX.Element {
             storefront, however your stock is organized.
           </p>
         </div>
-        {canExport && reportExportRequest && <ReportExportMenu request={reportExportRequest} />}
+        <div className="flex items-center gap-3">
+          <ReportStorefrontFilter filter={locationFilter} />
+          {canExport && reportExportRequest && <ReportExportMenu request={reportExportRequest} />}
+        </div>
       </div>
 
       {error && (

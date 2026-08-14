@@ -1,16 +1,24 @@
 export type DateRangeInput = {
   startDate: string;
   endDate: string;
+  /** Only meaningful for a session with no assigned branch (Super Admin) — lets them narrow a
+   * report to one storefront instead of every location. A branch-scoped session's reports are
+   * always their own branch regardless of this field; see resolveReportLocationScope. */
+  locationId?: string | null;
 };
 
 export type SalesReportMode = "daily" | "weekly" | "monthly" | "yearly" | "custom";
 
 export type SalesTrendWindowInput =
-  | { mode: "daily"; anchor: string }
-  | { mode: "weekly"; anchor: string }
-  | { mode: "monthly"; anchor: string }
-  | { mode: "yearly"; anchor: string }
-  | { mode: "custom"; startDate: string; endDate: string };
+  | { mode: "daily"; anchor: string; locationId?: string | null }
+  | { mode: "weekly"; anchor: string; locationId?: string | null }
+  | { mode: "monthly"; anchor: string; locationId?: string | null }
+  | { mode: "yearly"; anchor: string; locationId?: string | null }
+  | { mode: "custom"; startDate: string; endDate: string; locationId?: string | null };
+
+/** Shared param shape for the handful of report calls with no date range at all
+ * (Inventory, Outstanding Invoices, Outstanding Purchases) — still filterable by storefront. */
+export type LocationScopeInput = { locationId: string | null };
 
 export type SalesTopProduct = {
   productId: string;

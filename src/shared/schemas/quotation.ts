@@ -19,7 +19,15 @@ const quotationCartItemSchema = z.object({
 
 export const quotationCreateSchema = z
   .object({
-    customerId: z.string().trim().min(1, "Select a customer"),
+    // Null/omitted means a walk-in quotation — see Quotation["customerId"]'s own doc comment for why
+    // this is intentionally allowed here, unlike an invoice.
+    customerId: z
+      .string()
+      .trim()
+      .min(1)
+      .nullable()
+      .optional()
+      .transform((value) => (value === undefined ? null : value)),
     validUntil: z.string().trim().min(1, "Valid-until date is required"),
     notes: optionalText(1000),
     /** Whether the "Tax Breakdown" section prints/downloads/shares on this quotation — see

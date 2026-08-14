@@ -7,6 +7,7 @@ import {
   listRecentReconciliations as listRecentReconciliationsFromEngine,
   readSetting,
   resolveConflict as resolveConflictInEngine,
+  resyncOrphanedEntities,
   syncNow,
   type DriftReport
 } from "@main/services/sync-engine";
@@ -87,6 +88,16 @@ export function getSyncSnapshot(): SyncSnapshot {
  * instead of waiting for the next timer tick (see bootstrap.ts), then returns the fresh snapshot so
  * the UI can update without a second round trip. */
 export async function runSyncNow(): Promise<SyncSnapshot> {
+  await syncNow();
+  return getSyncSnapshot();
+}
+
+/** Renderer-invokable "Retry Orphaned Records" button — see resyncOrphanedEntities' own doc comment
+ * for why a plain "Sync Now" can never recover a quarantined row on its own. Resets every entity
+ * currently represented in sync_pull_orphans, then runs a full sync cycle immediately so the reset
+ * takes effect right away instead of waiting for the next timer tick. */
+export async function retryOrphanedRecords(): Promise<SyncSnapshot> {
+  resyncOrphanedEntities();
   await syncNow();
   return getSyncSnapshot();
 }

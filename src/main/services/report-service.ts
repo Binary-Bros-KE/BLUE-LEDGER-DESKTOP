@@ -1,7 +1,14 @@
 import * as purchaseRepository from "@main/database/repositories/purchase-repository";
 import * as reportRepository from "@main/database/repositories/report-repository";
 import type { CompletedSaleRow, InvoicePaymentCandidateRow, PurchasePaymentCandidateRow, SaleItemProfitRow } from "@main/database/repositories/report-repository";
-import { getCurrentBranchScope, getCurrentEmployeeId, hasPermission, requirePermission, requirePermissionAnyOf } from "@main/services/auth-service";
+import {
+  getCurrentBranchScope,
+  getCurrentEmployeeId,
+  hasPermission,
+  requirePermission,
+  requirePermissionAnyOf,
+  resolveReportLocationScope,
+} from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { dateRangeInputSchema, salesTrendWindowInputSchema } from "@shared/schemas/report";
 import type {
@@ -320,9 +327,9 @@ export function getSalesFinancialOverview(input: unknown): SalesFinancialOvervie
     ["reports", "view"],
     ["sales", "view"]
   ]);
-  const { startDate, endDate } = dateRangeInputSchema.parse(input);
+  const { startDate, endDate, locationId: explicitLocationId } = dateRangeInputSchema.parse(input);
   const { tenantId } = getCurrentTenant();
-  const locationId = getCurrentBranchScope();
+  const locationId = resolveReportLocationScope(explicitLocationId);
 
   const startIso = startOfDayIso(startDate);
   const endIsoExclusive = startOfDayIso(addDaysIso(endDate, 1));
@@ -527,9 +534,9 @@ export function getSalesTransactions(input: unknown): SalesTransactionRow[] {
     ["reports", "view"],
     ["sales", "view"]
   ]);
-  const { startDate, endDate } = dateRangeInputSchema.parse(input);
+  const { startDate, endDate, locationId: explicitLocationId } = dateRangeInputSchema.parse(input);
   const { tenantId } = getCurrentTenant();
-  const locationId = getCurrentBranchScope();
+  const locationId = resolveReportLocationScope(explicitLocationId);
 
   const rows = reportRepository.findCompletedSaleRows(tenantId, locationId, startOfDayIso(startDate), startOfDayIso(addDaysIso(endDate, 1)));
 
@@ -557,9 +564,9 @@ export function getCancelledPurchasesInRange(input: unknown): CancelledPurchases
     ["reports", "view"],
     ["purchases", "view"]
   ]);
-  const { startDate, endDate } = dateRangeInputSchema.parse(input);
+  const { startDate, endDate, locationId: explicitLocationId } = dateRangeInputSchema.parse(input);
   const { tenantId } = getCurrentTenant();
-  const locationId = getCurrentBranchScope();
+  const locationId = resolveReportLocationScope(explicitLocationId);
 
   const rows = purchaseRepository.findCancelledPurchaseRowsInRange(
     tenantId,
@@ -806,9 +813,9 @@ export function getMySales(input: unknown): MySaleEntry[] {
 
 export function getSalesByStorefront(input: unknown): SalesByStorefrontRow[] {
   requirePermission("reports", "view");
-  const { startDate, endDate } = dateRangeInputSchema.parse(input);
+  const { startDate, endDate, locationId: explicitLocationId } = dateRangeInputSchema.parse(input);
   const { tenantId } = getCurrentTenant();
-  const locationId = getCurrentBranchScope();
+  const locationId = resolveReportLocationScope(explicitLocationId);
 
   const rows = reportRepository.findCompletedSaleRows(tenantId, locationId, startOfDayIso(startDate), startOfDayIso(addDaysIso(endDate, 1)));
   const totalRevenueCents = rows.reduce((sum, row) => sum + row.grand_total_cents, 0);
@@ -838,9 +845,9 @@ export function getSalesByEmployee(input: unknown): SalesByEmployeeRow[] {
     ["reports", "view"],
     ["sales", "view"]
   ]);
-  const { startDate, endDate } = dateRangeInputSchema.parse(input);
+  const { startDate, endDate, locationId: explicitLocationId } = dateRangeInputSchema.parse(input);
   const { tenantId } = getCurrentTenant();
-  const locationId = getCurrentBranchScope();
+  const locationId = resolveReportLocationScope(explicitLocationId);
 
   const rows = reportRepository.findCompletedSaleRows(tenantId, locationId, startOfDayIso(startDate), startOfDayIso(addDaysIso(endDate, 1)));
   const totalRevenueCents = rows.reduce((sum, row) => sum + row.grand_total_cents, 0);
@@ -869,9 +876,9 @@ export function getSalesByEmployee(input: unknown): SalesByEmployeeRow[] {
 
 export function getSalesByPaymentMethod(input: unknown): SalesByPaymentMethodRow[] {
   requirePermission("reports", "view");
-  const { startDate, endDate } = dateRangeInputSchema.parse(input);
+  const { startDate, endDate, locationId: explicitLocationId } = dateRangeInputSchema.parse(input);
   const { tenantId } = getCurrentTenant();
-  const locationId = getCurrentBranchScope();
+  const locationId = resolveReportLocationScope(explicitLocationId);
 
   const startIso = startOfDayIso(startDate);
   const endIsoExclusive = startOfDayIso(addDaysIso(endDate, 1));
@@ -1006,7 +1013,7 @@ export function getSalesTrendWindow(input: unknown): SalesTrendWindowResult {
   requirePermission("reports", "view");
   const parsed = salesTrendWindowInputSchema.parse(input);
   const { tenantId } = getCurrentTenant();
-  const locationId = getCurrentBranchScope();
+  const locationId = resolveReportLocationScope(parsed.locationId);
 
   if (parsed.mode === "custom") {
     const { startDate, endDate } = parsed;

@@ -2309,9 +2309,13 @@ function upsertDocumentHeader(
 
 const QUOTATION_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }> = [
   { local: "quotation_number", cloud: "quotationNumber" },
-  // Same missing-tag bug as SALE_HEADER_COLUMNS' customer_id above — fixed identically. NOT NULL
-  // on quotations (unlike sales, where customer_id is nullable/walk-in) — refNotNull matters here.
-  { local: "customer_id", cloud: "customerId", refEntity: "customers", refNotNull: true },
+  // Nullable now, same as SALE_HEADER_COLUMNS' own customer_id (walk-in quotations) — was
+  // refNotNull: true, which meant a quotation whose customer became genuinely unresolvable (e.g. a
+  // duplicate-customer sync collision, see the customers NATURAL_KEY_FIELDS fix) failed to apply at
+  // all and eventually got permanently skipped, silently losing the whole document rather than just
+  // its customer name. resolveRefOrNull degrades to a walk-in quotation instead — see
+  // migration 67 (quotation_walk_in_customer) for the schema half of this.
+  { local: "customer_id", cloud: "customerId", refEntity: "customers" },
   { local: "location_id", cloud: "locationId", refEntity: "locations", refNotNull: true },
   { local: "employee_id", cloud: "employeeId", refEntity: "employees", refNotNull: true },
   { local: "status", cloud: "status" },
@@ -2708,8 +2712,18 @@ const ORPHAN_QUARANTINE_THRESHOLD = 3;
  * legitimately take several minutes to fully catch up on its very first sync; 3 rapid-fire attempts
  * inside that window is not the same signal as 3 attempts spread over a device's normal, already-
  * caught-up operation (the case this quarantine mechanism was actually built for — a genuinely
- * deleted cloud reference). Both conditions must hold before giving up on a row. */
-const ORPHAN_MIN_AGE_MS = 5 * 60 * 1000;
+ * deleted cloud reference). Both conditions must hold before giving up on a row.
+ *
+ * Was 5 minutes — raised after this exact failure mode recurred on a real client's first full sync
+ * (hundreds of stock_movements + several small entities), just at larger scale: rows failed their
+ * first 3 attempts within the first ~5-6 minutes of a cold start (before "products"/"locations" had
+ * fully landed), crossed BOTH thresholds right at that boundary, and were quarantined — permanently
+ * excluded from ever pulling again — even though the data they referenced was completely valid and
+ * landed locally minutes later. 5 minutes is not a generous enough buffer for a large, established
+ * tenant's very first sync; a longer window only delays how fast a GENUINELY dead reference gets
+ * flagged, which is a far better trade-off than silently losing real data. See resyncOrphanedEntities
+ * below for the recovery path once a row is wrongly quarantined despite this. */
+const ORPHAN_MIN_AGE_MS = 20 * 60 * 1000;
 
 /** Records (or bumps the attempt count on) a row that's still failing after the in-page retry below.
  * Table is local-only, diagnostic, and deliberately has no FK constraints of its own — it must be
@@ -2828,6 +2842,33 @@ async function pullEntity(tenantId: string, deviceId: string, entity: SyncEntity
 export function getPullOrphanCount(): number {
   const row = getDatabase().prepare("SELECT COUNT(*) as count FROM sync_pull_orphans").get() as { count: number };
   return row.count;
+}
+
+/**
+ * Recovery path for rows quarantined by pullEntity's ORPHAN_QUARANTINE_THRESHOLD path above — there
+ * was previously no way back from that state short of manual SQL surgery. Once a row is quarantined,
+ * the entity's cursor has already advanced past its cloud `syncedAt` (see pullEntity: quarantining a
+ * row is what LETS the cursor advance past an otherwise-blocked page), so the server's delta-pull
+ * query (`syncedAt > cursor`) will never return it again — clicking "Sync Now" a hundred times does
+ * nothing, by design, for a row in this state. This is intentionally a blunt full reset, not a precise
+ * rewind to just before the earliest orphan: rewinding to the exact right instant per entity is easy
+ * to get subtly wrong (an off-by-one leaves the same row excluded again), whereas re-pulling an
+ * entity from scratch is always safe — every apply path here is idempotent (stock_movements' own
+ * `alreadyApplied` check, every other entity's plain upsert-by-id) and cheap for the entity sizes this
+ * has actually been needed for. Clears sync_pull_orphans for exactly the entities being reset so their
+ * attempt/age counters start clean, not fresh reattempts warp against stale history.
+ */
+export function resyncOrphanedEntities(): { entities: SyncEntity[] } {
+  const db = getDatabase();
+  const rows = db.prepare("SELECT DISTINCT entity FROM sync_pull_orphans").all() as Array<{ entity: SyncEntity }>;
+  const entities = rows.map((row) => row.entity);
+
+  for (const entity of entities) {
+    writeCursor(entity, new Date(0).toISOString());
+    db.prepare("DELETE FROM sync_pull_orphans WHERE entity = ?").run(entity);
+  }
+
+  return { entities };
 }
 
 export async function pullDeltas(): Promise<void> {

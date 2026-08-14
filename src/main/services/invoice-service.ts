@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import * as customerRepository from "@main/database/repositories/customer-repository";
+import * as deliveryNoteRepository from "@main/database/repositories/delivery-note-repository";
 import * as paymentMethodRepository from "@main/database/repositories/payment-method-repository";
 import * as saleRepository from "@main/database/repositories/sale-repository";
 import type { SaleRow } from "@main/database/repositories/sale-repository";
+import * as serviceChargeRepository from "@main/database/repositories/service-charge-repository";
 import { runInTransaction } from "@main/database/connection";
 import {
   getCurrentBranchScope,
@@ -24,7 +26,13 @@ import {
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { computePaymentStatus } from "@shared/lib/invoice";
 import { optionalText } from "@shared/schemas/common";
-import { createInvoiceSchema, recordPaymentSchema, type CreateInvoiceInput } from "@shared/schemas/invoice";
+import {
+  createInvoiceSchema,
+  recordPaymentSchema,
+  updateInvoiceSchema,
+  type CreateInvoiceInput,
+  type UpdateInvoiceInput
+} from "@shared/schemas/invoice";
 import type { InvoiceListItem, InvoiceSummary } from "@shared/types/invoice";
 import type { Sale, SalePayment, TransactionType } from "@shared/types/sale";
 
@@ -327,6 +335,131 @@ export function createInvoice(input: unknown): Sale {
   });
 
   return getSaleDetail(saleId);
+}
+
+function requireEditableUnpaidInvoice(id: string, tenantId: string): SaleRow {
+  const row = requireInvoiceRow(id, tenantId);
+  if (row.payment_status === "cancelled") {
+    throw new Error("This invoice has been cancelled");
+  }
+  if (row.amount_paid_cents > 0) {
+    throw new Error("This invoice has payments recorded against it and can no longer be edited");
+  }
+  return row;
+}
+
+/** A fully unpaid invoice can be freely re-priced and re-itemized from live product data — same
+ * "nothing committed yet" reasoning quotation-service.ts's updateQuotation uses for drafts, except an
+ * invoice's own commitment line is "has any payment been recorded" rather than a status field.
+ * Restocks every existing line first, then re-deducts the new cart — same net effect as diffing old
+ * vs new quantities, but far simpler, and reuses the exact restock condition
+ * invoice-cancellation-service.ts's restockAndMarkCancelled already established (track_stock &&
+ * !is_locally_sourced). If the new cart needs more stock than's available, applyValidatedStockMovement
+ * throws and the whole transaction rolls back — the old items' restock happens in the SAME
+ * transaction, so nothing is left half-adjusted. The invoice's own storefront is fixed at creation,
+ * same as a quotation's — parsed.locationId (if sent) is simply never read here. */
+export function updateInvoice(id: string, input: unknown): Sale {
+  requirePermission("sales", "edit");
+  const parsed: UpdateInvoiceInput = updateInvoiceSchema.parse(input);
+  const { tenantId } = getCurrentTenant();
+  const row = requireEditableUnpaidInvoice(id, tenantId);
+
+  const customer = customerRepository.findCustomerRowById(parsed.customerId);
+  if (!customer || customer.tenant_id !== tenantId) {
+    throw new Error("Customer not found");
+  }
+
+  const cart = prepareCart(tenantId, parsed.items, {
+    serviceCharges: parsed.serviceCharges,
+    delivery: parsed.delivery
+  });
+
+  const paymentStatus = computePaymentStatus({
+    balanceDueCents: cart.grandTotalCents,
+    amountPaidCents: 0,
+    dueDate: parsed.dueDate,
+    cancelled: false
+  });
+
+  const employeeId = getCurrentEmployeeId();
+  if (!employeeId) {
+    throw new Error("You must be signed in to do that");
+  }
+
+  runInTransaction(() => {
+    const existingItems = saleRepository.findSaleItemDetailRows(id);
+    for (const item of existingItems) {
+      if (!item.track_stock || item.is_locally_sourced) continue;
+      applyValidatedStockMovement(
+        {
+          productId: item.product_id,
+          locationId: row.location_id,
+          movementType: "return",
+          quantityChange: item.quantity,
+          referenceType: "invoice_edit",
+          referenceId: id,
+          performedBy: employeeId,
+          notes: null
+        },
+        tenantId
+      );
+    }
+
+    saleRepository.updateInvoiceContentRow({
+      id,
+      customerId: parsed.customerId,
+      transactionType: parsed.transactionType,
+      dueDate: parsed.dueDate,
+      subtotalCents: cart.subtotalCents,
+      discountAmountCents: cart.discountAmountCents,
+      taxAmountCents: cart.taxAmountCents,
+      grandTotalCents: cart.grandTotalCents,
+      balanceDueCents: cart.grandTotalCents,
+      paymentStatus,
+      invoiceNotes: parsed.invoiceNotes,
+      includeTaxBreakdown: parsed.includeTaxBreakdown
+    });
+
+    saleRepository.deleteSaleItemsForSaleRow(id);
+    for (const item of cart.items) {
+      saleRepository.insertSaleItemRow({
+        id: `sale_item_${randomUUID()}`,
+        saleId: id,
+        productId: item.product.id,
+        quantity: item.quantity,
+        unitPriceCents: item.unitPriceCents,
+        discountAmountCents: item.discountAmountCents,
+        taxType: item.taxType,
+        taxAmountCents: item.taxAmountCents,
+        lineTotalCents: item.lineTotalCents,
+        isLocallySourced: item.isLocallySourced,
+        localCostCents: item.localCostCents,
+        localSupplierId: item.localSupplierId
+      });
+
+      if (item.product.track_stock && !item.isLocallySourced) {
+        applyValidatedStockMovement(
+          {
+            productId: item.product.id,
+            locationId: row.location_id,
+            movementType: "sale",
+            quantityChange: -item.quantity,
+            referenceType: "invoice",
+            referenceId: id,
+            performedBy: employeeId,
+            notes: null
+          },
+          tenantId
+        );
+      }
+    }
+
+    serviceChargeRepository.deleteServiceChargesForSaleRow(id);
+    deliveryNoteRepository.deleteDeliveryNoteForSaleRow(id);
+    persistCartExtras(tenantId, { saleId: id }, cart);
+  });
+
+  return getSaleDetail(id);
 }
 
 /** Appends a payment to the invoice's history and recalculates the outstanding balance and status. */
