@@ -182,6 +182,12 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
                 <td className="border border-ink px-1.5 py-1 text-right">-{money(vm.discountAmountCents)}</td>
               </tr>
             )}
+            {vm.includeTaxBreakdown && vm.addedTaxCents > 0 && (
+              <tr>
+                <td className="border border-ink bg-soft px-1.5 py-1 font-bold">Total Tax</td>
+                <td className="border border-ink px-1.5 py-1 text-right">{money(vm.addedTaxCents)}</td>
+              </tr>
+            )}
             <tr>
               <td className="border border-ink bg-soft px-1.5 py-1 text-sm font-extrabold">Total</td>
               <td className="border border-ink px-1.5 py-1 text-right text-sm font-extrabold">{money(vm.grandTotalCents)}</td>
@@ -206,9 +212,9 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
             </thead>
             <tbody>
               {vm.taxBreakdown.map((entry) => (
-                <tr key={entry.taxType}>
+                <tr key={`${entry.taxType}:${entry.pricingMode ?? ""}`}>
                   <td className="border border-ink px-1.5 py-1 font-bold">
-                    {taxBreakdownLabel(entry.taxType, { vatRatePercent: vm.vatRatePercent, pricesTaxInclusive: true })}
+                    {taxBreakdownLabel(entry.taxType, { vatRatePercent: vm.vatRatePercent, pricesTaxInclusive: true }, entry.pricingMode)}
                   </td>
                   <td className="border border-ink px-1.5 py-1 text-right">{money(entry.netCents)}</td>
                   <td className="border border-ink px-1.5 py-1 text-right">{money(entry.taxCents)}</td>

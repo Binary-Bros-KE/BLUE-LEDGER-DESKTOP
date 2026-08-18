@@ -22,7 +22,7 @@ import {
   type PurchaseItemInput,
   type PurchaseUpdateInput
 } from "@shared/schemas/purchase";
-import { computeLineTax } from "@shared/lib/tax-calculation";
+import { computeLineTax, resolveProductTaxConfig } from "@shared/lib/tax-calculation";
 import type { ProductTaxType } from "@shared/types/product";
 import type { Purchase, PurchaseListItem, PurchasePayment, PurchaseStatus, PurchaseSummary } from "@shared/types/purchase";
 
@@ -100,12 +100,17 @@ function prepareCart(tenantId: string, items: PurchaseItemInput[], shippingCostC
       throw new Error("One of the selected products was not found");
     }
 
-    // Supplier invoice cost is treated the same as a tax-inclusive retail price — tax is extracted
-    // for reporting, never added on top (see tax-calculation.ts). taxType comes from the line
-    // itself (defaults from the product in the UI, but a real invoice can classify differently).
+    // Supplier invoice cost follows the same product-level (falling back to tenant-wide) inclusive/
+    // exclusive setting as retail prices (see tax-calculation.ts) — tax is extracted for reporting
+    // when inclusive, added on top when exclusive. taxType comes from the line itself (defaults from
+    // the product in the UI, but a real invoice can classify differently).
     const taxableCents = item.orderedQuantity * item.unitCostCents - item.discountAmountCents;
     const taxType = item.taxType as ProductTaxType;
-    const { taxCents } = computeLineTax(taxableCents, taxType, tenantTaxConfig);
+    const productTaxConfig = resolveProductTaxConfig(
+      { pricesTaxInclusive: product.prices_tax_inclusive === null ? null : Boolean(product.prices_tax_inclusive) },
+      tenantTaxConfig
+    );
+    const { grossCents, taxCents } = computeLineTax(taxableCents, taxType, productTaxConfig);
 
     return {
       productId: product.id,
@@ -114,7 +119,7 @@ function prepareCart(tenantId: string, items: PurchaseItemInput[], shippingCostC
       discountAmountCents: item.discountAmountCents,
       taxType,
       taxAmountCents: taxCents,
-      lineTotalCents: taxableCents
+      lineTotalCents: grossCents
     };
   });
 
@@ -127,16 +132,19 @@ function prepareCart(tenantId: string, items: PurchaseItemInput[], shippingCostC
     taxAmountCents += item.taxAmountCents;
   }
 
+  // Sums each line's own grossCents rather than branching off one global toggle — same reasoning as
+  // sale-service.ts's prepareCart, since an order's lines can mix inclusive and exclusive products
+  // via their own overrides. Shipping is a whole-order add-on, unlike discount — it increases the
+  // total, it never reduces it.
+  const grandTotalCents = preparedItems.reduce((sum, item) => sum + item.lineTotalCents, 0) + shippingCostCents;
+
   return {
     items: preparedItems,
     subtotalCents,
     discountAmountCents,
     taxAmountCents,
     shippingCostCents,
-    // Tax is already inside subtotalCents (cost is tax-inclusive) — never added again here, same
-    // fix as sale-service.ts's prepareCart. Shipping is a whole-order add-on, unlike discount —
-    // it increases the total, it never reduces it.
-    grandTotalCents: subtotalCents - discountAmountCents + shippingCostCents
+    grandTotalCents
   };
 }
 

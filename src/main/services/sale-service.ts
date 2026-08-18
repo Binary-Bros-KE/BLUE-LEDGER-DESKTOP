@@ -21,7 +21,7 @@ import {
   type CheckoutInput,
   type SaleCartInput
 } from "@shared/schemas/sale";
-import { computeLineTax } from "@shared/lib/tax-calculation";
+import { computeLineTax, resolveProductTaxConfig } from "@shared/lib/tax-calculation";
 import { isStorefrontType, type LocationType } from "@shared/types/location";
 import type { ProductTaxType } from "@shared/types/product";
 import type { PendingSaleListItem, Sale, SaleListItem } from "@shared/types/sale";
@@ -170,13 +170,24 @@ export function prepareCart(
       throw new Error(`Discount for "${product.name}" would drop it below its minimum price`);
     }
 
-    // The gross line price ALREADY includes tax (product prices are tax-inclusive) — tax is
-    // extracted from it for reporting via computeLineTax, never added on top. lineTotalCents is
-    // just the gross amount actually charged; taxAmountCents is purely informational and never
-    // contributes to any total (see grandTotalCents below).
+    // Whether this base amount is the already-taxed gross or the pre-tax net depends on THIS
+    // product's own effective setting (its own override, or the tenant default when it has none) —
+    // resolveProductTaxConfig resolves that per line, since a single cart can mix inclusive and
+    // exclusive products. lineTotalCents is always the result's grossCents (what's actually
+    // charged): identical to the base amount when inclusive, base + tax when exclusive.
+    // taxAmountCents is reporting-only either way, never re-added elsewhere (see grandTotalCents
+    // below, which sums each line's own grossCents rather than re-branching globally).
     const taxableCents = lineSubtotalCents - item.discountAmountCents;
-    const { taxCents: lineTaxCents } = computeLineTax(taxableCents, product.tax_type as ProductTaxType, tenantTaxConfig);
-    const lineTotalCents = taxableCents;
+    const productTaxConfig = resolveProductTaxConfig(
+      { pricesTaxInclusive: product.prices_tax_inclusive === null ? null : Boolean(product.prices_tax_inclusive) },
+      tenantTaxConfig
+    );
+    const { grossCents: lineGrossCents, taxCents: lineTaxCents } = computeLineTax(
+      taxableCents,
+      product.tax_type as ProductTaxType,
+      productTaxConfig
+    );
+    const lineTotalCents = lineGrossCents;
 
     subtotalCents += lineSubtotalCents;
     discountAmountCents += item.discountAmountCents;
@@ -213,15 +224,17 @@ export function prepareCart(
   const extraFeesCents =
     serviceCharges.reduce((sum, charge) => sum + charge.feeCents, 0) + (delivery?.feeCents ?? 0);
 
+  // Summing each line's own grossCents (rather than branching subtotalCents - discount + tax off a
+  // single global toggle) is what makes a cart with mixed inclusive/exclusive products total
+  // correctly — each line already resolved its OWN effective mode above via resolveProductTaxConfig.
+  const grandTotalCents = preparedItems.reduce((sum, item) => sum + item.lineTotalCents, 0) + extraFeesCents;
+
   return {
     items: preparedItems,
     subtotalCents,
     discountAmountCents,
     taxAmountCents,
-    // Tax is a reporting figure ONLY — it's already inside subtotalCents (prices are
-    // tax-inclusive), so it must never be added again here. This is the actual fix: before, this
-    // line silently inflated every sale's total by its own tax amount.
-    grandTotalCents: subtotalCents - discountAmountCents + extraFeesCents,
+    grandTotalCents,
     serviceCharges,
     delivery
   };

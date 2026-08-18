@@ -34,16 +34,18 @@ import { QuickCreateProductModal } from "@renderer/shared/components/QuickCreate
 import { ShareModal } from "@renderer/shared/components/ShareModal";
 import { StatementPreview } from "@renderer/shared/components/StatementPreview";
 import { StatTile } from "@renderer/shared/components/StatTile";
+import { StockByLocationRow } from "@renderer/shared/components/StockByLocationRow";
 import { StorefrontPicker } from "@renderer/shared/components/StorefrontPicker";
 import { SupplierPicker } from "@renderer/shared/components/SupplierPicker";
 import { TaxBreakdownTable } from "@renderer/shared/components/TaxBreakdownTable";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
+import { useProductStockOverview } from "@renderer/shared/hooks/use-product-stock-overview";
 import { computeLinePricing, isPriceBelowMinimum } from "@renderer/shared/lib/cart-pricing";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
-import { computeTaxBreakdown } from "@shared/lib/tax-calculation";
+import { computeAddedTaxCents, computeTaxBreakdown, taxModeBadgeLabel } from "@shared/lib/tax-calculation";
 import {
   ALL_YEARS_VALUE,
   buildAvailableYears,
@@ -714,25 +716,40 @@ export function InvoicesRoute(): React.JSX.Element {
     [createItems, productById, tenantContext]
   );
 
+  const createLineStock = useProductStockOverview(createLinePricing.map((entry) => entry.line.productId));
+
   const createTotals = useMemo(() => {
     let subtotalCents = 0;
     let discountAmountCents = 0;
     let taxAmountCents = 0;
+    let lineTotalCentsSum = 0;
     for (const entry of createLinePricing) {
       subtotalCents += entry.pricing.lineSubtotalCents;
       discountAmountCents += entry.pricing.discountAmountCents;
       taxAmountCents += entry.pricing.taxCents;
+      lineTotalCentsSum += entry.pricing.lineTotalCents;
     }
     const serviceChargesFeeCents = createServiceCharges.reduce((sum, charge) => sum + toCents(charge.fee), 0);
     const deliveryFeeCents = createDelivery ? toCents(createDelivery.fee) : 0;
+    // Sums each line's own lineTotalCents (already resolved per-product) rather than branching off
+    // one global toggle — see CheckoutRoute.tsx's computeDraftTotals for the same reasoning.
+    const grandTotalCents = lineTotalCentsSum + serviceChargesFeeCents + deliveryFeeCents;
+    const addedTaxCents = computeAddedTaxCents(
+      createLinePricing.map((entry) => ({
+        unitPriceCents: entry.pricing.unitPriceCents,
+        quantity: entry.line.quantity,
+        discountAmountCents: entry.pricing.discountAmountCents,
+        lineTotalCents: entry.pricing.lineTotalCents
+      }))
+    );
     return {
       subtotalCents,
       discountAmountCents,
       taxAmountCents,
       serviceChargesFeeCents,
       deliveryFeeCents,
-      // Tax is already inside subtotalCents (prices are tax-inclusive) — never added again here.
-      grandTotalCents: subtotalCents - discountAmountCents + serviceChargesFeeCents + deliveryFeeCents
+      grandTotalCents,
+      addedTaxCents
     };
   }, [createLinePricing, createServiceCharges, createDelivery]);
 
@@ -1434,6 +1451,12 @@ export function InvoicesRoute(): React.JSX.Element {
                   <span className="font-bold tabular-nums">{formatCents(viewingSale.delivery.feeCents)}</span>
                 </div>
               )}
+              {viewingSale.includeTaxBreakdown && computeAddedTaxCents(viewingSale.items) > 0 && (
+                <div className="flex justify-between text-muted">
+                  <span className="font-semibold">Total Tax</span>
+                  <span className="font-bold tabular-nums">{formatCents(computeAddedTaxCents(viewingSale.items))}</span>
+                </div>
+              )}
               <div className="flex justify-between text-base font-extrabold text-ink">
                 <span>Total</span>
                 <span>{formatCents(viewingSale.grandTotalCents)}</span>
@@ -2015,14 +2038,24 @@ export function InvoicesRoute(): React.JSX.Element {
                           {line.name}
                         </p>
                         <p className="text-[11px] font-semibold text-muted">@ {formatCents(pricing.unitPriceCents)}</p>
+                        <StockByLocationRow balances={createLineStock.get(line.productId)} />
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => removeCreateLine(line.productId)}
-                        className="text-[11px] font-extrabold uppercase text-danger hover:underline cursor-pointer"
-                      >
-                        Remove
-                      </button>
+                      <div className="flex flex-none flex-col items-end gap-1">
+                        {(() => {
+                          const badge = taxModeBadgeLabel(product, {
+                            vatRatePercent: tenantContext?.vatRatePercent ?? 16,
+                            pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true
+                          });
+                          return <DashedPill tone={badge.tone}>{badge.label}</DashedPill>;
+                        })()}
+                        <button
+                          type="button"
+                          onClick={() => removeCreateLine(line.productId)}
+                          className="text-[11px] font-extrabold uppercase text-danger hover:underline cursor-pointer"
+                        >
+                          Remove
+                        </button>
+                      </div>
                     </div>
                     <div className="mt-2 flex items-center justify-between gap-2">
                       <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted">
@@ -2195,6 +2228,12 @@ export function InvoicesRoute(): React.JSX.Element {
                 <span className="font-bold tabular-nums">{formatCents(createTotals.deliveryFeeCents)}</span>
               </div>
             )}
+            {createIncludeTaxBreakdown && createTotals.addedTaxCents > 0 && (
+              <div className="flex justify-between text-muted">
+                <span className="font-semibold">Total Tax</span>
+                <span className="font-bold tabular-nums">{formatCents(createTotals.addedTaxCents)}</span>
+              </div>
+            )}
             <div className="flex justify-between text-base font-extrabold text-ink">
               <span>Total</span>
               <span>{formatCents(createTotals.grandTotalCents)}</span>
@@ -2216,6 +2255,9 @@ export function InvoicesRoute(): React.JSX.Element {
           <TaxBreakdownTable
             breakdown={computeTaxBreakdown(
               createLinePricing.map((entry) => ({
+                unitPriceCents: entry.pricing.unitPriceCents,
+                quantity: entry.line.quantity,
+                discountAmountCents: entry.pricing.discountAmountCents,
                 taxType: entry.product.taxType,
                 taxAmountCents: entry.pricing.taxCents,
                 lineTotalCents: entry.pricing.lineTotalCents

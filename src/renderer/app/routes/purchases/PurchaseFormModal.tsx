@@ -6,7 +6,7 @@ import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
-import { computeLineTax, type TenantTaxConfig } from "@shared/lib/tax-calculation";
+import { computeLineTax, resolveProductTaxConfig, type TenantTaxConfig } from "@shared/lib/tax-calculation";
 import type { Location } from "@shared/types/location";
 import { TAX_TYPE_OPTIONS, type Product, type ProductListItem, type ProductTaxType } from "@shared/types/product";
 import type { Purchase } from "@shared/types/purchase";
@@ -39,14 +39,30 @@ function emptyItemLine(product: Product | ProductListItem): ItemLine {
   };
 }
 
-/** Cost is already tax-inclusive (same convention as sale-service.ts) — tax is extracted for
- * reporting, never added on top, so this is just the taxable (net-of-discount) amount. */
-function lineTotalCents(line: ItemLine): number {
+/** Net-of-discount amount before tax is applied — same convention as sale-service.ts's prepareCart. */
+function lineTaxableCents(line: ItemLine): number {
   return line.orderedQuantity * line.unitCostCents - line.discountAmountCents;
 }
 
-function lineTaxCents(line: ItemLine, tenantTaxConfig: TenantTaxConfig): number {
-  return computeLineTax(lineTotalCents(line), line.taxType, tenantTaxConfig).taxCents;
+/** Resolves this line's own product's inclusive/exclusive override (falling back to the tenant
+ * default) — `product` is undefined only if the catalog list this modal was given doesn't include
+ * it (e.g. it was deactivated after the purchase was created), in which case the tenant default
+ * applies, same as a product that was never given its own override. */
+function lineTaxConfig(
+  product: ProductListItem | undefined,
+  tenantTaxConfig: TenantTaxConfig
+): TenantTaxConfig {
+  return resolveProductTaxConfig({ pricesTaxInclusive: product?.pricesTaxInclusive ?? null }, tenantTaxConfig);
+}
+
+/** The amount actually charged for this line — equals the taxable amount when the effective mode
+ * is inclusive, or taxable + tax when exclusive (see tax-calculation.ts). */
+function lineGrossCents(line: ItemLine, product: ProductListItem | undefined, tenantTaxConfig: TenantTaxConfig): number {
+  return computeLineTax(lineTaxableCents(line), line.taxType, lineTaxConfig(product, tenantTaxConfig)).grossCents;
+}
+
+function lineTaxCents(line: ItemLine, product: ProductListItem | undefined, tenantTaxConfig: TenantTaxConfig): number {
+  return computeLineTax(lineTaxableCents(line), line.taxType, lineTaxConfig(product, tenantTaxConfig)).taxCents;
 }
 
 export function PurchaseFormModal({
@@ -144,26 +160,33 @@ export function PurchaseFormModal({
       .slice(0, 8);
   }, [products, productSearch]);
 
+  const productById = useMemo(() => new Map(products.map((product) => [product.id, product])), [products]);
+
   const totals = useMemo(() => {
     let subtotalCents = 0;
     let discountAmountCents = 0;
     let taxAmountCents = 0;
+    let lineGrossCentsSum = 0;
     for (const item of items) {
+      const product = productById.get(item.productId);
       subtotalCents += item.orderedQuantity * item.unitCostCents;
       discountAmountCents += item.discountAmountCents;
-      taxAmountCents += lineTaxCents(item, tenantTaxConfig);
+      taxAmountCents += lineTaxCents(item, product, tenantTaxConfig);
+      lineGrossCentsSum += lineGrossCents(item, product, tenantTaxConfig);
     }
     const shippingCostCents = shippingCost.trim() ? toCents(shippingCost) : 0;
+    // Sums each line's own gross amount (already resolved per-product) rather than branching off
+    // one global toggle — an order's lines can mix inclusive and exclusive products via their own
+    // overrides. Shipping is added on top either way, unlike discount — it increases the total.
+    const grandTotalCents = lineGrossCentsSum + shippingCostCents;
     return {
       subtotalCents,
       discountAmountCents,
       taxAmountCents,
       shippingCostCents,
-      // Tax is already inside subtotalCents (cost is tax-inclusive) — never added again here.
-      // Shipping is added on top, unlike discount — it increases the total.
-      grandTotalCents: subtotalCents - discountAmountCents + shippingCostCents
+      grandTotalCents
     };
-  }, [items, shippingCost, tenantTaxConfig]);
+  }, [items, shippingCost, tenantTaxConfig, productById]);
 
   function addItemLine(product: ProductListItem): void {
     setItems((prev) => {
@@ -489,8 +512,10 @@ export function PurchaseFormModal({
                       </label>
                     </div>
                     <div className="mt-2 flex items-center justify-between text-xs font-semibold text-muted">
-                      <span>Tax (included): {formatCents(lineTaxCents(line, tenantTaxConfig))}</span>
-                      <span className="text-sm font-extrabold text-ink">{formatCents(lineTotalCents(line))}</span>
+                      <span>Tax: {formatCents(lineTaxCents(line, productById.get(line.productId), tenantTaxConfig))}</span>
+                      <span className="text-sm font-extrabold text-ink">
+                        {formatCents(lineGrossCents(line, productById.get(line.productId), tenantTaxConfig))}
+                      </span>
                     </div>
                   </div>
                 ))

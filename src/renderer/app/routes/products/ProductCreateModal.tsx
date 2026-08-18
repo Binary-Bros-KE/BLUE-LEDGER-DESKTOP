@@ -12,7 +12,14 @@ import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import type { Category } from "@shared/types/category";
 import { isStorefrontType, type Location } from "@shared/types/location";
-import { TAX_TYPE_OPTIONS, UNIT_OF_MEASURE_OPTIONS, type Product, type ProductTaxType } from "@shared/types/product";
+import {
+  PRODUCT_TAX_MODE_OPTIONS,
+  TAX_TYPE_OPTIONS,
+  UNIT_OF_MEASURE_OPTIONS,
+  type Product,
+  type ProductTaxMode,
+  type ProductTaxType
+} from "@shared/types/product";
 
 type FormState = {
   sku: string;
@@ -30,6 +37,7 @@ type FormState = {
   wholesaleMinQuantity: string;
   minimumPrice: string;
   taxType: ProductTaxType;
+  taxMode: ProductTaxMode;
   reorderLevel: string;
   trackStock: boolean;
   allowNegativeStock: boolean;
@@ -53,6 +61,7 @@ function emptyForm(): FormState {
     wholesaleMinQuantity: "0",
     minimumPrice: "",
     taxType: "vat",
+    taxMode: "inherit",
     reorderLevel: "0",
     trackStock: true,
     allowNegativeStock: false,
@@ -104,6 +113,8 @@ export function ProductCreateModal({
   const { session } = usePermissions();
   const isSuperAdmin = getDashboardVariant(session) === "superAdmin";
   const vatRatePercent = useAppStore((state) => state.context?.tenant.vatRatePercent ?? 16);
+  const pricesTaxInclusive = useAppStore((state) => state.context?.tenant.pricesTaxInclusive ?? true);
+  const businessDefaultTaxModeLabel = pricesTaxInclusive ? "currently Inclusive" : "currently Exclusive";
 
   const [form, setForm] = useState<FormState>(() => emptyForm());
   const [openingStock, setOpeningStock] = useState<Record<string, string>>({});
@@ -228,6 +239,7 @@ export function ProductCreateModal({
         // schema outright.
         taxRate: form.taxType === "vat" ? vatRatePercent : 0,
         taxType: form.taxType,
+        pricesTaxInclusive: form.taxMode === "inherit" ? null : form.taxMode === "inclusive",
         reorderLevel: Number(form.reorderLevel) || 0,
         trackStock: form.trackStock,
         allowNegativeStock: form.allowNegativeStock,
@@ -444,6 +456,16 @@ export function ProductCreateModal({
                 label: option.value === "vat" ? `${option.label} (${vatRatePercent}%)` : option.label
               }))}
             />
+            <SelectField
+              label="Tax Mode"
+              value={form.taxMode}
+              onChange={(value) => updateField("taxMode", value as ProductTaxMode)}
+              options={PRODUCT_TAX_MODE_OPTIONS.map((option) => ({
+                value: option.value,
+                label: option.value === "inherit" ? `${option.label} (${businessDefaultTaxModeLabel})` : option.label
+              }))}
+              disabled={form.taxType !== "vat"}
+            />
             <Field
               label="Reorder Level"
               type="number"
@@ -454,6 +476,8 @@ export function ProductCreateModal({
           </div>
           <p className="mt-1.5 text-[11px] font-semibold text-muted">
             A storefront's own on-hand stock below this level is flagged "Low" throughout Main Store.
+            Tax Mode only matters for Standard (VAT) products — Exempted and Zero-Rated have no tax
+            either way.
           </p>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <CheckboxField

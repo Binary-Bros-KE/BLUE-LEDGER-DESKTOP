@@ -2416,6 +2416,20 @@ const migrations = [
         VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'quotations', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
       END;
     `
+  },
+  {
+    version: 68,
+    name: "product_prices_tax_inclusive",
+    sql: `
+      -- Per-product override of the tenant's own default (tenant.prices_tax_inclusive) — a catalog is
+      -- rarely uniform (e.g. imported goods priced exclusive of VAT sitting alongside locally-priced
+      -- stock that already has VAT baked in). NULL means "inherit the tenant default", the state every
+      -- existing product backfills to so nothing changes in behavior until an admin explicitly sets a
+      -- product's own mode — see tax-calculation.ts's resolveProductTaxConfig, which every checkout/
+      -- invoice/quotation/purchase calculation now resolves through instead of reading the tenant
+      -- setting directly.
+      ALTER TABLE products ADD COLUMN prices_tax_inclusive INTEGER;
+    `
   }
 ] as const;
 

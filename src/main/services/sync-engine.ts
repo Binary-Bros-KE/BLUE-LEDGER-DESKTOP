@@ -387,6 +387,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       minimumPriceCents: p.minimumPriceCents,
       taxRate: p.taxRate,
       taxType: p.taxType,
+      pricesTaxInclusive: p.pricesTaxInclusive,
       reorderLevel: p.reorderLevel,
       trackStock: p.trackStock,
       allowNegativeStock: p.allowNegativeStock,
@@ -1484,6 +1485,11 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       { local: "minimum_price_cents", cloud: "minimumPriceCents" },
       { local: "tax_rate", cloud: "taxRate" },
       { local: "tax_type", cloud: "taxType", default: "vat" },
+      // Genuinely tri-state (null = inherit the tenant default) — toLocalValue checks value === null
+      // BEFORE checking col.type, so a pulled null cloud value stays null (no `default` is set here,
+      // so `col.default ?? null` resolves to null) while an actual true/false still goes through the
+      // "bool" branch to become 1/0, which better-sqlite3 requires (it can't bind raw JS booleans).
+      { local: "prices_tax_inclusive", cloud: "pricesTaxInclusive", type: "bool" },
       { local: "reorder_level", cloud: "reorderLevel" },
       { local: "track_stock", cloud: "trackStock", type: "bool" },
       { local: "allow_negative_stock", cloud: "allowNegativeStock", type: "bool" },

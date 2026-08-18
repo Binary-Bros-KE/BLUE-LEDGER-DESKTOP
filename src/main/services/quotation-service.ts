@@ -22,7 +22,7 @@ import {
 } from "@main/services/sale-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { computeQuotationStatus } from "@shared/lib/quotation";
-import { computeLineTax } from "@shared/lib/tax-calculation";
+import { computeLineTax, resolveProductTaxConfig } from "@shared/lib/tax-calculation";
 import type { ProductTaxType } from "@shared/types/product";
 import {
   convertToInvoiceSchema,
@@ -317,9 +317,10 @@ export function checkQuotationStock(id: string): QuotationStockCheckItem[] {
 /** Re-derives a line's discount/tax/total for an overridden (reduced) quantity, keeping the frozen
  * unit price but scaling the discount proportionally and recomputing tax off the product's current
  * category/rate (deliberately not the quotation's own frozen tax_type snapshot — an overridden
- * quantity is treated as a fresh re-price, same as the discount ratio scaling above it). Gross line
- * price already includes tax — see tax-calculation.ts — so lineTotalCents is just the taxable
- * amount, never taxable + tax. */
+ * quantity is treated as a fresh re-price, same as the discount ratio scaling above it). Tax mode
+ * (inclusive/exclusive) is resolved from the product's own CURRENT setting too, same reasoning.
+ * lineTotalCents is computeLineTax's grossCents — see tax-calculation.ts for why this differs from
+ * the taxable amount when exclusive. */
 function repriceLineForQuantity(item: QuotationItemDetailRow, product: ProductRow, quantity: number): PreparedItem {
   const unitPriceCents = item.unit_price_cents;
   const lineSubtotalCents = unitPriceCents * quantity;
@@ -328,7 +329,11 @@ function repriceLineForQuantity(item: QuotationItemDetailRow, product: ProductRo
   const discountAmountCents = Math.min(Math.round(lineSubtotalCents * discountRatio), lineSubtotalCents);
   const taxableCents = lineSubtotalCents - discountAmountCents;
   const taxType = product.tax_type as ProductTaxType;
-  const { taxCents: taxAmountCents } = computeLineTax(taxableCents, taxType, getCurrentTenant());
+  const productTaxConfig = resolveProductTaxConfig(
+    { pricesTaxInclusive: product.prices_tax_inclusive === null ? null : Boolean(product.prices_tax_inclusive) },
+    getCurrentTenant()
+  );
+  const { grossCents, taxCents: taxAmountCents } = computeLineTax(taxableCents, taxType, productTaxConfig);
 
   return {
     product,
@@ -337,7 +342,7 @@ function repriceLineForQuantity(item: QuotationItemDetailRow, product: ProductRo
     discountAmountCents,
     taxType,
     taxAmountCents,
-    lineTotalCents: taxableCents,
+    lineTotalCents: grossCents,
     // Carried over unchanged even though quantity was re-priced above — localCostCents is a flat
     // "what we paid for this batch" figure the cashier typed once, not a per-unit rate, so there's
     // no proportional amount to recompute here.
@@ -405,17 +410,17 @@ function buildConversionCart(
   const delivery = deliveryRow ? deliveryNoteRepository.mapDeliveryNoteRow(deliveryRow) : null;
   const extraFeesCents = serviceCharges.reduce((sum, charge) => sum + charge.feeCents, 0) + (delivery?.feeCents ?? 0);
 
+  // Sums each line's own grossCents rather than branching off one global toggle — mirrors
+  // prepareCart's own grandTotalCents formula in sale-service.ts (see its comment), since a
+  // quotation's lines can mix inclusive and exclusive products via their own overrides.
+  const grandTotalCents = preparedItems.reduce((sum, item) => sum + item.lineTotalCents, 0) + extraFeesCents;
+
   return {
     items: preparedItems,
     subtotalCents,
     discountAmountCents,
     taxAmountCents,
-    // Tax is a reporting figure ONLY — it's already inside subtotalCents (prices are tax-inclusive),
-    // so it must never be added again here. This mirrors prepareCart's own grandTotalCents formula
-    // in sale-service.ts (see its own comment for the bug this exact line used to reintroduce for
-    // any quotation converted to a sale/invoice: the total was silently inflated by its own tax
-    // amount, on top of what checkout/invoice creation already gets right).
-    grandTotalCents: subtotalCents - discountAmountCents + extraFeesCents,
+    grandTotalCents,
     serviceCharges,
     delivery
   };

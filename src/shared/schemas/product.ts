@@ -65,6 +65,13 @@ const productFieldsSchema = z.object({
   // field yet, Phase 1) rather than being required, since most retail goods are standard-rated and
   // an admin can correct any that aren't after the fact.
   taxType: z.enum(taxTypeValues).default("vat"),
+  // Null (the default when absent) means "inherit the tenant's Business Profile default" — see
+  // ProductInputFields' own doc comment.
+  pricesTaxInclusive: z
+    .boolean()
+    .nullable()
+    .optional()
+    .transform((value) => (value === undefined ? null : value)),
   reorderLevel: z.coerce.number().int().min(0).max(1_000_000),
   trackStock: z.boolean(),
   allowNegativeStock: z.boolean(),

@@ -37,8 +37,10 @@ export function TaxBreakdownTable({
           </thead>
           <tbody>
             {breakdown.map((entry) => (
-              <tr key={entry.taxType} className="border-t border-line">
-                <td className="px-2.5 py-1.5 font-bold text-ink">{taxBreakdownLabel(entry.taxType, tenantTaxConfig)}</td>
+              <tr key={`${entry.taxType}:${entry.pricingMode ?? ""}`} className="border-t border-line">
+                <td className="px-2.5 py-1.5 font-bold text-ink">
+                  {taxBreakdownLabel(entry.taxType, tenantTaxConfig, entry.pricingMode)}
+                </td>
                 <td className="px-2.5 py-1.5 text-right tabular-nums text-muted">{formatCents(entry.netCents)}</td>
                 <td className="px-2.5 py-1.5 text-right tabular-nums text-muted">{formatCents(entry.taxCents)}</td>
                 <td className="px-2.5 py-1.5 text-right tabular-nums font-bold text-ink">{formatCents(entry.grossCents)}</td>

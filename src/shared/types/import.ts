@@ -1,5 +1,5 @@
 import { CUSTOMER_TYPE_OPTIONS } from "@shared/types/customer";
-import { UNIT_OF_MEASURE_OPTIONS } from "@shared/types/product";
+import { PRODUCT_TAX_MODE_OPTIONS, UNIT_OF_MEASURE_OPTIONS } from "@shared/types/product";
 import { SUPPLIER_PAYMENT_OPTION_OPTIONS } from "@shared/types/supplier";
 
 export type ImportEntityType = "products" | "customers" | "suppliers";
@@ -74,6 +74,11 @@ const PRODUCT_FIELDS: ImportFieldDefinition[] = [
   { key: "wholesaleMinQuantity", label: "Wholesale Min Quantity", required: false, kind: "number", aliases: ["wholesale min qty", "wholesale minimum quantity"] },
   { key: "minimumPriceCents", label: "Minimum Price", required: false, kind: "money", aliases: ["minimum price", "min price", "floor price"] },
   { key: "taxRate", label: "Tax Rate (%)", required: false, kind: "number", aliases: ["tax rate", "tax", "vat", "vat rate"] },
+  // Not required — blank/unmapped means "inherit the tenant's Business Profile default", the same
+  // state a manually-created product with no override gets. See import-service.ts's buildRowCandidate
+  // for the string-to-boolean-or-null conversion (this field's raw value is one of PRODUCT_TAX_MODE_
+  // OPTIONS' string values, never the actual pricesTaxInclusive boolean|null directly).
+  { key: "pricesTaxInclusive", label: "Tax Mode", required: false, kind: "enum", aliases: ["tax mode", "price tax mode", "inclusive or exclusive", "pricing mode"], enumOptions: PRODUCT_TAX_MODE_OPTIONS },
   { key: "reorderLevel", label: "Reorder Level", required: false, kind: "number", aliases: ["reorder level", "reorder point", "low stock level"] },
   { key: "trackStock", label: "Track Stock", required: false, kind: "boolean", aliases: ["track stock", "manage stock"] },
   { key: "allowNegativeStock", label: "Allow Negative Stock", required: false, kind: "boolean", aliases: ["allow negative stock", "allow negative"] },

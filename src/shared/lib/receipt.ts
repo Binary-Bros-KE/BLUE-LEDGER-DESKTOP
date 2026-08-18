@@ -1,5 +1,5 @@
 import { formatDocumentDateTime } from "@shared/lib/date";
-import { computeTaxBreakdown, type TaxBreakdownEntry } from "@shared/lib/tax-calculation";
+import { computeAddedTaxCents, computeTaxBreakdown, type TaxBreakdownEntry } from "@shared/lib/tax-calculation";
 import type { Sale } from "@shared/types/sale";
 
 /** Formats integer cents for a receipt, e.g. 25050 -> "250.50". Usable from both main and renderer. */
@@ -32,9 +32,14 @@ export type ReceiptViewModel = {
   extraLines: ReceiptLineItem[];
   subtotalCents: number;
   discountAmountCents: number;
-  /** Reporting-only — already included in subtotalCents (prices are tax-inclusive), never added
-   * into grandTotalCents. See taxBreakdown for the printable category breakdown. */
+  /** Reporting-only figure — grandTotalCents below is the frozen value prepareCart already computed
+   * correctly for whichever tax mode was active at sale time (see tax-calculation.ts), so this
+   * component never re-derives it. See taxBreakdown for the printable category breakdown. */
   taxAmountCents: number;
+  /** The subset of taxAmountCents that was actually ADDED to reach grandTotalCents (exclusive-priced
+   * lines only) — see computeAddedTaxCents' own doc comment. This is what the "Total Tax" summary
+   * row shows, distinct from taxAmountCents (which also includes inclusive lines' embedded tax). */
+  addedTaxCents: number;
   taxBreakdown: TaxBreakdownEntry[];
   /** Whether the Tax Breakdown section should actually render — see Sale["includeTaxBreakdown"]'s
    * own doc comment. taxBreakdown itself is always computed regardless, so a caller that ignores
@@ -100,6 +105,7 @@ export function buildReceiptViewModel(sale: Sale, business: ReceiptBusinessInfo)
     subtotalCents: sale.subtotalCents,
     discountAmountCents: sale.discountAmountCents,
     taxAmountCents: sale.taxAmountCents,
+    addedTaxCents: computeAddedTaxCents(sale.items),
     taxBreakdown: computeTaxBreakdown(sale.items),
     includeTaxBreakdown: sale.includeTaxBreakdown,
     vatRatePercent: business.vatRatePercent,

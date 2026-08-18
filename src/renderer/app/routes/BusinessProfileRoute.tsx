@@ -315,7 +315,7 @@ export function BusinessProfileRoute(): React.JSX.Element {
             placeholder="16"
           />
           <SelectField
-            label="Product prices are"
+            label="Default product prices are"
             value={form.pricesTaxInclusive ? "inclusive" : "exclusive"}
             onChange={(value) => updateField("pricesTaxInclusive", value === "inclusive")}
             options={[
@@ -325,8 +325,8 @@ export function BusinessProfileRoute(): React.JSX.Element {
           />
           <p className="text-xs font-semibold text-muted sm:col-span-2">
             Every product picks one of three tax categories — Standard (this rate), Exempted, or
-            Zero-Rated — from its own edit screen. Exclusive pricing is stored for a future market
-            that needs it; only inclusive pricing is fully supported today.
+            Zero-Rated — from its own edit screen. Each product can also override inclusive vs.
+            exclusive individually; this setting is only the default new products start with.
           </p>
         </FormSection>
 

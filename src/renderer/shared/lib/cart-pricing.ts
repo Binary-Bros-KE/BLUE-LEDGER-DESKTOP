@@ -1,4 +1,4 @@
-import { computeLineTax, type TenantTaxConfig } from "@shared/lib/tax-calculation";
+import { computeLineTax, resolveProductTaxConfig, type TenantTaxConfig } from "@shared/lib/tax-calculation";
 import type { ProductListItem } from "@shared/types/product";
 
 export type LinePricing = {
@@ -13,8 +13,11 @@ export type LinePricing = {
  * quantity qualifies. Mirrors the server-side pricing in sale-service.ts's prepareCart —
  * including `priceOverrideCents`, a cashier-entered markup/override for this line only, which
  * (like on the server) replaces the derived price outright rather than needing special-casing
- * downstream. Gross line price already includes tax (see tax-calculation.ts) — lineTotalCents is
- * just the taxable amount, never taxable + tax; taxCents is purely a reporting figure. */
+ * downstream, and resolveProductTaxConfig, which resolves THIS product's own inclusive/exclusive
+ * override (falling back to the tenant default). lineTotalCents is computeLineTax's grossCents —
+ * the amount actually charged for this line, which equals the taxable amount when inclusive but
+ * adds tax on top when exclusive (see tax-calculation.ts); taxCents is purely a reporting figure
+ * either way. */
 /** Used by Checkout/Invoices/Quotations to warn inline the moment a cashier-typed price override
  * dips below the product's own floor — server-side prepareCart rejects this outright at submit
  * time (sale-service.ts), but catching it here means the user sees why immediately instead of
@@ -43,12 +46,13 @@ export function computeLinePricing(
   const maxDiscountCents = Math.max(0, lineSubtotalCents - floorCents);
   const clampedDiscountCents = Math.max(0, Math.min(discountAmountCents, lineSubtotalCents, maxDiscountCents));
   const taxableCents = lineSubtotalCents - clampedDiscountCents;
-  const { taxCents } = computeLineTax(taxableCents, product.taxType, tenantTaxConfig);
+  const productTaxConfig = resolveProductTaxConfig(product, tenantTaxConfig);
+  const { grossCents, taxCents } = computeLineTax(taxableCents, product.taxType, productTaxConfig);
   return {
     unitPriceCents,
     lineSubtotalCents,
     discountAmountCents: clampedDiscountCents,
     taxCents,
-    lineTotalCents: taxableCents
+    lineTotalCents: grossCents
   };
 }

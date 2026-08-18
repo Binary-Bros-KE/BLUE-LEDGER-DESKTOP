@@ -43,7 +43,7 @@ import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useAppStore } from "@renderer/shared/stores/app-store";
-import { computeTaxBreakdown } from "@shared/lib/tax-calculation";
+import { computeAddedTaxCents, computeTaxBreakdown, taxModeBadgeLabel } from "@shared/lib/tax-calculation";
 import type { Customer } from "@shared/types/customer";
 import type { LocationStockLevel } from "@shared/types/inventory";
 import type { MpesaTransactionStatus } from "@shared/types/mpesa";
@@ -314,6 +314,7 @@ export function CheckoutRoute(): React.JSX.Element {
     subtotalCents: number;
     discountAmountCents: number;
     taxAmountCents: number;
+    addedTaxCents: number;
     serviceChargesFeeCents: number;
     deliveryFeeCents: number;
     grandTotalCents: number;
@@ -321,7 +322,13 @@ export function CheckoutRoute(): React.JSX.Element {
     let subtotalCents = 0;
     let discountAmountCents = 0;
     let taxAmountCents = 0;
+    let lineTotalCentsSum = 0;
     const lines: Array<{ line: CartLine; product: ProductListItem; pricing: LinePricing }> = [];
+
+    const tenantTaxConfig = {
+      vatRatePercent: tenantContext?.vatRatePercent ?? 16,
+      pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true
+    };
 
     for (const line of items) {
       const product = productById.get(line.productId);
@@ -330,28 +337,41 @@ export function CheckoutRoute(): React.JSX.Element {
         product,
         line.quantity,
         toCents(line.discount),
-        { vatRatePercent: tenantContext?.vatRatePercent ?? 16, pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true },
+        tenantTaxConfig,
         line.priceOverride.trim() ? toCents(line.priceOverride) : null
       );
       subtotalCents += pricing.lineSubtotalCents;
       discountAmountCents += pricing.discountAmountCents;
       taxAmountCents += pricing.taxCents;
+      lineTotalCentsSum += pricing.lineTotalCents;
       lines.push({ line, product, pricing });
     }
 
     const serviceChargesFeeCents = serviceCharges.reduce((sum, charge) => sum + toCents(charge.fee), 0);
     const deliveryFeeCents = delivery ? toCents(delivery.fee) : 0;
 
+    // Sums each line's own lineTotalCents (already resolved per-product by computeLinePricing)
+    // rather than branching off one global toggle — a cart can mix inclusive and exclusive
+    // products via their own overrides, see cart-pricing.ts/tax-calculation.ts.
+    const grandTotalCents = lineTotalCentsSum + serviceChargesFeeCents + deliveryFeeCents;
+    const addedTaxCents = computeAddedTaxCents(
+      lines.map(({ line, pricing }) => ({
+        unitPriceCents: pricing.unitPriceCents,
+        quantity: line.quantity,
+        discountAmountCents: pricing.discountAmountCents,
+        lineTotalCents: pricing.lineTotalCents
+      }))
+    );
+
     return {
       lines,
       subtotalCents,
       discountAmountCents,
       taxAmountCents,
+      addedTaxCents,
       serviceChargesFeeCents,
       deliveryFeeCents,
-      // Tax is already inside subtotalCents (prices are tax-inclusive) — never added again here,
-      // see cart-pricing.ts's own doc comment.
-      grandTotalCents: subtotalCents - discountAmountCents + serviceChargesFeeCents + deliveryFeeCents
+      grandTotalCents
     };
   }
 
@@ -1066,12 +1086,20 @@ export function CheckoutRoute(): React.JSX.Element {
                               <p className="text-sm font-extrabold tabular-nums text-ink">
                                 {formatCents(pricing.lineTotalCents)}
                               </p>
-                              <DashedPill
-                                tone={pricing.unitPriceCents === product.sellingPriceCents ? "neutral" : "accent"}
-                                className="mt-0.5"
-                              >
-                                {pricing.unitPriceCents === product.sellingPriceCents ? "Unit Rate" : "Bulk Rate"}
-                              </DashedPill>
+                              <div className="mt-0.5 flex items-center justify-end gap-1">
+                                <DashedPill
+                                  tone={pricing.unitPriceCents === product.sellingPriceCents ? "neutral" : "accent"}
+                                >
+                                  {pricing.unitPriceCents === product.sellingPriceCents ? "Unit Rate" : "Bulk Rate"}
+                                </DashedPill>
+                                {(() => {
+                                  const badge = taxModeBadgeLabel(product, {
+                                    vatRatePercent: tenantContext?.vatRatePercent ?? 16,
+                                    pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true
+                                  });
+                                  return <DashedPill tone={badge.tone}>{badge.label}</DashedPill>;
+                                })()}
+                              </div>
                             </div>
                           </div>
                           <div className="mt-2 flex items-center justify-between gap-2">
@@ -1229,11 +1257,20 @@ export function CheckoutRoute(): React.JSX.Element {
                         <span className="font-bold tabular-nums">{formatCents(totals.deliveryFeeCents)}</span>
                       </div>
                     )}
+                    {draft.includeTaxBreakdown && totals.addedTaxCents > 0 && (
+                      <div className="flex items-center justify-between text-muted">
+                        <span className="font-semibold">Total Tax</span>
+                        <span className="font-bold tabular-nums">{formatCents(totals.addedTaxCents)}</span>
+                      </div>
+                    )}
                   </div>
 
                   <TaxBreakdownTable
                     breakdown={computeTaxBreakdown(
-                      totals.lines.map(({ product, pricing }) => ({
+                      totals.lines.map(({ line, product, pricing }) => ({
+                        unitPriceCents: pricing.unitPriceCents,
+                        quantity: line.quantity,
+                        discountAmountCents: pricing.discountAmountCents,
                         taxType: product.taxType,
                         taxAmountCents: pricing.taxCents,
                         lineTotalCents: pricing.lineTotalCents

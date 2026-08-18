@@ -21,6 +21,8 @@ export type ProductRow = {
   minimum_price_cents: number | null;
   tax_rate: number;
   tax_type: string;
+  /** Null means "inherit the tenant default" — see Product["pricesTaxInclusive"]'s own doc comment. */
+  prices_tax_inclusive: number | null;
   reorder_level: number;
   track_stock: number;
   allow_negative_stock: number;
@@ -150,7 +152,7 @@ export function insertProductRow(
       INSERT INTO products (
         id, tenant_id, sku, barcode, supplier_sku, name, short_name, description,
         category_id, storefront_id, unit_of_measure, buying_price_cents, selling_price_cents, wholesale_price_cents,
-        wholesale_min_quantity, minimum_price_cents, tax_rate, tax_type, reorder_level, track_stock,
+        wholesale_min_quantity, minimum_price_cents, tax_rate, tax_type, prices_tax_inclusive, reorder_level, track_stock,
         allow_negative_stock, image_path, status, created_at, updated_at, created_by, sync_status
       )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
@@ -175,6 +177,7 @@ export function insertProductRow(
       input.minimumPriceCents,
       input.taxRate,
       input.taxType,
+      input.pricesTaxInclusive === null ? null : input.pricesTaxInclusive ? 1 : 0,
       input.reorderLevel,
       input.trackStock ? 1 : 0,
       input.allowNegativeStock ? 1 : 0,
@@ -217,6 +220,7 @@ export function updateProductRow(
         minimum_price_cents = ?,
         tax_rate = ?,
         tax_type = ?,
+        prices_tax_inclusive = ?,
         reorder_level = ?,
         track_stock = ?,
         allow_negative_stock = ?,
@@ -244,6 +248,7 @@ export function updateProductRow(
       input.minimumPriceCents,
       input.taxRate,
       input.taxType,
+      input.pricesTaxInclusive === null ? null : input.pricesTaxInclusive ? 1 : 0,
       input.reorderLevel,
       input.trackStock ? 1 : 0,
       input.allowNegativeStock ? 1 : 0,
@@ -310,6 +315,7 @@ export function mapProductRow(row: ProductRow): Product {
     minimumPriceCents: row.minimum_price_cents,
     taxRate: row.tax_rate,
     taxType: row.tax_type as Product["taxType"],
+    pricesTaxInclusive: row.prices_tax_inclusive === null ? null : Boolean(row.prices_tax_inclusive),
     reorderLevel: row.reorder_level,
     trackStock: Boolean(row.track_stock),
     allowNegativeStock: Boolean(row.allow_negative_stock),

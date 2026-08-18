@@ -46,6 +46,18 @@ export const TAX_TYPE_OPTIONS = [
 
 export type ProductTaxType = (typeof TAX_TYPE_OPTIONS)[number]["value"];
 
+/** UI/import-only tri-state — never stored under this name. "inherit" means the product's own
+ * `pricesTaxInclusive` is null (uses the tenant's Business Profile default); "inclusive"/"exclusive"
+ * mean it's explicitly set to true/false, overriding the tenant default for this product alone. See
+ * tax-calculation.ts's resolveProductTaxConfig for where this actually gets resolved. */
+export const PRODUCT_TAX_MODE_OPTIONS = [
+  { value: "inherit", label: "Use business default" },
+  { value: "inclusive", label: "Inclusive of tax" },
+  { value: "exclusive", label: "Exclusive of tax" }
+] as const;
+
+export type ProductTaxMode = (typeof PRODUCT_TAX_MODE_OPTIONS)[number]["value"];
+
 export type ProductStatus = "active" | "inactive";
 
 export type ProductSyncStatus = "pending" | "synced" | "syncing" | "error";
@@ -75,6 +87,10 @@ export type ProductInputFields = {
   minimumPriceCents: number | null;
   taxRate: number;
   taxType: ProductTaxType;
+  /** Null means "inherit the tenant's Business Profile default" — see PRODUCT_TAX_MODE_OPTIONS and
+   * tax-calculation.ts's resolveProductTaxConfig. Explicit true/false overrides that default for
+   * this product alone. */
+  pricesTaxInclusive: boolean | null;
   reorderLevel: number;
   trackStock: boolean;
   allowNegativeStock: boolean;

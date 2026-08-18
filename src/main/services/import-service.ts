@@ -283,6 +283,13 @@ function buildRowCandidate(
             candidate[field.key] = match.value;
           }
         }
+        // pricesTaxInclusive's real schema type is boolean|null, not one of PRODUCT_TAX_MODE_OPTIONS'
+        // own string values — the branches above only ever set the string, so it's converted here
+        // regardless of which one ran (both the blank-with-fallback and the matched-cell paths land
+        // here with the same string shape).
+        if (field.key === "pricesTaxInclusive" && entityType === "products" && typeof candidate.pricesTaxInclusive === "string") {
+          candidate.pricesTaxInclusive = candidate.pricesTaxInclusive === "inherit" ? null : candidate.pricesTaxInclusive === "inclusive";
+        }
         break;
       }
       case "category": {

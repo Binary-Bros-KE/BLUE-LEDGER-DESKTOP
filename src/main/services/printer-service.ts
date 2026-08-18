@@ -28,7 +28,7 @@ import { PRINTER_SETTINGS_STORAGE_KEY } from "@shared/constants/app";
 import { formatDocumentDate } from "@shared/lib/date";
 import { buildDeliveryNoteViewModel, type DeliveryNoteViewModel } from "@shared/lib/delivery-note";
 import { buildReceiptViewModel, formatReceiptCents, type ReceiptViewModel } from "@shared/lib/receipt";
-import { computeTaxBreakdown, taxBreakdownLabel, type TaxBreakdownEntry } from "@shared/lib/tax-calculation";
+import { computeAddedTaxCents, computeTaxBreakdown, taxBreakdownLabel, type TaxBreakdownEntry } from "@shared/lib/tax-calculation";
 import { printerSettingsSchema } from "@shared/schemas/printer";
 import type { LogoRatio } from "@shared/types/logo";
 import {
@@ -187,6 +187,9 @@ function writeReceiptToPrinter(printerInstance: ThermalPrinter, vm: ReceiptViewM
   if (vm.discountAmountCents > 0) {
     printerInstance.leftRight("Discount", `-${money(vm.discountAmountCents)}`);
   }
+  if (vm.includeTaxBreakdown && vm.addedTaxCents > 0) {
+    printerInstance.leftRight("Total Tax", money(vm.addedTaxCents));
+  }
   printerInstance.bold(true);
   printerInstance.leftRight("TOTAL", money(vm.grandTotalCents));
   printerInstance.bold(false);
@@ -196,7 +199,7 @@ function writeReceiptToPrinter(printerInstance: ThermalPrinter, vm: ReceiptViewM
     printerInstance.println("Tax Breakdown");
     for (const entry of vm.taxBreakdown) {
       printerInstance.leftRight(
-        taxBreakdownLabel(entry.taxType, { vatRatePercent: vm.vatRatePercent, pricesTaxInclusive: true }),
+        taxBreakdownLabel(entry.taxType, { vatRatePercent: vm.vatRatePercent, pricesTaxInclusive: true }, entry.pricingMode),
         `Net ${money(entry.netCents)} / Tax ${money(entry.taxCents)}`
       );
     }
@@ -365,7 +368,7 @@ function buildTaxBreakdownHtml(
     .map(
       (entry) => `
       <tr>
-        <td>${escapeHtml(taxBreakdownLabel(entry.taxType, { vatRatePercent, pricesTaxInclusive: true }))}</td>
+        <td>${escapeHtml(taxBreakdownLabel(entry.taxType, { vatRatePercent, pricesTaxInclusive: true }, entry.pricingMode))}</td>
         <td class="right">${money(entry.netCents)}</td>
         <td class="right">${money(entry.taxCents)}</td>
         <td class="right">${money(entry.grossCents)}</td>
@@ -453,6 +456,7 @@ function buildReceiptHtml(vm: ReceiptViewModel): string {
     <table class="totals">
       <tr><td class="label">Subtotal</td><td class="right">${money(vm.subtotalCents)}</td></tr>
       ${vm.discountAmountCents > 0 ? `<tr><td class="label">Discount</td><td class="right">-${money(vm.discountAmountCents)}</td></tr>` : ""}
+      ${vm.includeTaxBreakdown && vm.addedTaxCents > 0 ? `<tr><td class="label">Total Tax</td><td class="right">${money(vm.addedTaxCents)}</td></tr>` : ""}
       <tr class="grand"><td class="label">Total</td><td class="right">${money(vm.grandTotalCents)}</td></tr>
     </table>
     ${vm.includeTaxBreakdown ? buildTaxBreakdownHtml(vm.taxBreakdown, vm.vatRatePercent, (cents) => money(cents), "items") : ""}
@@ -674,6 +678,7 @@ function buildReceiptLetterheadHtml(vm: ReceiptViewModel, logo: DocumentLogo): s
       <table class="totals-table">
         <tr><td>Subtotal</td><td>${money(vm.subtotalCents)}</td></tr>
         ${vm.discountAmountCents > 0 ? `<tr><td>Discount</td><td>-${money(vm.discountAmountCents)}</td></tr>` : ""}
+        ${vm.includeTaxBreakdown && vm.addedTaxCents > 0 ? `<tr><td>Total Tax</td><td>${money(vm.addedTaxCents)}</td></tr>` : ""}
         <tr class="grand"><td>Total</td><td>${money(vm.grandTotalCents)}</td></tr>
       </table>
     </div>
@@ -1223,6 +1228,7 @@ function buildInvoiceHtml(
       <table class="totals-table">
         <tr><td>Subtotal</td><td>${money(sale.subtotalCents)}</td></tr>
         ${sale.discountAmountCents > 0 ? `<tr><td>Discount</td><td>-${money(sale.discountAmountCents)}</td></tr>` : ""}
+        ${sale.includeTaxBreakdown && computeAddedTaxCents(sale.items) > 0 ? `<tr><td>Total Tax</td><td>${money(computeAddedTaxCents(sale.items))}</td></tr>` : ""}
         <tr class="grand"><td>Total</td><td>${money(sale.grandTotalCents)}</td></tr>
         <tr><td>Amount Paid</td><td>${money(sale.amountPaidCents)}</td></tr>
         <tr class="balance"><td>Balance Due</td><td>${money(sale.balanceDueCents)}</td></tr>
@@ -1412,6 +1418,7 @@ function buildInvoiceThermalHtml(sale: Sale, business: DocumentBusinessInfo): st
     <table class="totals">
       <tr><td class="label">Subtotal</td><td class="right">${money(sale.subtotalCents)}</td></tr>
       ${sale.discountAmountCents > 0 ? `<tr><td class="label">Discount</td><td class="right">-${money(sale.discountAmountCents)}</td></tr>` : ""}
+      ${sale.includeTaxBreakdown && computeAddedTaxCents(sale.items) > 0 ? `<tr><td class="label">Total Tax</td><td class="right">${money(computeAddedTaxCents(sale.items))}</td></tr>` : ""}
       <tr class="grand"><td class="label">Total</td><td class="right">${money(sale.grandTotalCents)}</td></tr>
       <tr><td class="label">Amount Paid</td><td class="right">${money(sale.amountPaidCents)}</td></tr>
       <tr class="balance"><td class="label">Balance Due</td><td class="right">${money(sale.balanceDueCents)}</td></tr>
@@ -1589,6 +1596,7 @@ function buildQuotationHtml(
       <table class="totals-table">
         <tr><td>Subtotal</td><td>${money(quotation.subtotalCents)}</td></tr>
         ${quotation.discountAmountCents > 0 ? `<tr><td>Discount</td><td>-${money(quotation.discountAmountCents)}</td></tr>` : ""}
+        ${quotation.includeTaxBreakdown && computeAddedTaxCents(quotation.items) > 0 ? `<tr><td>Total Tax</td><td>${money(computeAddedTaxCents(quotation.items))}</td></tr>` : ""}
         <tr class="grand"><td>Total</td><td>${money(quotation.grandTotalCents)}</td></tr>
       </table>
     </div>
@@ -1765,6 +1773,7 @@ function buildQuotationThermalHtml(quotation: Quotation, business: DocumentBusin
     <table class="totals">
       <tr><td class="label">Subtotal</td><td class="right">${money(quotation.subtotalCents)}</td></tr>
       ${quotation.discountAmountCents > 0 ? `<tr><td class="label">Discount</td><td class="right">-${money(quotation.discountAmountCents)}</td></tr>` : ""}
+      ${quotation.includeTaxBreakdown && computeAddedTaxCents(quotation.items) > 0 ? `<tr><td class="label">Total Tax</td><td class="right">${money(computeAddedTaxCents(quotation.items))}</td></tr>` : ""}
       <tr class="grand"><td class="label">Total</td><td class="right">${money(quotation.grandTotalCents)}</td></tr>
     </table>
     ${quotation.includeTaxBreakdown ? buildTaxBreakdownHtml(computeTaxBreakdown(quotation.items), business.vatRatePercent, (cents) => money(cents), "items") : ""}
