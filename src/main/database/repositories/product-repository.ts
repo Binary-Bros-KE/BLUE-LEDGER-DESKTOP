@@ -155,7 +155,7 @@ export function insertProductRow(
         wholesale_min_quantity, minimum_price_cents, tax_rate, tax_type, prices_tax_inclusive, reorder_level, track_stock,
         allow_negative_stock, image_path, status, created_at, updated_at, created_by, sync_status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
     `
     )
     .run(

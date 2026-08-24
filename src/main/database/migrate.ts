@@ -2367,6 +2367,24 @@ const migrations = [
         FOREIGN KEY (converted_sale_id) REFERENCES sales(id)
       );
 
+      -- customer_id is FOREIGN KEY REFERENCES customers(id) on quotations_new below, and this
+      -- connection always runs with PRAGMA foreign_keys = ON (connection.ts) — so the INSERT just
+      -- below throws "FOREIGN KEY constraint failed" outright for any quotation whose customer_id
+      -- doesn't resolve to a customer row that actually exists on THIS device. That's a real,
+      -- reachable state, not a hypothetical: this migration's own header comment describes exactly
+      -- this scenario (a quotation pulled from another device whose customer never itself finished
+      -- syncing down locally) as the ORIGINAL bug being fixed here — under the OLD schema that pull
+      -- either failed outright (NOT NULL) or, if some now-fixed earlier sync bug ever let a bad id
+      -- through unresolved, left a genuinely dangling value sitting in this column already. Confirmed
+      -- live: this is what turned migration 67 into a permanent crash loop for at least one real
+      -- tenant (rolled back and retried, identically, on every single launch — see runInTransaction).
+      -- Degrading straight to NULL (walk-in) here is exactly this migration's own stated intent for
+      -- an unresolvable customer, just applied to a row already sitting in the table instead of one
+      -- still arriving over sync. Done via a CASE in the SELECT below, not a separate UPDATE against
+      -- the OLD "quotations" table first — that table's own customer_id is STILL NOT NULL at this
+      -- point (this migration is what makes it nullable), so an UPDATE trying to null it out there
+      -- would itself throw "NOT NULL constraint failed" (confirmed empirically). Reading it here and
+      -- writing the resolved value straight into the new (nullable) table sidesteps that entirely.
       INSERT INTO quotations_new (
         id, tenant_id, quotation_number, customer_id, location_id, employee_id, status,
         subtotal_cents, discount_amount_cents, tax_amount_cents, grand_total_cents, valid_until,
@@ -2374,7 +2392,9 @@ const migrations = [
         synced_updated_at, include_tax_breakdown
       )
       SELECT
-        id, tenant_id, quotation_number, customer_id, location_id, employee_id, status,
+        id, tenant_id, quotation_number,
+        CASE WHEN customer_id IS NOT NULL AND customer_id NOT IN (SELECT id FROM customers) THEN NULL ELSE customer_id END,
+        location_id, employee_id, status,
         subtotal_cents, discount_amount_cents, tax_amount_cents, grand_total_cents, valid_until,
         notes, converted_sale_id, converted_at, created_at, updated_at, sync_status, last_synced_at,
         synced_updated_at, include_tax_breakdown
@@ -2454,12 +2474,23 @@ export function migrateDatabase(): void {
       continue;
     }
 
-    runInTransaction(() => {
-      db.exec(migration.sql);
-      db.prepare("INSERT INTO migrations (version, name) VALUES (?, ?)").run(
-        migration.version,
-        migration.name
-      );
-    });
+    try {
+      runInTransaction(() => {
+        db.exec(migration.sql);
+        db.prepare("INSERT INTO migrations (version, name) VALUES (?, ?)").run(
+          migration.version,
+          migration.name
+        );
+      });
+    } catch (error) {
+      // Rolled back by runInTransaction — this migration is NOT marked applied, so it retries
+      // identically on every future launch until whatever's tripping it is fixed. Re-thrown with the
+      // migration's own identity attached: index.ts's handleFatalStartupError surfaces this message
+      // verbatim (dialog + startup-crash.log), and a bare SQLite error alone doesn't say WHICH of 60+
+      // migrations actually failed — this is what makes that diagnosable from a field report instead
+      // of guessed at.
+      const cause = error instanceof Error ? error.message : String(error);
+      throw new Error(`Migration ${migration.version} (${migration.name}) failed: ${cause}`, { cause: error });
+    }
   }
 }
