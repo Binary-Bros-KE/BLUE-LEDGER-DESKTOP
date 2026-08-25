@@ -1280,11 +1280,16 @@ async function pushOneBatch(
       } else if (result.status === "aliased" && result.canonicalId) {
         // The server already had a row for this same natural key (roles/employees/payment_methods/
         // expense_categories/locations — see SERVER's own NATURAL_KEY_FIELDS) under a different id,
-        // and refused to create a duplicate. This device's own row's CONTENT already matches what was
-        // just pushed, so nothing was lost — record the same alias pull-time reconciliation already
-        // uses (recordIdAlias), so any future payload referencing the server's canonical id resolves
-        // to this device's local row correctly, and mark this row synced — it's safely represented
-        // server-side now, just under a different id than this device generated.
+        // and refused to create a duplicate. SERVER writes this row's actual content to the
+        // canonical row instead (see sync-service.ts's pushRows: targetId/aliasedCanonicalId), so
+        // nothing pushed here is lost even on a later edit to the aliased local row — record the
+        // same alias pull-time reconciliation already uses (recordIdAlias), so any future payload
+        // referencing the server's canonical id resolves to this device's local row correctly, and
+        // mark this row synced — it's safely represented server-side now, just under a different id
+        // than this device generated. (Before 2026-08-25, SERVER discarded the row's content on
+        // every aliased push instead of writing it to the canonical row — harmless the instant an
+        // alias was first created, since both rows were then still identical, but silently dropped
+        // every subsequent edit forever after.)
         recordIdAlias(entity, result.canonicalId, result.id);
         markOutboxSynced(entity, result.id);
         markSourceRowSynced(entity, result.id);
