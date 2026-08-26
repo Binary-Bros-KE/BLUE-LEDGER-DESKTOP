@@ -49,12 +49,16 @@ const DEFAULT_SYSTEM_ROLES: Array<{
   roleName: string;
   description: string;
   permissions: PermissionsMap;
+  isSuperAdmin?: boolean;
 }> = [
   {
     roleName: "Super Admin",
     description:
       "Cross-branch oversight. Leave this employee's branch unassigned so they see every storefront's data instead of being limited to one.",
-    permissions: fullAccess(ALL_MODULE_KEYS)
+    permissions: fullAccess(ALL_MODULE_KEYS),
+    // The only default role this is ever true for — see Role.isSuperAdmin's own doc comment for why
+    // this exists as a real flag rather than matching roleName === "Super Admin" everywhere.
+    isSuperAdmin: true
   },
   {
     roleName: "Manager",
@@ -145,6 +149,7 @@ export function ensureDefaultRoles(tenantId: string): void {
       description: defaultRole.description,
       permissions: defaultRole.permissions,
       isSystemRole: true,
+      isSuperAdmin: defaultRole.isSuperAdmin,
       createdBy: null
     });
   }
@@ -166,8 +171,23 @@ export function ensureSuperAdminRole(tenantId: string): void {
     description: superAdminDefault.description,
     permissions: superAdminDefault.permissions,
     isSystemRole: true,
+    isSuperAdmin: superAdminDefault.isSuperAdmin,
     createdBy: null
   });
+}
+
+/**
+ * Retroactively flags the existing "Super Admin" role row for tenants that seeded it before
+ * Role.isSuperAdmin existed — new installs get it for free via DEFAULT_SYSTEM_ROLES/
+ * ensureSuperAdminRole above. Without this, every already-installed tenant's Super Admin role is a
+ * persisted DB row a new column alone can never reach, and the Working Hours lockout bypass this
+ * flag drives would silently lock out the very person meant to always have access. Safe every boot:
+ * a no-op once already set.
+ */
+export function ensureSuperAdminFlag(tenantId: string): void {
+  const row = roleRepository.findRoleByNameRow(tenantId, "Super Admin");
+  if (!row || !row.is_system_role || row.is_super_admin) return;
+  roleRepository.setRoleSuperAdminFlagRow(row.id, true);
 }
 
 /**

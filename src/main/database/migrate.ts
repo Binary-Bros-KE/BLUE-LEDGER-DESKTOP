@@ -2450,6 +2450,65 @@ const migrations = [
       -- setting directly.
       ALTER TABLE products ADD COLUMN prices_tax_inclusive INTEGER;
     `
+  },
+  {
+    version: 69,
+    name: "working_hours_lockout",
+    sql: `
+      -- role.is_super_admin: server-authoritative "is this THE Super Admin role" flag — replaces a
+      -- fragile role_name = 'Super Admin' string match (a tenant could rename or clone this role,
+      -- either way silently breaking "Super Admin always retains access"). Backfilled for the
+      -- already-seeded row below via role-service.ts's ensureSuperAdminFlag, called on every boot
+      -- alongside its sibling ensure*/consolidate*/fix* functions in bootstrap.ts.
+      ALTER TABLE roles ADD COLUMN is_super_admin INTEGER NOT NULL DEFAULT 0;
+
+      -- One row per storefront, created on-demand the first time a Super Admin configures hours for
+      -- it (never boot-seeded, unlike roles/payment_methods/etc.) — drives the Working Hours lockout
+      -- feature. schedule_json is keyed "0".."6" (0=Sunday..6=Saturday, JS Date.getDay()), one entry
+      -- per day of {isOpen, openTime, closeTime}. See shared/lib/working-hours-lock.ts's
+      -- computeWorkingHoursLockStatus for how these columns combine — that function is PORTED
+      -- (not shared) from SERVER's own lib/working-hours-lock.ts of the same name, since this app
+      -- must be able to compute lock status fully offline from its own locally-synced copy of this
+      -- row; update both together if this logic ever changes.
+      CREATE TABLE IF NOT EXISTS working_hours (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        location_id TEXT NOT NULL,
+        lock_enabled INTEGER NOT NULL DEFAULT 0,
+        lock_mode TEXT NOT NULL DEFAULT 'auto',
+        manually_locked INTEGER NOT NULL DEFAULT 0,
+        timezone_offset_minutes INTEGER NOT NULL DEFAULT 0,
+        schedule_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        -- Optimistic-lock baseline (see sync-engine.ts's CONFLICT_AWARE_ENTITIES/markSyncedBaseline)
+        -- — a Super Admin's schedule edit shouldn't silently overwrite another device's more recent
+        -- edit to the same storefront's hours, same protection every other mutable settings-like
+        -- entity (roles, locations, payment_methods) already gets.
+        synced_updated_at TEXT,
+        UNIQUE (tenant_id, location_id),
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (location_id) REFERENCES locations(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_working_hours_tenant ON working_hours(tenant_id);
+      CREATE INDEX IF NOT EXISTS idx_working_hours_location ON working_hours(location_id);
+
+      CREATE TRIGGER trg_working_hours_sync_ai AFTER INSERT ON working_hours BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'working_hours', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_working_hours_sync_au AFTER UPDATE ON working_hours BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'working_hours', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_working_hours_sync_ad AFTER DELETE ON working_hours BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'working_hours', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+    `
   }
 ] as const;
 

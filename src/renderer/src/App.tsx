@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { AppShell } from "@renderer/app/layouts/AppShell";
 import { navItemsByKey } from "@renderer/app/layouts/navigation";
@@ -42,11 +42,13 @@ import { StockRequestsRoute } from "@renderer/app/routes/StockRequestsRoute";
 import { StorefrontsRoute } from "@renderer/app/routes/StorefrontsRoute";
 import { SuppliersRoute } from "@renderer/app/routes/SuppliersRoute";
 import { TransactionsRoute } from "@renderer/app/routes/TransactionsRoute";
+import { WorkingHoursBlockedRoute } from "@renderer/app/routes/WorkingHoursBlockedRoute";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { useAuthStore } from "@renderer/shared/stores/auth-store";
 import { useUiStore } from "@renderer/shared/stores/ui-store";
 import { computeGraceStatus } from "@shared/lib/grace-period";
+import type { WorkingHoursLockStatus } from "@shared/lib/working-hours-lock";
 
 export function App(): React.JSX.Element {
   const context = useAppStore((state) => state.context);
@@ -55,6 +57,7 @@ export function App(): React.JSX.Element {
   const hydrateAuth = useAuthStore((state) => state.hydrate);
   const activeNavKey = useUiStore((state) => state.activeNavKey);
   const { can } = usePermissions();
+  const [workingHoursLockStatus, setWorkingHoursLockStatus] = useState<WorkingHoursLockStatus | null>(null);
 
   useEffect(() => {
     void hydrate();
@@ -67,6 +70,30 @@ export function App(): React.JSX.Element {
     const interval = setInterval(() => void hydrate(), 30 * 60 * 1000);
     return () => clearInterval(interval);
   }, [hydrate, hydrateAuth]);
+
+  useEffect(() => {
+    if (authStatus !== "authenticated") {
+      setWorkingHoursLockStatus(null);
+      return;
+    }
+
+    let cancelled = false;
+    function checkLockStatus(): void {
+      // Pure local IPC over the already-synced WorkingHours row — no network round trip, so this
+      // resolves near-instantly even offline. A tighter cadence than the 30-min context re-hydrate
+      // above (matching the app's existing 15s/30s poll widgets) so a schedule boundary (e.g.
+      // "closes at 9pm") takes effect promptly for an already-open session.
+      void window.blueLedger.workingHours.getMyLockStatus().then((status) => {
+        if (!cancelled) setWorkingHoursLockStatus(status);
+      });
+    }
+    checkLockStatus();
+    const interval = setInterval(checkLockStatus, 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [authStatus]);
 
   if (!context || authStatus === "loading") {
     return (
@@ -98,6 +125,14 @@ export function App(): React.JSX.Element {
 
   if (authStatus === "unauthenticated") {
     return <LoginRoute />;
+  }
+
+  // Unlike the license checks above (which block everyone unconditionally, so they run before
+  // login), this gate needs to know WHO is logging in — a Super Admin always bypasses it — so it
+  // can only run once authenticated. getMyLockStatus() (main process) already returns
+  // `{ locked: false }` for a Super Admin session regardless of the storefront's own config.
+  if (workingHoursLockStatus?.locked) {
+    return <WorkingHoursBlockedRoute reason={workingHoursLockStatus.reason} />;
   }
 
   const activeItem = navItemsByKey[activeNavKey];

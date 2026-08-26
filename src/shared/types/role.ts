@@ -95,6 +95,10 @@ export type Role = RoleInputFields & {
   id: RoleId;
   tenantId: string;
   isSystemRole: boolean;
+  /** Server-authoritative "is this THE Super Admin role" flag — never settable from the Roles &
+   * Permissions form, only ever set by role-service.ts's DEFAULT_SYSTEM_ROLES seed/
+   * ensureSuperAdminFlag backfill. Drives the Working Hours lockout bypass. */
+  isSuperAdmin: boolean;
   createdAt: string;
   updatedAt: string;
   createdBy: string | null;

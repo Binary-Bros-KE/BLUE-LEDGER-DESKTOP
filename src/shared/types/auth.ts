@@ -13,6 +13,9 @@ export type AuthEmployeeSummary = {
 export type AuthRoleSummary = {
   id: string;
   roleName: string;
+  /** See Role.isSuperAdmin's own doc comment — server-authoritative, drives the Working Hours
+   * lockout bypass. */
+  isSuperAdmin: boolean;
 } | null;
 
 export type AuthBranchSummary = {

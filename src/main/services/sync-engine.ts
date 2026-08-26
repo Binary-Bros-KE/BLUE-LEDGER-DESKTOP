@@ -27,6 +27,7 @@ import * as stockMovementRepository from "@main/database/repositories/stock-move
 import * as stockRequestRepository from "@main/database/repositories/stock-request-repository";
 import * as supplierRepository from "@main/database/repositories/supplier-repository";
 import * as tenantRepository from "@main/database/repositories/tenant-repository";
+import * as workingHoursRepository from "@main/database/repositories/working-hours-repository";
 import { API_BASE_URL } from "@main/services/license-service";
 import { computeGraceStatus } from "@shared/lib/grace-period";
 import type { LicenseStatus, SubscriptionType } from "@shared/types/tenant";
@@ -47,6 +48,8 @@ import type {
  * schema.prisma's own comment on that field). */
 const SYNC_ENTITIES: SyncEntity[] = [
   "locations",
+  // Depends on locations already existing locally on pull (FK on location_id) — must come after it.
+  "working_hours",
   "categories",
   "roles",
   "payment_methods",
@@ -113,6 +116,7 @@ const CONFLICT_AWARE_ENTITIES = new Set<SyncEntity>([
   "employees",
   "roles",
   "locations",
+  "working_hours",
   "expense_categories",
   "expenses",
   "salaries",
@@ -284,6 +288,23 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       sortOrder: p.sortOrder,
       localCreatedAt: p.createdAt,
       localUpdatedAt: p.updatedAt,
+      baseUpdatedAt: row.synced_updated_at
+    };
+  },
+  working_hours: (id) => {
+    const row = workingHoursRepository.findWorkingHoursRowById(id);
+    if (!row) return null;
+    const w = workingHoursRepository.mapWorkingHoursRow(row);
+    return {
+      id: w.id,
+      locationId: w.locationId,
+      lockEnabled: w.lockEnabled,
+      lockMode: w.lockMode,
+      manuallyLocked: w.manuallyLocked,
+      timezoneOffsetMinutes: w.timezoneOffsetMinutes,
+      schedule: w.schedule,
+      localCreatedAt: w.createdAt,
+      localUpdatedAt: w.updatedAt,
       baseUpdatedAt: row.synced_updated_at
     };
   },
@@ -605,6 +626,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       description: r.description,
       permissionsJson: r.permissions,
       isSystemRole: r.isSystemRole,
+      isSuperAdmin: r.isSuperAdmin,
       localCreatedAt: r.createdAt,
       localUpdatedAt: r.updatedAt,
       baseUpdatedAt: row.synced_updated_at
@@ -1547,7 +1569,8 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       { local: "role_name", cloud: "roleName" },
       { local: "description", cloud: "description" },
       { local: "permissions_json", cloud: "permissionsJson", type: "json" },
-      { local: "is_system_role", cloud: "isSystemRole", type: "bool" }
+      { local: "is_system_role", cloud: "isSystemRole", type: "bool" },
+      { local: "is_super_admin", cloud: "isSuperAdmin", type: "bool", default: 0 }
     ]
   },
   locations: {
@@ -1599,6 +1622,22 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       // and crash the pull, exactly like sale_items.local_supplier_id did before it got one.
       { local: "show_product_images_on_invoices", cloud: "showProductImagesOnInvoices", type: "bool", default: 0 },
       { local: "show_product_images_on_quotations", cloud: "showProductImagesOnQuotations", type: "bool", default: 0 }
+    ]
+  },
+  // Not a boot-seeded default — created on-demand the first time a Super Admin configures hours for
+  // a storefront (see the model's own migration comment). naturalKey dedupes the case where two
+  // devices each independently create the first-ever row for the same storefront before ever
+  // syncing with each other, same reasoning as main_store_allocations below.
+  working_hours: {
+    table: "working_hours",
+    naturalKey: { local: "location_id", cloud: "locationId" },
+    columns: [
+      { local: "location_id", cloud: "locationId", refEntity: "locations", refNotNull: true },
+      { local: "lock_enabled", cloud: "lockEnabled", type: "bool" },
+      { local: "lock_mode", cloud: "lockMode" },
+      { local: "manually_locked", cloud: "manuallyLocked", type: "bool" },
+      { local: "timezone_offset_minutes", cloud: "timezoneOffsetMinutes" },
+      { local: "schedule_json", cloud: "schedule", type: "json" }
     ]
   },
   expense_categories: {
@@ -3056,6 +3095,12 @@ const CONFLICT_LABEL_BUILDERS: Partial<Record<SyncEntity, (entityId: string) => 
   roles: (id) => {
     const row = roleRepository.findRoleRowById(id);
     return row ? row.role_name : id;
+  },
+  working_hours: (id) => {
+    const row = workingHoursRepository.findWorkingHoursRowById(id);
+    if (!row) return id;
+    const location = locationRepository.findLocationRowById(row.location_id);
+    return location ? `Working Hours — ${location.location_name}` : id;
   },
   employees: (id) => {
     const row = employeeRepository.findEmployeeRowById(id);

@@ -30,7 +30,7 @@ function buildSession(row: EmployeeRow, tenantId: string): AuthSession {
       jobTitle: row.job_title,
       photoPath: row.photo_path
     },
-    role: role ? { id: role.id, roleName: role.roleName } : null,
+    role: role ? { id: role.id, roleName: role.roleName, isSuperAdmin: role.isSuperAdmin } : null,
     branch: branchRow
       ? {
           id: branchRow.id,
@@ -182,6 +182,27 @@ export function getCurrentEmployeeName(): string | null {
  */
 export function getCurrentBranchScope(): string | null {
   return currentSession?.branch?.id ?? null;
+}
+
+/** Whether the signed-in employee's role carries Role.isSuperAdmin — see that field's own doc
+ * comment. Deliberately NOT the same thing as "branch-less" (getCurrentBranchScope() === null); a
+ * branch-less Manager-equivalent role is theoretically possible even though DEFAULT_SYSTEM_ROLES
+ * never creates one. Drives the Working Hours lockout bypass and gates that feature's own config UI. */
+export function getCurrentIsSuperAdmin(): boolean {
+  return currentSession?.role?.isSuperAdmin ?? false;
+}
+
+/** Throws unless the signed-in employee's role is flagged Role.isSuperAdmin — deliberately NOT a
+ * module/action permission check like requirePermission (see Working Hours' own design notes: this
+ * feature is meant to be Super-Admin-exclusive, not delegable via the normal Roles & Permissions
+ * grid). */
+export function requireSuperAdmin(): void {
+  if (!currentSession) {
+    throw new Error("You must be signed in to do that");
+  }
+  if (!getCurrentIsSuperAdmin()) {
+    throw new Error("Only your Super Admin can do that");
+  }
 }
 
 /**

@@ -8,6 +8,7 @@ export type RoleRow = {
   description: string | null;
   permissions_json: string;
   is_system_role: number;
+  is_super_admin: number;
   created_at: string;
   updated_at: string;
   created_by: string | null;
@@ -65,6 +66,7 @@ export function insertRoleRow(input: {
   description: string | null;
   permissions: PermissionsMap;
   isSystemRole: boolean;
+  isSuperAdmin?: boolean | undefined;
   createdBy: string | null;
 }): RoleRow {
   const now = new Date().toISOString();
@@ -72,8 +74,8 @@ export function insertRoleRow(input: {
   getDatabase()
     .prepare(
       `
-      INSERT INTO roles (id, tenant_id, role_name, description, permissions_json, is_system_role, created_at, updated_at, created_by, sync_status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+      INSERT INTO roles (id, tenant_id, role_name, description, permissions_json, is_system_role, is_super_admin, created_at, updated_at, created_by, sync_status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
     `
     )
     .run(
@@ -83,6 +85,7 @@ export function insertRoleRow(input: {
       input.description,
       JSON.stringify(input.permissions),
       input.isSystemRole ? 1 : 0,
+      input.isSuperAdmin ? 1 : 0,
       now,
       now,
       input.createdBy
@@ -91,6 +94,22 @@ export function insertRoleRow(input: {
   const row = findRoleRowById(input.id);
   if (!row) {
     throw new Error("Failed to create role record");
+  }
+  return row;
+}
+
+/** Dedicated, narrow setter — deliberately NOT part of updateRoleRow's general input shape, since
+ * this flag must never be reachable from the user-facing Roles & Permissions form (createRole/
+ * updateRole). Only role-service.ts's ensureSuperAdminFlag calls this. */
+export function setRoleSuperAdminFlagRow(id: string, isSuperAdmin: boolean): RoleRow {
+  const now = new Date().toISOString();
+  getDatabase()
+    .prepare("UPDATE roles SET is_super_admin = ?, sync_status = 'pending', updated_at = ? WHERE id = ?")
+    .run(isSuperAdmin ? 1 : 0, now, id);
+
+  const row = findRoleRowById(id);
+  if (!row) {
+    throw new Error("Role not found after update");
   }
   return row;
 }
@@ -148,6 +167,7 @@ export function mapRoleRow(row: RoleRow): Role {
     description: row.description,
     permissions: parsePermissions(row.permissions_json),
     isSystemRole: Boolean(row.is_system_role),
+    isSuperAdmin: Boolean(row.is_super_admin),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     createdBy: row.created_by,

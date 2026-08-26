@@ -15,6 +15,7 @@ export type SyncEntity =
   | "roles"
   | "products"
   | "locations"
+  | "working_hours"
   | "sales"
   | "expense_categories"
   | "expenses"

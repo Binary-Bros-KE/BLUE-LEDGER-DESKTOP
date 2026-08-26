@@ -21,6 +21,7 @@ import {
   ensureStockRequestsPermission,
   ensureStorekeeperCategoriesPermission,
   ensureStorekeeperProductPermissions,
+  ensureSuperAdminFlag,
   ensureSuperAdminRole,
   fixCashierPermissionDrift,
   restrictReportsToAdminRoles
@@ -97,6 +98,7 @@ export async function bootstrap(): Promise<void> {
   const tenant = ensureTenantContext();
   ensureDefaultRoles(tenant.tenantId);
   ensureSuperAdminRole(tenant.tenantId);
+  ensureSuperAdminFlag(tenant.tenantId);
   consolidateToFourCoreRoles(tenant.tenantId);
   ensureQuotationsPermission(tenant.tenantId);
   ensureStorekeeperProductPermissions(tenant.tenantId);

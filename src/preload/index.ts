@@ -134,6 +134,13 @@ const api: BlueLedgerApi = {
     setActive: (id, isActive) => invoke("payment-method:set-active", id, isActive),
     delete: (id) => invoke("payment-method:delete", id)
   },
+  workingHours: {
+    list: () => invoke("working-hours:list"),
+    get: (locationId) => invoke("working-hours:get", locationId),
+    upsert: (locationId, input) => invoke("working-hours:upsert", locationId, input),
+    setManualLock: (locationId, locked) => invoke("working-hours:set-manual-lock", locationId, locked),
+    getMyLockStatus: () => invoke("working-hours:get-my-lock-status")
+  },
   customer: {
     list: () => invoke("customer:list"),
     get: (id) => invoke("customer:get", id),

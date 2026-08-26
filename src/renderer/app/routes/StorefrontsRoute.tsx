@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   ArrowLeftRight,
+  Clock,
   ImagePlus,
   Loader2,
   Pencil,
@@ -31,6 +32,7 @@ import {
 } from "@shared/types/location";
 import { LOGO_RATIO_OPTIONS, type LogoRatio } from "@shared/types/logo";
 import { MpesaSettingsModal } from "./storefronts/MpesaSettingsModal";
+import { WorkingHoursModal } from "./storefronts/WorkingHoursModal";
 
 type FormState = {
   locationName: string;
@@ -135,7 +137,7 @@ function locationTypeLabel(type: LocationType): string {
 }
 
 export function StorefrontsRoute(): React.JSX.Element {
-  const { can } = usePermissions();
+  const { can, session } = usePermissions();
   const canCreate = can("locations", "create");
   const canEdit = can("locations", "edit");
 
@@ -143,6 +145,7 @@ export function StorefrontsRoute(): React.JSX.Element {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [mpesaLocation, setMpesaLocation] = useState<Location | null>(null);
+  const [workingHoursLocation, setWorkingHoursLocation] = useState<Location | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
   const [logoBusy, setLogoBusy] = useState(false);
@@ -389,6 +392,17 @@ export function StorefrontsRoute(): React.JSX.Element {
                               className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-ink cursor-pointer"
                             >
                               <Smartphone className="size-3.5" aria-hidden="true" />
+                            </button>
+                          )}
+                          {session?.role?.isSuperAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => setWorkingHoursLocation(location)}
+                              aria-label={`Working hours for ${location.locationName}`}
+                              title="Working hours"
+                              className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-ink cursor-pointer"
+                            >
+                              <Clock className="size-3.5" aria-hidden="true" />
                             </button>
                           )}
                           {canEdit && (
@@ -714,6 +728,15 @@ export function StorefrontsRoute(): React.JSX.Element {
           onClose={() => setMpesaLocation(null)}
           locationId={mpesaLocation.id}
           locationName={mpesaLocation.locationName}
+        />
+      )}
+
+      {workingHoursLocation && (
+        <WorkingHoursModal
+          open={Boolean(workingHoursLocation)}
+          onClose={() => setWorkingHoursLocation(null)}
+          locationId={workingHoursLocation.id}
+          locationName={workingHoursLocation.locationName}
         />
       )}
     </motion.div>

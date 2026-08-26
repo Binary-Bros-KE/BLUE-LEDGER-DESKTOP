@@ -14,6 +14,8 @@ import type { InvoiceListItem, InvoiceSummary } from "./invoice";
 import type { Location, LocationStatus } from "./location";
 import type { MpesaStatusResult, MpesaStkPushResult, MpesaTillSettings } from "./mpesa";
 import type { PaymentMethod } from "./payment-method";
+import type { WorkingHoursLockStatus } from "../lib/working-hours-lock";
+import type { WorkingHours, WorkingHoursStorefrontEntry } from "./working-hours";
 import type { MainStoreAllocationSummary, MainStoreProductDetail, MainStoreProductRow } from "./main-store";
 import type { Product, ProductListItem, ProductStatus, ProductStockSummary } from "./product";
 import type { ProductSalesHistoryEntry, ProductsPerformanceReport } from "./product-report";
@@ -430,6 +432,26 @@ export type IpcInvokeMap = {
   "payment-method:delete": {
     args: [string];
     result: { id: string };
+  };
+  "working-hours:list": {
+    args: [];
+    result: WorkingHoursStorefrontEntry[];
+  };
+  "working-hours:get": {
+    args: [string];
+    result: WorkingHours | null;
+  };
+  "working-hours:upsert": {
+    args: [string, Record<string, unknown>];
+    result: WorkingHours;
+  };
+  "working-hours:set-manual-lock": {
+    args: [string, boolean];
+    result: WorkingHours;
+  };
+  "working-hours:get-my-lock-status": {
+    args: [];
+    result: WorkingHoursLockStatus;
   };
   "customer:list": {
     args: [];
@@ -1386,6 +1408,19 @@ export type BlueLedgerApi = {
       isActive: boolean
     ) => Promise<IpcInvokeMap["payment-method:set-active"]["result"]>;
     delete: (id: string) => Promise<IpcInvokeMap["payment-method:delete"]["result"]>;
+  };
+  workingHours: {
+    list: () => Promise<IpcInvokeMap["working-hours:list"]["result"]>;
+    get: (locationId: string) => Promise<IpcInvokeMap["working-hours:get"]["result"]>;
+    upsert: (
+      locationId: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["working-hours:upsert"]["result"]>;
+    setManualLock: (
+      locationId: string,
+      locked: boolean
+    ) => Promise<IpcInvokeMap["working-hours:set-manual-lock"]["result"]>;
+    getMyLockStatus: () => Promise<IpcInvokeMap["working-hours:get-my-lock-status"]["result"]>;
   };
   customer: {
     list: () => Promise<IpcInvokeMap["customer:list"]["result"]>;

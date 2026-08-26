@@ -86,6 +86,13 @@ import {
   updatePaymentMethod
 } from "@main/services/payment-method-service";
 import {
+  getMyLockStatus,
+  getWorkingHours,
+  listWorkingHours,
+  setManualLock,
+  upsertWorkingHours
+} from "@main/services/working-hours-service";
+import {
   generateDeliveryNotePdf,
   generateInvoicePdf,
   generateQuotationPdf,
@@ -515,6 +522,15 @@ export function registerIpcHandlers(): void {
     setPaymentMethodActive(id, isActive)
   );
   ipcMain.handle(ipcChannels.paymentMethodDelete, (_event, id: string) => deletePaymentMethod(id));
+  ipcMain.handle(ipcChannels.workingHoursList, () => listWorkingHours());
+  ipcMain.handle(ipcChannels.workingHoursGet, (_event, locationId: string) => getWorkingHours(locationId));
+  ipcMain.handle(ipcChannels.workingHoursUpsert, (_event, locationId: string, input: unknown) =>
+    upsertWorkingHours(locationId, input)
+  );
+  ipcMain.handle(ipcChannels.workingHoursSetManualLock, (_event, locationId: string, locked: boolean) =>
+    setManualLock(locationId, locked)
+  );
+  ipcMain.handle(ipcChannels.workingHoursGetMyLockStatus, () => getMyLockStatus());
   ipcMain.handle(ipcChannels.customerList, () => listCustomers());
   ipcMain.handle(ipcChannels.customerGet, (_event, id: string) => getCustomer(id));
   ipcMain.handle(ipcChannels.customerCreate, (_event, input: unknown) => createCustomer(input));
