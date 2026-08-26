@@ -145,7 +145,8 @@ export function createQuotation(input: unknown): Quotation {
       grandTotalCents: cart.grandTotalCents,
       validUntil: parsed.validUntil,
       notes: parsed.notes,
-      includeTaxBreakdown: parsed.includeTaxBreakdown
+      includeTaxBreakdown: parsed.includeTaxBreakdown,
+      includeBusinessInfo: parsed.includeBusinessInfo
     });
 
     for (const item of cart.items) {
@@ -203,7 +204,8 @@ export function updateQuotation(id: string, input: unknown): Quotation {
       grandTotalCents: cart.grandTotalCents,
       validUntil: parsed.validUntil,
       notes: parsed.notes,
-      includeTaxBreakdown: parsed.includeTaxBreakdown
+      includeTaxBreakdown: parsed.includeTaxBreakdown,
+      includeBusinessInfo: parsed.includeBusinessInfo
     });
 
     quotationRepository.deleteQuotationItemsForQuotationRow(id);
@@ -287,6 +289,19 @@ export function setQuotationIncludeTaxBreakdown(id: string, includeTaxBreakdown:
     throw new Error("Quotation not found");
   }
   quotationRepository.updateQuotationIncludeTaxBreakdownRow(id, includeTaxBreakdown);
+  return getQuotationDetail(id);
+}
+
+/** Same as setQuotationIncludeTaxBreakdown above, for the independent "Include storefront
+ * information" toggle — see Sale["includeBusinessInfo"]'s own doc comment. */
+export function setQuotationIncludeBusinessInfo(id: string, includeBusinessInfo: boolean): Quotation {
+  requirePermission("quotations", "edit");
+  const { tenantId } = getCurrentTenant();
+  const row = quotationRepository.findQuotationRowById(id);
+  if (!row || row.tenant_id !== tenantId) {
+    throw new Error("Quotation not found");
+  }
+  quotationRepository.updateQuotationIncludeBusinessInfoRow(id, includeBusinessInfo);
   return getQuotationDetail(id);
 }
 
@@ -474,7 +489,8 @@ export function convertQuotationToSale(id: string, input: unknown): Sale {
     notes: quotation.notes,
     // Carried over, not re-decided — converting shouldn't silently reset the customer's chosen
     // presentation for what is, from their side, the same document going final.
-    includeTaxBreakdown: quotation.includeTaxBreakdown
+    includeTaxBreakdown: quotation.includeTaxBreakdown,
+    includeBusinessInfo: quotation.includeBusinessInfo
   });
 
   quotationRepository.markQuotationConvertedRow(quotation.id, sale.id);
@@ -511,7 +527,8 @@ export function convertQuotationToInvoice(id: string, input: unknown): Sale {
     invoiceNotes: quotation.notes,
     cart,
     initialPayment: null,
-    includeTaxBreakdown: quotation.includeTaxBreakdown
+    includeTaxBreakdown: quotation.includeTaxBreakdown,
+    includeBusinessInfo: quotation.includeBusinessInfo
   });
 
   quotationRepository.markQuotationConvertedRow(quotation.id, saleId);

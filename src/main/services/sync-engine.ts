@@ -781,6 +781,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       balanceDueCents: row.balance_due_cents,
       invoiceNotes: row.invoice_notes,
       includeTaxBreakdown: Boolean(row.include_tax_breakdown),
+      includeBusinessInfo: Boolean(row.include_business_info),
       payments: JSON.parse(row.payments) as unknown,
       items,
       serviceCharges,
@@ -1030,6 +1031,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       validUntil: row.valid_until,
       notes: row.notes,
       includeTaxBreakdown: Boolean(row.include_tax_breakdown),
+      includeBusinessInfo: Boolean(row.include_business_info),
       convertedSaleId: row.converted_sale_id,
       convertedAt: row.converted_at,
       items,
@@ -2082,6 +2084,7 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         ...SALE_HEADER_COLUMNS.map((c) => c.local),
         "payments",
         "include_tax_breakdown",
+        "include_business_info",
         "created_at",
         "updated_at",
         "sync_status",
@@ -2104,6 +2107,7 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         // for an INTEGER column. Missing on an older device's pre-this-feature payload defaults to 1,
         // matching the column's own DEFAULT 1.
         row.includeTaxBreakdown === false ? 0 : 1,
+        row.includeBusinessInfo === false ? 0 : 1,
         localCreatedAt,
         localUpdatedAt,
         "synced",
@@ -2116,6 +2120,7 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         ...SALE_HEADER_COLUMNS.map((c) => `${c.local} = ?`),
         "payments = ?",
         "include_tax_breakdown = ?",
+        "include_business_info = ?",
         "updated_at = ?",
         "sync_status = 'synced'",
         "last_synced_at = ?",
@@ -2129,6 +2134,7 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         ),
         JSON.stringify(row.payments ?? []),
         row.includeTaxBreakdown === false ? 0 : 1,
+        row.includeBusinessInfo === false ? 0 : 1,
         localUpdatedAt,
         now,
         ...(isConflictAware ? [localUpdatedAt] : []),
@@ -2402,6 +2408,10 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
     // pre-this-feature payload defaults to 1, matching the column's own DEFAULT 1.
     db.prepare("UPDATE quotations SET include_tax_breakdown = ? WHERE id = ?").run(
       row.includeTaxBreakdown === false ? 0 : 1,
+      id
+    );
+    db.prepare("UPDATE quotations SET include_business_info = ? WHERE id = ?").run(
+      row.includeBusinessInfo === false ? 0 : 1,
       id
     );
 

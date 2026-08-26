@@ -138,6 +138,11 @@ export type Sale = {
    * creation (Checkout/Invoice/Quotation form), editable afterward from the document's own detail
    * view. Defaults to true. See printer-service.ts's buildTaxBreakdownHtml callers. */
   includeTaxBreakdown: boolean;
+  /** Whether this document shows ANY shop identity (business name, logo, address, phone,
+   * header/footer, KRA PIN) — same lifecycle as includeTaxBreakdown above, independent flag. When
+   * false, every render falls back to a generic heading instead ("CASH RECEIPT"/"INVOICE") — see
+   * printer-service.ts's suppressBusinessInfo and shared/lib/receipt.ts's buildReceiptViewModel. */
+  includeBusinessInfo: boolean;
   invoiceNumber: string | null;
   invoiceDate: string | null;
   dueDate: string | null;

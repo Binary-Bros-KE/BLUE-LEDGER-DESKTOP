@@ -34,10 +34,13 @@ export function InvoicePreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
   // Toggleable even after the invoice already exists — see ReceiptPreview's own identical field.
   const [includeTaxBreakdown, setIncludeTaxBreakdown] = useState(sale.includeTaxBreakdown);
   const [togglingTax, setTogglingTax] = useState(false);
+  const [includeBusinessInfo, setIncludeBusinessInfo] = useState(sale.includeBusinessInfo);
+  const [togglingBusinessInfo, setTogglingBusinessInfo] = useState(false);
 
   useEffect(() => {
     setIncludeTaxBreakdown(sale.includeTaxBreakdown);
-  }, [sale.id, sale.includeTaxBreakdown]);
+    setIncludeBusinessInfo(sale.includeBusinessInfo);
+  }, [sale.id, sale.includeTaxBreakdown, sale.includeBusinessInfo]);
 
   async function handleToggleTaxBreakdown(next: boolean): Promise<void> {
     setTogglingTax(true);
@@ -49,6 +52,19 @@ export function InvoicePreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
       showErrorToast(getErrorMessage(err, "Failed to update the tax breakdown setting"));
     } finally {
       setTogglingTax(false);
+    }
+  }
+
+  async function handleToggleBusinessInfo(next: boolean): Promise<void> {
+    setTogglingBusinessInfo(true);
+    try {
+      await window.blueLedger.sale.setIncludeBusinessInfo(sale.id, next);
+      setIncludeBusinessInfo(next);
+      showSuccessToast(next ? "Storefront information will now show on this invoice" : "Storefront information hidden on this invoice");
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Failed to update the storefront information setting"));
+    } finally {
+      setTogglingBusinessInfo(false);
     }
   }
 
@@ -99,7 +115,7 @@ export function InvoicePreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
       <div className="rounded-lg border-2 border-ink bg-white p-3.5 text-xs text-ink">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-sm font-extrabold">{sale.locationName}</p>
+            {includeBusinessInfo && <p className="text-sm font-extrabold">{sale.locationName}</p>}
             {sale.customerName && <p className="mt-0.5 text-[11px] font-semibold text-muted">Bill to: {sale.customerName}</p>}
           </div>
           <p className="flex-none text-sm font-extrabold uppercase tracking-wide">Invoice</p>
@@ -177,6 +193,15 @@ export function InvoicePreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
           description="Shows the Tax Breakdown section on this invoice's print, download, and share"
           checked={includeTaxBreakdown}
           onChange={(checked) => void handleToggleTaxBreakdown(checked)}
+        />
+      </div>
+
+      <div className={cn("mt-3 rounded-lg border border-line bg-soft/60 px-3 py-2.5", togglingBusinessInfo && "pointer-events-none opacity-60")}>
+        <CheckboxField
+          label="Include storefront information"
+          description="Shows the shop name, logo, address, contacts and header/footer text on this invoice. Turn off for a fully anonymous invoice."
+          checked={includeBusinessInfo}
+          onChange={(checked) => void handleToggleBusinessInfo(checked)}
         />
       </div>
 

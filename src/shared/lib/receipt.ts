@@ -63,18 +63,26 @@ export type ReceiptBusinessInfo = {
   vatRatePercent: number;
 };
 
+/** "CASH RECEIPT" replaces businessName as the printed heading when Sale["includeBusinessInfo"] is
+ * false — see that field's own doc comment (shared/types/sale.ts). Every other identity field is
+ * blanked the same way, including branchName (the storefront name), whose only consumers are the
+ * "Cashier: X · Branch: Y" metadata line in printer-service.ts/ReceiptPreview.tsx — those already
+ * omit the "· Branch: Y" segment entirely when branchName is empty. */
+const GENERIC_RECEIPT_HEADING = "CASH RECEIPT";
+
 export function buildReceiptViewModel(sale: Sale, business: ReceiptBusinessInfo): ReceiptViewModel {
+  const showBusinessInfo = sale.includeBusinessInfo;
   return {
-    businessName: business.businessName,
-    physicalAddress: business.physicalAddress,
-    primaryPhone: business.primaryPhone,
-    receiptHeader: business.receiptHeader,
-    receiptFooter: business.receiptFooter,
+    businessName: showBusinessInfo ? business.businessName : GENERIC_RECEIPT_HEADING,
+    physicalAddress: showBusinessInfo ? business.physicalAddress : null,
+    primaryPhone: showBusinessInfo ? business.primaryPhone : null,
+    receiptHeader: showBusinessInfo ? business.receiptHeader : null,
+    receiptFooter: showBusinessInfo ? business.receiptFooter : null,
     currency: business.currency,
     receiptNumber: sale.receiptNumber,
     dateLabel: formatDocumentDateTime(sale.completedAt ?? sale.createdAt),
     cashierName: sale.employeeName,
-    branchName: sale.locationName,
+    branchName: showBusinessInfo ? sale.locationName : "",
     customerName: sale.customerName,
     items: sale.items.map((item) => ({
       name: item.productName,

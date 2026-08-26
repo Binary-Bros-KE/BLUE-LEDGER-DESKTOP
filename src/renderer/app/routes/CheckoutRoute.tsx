@@ -93,6 +93,9 @@ type OpenSaleDraft = {
   // Per-draft, same reasoning as paymentMethodId above — carried through suspend/resume so a cashier
   // who already unchecked this before holding the sale doesn't have to redo it.
   includeTaxBreakdown: boolean;
+  /** Same per-draft carry-through-suspend/resume treatment as includeTaxBreakdown above — see
+   * Sale["includeBusinessInfo"]'s own doc comment. */
+  includeBusinessInfo: boolean;
   createdAt: number;
 };
 
@@ -240,6 +243,7 @@ export function CheckoutRoute(): React.JSX.Element {
               paymentReference: full.paymentReference ?? "",
               amountReceived: full.amountReceivedCents !== null ? fromCents(full.amountReceivedCents) : "",
               includeTaxBreakdown: full.includeTaxBreakdown,
+              includeBusinessInfo: full.includeBusinessInfo,
               createdAt: new Date(full.createdAt).getTime()
             };
             return draft;
@@ -519,6 +523,7 @@ export function CheckoutRoute(): React.JSX.Element {
       paymentReference: "",
       amountReceived: "",
       includeTaxBreakdown: true,
+      includeBusinessInfo: true,
       createdAt: Date.now()
     };
   }
@@ -689,6 +694,11 @@ export function CheckoutRoute(): React.JSX.Element {
     setOpenSales((prev) => prev.map((draft) => (draft.key === activeKey ? { ...draft, includeTaxBreakdown: value } : draft)));
   }
 
+  function updateActiveIncludeBusinessInfo(value: boolean): void {
+    if (!activeKey) return;
+    setOpenSales((prev) => prev.map((draft) => (draft.key === activeKey ? { ...draft, includeBusinessInfo: value } : draft)));
+  }
+
   function selectCustomerForActiveDraft(customerId: string | null): void {
     if (!activeKey) return;
     setOpenSales((prev) => prev.map((draft) => (draft.key === activeKey ? { ...draft, customerId } : draft)));
@@ -786,6 +796,7 @@ export function CheckoutRoute(): React.JSX.Element {
         paymentReference: activeDraft.paymentReference || undefined,
         amountReceivedCents: activeDraft.amountReceived.trim() === "" ? null : toCents(activeDraft.amountReceived),
         includeTaxBreakdown: activeDraft.includeTaxBreakdown,
+        includeBusinessInfo: activeDraft.includeBusinessInfo,
         locationId: session && !session.branch ? storefrontId : undefined
       });
       const suspendedKey = activeDraft.key;
@@ -833,6 +844,7 @@ export function CheckoutRoute(): React.JSX.Element {
         paymentReference: activeDraft.paymentReference,
         amountReceivedCents: activeDraft.amountReceived.trim() === "" ? null : toCents(activeDraft.amountReceived),
         includeTaxBreakdown: activeDraft.includeTaxBreakdown,
+        includeBusinessInfo: activeDraft.includeBusinessInfo,
         locationId: session && !session.branch ? storefrontId : undefined
       });
       const completedKey = activeDraft.key;
@@ -1285,6 +1297,15 @@ export function CheckoutRoute(): React.JSX.Element {
                       description="Shows the Tax Breakdown section on this sale's receipt (print, download, and share)"
                       checked={activeDraft?.includeTaxBreakdown ?? true}
                       onChange={updateActiveIncludeTaxBreakdown}
+                    />
+                  </div>
+
+                  <div className="mt-3">
+                    <CheckboxField
+                      label="Include storefront information"
+                      description="Shows the shop name, logo, address, contacts and header/footer text on this receipt. Turn off for a fully anonymous receipt."
+                      checked={activeDraft?.includeBusinessInfo ?? true}
+                      onChange={updateActiveIncludeBusinessInfo}
                     />
                   </div>
 

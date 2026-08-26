@@ -173,7 +173,7 @@ function writeReceiptToPrinter(printerInstance: ThermalPrinter, vm: ReceiptViewM
   printerInstance.println(`Receipt: ${vm.receiptNumber ?? "-"}`);
   printerInstance.println(`Date: ${vm.dateLabel}`);
   printerInstance.println(`Cashier: ${vm.cashierName}`);
-  printerInstance.println(`Branch: ${vm.branchName}`);
+  if (vm.branchName) printerInstance.println(`Branch: ${vm.branchName}`);
   if (vm.customerName) printerInstance.println(`Customer: ${vm.customerName}`);
   printerInstance.drawLine();
 
@@ -439,7 +439,7 @@ function buildReceiptHtml(vm: ReceiptViewModel): string {
     <p class="muted">
       Receipt: ${escapeHtml(vm.receiptNumber ?? "-")}<br/>
       Date: ${escapeHtml(vm.dateLabel)}<br/>
-      Cashier: ${escapeHtml(vm.cashierName)} &middot; Branch: ${escapeHtml(vm.branchName)}
+      Cashier: ${escapeHtml(vm.cashierName)}${vm.branchName ? ` &middot; Branch: ${escapeHtml(vm.branchName)}` : ""}
       ${vm.customerName ? `<br/>Customer: ${escapeHtml(vm.customerName)}` : ""}
     </p>
     <table class="items">
@@ -926,7 +926,10 @@ export async function generateReceiptPdf(saleId: string): Promise<string | null>
   const { sale, business } = loadReceiptData(saleId);
   const viewModel = buildReceiptViewModel(sale, business);
   const tenantRow = tenantRepository.findTenantRow();
-  const logo = tenantRow ? await resolveDocumentLogo(sale.locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
+  const logo =
+    tenantRow && sale.includeBusinessInfo
+      ? await resolveDocumentLogo(sale.locationId, tenantRow)
+      : { logoDataUrl: null, logoRatio: null };
   const html = buildReceiptLetterheadHtml(viewModel, logo);
   const buffer = await renderHtmlToPdfBuffer(html);
 
@@ -950,7 +953,10 @@ export async function previewReceiptPdf(saleId: string): Promise<void> {
   const { sale, business } = loadReceiptData(saleId);
   const viewModel = buildReceiptViewModel(sale, business);
   const tenantRow = tenantRepository.findTenantRow();
-  const logo = tenantRow ? await resolveDocumentLogo(sale.locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
+  const logo =
+    tenantRow && sale.includeBusinessInfo
+      ? await resolveDocumentLogo(sale.locationId, tenantRow)
+      : { logoDataUrl: null, logoRatio: null };
   const html = buildReceiptLetterheadHtml(viewModel, logo);
   const buffer = await renderHtmlToPdfBuffer(html);
   const filename = `Receipt-${viewModel.receiptNumber ?? saleId}.pdf`;
@@ -1029,6 +1035,29 @@ function resolveDocumentBusiness(locationId: string | null, tenantRow: tenantRep
     currency: tenantRow.currency,
     vatRatePercent: tenantRow.vat_rate_percent,
     kraPin: tenantRow.kra_pin
+  };
+}
+
+/** Strips ALL shop identity from an already-resolved DocumentBusinessInfo — used by invoice/
+ * quotation generate/preview/print functions when Sale/Quotation["includeBusinessInfo"] is false
+ * (see that field's own doc comment, shared/types/sale.ts). businessName becomes the given generic
+ * heading; every other identity field goes null. currency/vatRatePercent/showProductImagesOn* are
+ * deliberately left untouched — they govern totals/tax display and per-line product photos, neither
+ * of which is shop identity. The paired logo fetch is gated separately at each call site (see
+ * resolveDocumentLogo's own callers) since logo isn't part of this type. */
+function suppressBusinessInfo(business: DocumentBusinessInfo, genericHeading: string): DocumentBusinessInfo {
+  return {
+    ...business,
+    businessName: genericHeading,
+    physicalAddress: null,
+    primaryPhone: null,
+    receiptHeader: null,
+    receiptFooter: null,
+    invoiceHeader: null,
+    invoiceFooter: null,
+    quotationHeader: null,
+    quotationFooter: null,
+    kraPin: null
   };
 }
 
@@ -1265,9 +1294,13 @@ export async function generateInvoicePdf(saleId: string): Promise<string | null>
     throw new Error("This sale is not an invoice");
   }
   const tenantRow = tenantRepository.findTenantRow();
-  const logo = tenantRow ? await resolveDocumentLogo(sale.locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
+  const logo =
+    tenantRow && sale.includeBusinessInfo
+      ? await resolveDocumentLogo(sale.locationId, tenantRow)
+      : { logoDataUrl: null, logoRatio: null };
+  const effectiveBusiness = sale.includeBusinessInfo ? business : suppressBusinessInfo(business, "INVOICE");
   const productImages = business.showProductImagesOnInvoices ? await resolveItemProductImages(sale.items) : new Map();
-  const html = buildInvoiceHtml(sale, business, logo, productImages);
+  const html = buildInvoiceHtml(sale, effectiveBusiness, logo, productImages);
   const buffer = await renderHtmlToPdfBuffer(html);
 
   const result = await dialog.showSaveDialog({
@@ -1292,9 +1325,13 @@ export async function previewInvoicePdf(saleId: string): Promise<void> {
     throw new Error("This sale is not an invoice");
   }
   const tenantRow = tenantRepository.findTenantRow();
-  const logo = tenantRow ? await resolveDocumentLogo(sale.locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
+  const logo =
+    tenantRow && sale.includeBusinessInfo
+      ? await resolveDocumentLogo(sale.locationId, tenantRow)
+      : { logoDataUrl: null, logoRatio: null };
+  const effectiveBusiness = sale.includeBusinessInfo ? business : suppressBusinessInfo(business, "INVOICE");
   const productImages = business.showProductImagesOnInvoices ? await resolveItemProductImages(sale.items) : new Map();
-  const html = buildInvoiceHtml(sale, business, logo, productImages);
+  const html = buildInvoiceHtml(sale, effectiveBusiness, logo, productImages);
   const buffer = await renderHtmlToPdfBuffer(html);
   await openPdfPreviewWindow(buffer, `${sale.invoiceNumber}.pdf`, `Invoice ${sale.invoiceNumber}`);
 }
@@ -1311,9 +1348,13 @@ export async function printInvoiceDocument(saleId: string): Promise<PrinterActio
   }
 
   const tenantRow = tenantRepository.findTenantRow();
-  const logo = tenantRow ? await resolveDocumentLogo(sale.locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
+  const logo =
+    tenantRow && sale.includeBusinessInfo
+      ? await resolveDocumentLogo(sale.locationId, tenantRow)
+      : { logoDataUrl: null, logoRatio: null };
+  const effectiveBusiness = sale.includeBusinessInfo ? business : suppressBusinessInfo(business, "INVOICE");
   const productImages = business.showProductImagesOnInvoices ? await resolveItemProductImages(sale.items) : new Map();
-  const html = buildInvoiceHtml(sale, business, logo, productImages);
+  const html = buildInvoiceHtml(sale, effectiveBusiness, logo, productImages);
 
   try {
     await printHtmlViaSystemPrinter(html, "invoice");
@@ -1402,7 +1443,7 @@ function buildInvoiceThermalHtml(sale: Sale, business: DocumentBusinessInfo): st
       Bill To: ${escapeHtml(sale.customerName ?? "Walk-in Customer")}<br/>
       Invoice Date: ${formatInvoiceDate(sale.invoiceDate)}<br/>
       Due Date: ${formatInvoiceDate(sale.dueDate)}<br/>
-      Storefront: ${escapeHtml(sale.locationName)} &middot; Issued By: ${escapeHtml(sale.employeeName)}
+      ${sale.includeBusinessInfo ? `Storefront: ${escapeHtml(sale.locationName)} &middot; ` : ""}Issued By: ${escapeHtml(sale.employeeName)}
     </p>
     <table class="items">
       <thead>
@@ -1452,7 +1493,8 @@ export async function printInvoiceViaThermal(saleId: string): Promise<PrinterAct
     return { success: false, message: "This sale is not an invoice" };
   }
 
-  const html = buildInvoiceThermalHtml(sale, business);
+  const effectiveBusiness = sale.includeBusinessInfo ? business : suppressBusinessInfo(business, "INVOICE");
+  const html = buildInvoiceThermalHtml(sale, effectiveBusiness);
   const buffer = await renderThermalHtmlToPdfBuffer(html, resolveThermalPageWidthIn(settings.paperWidth));
   const tempPath = join(app.getPath("temp"), `blue-ledger-invoice-${randomUUID()}.pdf`);
   await writeFile(tempPath, buffer);
@@ -1630,9 +1672,13 @@ export async function generateQuotationPdf(quotationId: string): Promise<string 
   requirePermission("quotations", "view");
   const { quotation, business } = loadQuotationData(quotationId);
   const tenantRow = tenantRepository.findTenantRow();
-  const logo = tenantRow ? await resolveDocumentLogo(quotation.locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
+  const logo =
+    tenantRow && quotation.includeBusinessInfo
+      ? await resolveDocumentLogo(quotation.locationId, tenantRow)
+      : { logoDataUrl: null, logoRatio: null };
+  const effectiveBusiness = quotation.includeBusinessInfo ? business : suppressBusinessInfo(business, "QUOTATION");
   const productImages = business.showProductImagesOnQuotations ? await resolveItemProductImages(quotation.items) : new Map();
-  const html = buildQuotationHtml(quotation, business, logo, productImages);
+  const html = buildQuotationHtml(quotation, effectiveBusiness, logo, productImages);
   const buffer = await renderHtmlToPdfBuffer(html);
 
   const result = await dialog.showSaveDialog({
@@ -1654,9 +1700,13 @@ export async function previewQuotationPdf(quotationId: string): Promise<void> {
   requirePermission("quotations", "view");
   const { quotation, business } = loadQuotationData(quotationId);
   const tenantRow = tenantRepository.findTenantRow();
-  const logo = tenantRow ? await resolveDocumentLogo(quotation.locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
+  const logo =
+    tenantRow && quotation.includeBusinessInfo
+      ? await resolveDocumentLogo(quotation.locationId, tenantRow)
+      : { logoDataUrl: null, logoRatio: null };
+  const effectiveBusiness = quotation.includeBusinessInfo ? business : suppressBusinessInfo(business, "QUOTATION");
   const productImages = business.showProductImagesOnQuotations ? await resolveItemProductImages(quotation.items) : new Map();
-  const html = buildQuotationHtml(quotation, business, logo, productImages);
+  const html = buildQuotationHtml(quotation, effectiveBusiness, logo, productImages);
   const buffer = await renderHtmlToPdfBuffer(html);
   await openPdfPreviewWindow(buffer, `${quotation.quotationNumber}.pdf`, `Quotation ${quotation.quotationNumber}`);
 }
@@ -1667,9 +1717,13 @@ export async function printQuotationDocument(quotationId: string): Promise<Print
   requirePermission("quotations", "view");
   const { quotation, business } = loadQuotationData(quotationId);
   const tenantRow = tenantRepository.findTenantRow();
-  const logo = tenantRow ? await resolveDocumentLogo(quotation.locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
+  const logo =
+    tenantRow && quotation.includeBusinessInfo
+      ? await resolveDocumentLogo(quotation.locationId, tenantRow)
+      : { logoDataUrl: null, logoRatio: null };
+  const effectiveBusiness = quotation.includeBusinessInfo ? business : suppressBusinessInfo(business, "QUOTATION");
   const productImages = business.showProductImagesOnQuotations ? await resolveItemProductImages(quotation.items) : new Map();
-  const html = buildQuotationHtml(quotation, business, logo, productImages);
+  const html = buildQuotationHtml(quotation, effectiveBusiness, logo, productImages);
 
   try {
     await printHtmlViaSystemPrinter(html, "quotation");
@@ -1757,7 +1811,7 @@ function buildQuotationThermalHtml(quotation: Quotation, business: DocumentBusin
       Quoted To: ${escapeHtml(quotation.customerName ?? "Walk-in Customer")}<br/>
       Date Prepared: ${formatInvoiceDate(quotation.createdAt)}<br/>
       Valid Until: ${formatInvoiceDate(quotation.validUntil)}<br/>
-      Storefront: ${escapeHtml(quotation.locationName)} &middot; Prepared By: ${escapeHtml(quotation.employeeName)}
+      ${quotation.includeBusinessInfo ? `Storefront: ${escapeHtml(quotation.locationName)} &middot; ` : ""}Prepared By: ${escapeHtml(quotation.employeeName)}
     </p>
     <table class="items">
       <thead>
@@ -1801,7 +1855,8 @@ export async function printQuotationViaThermal(quotationId: string): Promise<Pri
   }
 
   const { quotation, business } = loadQuotationData(quotationId);
-  const html = buildQuotationThermalHtml(quotation, business);
+  const effectiveBusiness = quotation.includeBusinessInfo ? business : suppressBusinessInfo(business, "QUOTATION");
+  const html = buildQuotationThermalHtml(quotation, effectiveBusiness);
   const buffer = await renderThermalHtmlToPdfBuffer(html, resolveThermalPageWidthIn(settings.paperWidth));
   const tempPath = join(app.getPath("temp"), `blue-ledger-quotation-${randomUUID()}.pdf`);
   await writeFile(tempPath, buffer);

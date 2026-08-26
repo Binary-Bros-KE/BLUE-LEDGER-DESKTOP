@@ -23,10 +23,13 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
   // subsequent Print/Preview/Share on THIS screen reflect the change immediately.
   const [includeTaxBreakdown, setIncludeTaxBreakdown] = useState(sale.includeTaxBreakdown);
   const [togglingTax, setTogglingTax] = useState(false);
+  const [includeBusinessInfo, setIncludeBusinessInfo] = useState(sale.includeBusinessInfo);
+  const [togglingBusinessInfo, setTogglingBusinessInfo] = useState(false);
 
   useEffect(() => {
     setIncludeTaxBreakdown(sale.includeTaxBreakdown);
-  }, [sale.id, sale.includeTaxBreakdown]);
+    setIncludeBusinessInfo(sale.includeBusinessInfo);
+  }, [sale.id, sale.includeTaxBreakdown, sale.includeBusinessInfo]);
 
   async function handleToggleTaxBreakdown(next: boolean): Promise<void> {
     setTogglingTax(true);
@@ -38,6 +41,19 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
       showErrorToast(getErrorMessage(err, "Failed to update the tax breakdown setting"));
     } finally {
       setTogglingTax(false);
+    }
+  }
+
+  async function handleToggleBusinessInfo(next: boolean): Promise<void> {
+    setTogglingBusinessInfo(true);
+    try {
+      await window.blueLedger.sale.setIncludeBusinessInfo(sale.id, next);
+      setIncludeBusinessInfo(next);
+      showSuccessToast(next ? "Storefront information will now show on this receipt" : "Storefront information hidden on this receipt");
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Failed to update the storefront information setting"));
+    } finally {
+      setTogglingBusinessInfo(false);
     }
   }
   // The receipt must show THIS SALE's own storefront identity, never the tenant-wide Business
@@ -62,7 +78,7 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
   }, [sale.locationId]);
 
   const vm = buildReceiptViewModel(
-    { ...sale, includeTaxBreakdown },
+    { ...sale, includeTaxBreakdown, includeBusinessInfo },
     {
       businessName: location?.locationName ?? tenant.businessName,
       physicalAddress: location?.physicalAddress ?? tenant.physicalAddress,
@@ -140,7 +156,8 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
           <br />
           Date: {vm.dateLabel}
           <br />
-          Cashier: {vm.cashierName} · Branch: {vm.branchName}
+          Cashier: {vm.cashierName}
+          {vm.branchName && <> · Branch: {vm.branchName}</>}
           {vm.customerName && (
             <>
               <br />
@@ -258,6 +275,15 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
           description="Shows the Tax Breakdown section on this receipt's print, download, and share"
           checked={includeTaxBreakdown}
           onChange={(checked) => void handleToggleTaxBreakdown(checked)}
+        />
+      </div>
+
+      <div className={cn("mt-3 rounded-lg border border-line bg-soft/60 px-3 py-2.5", togglingBusinessInfo && "pointer-events-none opacity-60")}>
+        <CheckboxField
+          label="Include storefront information"
+          description="Shows the shop name, logo, address, contacts and header/footer text on this receipt. Turn off for a fully anonymous receipt."
+          checked={includeBusinessInfo}
+          onChange={(checked) => void handleToggleBusinessInfo(checked)}
         />
       </div>
 

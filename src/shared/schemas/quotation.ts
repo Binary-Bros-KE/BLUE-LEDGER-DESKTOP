@@ -33,6 +33,8 @@ export const quotationCreateSchema = z
     /** Whether the "Tax Breakdown" section prints/downloads/shares on this quotation — see
      * Sale["includeTaxBreakdown"]'s own doc comment, the identical concept. */
     includeTaxBreakdown: z.coerce.boolean().optional().default(true),
+    /** See Sale["includeBusinessInfo"]'s own doc comment, the identical concept. */
+    includeBusinessInfo: z.coerce.boolean().optional().default(true),
     // No .min(1) here — a quotation for pure service/labour work (no physical product involved) is
     // valid on its own. The refine below is what actually enforces "there must be SOMETHING to
     // quote", accepting either products or service charges.

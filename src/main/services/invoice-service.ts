@@ -167,6 +167,8 @@ export function insertInvoiceFromCart(input: {
   /** Defaults to true (today's behavior) when omitted — see the include_tax_breakdown migration's
    * own doc comment. */
   includeTaxBreakdown?: boolean;
+  /** See includeTaxBreakdown above — same defaulting rule, independent flag. */
+  includeBusinessInfo?: boolean;
 }): string {
   const { tenantId, employeeId, locationId } = input;
   const saleId = `sale_${randomUUID()}`;
@@ -235,7 +237,8 @@ export function insertInvoiceFromCart(input: {
       paymentStatus,
       invoiceNotes: input.invoiceNotes,
       payments,
-      includeTaxBreakdown: input.includeTaxBreakdown
+      includeTaxBreakdown: input.includeTaxBreakdown,
+      includeBusinessInfo: input.includeBusinessInfo
     });
 
     for (const item of input.cart.items) {
@@ -331,7 +334,8 @@ export function createInvoice(input: unknown): Sale {
     invoiceNotes: parsed.invoiceNotes,
     cart,
     initialPayment: parsed.initialPayment,
-    includeTaxBreakdown: parsed.includeTaxBreakdown
+    includeTaxBreakdown: parsed.includeTaxBreakdown,
+    includeBusinessInfo: parsed.includeBusinessInfo
   });
 
   return getSaleDetail(saleId);
@@ -417,7 +421,8 @@ export function updateInvoice(id: string, input: unknown): Sale {
       balanceDueCents: cart.grandTotalCents,
       paymentStatus,
       invoiceNotes: parsed.invoiceNotes,
-      includeTaxBreakdown: parsed.includeTaxBreakdown
+      includeTaxBreakdown: parsed.includeTaxBreakdown,
+      includeBusinessInfo: parsed.includeBusinessInfo
     });
 
     saleRepository.deleteSaleItemsForSaleRow(id);
@@ -539,7 +544,8 @@ export function duplicateInvoice(saleId: string): Sale {
     initialPayment: null,
     // Carried over, not re-decided — same "duplicate is a faithful copy" reasoning as unitPriceCents
     // above, not the schema's own default.
-    includeTaxBreakdown: original.includeTaxBreakdown
+    includeTaxBreakdown: original.includeTaxBreakdown,
+    includeBusinessInfo: original.includeBusinessInfo
   });
 
   return getSaleDetail(saleId2);

@@ -180,6 +180,7 @@ export function QuotationsRoute(): React.JSX.Element {
   const [createValidUntil, setCreateValidUntil] = useState(addDaysIso(7));
   const [createNotes, setCreateNotes] = useState("");
   const [createIncludeTaxBreakdown, setCreateIncludeTaxBreakdown] = useState(true);
+  const [createIncludeBusinessInfo, setCreateIncludeBusinessInfo] = useState(true);
   const [createItems, setCreateItems] = useState<CartLine[]>([]);
   const [createServiceCharges, setCreateServiceCharges] = useState<ServiceChargeDraft[]>([]);
   const [createDelivery, setCreateDelivery] = useState<DeliveryDraft | null>(null);
@@ -420,6 +421,17 @@ export function QuotationsRoute(): React.JSX.Element {
     }
   }
 
+  async function handleToggleBusinessInfo(next: boolean): Promise<void> {
+    if (!viewingQuotation) return;
+    try {
+      const updated = await window.blueLedger.quotation.setIncludeBusinessInfo(viewingQuotation.id, next);
+      setViewingQuotation(updated);
+      showSuccessToast(next ? "Storefront information will now show on this quotation" : "Storefront information hidden on this quotation");
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Failed to update the storefront information setting"));
+    }
+  }
+
   async function handlePrintThermal(): Promise<void> {
     if (!viewingQuotation) return;
     setPrintingThermal(true);
@@ -625,6 +637,7 @@ export function QuotationsRoute(): React.JSX.Element {
     setCreateValidUntil(addDaysIso(7));
     setCreateNotes("");
     setCreateIncludeTaxBreakdown(true);
+    setCreateIncludeBusinessInfo(true);
     setCreateItems([]);
     setCreateServiceCharges([]);
     setCreateDelivery(null);
@@ -645,6 +658,7 @@ export function QuotationsRoute(): React.JSX.Element {
     setCreateValidUntil(quotation.validUntil);
     setCreateNotes(quotation.notes ?? "");
     setCreateIncludeTaxBreakdown(quotation.includeTaxBreakdown);
+    setCreateIncludeBusinessInfo(quotation.includeBusinessInfo);
     setCreateItems(
       quotation.items.map((item) => ({
         productId: item.productId,
@@ -790,6 +804,7 @@ export function QuotationsRoute(): React.JSX.Element {
       validUntil: createValidUntil,
       notes: createNotes,
       includeTaxBreakdown: createIncludeTaxBreakdown,
+      includeBusinessInfo: createIncludeBusinessInfo,
       locationId: session && !session.branch ? createStorefrontId : undefined,
       items: createItems.map((line) => ({
         productId: line.productId,
@@ -1135,6 +1150,15 @@ export function QuotationsRoute(): React.JSX.Element {
                 description="Shows the Tax Breakdown section on this quotation's print, download, and share"
                 checked={viewingQuotation.includeTaxBreakdown}
                 onChange={(checked) => void handleToggleTaxBreakdown(checked)}
+              />
+            </div>
+
+            <div className="mt-4">
+              <CheckboxField
+                label="Include storefront information"
+                description="Shows the shop name, logo, address, contacts and header/footer text on this quotation. Turn off for a fully anonymous quotation."
+                checked={viewingQuotation.includeBusinessInfo}
+                onChange={(checked) => void handleToggleBusinessInfo(checked)}
               />
             </div>
 
@@ -1882,6 +1906,15 @@ export function QuotationsRoute(): React.JSX.Element {
               description="Shows the Tax Breakdown section on this quotation's print, download, and share — can still be changed later from the quotation's own detail view"
               checked={createIncludeTaxBreakdown}
               onChange={setCreateIncludeTaxBreakdown}
+            />
+          </div>
+
+          <div className="mt-4">
+            <CheckboxField
+              label="Include storefront information"
+              description="Shows the shop name, logo, address, contacts and header/footer text on this quotation — can still be changed later from the quotation's own detail view"
+              checked={createIncludeBusinessInfo}
+              onChange={setCreateIncludeBusinessInfo}
             />
           </div>
 

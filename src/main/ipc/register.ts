@@ -193,6 +193,7 @@ import {
   getQuotation,
   getQuotationSummary,
   listQuotations,
+  setQuotationIncludeBusinessInfo,
   setQuotationIncludeTaxBreakdown,
   setQuotationStatus,
   updateQuotation
@@ -257,6 +258,7 @@ import {
   getSale,
   listPendingSales,
   listSales,
+  setSaleIncludeBusinessInfo,
   setSaleIncludeTaxBreakdown,
   suspendSale
 } from "@main/services/sale-service";
@@ -627,6 +629,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.saleSetIncludeTaxBreakdown, (_event, id: string, includeTaxBreakdown: boolean) =>
     setSaleIncludeTaxBreakdown(id, includeTaxBreakdown)
   );
+  ipcMain.handle(ipcChannels.saleSetIncludeBusinessInfo, (_event, id: string, includeBusinessInfo: boolean) =>
+    setSaleIncludeBusinessInfo(id, includeBusinessInfo)
+  );
   ipcMain.handle(ipcChannels.saleVoidList, () => listSaleVoids());
   ipcMain.handle(ipcChannels.saleVoidGet, (_event, id: string) => getSaleVoid(id));
   ipcMain.handle(ipcChannels.saleVoidRequest, (_event, input: unknown) => requestSaleVoid(input));
@@ -679,6 +684,9 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.quotationSetIncludeTaxBreakdown, (_event, id: string, includeTaxBreakdown: boolean) =>
     setQuotationIncludeTaxBreakdown(id, includeTaxBreakdown)
+  );
+  ipcMain.handle(ipcChannels.quotationSetIncludeBusinessInfo, (_event, id: string, includeBusinessInfo: boolean) =>
+    setQuotationIncludeBusinessInfo(id, includeBusinessInfo)
   );
   ipcMain.handle(ipcChannels.quotationCheckStock, (_event, id: string) => checkQuotationStock(id));
   ipcMain.handle(ipcChannels.quotationConvertToSale, (_event, id: string, input: unknown) =>

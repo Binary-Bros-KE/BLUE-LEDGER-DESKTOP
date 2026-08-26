@@ -247,6 +247,7 @@ export function InvoicesRoute(): React.JSX.Element {
   const [createDueDate, setCreateDueDate] = useState(todayIsoDate());
   const [createNotes, setCreateNotes] = useState("");
   const [createIncludeTaxBreakdown, setCreateIncludeTaxBreakdown] = useState(true);
+  const [createIncludeBusinessInfo, setCreateIncludeBusinessInfo] = useState(true);
   const [createItems, setCreateItems] = useState<CartLine[]>([]);
   const [createServiceCharges, setCreateServiceCharges] = useState<ServiceChargeDraft[]>([]);
   const [createDelivery, setCreateDelivery] = useState<DeliveryDraft | null>(null);
@@ -645,6 +646,17 @@ export function InvoicesRoute(): React.JSX.Element {
     }
   }
 
+  async function handleToggleBusinessInfo(next: boolean): Promise<void> {
+    if (!viewingSale) return;
+    try {
+      const updated = await window.blueLedger.sale.setIncludeBusinessInfo(viewingSale.id, next);
+      setViewingSale(updated);
+      showSuccessToast(next ? "Storefront information will now show on this invoice" : "Storefront information hidden on this invoice");
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Failed to update the storefront information setting"));
+    }
+  }
+
   async function handlePrintThermal(): Promise<void> {
     if (!viewingSale) return;
     setPrintingThermal(true);
@@ -764,6 +776,7 @@ export function InvoicesRoute(): React.JSX.Element {
     setCreateDueDate(todayIsoDate());
     setCreateNotes("");
     setCreateIncludeTaxBreakdown(true);
+    setCreateIncludeBusinessInfo(true);
     setCreateItems([]);
     setCreateServiceCharges([]);
     setCreateDelivery(null);
@@ -789,6 +802,7 @@ export function InvoicesRoute(): React.JSX.Element {
     setCreateDueDate(sale.dueDate ?? todayIsoDate());
     setCreateNotes(sale.invoiceNotes ?? "");
     setCreateIncludeTaxBreakdown(sale.includeTaxBreakdown);
+    setCreateIncludeBusinessInfo(sale.includeBusinessInfo);
     setCreateItems(
       sale.items.map((item) => ({
         productId: item.productId,
@@ -943,6 +957,7 @@ export function InvoicesRoute(): React.JSX.Element {
       dueDate: createDueDate,
       invoiceNotes: createNotes,
       includeTaxBreakdown: createIncludeTaxBreakdown,
+      includeBusinessInfo: createIncludeBusinessInfo,
       locationId: session && !session.branch ? createStorefrontId : undefined,
       items: createItems.map((line) => ({
         productId: line.productId,
@@ -1317,6 +1332,15 @@ export function InvoicesRoute(): React.JSX.Element {
                 description="Shows the Tax Breakdown section on this invoice's print, download, and share"
                 checked={viewingSale.includeTaxBreakdown}
                 onChange={(checked) => void handleToggleTaxBreakdown(checked)}
+              />
+            </div>
+
+            <div className="mt-4">
+              <CheckboxField
+                label="Include storefront information"
+                description="Shows the shop name, logo, address, contacts and header/footer text on this invoice. Turn off for a fully anonymous invoice."
+                checked={viewingSale.includeBusinessInfo}
+                onChange={(checked) => void handleToggleBusinessInfo(checked)}
               />
             </div>
 
@@ -2158,6 +2182,15 @@ export function InvoicesRoute(): React.JSX.Element {
               description="Shows the Tax Breakdown section on this invoice's print, download, and share — can still be changed later from the invoice's own detail view"
               checked={createIncludeTaxBreakdown}
               onChange={setCreateIncludeTaxBreakdown}
+            />
+          </div>
+
+          <div className="mt-4">
+            <CheckboxField
+              label="Include storefront information"
+              description="Shows the shop name, logo, address, contacts and header/footer text on this invoice — can still be changed later from the invoice's own detail view"
+              checked={createIncludeBusinessInfo}
+              onChange={setCreateIncludeBusinessInfo}
             />
           </div>
 

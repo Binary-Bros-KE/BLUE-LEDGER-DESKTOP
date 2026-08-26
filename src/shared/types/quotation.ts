@@ -63,6 +63,8 @@ export type Quotation = {
   /** Whether the "Tax Breakdown" section prints/downloads/shares on this specific quotation — see
    * Sale["includeTaxBreakdown"]'s own doc comment (shared/types/sale.ts), the identical concept. */
   includeTaxBreakdown: boolean;
+  /** See Sale["includeBusinessInfo"]'s own doc comment (shared/types/sale.ts) — the identical concept. */
+  includeBusinessInfo: boolean;
   convertedSaleId: string | null;
   convertedAt: string | null;
   createdAt: string;

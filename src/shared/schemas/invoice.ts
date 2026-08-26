@@ -36,6 +36,8 @@ export const createInvoiceSchema = z
     /** Whether the "Tax Breakdown" section prints/downloads/shares on this invoice — see
      * Sale["includeTaxBreakdown"]'s own doc comment. */
     includeTaxBreakdown: z.coerce.boolean().optional().default(true),
+    /** See Sale["includeBusinessInfo"]'s own doc comment, the identical concept. */
+    includeBusinessInfo: z.coerce.boolean().optional().default(true),
     // No .min(1) here — an invoice for pure service/labour work (no physical product involved) is
     // valid on its own. The refine below is what actually enforces "there must be SOMETHING to
     // bill", accepting either products or service charges.

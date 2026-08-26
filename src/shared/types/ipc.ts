@@ -717,6 +717,10 @@ export type IpcInvokeMap = {
     args: [string, boolean];
     result: Sale;
   };
+  "sale:set-include-business-info": {
+    args: [string, boolean];
+    result: Sale;
+  };
   "sale-void:list": {
     args: [];
     result: SaleVoid[];
@@ -838,6 +842,10 @@ export type IpcInvokeMap = {
     result: Quotation;
   };
   "quotation:set-include-tax-breakdown": {
+    args: [string, boolean];
+    result: Quotation;
+  };
+  "quotation:set-include-business-info": {
     args: [string, boolean];
     result: Quotation;
   };
@@ -1552,6 +1560,10 @@ export type BlueLedgerApi = {
       id: string,
       includeTaxBreakdown: boolean
     ) => Promise<IpcInvokeMap["sale:set-include-tax-breakdown"]["result"]>;
+    setIncludeBusinessInfo: (
+      id: string,
+      includeBusinessInfo: boolean
+    ) => Promise<IpcInvokeMap["sale:set-include-business-info"]["result"]>;
   };
   saleVoid: {
     list: () => Promise<IpcInvokeMap["sale-void:list"]["result"]>;
@@ -1631,6 +1643,10 @@ export type BlueLedgerApi = {
       id: string,
       includeTaxBreakdown: boolean
     ) => Promise<IpcInvokeMap["quotation:set-include-tax-breakdown"]["result"]>;
+    setIncludeBusinessInfo: (
+      id: string,
+      includeBusinessInfo: boolean
+    ) => Promise<IpcInvokeMap["quotation:set-include-business-info"]["result"]>;
     checkStock: (id: string) => Promise<IpcInvokeMap["quotation:check-stock"]["result"]>;
     convertToSale: (
       id: string,

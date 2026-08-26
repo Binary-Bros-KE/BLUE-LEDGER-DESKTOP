@@ -388,6 +388,7 @@ export function suspendSale(input: unknown): { id: string } {
       changeGivenCents: null,
       notes: parsed.notes,
       includeTaxBreakdown: parsed.includeTaxBreakdown,
+      includeBusinessInfo: parsed.includeBusinessInfo,
       completedAt: null,
       // No delivery_notes row (and no number allocated) while merely held — see persistCartExtras'
       // own doc comment for why. Just the raw cart input, stashed for the Checkout screen to
@@ -453,6 +454,19 @@ export function setSaleIncludeTaxBreakdown(id: string, includeTaxBreakdown: bool
   return getSaleDetail(id);
 }
 
+/** Same as setSaleIncludeTaxBreakdown above, for the independent "Include storefront information"
+ * toggle — see Sale["includeBusinessInfo"]'s own doc comment. */
+export function setSaleIncludeBusinessInfo(id: string, includeBusinessInfo: boolean): Sale {
+  requirePermission("sales", "edit");
+  const { tenantId } = getCurrentTenant();
+  const row = saleRepository.findSaleRowById(id);
+  if (!row || row.tenant_id !== tenantId) {
+    throw new Error("Sale not found");
+  }
+  saleRepository.updateSaleIncludeBusinessInfoRow(id, includeBusinessInfo);
+  return getSaleDetail(id);
+}
+
 /**
  * Inserts a completed sale from an already-priced cart — shared by checkout (which prices the cart
  * itself from live product data) and quotation conversion (which carries over the quotation's frozen
@@ -474,6 +488,8 @@ export function insertCompletedSaleFromCart(input: {
    * own doc comment. Quotation conversion passes the source quotation's own choice through instead
    * of defaulting, so converting doesn't silently reset it. */
   includeTaxBreakdown?: boolean;
+  /** See includeTaxBreakdown above — same defaulting/quotation-conversion-passthrough rule. */
+  includeBusinessInfo?: boolean;
 }): Sale {
   const { tenantId, employeeId, locationId, cart } = input;
 
@@ -509,6 +525,7 @@ export function insertCompletedSaleFromCart(input: {
       changeGivenCents,
       notes: input.notes,
       includeTaxBreakdown: input.includeTaxBreakdown,
+      includeBusinessInfo: input.includeBusinessInfo,
       completedAt: now
     });
 
@@ -606,6 +623,7 @@ export function completeSale(input: unknown): Sale {
     amountReceivedCents: parsed.amountReceivedCents,
     notes: parsed.notes,
     resumeSaleId: parsed.resumeSaleId,
-    includeTaxBreakdown: parsed.includeTaxBreakdown
+    includeTaxBreakdown: parsed.includeTaxBreakdown,
+    includeBusinessInfo: parsed.includeBusinessInfo
   });
 }

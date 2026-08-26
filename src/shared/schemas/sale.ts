@@ -29,6 +29,9 @@ export const saleCartInputSchema = z.object({
    * Sale["includeTaxBreakdown"]'s own doc comment. Round-trips through suspend/resume the same way
    * paymentMethodId/paymentReference already do, so a held sale doesn't lose the cashier's choice. */
   includeTaxBreakdown: z.coerce.boolean().optional().default(true),
+  /** See Sale["includeBusinessInfo"]'s own doc comment — same round-trip-through-suspend/resume
+   * treatment as includeTaxBreakdown above. */
+  includeBusinessInfo: z.coerce.boolean().optional().default(true),
   items: z.array(saleCartItemSchema).min(1, "Add at least one product to the cart"),
   serviceCharges: serviceChargesFieldSchema,
   delivery: deliveryFieldSchema,

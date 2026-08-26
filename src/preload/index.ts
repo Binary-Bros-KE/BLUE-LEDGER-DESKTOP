@@ -223,7 +223,8 @@ const api: BlueLedgerApi = {
     suspend: (input) => invoke("sale:suspend", input),
     deletePending: (id) => invoke("sale:delete-pending", id),
     complete: (input) => invoke("sale:complete", input),
-    setIncludeTaxBreakdown: (id, includeTaxBreakdown) => invoke("sale:set-include-tax-breakdown", id, includeTaxBreakdown)
+    setIncludeTaxBreakdown: (id, includeTaxBreakdown) => invoke("sale:set-include-tax-breakdown", id, includeTaxBreakdown),
+    setIncludeBusinessInfo: (id, includeBusinessInfo) => invoke("sale:set-include-business-info", id, includeBusinessInfo)
   },
   saleVoid: {
     list: () => invoke("sale-void:list"),
@@ -266,6 +267,8 @@ const api: BlueLedgerApi = {
     setStatus: (id, status) => invoke("quotation:set-status", id, status),
     setIncludeTaxBreakdown: (id, includeTaxBreakdown) =>
       invoke("quotation:set-include-tax-breakdown", id, includeTaxBreakdown),
+    setIncludeBusinessInfo: (id, includeBusinessInfo) =>
+      invoke("quotation:set-include-business-info", id, includeBusinessInfo),
     checkStock: (id) => invoke("quotation:check-stock", id),
     convertToSale: (id, input) => invoke("quotation:convert-to-sale", id, input),
     convertToInvoice: (id, input) => invoke("quotation:convert-to-invoice", id, input)

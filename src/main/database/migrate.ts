@@ -2532,6 +2532,20 @@ const migrations = [
       -- exactly what it was at that moment, never recomputed against current stock later.
       ALTER TABLE purchases ADD COLUMN receiving_events TEXT NOT NULL DEFAULT '[]';
     `
+  },
+  {
+    version: 72,
+    name: "document_include_business_info",
+    sql: `
+      -- Second per-document toggle alongside include_tax_breakdown: when 0, every render of this
+      -- document (preview, PDF, print, sync, share link) strips ALL shop identity — business name,
+      -- logo, address, phone, header/footer text, KRA PIN — down to a generic heading ("CASH
+      -- RECEIPT"/"INVOICE"/"QUOTATION"). Defaults to 1 (today's behavior, unchanged). Same
+      -- set-at-creation/editable-afterward/synced lifecycle as include_tax_breakdown — see that
+      -- column's own comment above.
+      ALTER TABLE sales ADD COLUMN include_business_info INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE quotations ADD COLUMN include_business_info INTEGER NOT NULL DEFAULT 1;
+    `
   }
 ] as const;
 

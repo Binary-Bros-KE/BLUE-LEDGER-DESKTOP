@@ -36,6 +36,7 @@ export type SaleRow = {
   change_given_cents: number | null;
   notes: string | null;
   include_tax_breakdown: number;
+  include_business_info: number;
   invoice_number: string | null;
   invoice_date: string | null;
   due_date: string | null;
@@ -422,6 +423,8 @@ export function insertSaleRow(input: {
   /** Defaults to true (today's behavior) when omitted/undefined — see the include_tax_breakdown
    * migration's own doc comment. */
   includeTaxBreakdown?: boolean | undefined;
+  /** See Sale["includeBusinessInfo"]'s own doc comment — same defaulting rule as includeTaxBreakdown. */
+  includeBusinessInfo?: boolean | undefined;
   completedAt: string | null;
   /** JSON-serialized DeliveryInput for a held sale's own delivery draft, or null — see
    * Sale["deliveryDraft"]'s own doc comment. Always null for a completed sale (its delivery, if
@@ -443,9 +446,9 @@ export function insertSaleRow(input: {
         subtotal_cents, discount_amount_cents, tax_amount_cents, grand_total_cents,
         payment_method_id, payment_reference, amount_received_cents, change_given_cents,
         notes, completed_at, created_at, updated_at, sync_status, amount_paid_cents, balance_due_cents,
-        delivery_draft_json, include_tax_breakdown
+        delivery_draft_json, include_tax_breakdown, include_business_info
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
     `
     )
     .run(
@@ -471,7 +474,8 @@ export function insertSaleRow(input: {
       amountPaidCents,
       balanceDueCents,
       input.deliveryDraftJson ?? null,
-      input.includeTaxBreakdown === false ? 0 : 1
+      input.includeTaxBreakdown === false ? 0 : 1,
+      input.includeBusinessInfo === false ? 0 : 1
     );
 
   const row = findSaleRowById(input.id);
@@ -557,6 +561,8 @@ export function insertInvoiceRow(input: {
   /** Defaults to true (today's behavior) when omitted/undefined — see the include_tax_breakdown
    * migration's own doc comment. */
   includeTaxBreakdown?: boolean | undefined;
+  /** See Sale["includeBusinessInfo"]'s own doc comment — same defaulting rule as includeTaxBreakdown. */
+  includeBusinessInfo?: boolean | undefined;
 }): SaleRow {
   const now = new Date().toISOString();
 
@@ -568,9 +574,9 @@ export function insertInvoiceRow(input: {
         subtotal_cents, discount_amount_cents, tax_amount_cents, grand_total_cents,
         invoice_number, invoice_date, due_date, amount_paid_cents, balance_due_cents,
         payment_status, invoice_notes, payments, completed_at, created_at, updated_at, sync_status,
-        include_tax_breakdown
+        include_tax_breakdown, include_business_info
       )
-      VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+      VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
     `
     )
     .run(
@@ -595,7 +601,8 @@ export function insertInvoiceRow(input: {
       now,
       now,
       now,
-      input.includeTaxBreakdown === false ? 0 : 1
+      input.includeTaxBreakdown === false ? 0 : 1,
+      input.includeBusinessInfo === false ? 0 : 1
     );
 
   const row = findSaleRowById(input.id);
@@ -672,6 +679,20 @@ export function updateSaleIncludeTaxBreakdownRow(id: string, includeTaxBreakdown
   return row;
 }
 
+export function updateSaleIncludeBusinessInfoRow(id: string, includeBusinessInfo: boolean): SaleRow {
+  const now = new Date().toISOString();
+
+  getDatabase()
+    .prepare("UPDATE sales SET include_business_info = ?, sync_status = 'pending', updated_at = ? WHERE id = ?")
+    .run(includeBusinessInfo ? 1 : 0, now, id);
+
+  const row = findSaleRowById(id);
+  if (!row) {
+    throw new Error("Sale not found after business-info-toggle update");
+  }
+  return row;
+}
+
 /** Rewrites an invoice's header content — customer/type/due date/notes/totals — as part of an
  * in-place edit. Items themselves are handled separately by the caller (deleteSaleItemsForSaleRow +
  * fresh insertSaleItemRow calls), same split as updateQuotationRow/deleteQuotationItemsForQuotationRow. */
@@ -688,6 +709,8 @@ export function updateInvoiceContentRow(input: {
   paymentStatus: PaymentStatus;
   invoiceNotes: string | null;
   includeTaxBreakdown?: boolean | undefined;
+  /** See Sale["includeBusinessInfo"]'s own doc comment — same defaulting rule as includeTaxBreakdown. */
+  includeBusinessInfo?: boolean | undefined;
 }): SaleRow {
   const now = new Date().toISOString();
 
@@ -706,6 +729,7 @@ export function updateInvoiceContentRow(input: {
         payment_status = ?,
         invoice_notes = ?,
         include_tax_breakdown = ?,
+        include_business_info = ?,
         sync_status = 'pending',
         updated_at = ?
       WHERE id = ?
@@ -723,6 +747,7 @@ export function updateInvoiceContentRow(input: {
       input.paymentStatus,
       input.invoiceNotes,
       input.includeTaxBreakdown === false ? 0 : 1,
+      input.includeBusinessInfo === false ? 0 : 1,
       now,
       input.id
     );
@@ -808,6 +833,7 @@ export function mapSaleDetailRow(
     changeGivenCents: row.change_given_cents,
     notes: row.notes,
     includeTaxBreakdown: row.include_tax_breakdown === 1,
+    includeBusinessInfo: row.include_business_info === 1,
     invoiceNumber: row.invoice_number,
     invoiceDate: row.invoice_date,
     dueDate: row.due_date,
