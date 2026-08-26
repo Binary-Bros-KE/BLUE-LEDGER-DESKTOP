@@ -64,6 +64,10 @@ export type LocationInputFields = {
    * this setting. Off by default: most tenants' product photos aren't curated for a formal document. */
   showProductImagesOnInvoices: boolean;
   showProductImagesOnQuotations: boolean;
+  /** Pre-fills the "Include storefront information" checkbox's initial value on a brand-new receipt/
+   * invoice/quotation created at this storefront — see Sale["includeBusinessInfo"]'s own doc comment
+   * for the actual per-document flag this only ever seeds. Defaults true, matching that flag. */
+  defaultIncludeBusinessInfo: boolean;
   canReceiveStock: boolean;
   canSellStock: boolean;
   canTransferStock: boolean;

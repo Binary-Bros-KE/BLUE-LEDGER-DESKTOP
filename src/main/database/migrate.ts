@@ -2546,6 +2546,17 @@ const migrations = [
       ALTER TABLE sales ADD COLUMN include_business_info INTEGER NOT NULL DEFAULT 1;
       ALTER TABLE quotations ADD COLUMN include_business_info INTEGER NOT NULL DEFAULT 1;
     `
+  },
+  {
+    version: 73,
+    name: "location_default_include_business_info",
+    sql: `
+      -- Pre-fills the "Include storefront information" checkbox's initial value on a brand-new
+      -- receipt/invoice/quotation created at this storefront — see include_business_info's own
+      -- migration comment above for the per-document flag this only ever seeds. Never touched again
+      -- once a document exists; never overrides an in-progress draft's already-chosen value.
+      ALTER TABLE locations ADD COLUMN default_include_business_info INTEGER NOT NULL DEFAULT 1;
+    `
   }
 ] as const;
 

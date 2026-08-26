@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -181,6 +181,9 @@ export function QuotationsRoute(): React.JSX.Element {
   const [createNotes, setCreateNotes] = useState("");
   const [createIncludeTaxBreakdown, setCreateIncludeTaxBreakdown] = useState(true);
   const [createIncludeBusinessInfo, setCreateIncludeBusinessInfo] = useState(true);
+  // Kept in sync by the effect below — openCreateModal() reads this synchronously, same pattern as
+  // CheckoutRoute's/InvoicesRoute's own identical ref.
+  const defaultIncludeBusinessInfoRef = useRef(true);
   const [createItems, setCreateItems] = useState<CartLine[]>([]);
   const [createServiceCharges, setCreateServiceCharges] = useState<ServiceChargeDraft[]>([]);
   const [createDelivery, setCreateDelivery] = useState<DeliveryDraft | null>(null);
@@ -628,6 +631,27 @@ export function QuotationsRoute(): React.JSX.Element {
     };
   }, [createLinePricing, createServiceCharges, createDelivery]);
 
+  const effectiveCreateLocationId = session?.branch ? session.branch.id : createStorefrontId || null;
+
+  useEffect(() => {
+    if (!effectiveCreateLocationId) {
+      defaultIncludeBusinessInfoRef.current = true;
+      return;
+    }
+    let cancelled = false;
+    void window.blueLedger.location
+      .get(effectiveCreateLocationId)
+      .then((location) => {
+        if (!cancelled) defaultIncludeBusinessInfoRef.current = location?.defaultIncludeBusinessInfo ?? true;
+      })
+      .catch(() => {
+        if (!cancelled) defaultIncludeBusinessInfoRef.current = true;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveCreateLocationId]);
+
   function openCreateModal(): void {
     setEditingQuotationId(null);
     setCreateCustomerId(null);
@@ -637,7 +661,7 @@ export function QuotationsRoute(): React.JSX.Element {
     setCreateValidUntil(addDaysIso(7));
     setCreateNotes("");
     setCreateIncludeTaxBreakdown(true);
-    setCreateIncludeBusinessInfo(true);
+    setCreateIncludeBusinessInfo(defaultIncludeBusinessInfoRef.current);
     setCreateItems([]);
     setCreateServiceCharges([]);
     setCreateDelivery(null);

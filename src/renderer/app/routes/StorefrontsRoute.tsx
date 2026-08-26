@@ -61,6 +61,7 @@ type FormState = {
   quotationFooter: string;
   showProductImagesOnInvoices: boolean;
   showProductImagesOnQuotations: boolean;
+  defaultIncludeBusinessInfo: boolean;
   canReceiveStock: boolean;
   canSellStock: boolean;
   canTransferStock: boolean;
@@ -93,6 +94,7 @@ const emptyForm: FormState = {
   quotationFooter: "",
   showProductImagesOnInvoices: false,
   showProductImagesOnQuotations: false,
+  defaultIncludeBusinessInfo: true,
   canReceiveStock: true,
   canSellStock: true,
   canTransferStock: true
@@ -126,6 +128,7 @@ function toFormState(location: Location): FormState {
     quotationFooter: location.quotationFooter ?? "",
     showProductImagesOnInvoices: location.showProductImagesOnInvoices,
     showProductImagesOnQuotations: location.showProductImagesOnQuotations,
+    defaultIncludeBusinessInfo: location.defaultIncludeBusinessInfo,
     canReceiveStock: location.canReceiveStock,
     canSellStock: location.canSellStock,
     canTransferStock: location.canTransferStock
@@ -674,6 +677,12 @@ export function StorefrontsRoute(): React.JSX.Element {
                 description="Each line item's own photo, downloaded/printed PDF only"
                 checked={form.showProductImagesOnQuotations}
                 onChange={(checked) => updateField("showProductImagesOnQuotations", checked)}
+              />
+              <CheckboxField
+                label="Include Storefront Information by Default"
+                description="Pre-fills the 'Include storefront information' checkbox on a new receipt/invoice/quotation at this storefront — cashiers can still change it per document"
+                checked={form.defaultIncludeBusinessInfo}
+                onChange={(checked) => updateField("defaultIncludeBusinessInfo", checked)}
               />
             </div>
           </div>

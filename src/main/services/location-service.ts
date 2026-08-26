@@ -97,6 +97,7 @@ export function ensureMainStoreLocation(tenantId: string): void {
     quotationFooter: null,
     showProductImagesOnInvoices: false,
     showProductImagesOnQuotations: false,
+    defaultIncludeBusinessInfo: true,
     canReceiveStock: true,
     canSellStock: false,
     canTransferStock: true,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Ban,
@@ -248,6 +248,9 @@ export function InvoicesRoute(): React.JSX.Element {
   const [createNotes, setCreateNotes] = useState("");
   const [createIncludeTaxBreakdown, setCreateIncludeTaxBreakdown] = useState(true);
   const [createIncludeBusinessInfo, setCreateIncludeBusinessInfo] = useState(true);
+  // Kept in sync by the effect below — openCreateModal() reads this synchronously when a brand-new
+  // invoice form opens, same reasoning/pattern as CheckoutRoute's own identical ref.
+  const defaultIncludeBusinessInfoRef = useRef(true);
   const [createItems, setCreateItems] = useState<CartLine[]>([]);
   const [createServiceCharges, setCreateServiceCharges] = useState<ServiceChargeDraft[]>([]);
   const [createDelivery, setCreateDelivery] = useState<DeliveryDraft | null>(null);
@@ -767,6 +770,27 @@ export function InvoicesRoute(): React.JSX.Element {
 
   const initialPaymentCents = includeInitialPayment && initialPaymentAmount.trim() !== "" ? toCents(initialPaymentAmount) : 0;
 
+  const effectiveCreateLocationId = session?.branch ? session.branch.id : createStorefrontId || null;
+
+  useEffect(() => {
+    if (!effectiveCreateLocationId) {
+      defaultIncludeBusinessInfoRef.current = true;
+      return;
+    }
+    let cancelled = false;
+    void window.blueLedger.location
+      .get(effectiveCreateLocationId)
+      .then((location) => {
+        if (!cancelled) defaultIncludeBusinessInfoRef.current = location?.defaultIncludeBusinessInfo ?? true;
+      })
+      .catch(() => {
+        if (!cancelled) defaultIncludeBusinessInfoRef.current = true;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveCreateLocationId]);
+
   function openCreateModal(): void {
     setEditingInvoiceId(null);
     setCreateCustomerId(null);
@@ -776,7 +800,7 @@ export function InvoicesRoute(): React.JSX.Element {
     setCreateDueDate(todayIsoDate());
     setCreateNotes("");
     setCreateIncludeTaxBreakdown(true);
-    setCreateIncludeBusinessInfo(true);
+    setCreateIncludeBusinessInfo(defaultIncludeBusinessInfoRef.current);
     setCreateItems([]);
     setCreateServiceCharges([]);
     setCreateDelivery(null);

@@ -46,6 +46,7 @@ export const locationInputSchema = z.object({
   quotationFooter: optionalText(500),
   showProductImagesOnInvoices: z.boolean().optional().default(false),
   showProductImagesOnQuotations: z.boolean().optional().default(false),
+  defaultIncludeBusinessInfo: z.boolean().optional().default(true),
   canReceiveStock: z.boolean(),
   canSellStock: z.boolean(),
   canTransferStock: z.boolean()

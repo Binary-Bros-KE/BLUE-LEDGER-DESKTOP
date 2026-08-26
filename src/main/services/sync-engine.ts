@@ -684,6 +684,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       quotationFooter: row.quotation_footer,
       showProductImagesOnInvoices: Boolean(row.show_product_images_on_invoices),
       showProductImagesOnQuotations: Boolean(row.show_product_images_on_quotations),
+      defaultIncludeBusinessInfo: Boolean(row.default_include_business_info),
       localCreatedAt: row.created_at,
       localUpdatedAt: row.updated_at,
       baseUpdatedAt: row.synced_updated_at
@@ -1628,7 +1629,10 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       // default, toLocalValue's undefined-fallback would bind a bare null into a NOT NULL column
       // and crash the pull, exactly like sale_items.local_supplier_id did before it got one.
       { local: "show_product_images_on_invoices", cloud: "showProductImagesOnInvoices", type: "bool", default: 0 },
-      { local: "show_product_images_on_quotations", cloud: "showProductImagesOnQuotations", type: "bool", default: 0 }
+      { local: "show_product_images_on_quotations", cloud: "showProductImagesOnQuotations", type: "bool", default: 0 },
+      // Same older-device-safety reasoning as the two fields above, but this one's own column
+      // default is 1 (true), not 0 — matching include_business_info's own default polarity.
+      { local: "default_include_business_info", cloud: "defaultIncludeBusinessInfo", type: "bool", default: 1 }
     ]
   },
   // Not a boot-seeded default — created on-demand the first time a Super Admin configures hours for

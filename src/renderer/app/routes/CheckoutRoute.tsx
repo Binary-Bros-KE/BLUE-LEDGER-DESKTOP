@@ -137,6 +137,11 @@ export function CheckoutRoute(): React.JSX.Element {
   const [openSales, setOpenSales] = useState<OpenSaleDraft[]>([]);
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const ticketCounterRef = useRef(Math.floor(1000 + Math.random() * 8999));
+  // Kept in sync by the effect below (not state) — createDraft() is synchronous and needs this
+  // value immediately when a new ticket opens, no render/await round-trip. Defaults true until the
+  // active storefront's own setting loads, matching Location["defaultIncludeBusinessInfo"]'s own
+  // default (see that field's own doc comment).
+  const defaultIncludeBusinessInfoRef = useRef(true);
 
   const [suspending, setSuspending] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -162,6 +167,25 @@ export function CheckoutRoute(): React.JSX.Element {
   // Same fallback the rest of checkout already uses for a session with no assigned branch — the
   // cashier's StorefrontPicker choice below stands in for it.
   const effectiveLocationId = branchId ?? (storefrontId || null);
+
+  useEffect(() => {
+    if (!effectiveLocationId) {
+      defaultIncludeBusinessInfoRef.current = true;
+      return;
+    }
+    let cancelled = false;
+    void window.blueLedger.location
+      .get(effectiveLocationId)
+      .then((location) => {
+        if (!cancelled) defaultIncludeBusinessInfoRef.current = location?.defaultIncludeBusinessInfo ?? true;
+      })
+      .catch(() => {
+        if (!cancelled) defaultIncludeBusinessInfoRef.current = true;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveLocationId]);
 
   useEffect(() => {
     void (async () => {
@@ -523,7 +547,7 @@ export function CheckoutRoute(): React.JSX.Element {
       paymentReference: "",
       amountReceived: "",
       includeTaxBreakdown: true,
-      includeBusinessInfo: true,
+      includeBusinessInfo: defaultIncludeBusinessInfoRef.current,
       createdAt: Date.now()
     };
   }
