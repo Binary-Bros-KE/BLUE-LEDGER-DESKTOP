@@ -126,8 +126,12 @@ export function InvoicePreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
           Invoice: {sale.invoiceNumber ?? "-"}
           <br />
           Date: {formatDate(sale.invoiceDate)} · Due: {formatDate(sale.dueDate)}
-          <br />
-          Issued by: {sale.employeeName}
+          {includeBusinessInfo && (
+            <>
+              <br />
+              Issued by: {sale.employeeName}
+            </>
+          )}
         </p>
 
         <table className="mt-2 w-full border-collapse text-[10px]">

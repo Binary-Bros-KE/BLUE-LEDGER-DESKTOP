@@ -172,7 +172,7 @@ function writeReceiptToPrinter(printerInstance: ThermalPrinter, vm: ReceiptViewM
   printerInstance.alignLeft();
   printerInstance.println(`Receipt: ${vm.receiptNumber ?? "-"}`);
   printerInstance.println(`Date: ${vm.dateLabel}`);
-  printerInstance.println(`Cashier: ${vm.cashierName}`);
+  if (vm.cashierName) printerInstance.println(`Cashier: ${vm.cashierName}`);
   if (vm.branchName) printerInstance.println(`Branch: ${vm.branchName}`);
   if (vm.customerName) printerInstance.println(`Customer: ${vm.customerName}`);
   printerInstance.drawLine();
@@ -438,8 +438,8 @@ function buildReceiptHtml(vm: ReceiptViewModel): string {
     <hr/>
     <p class="muted">
       Receipt: ${escapeHtml(vm.receiptNumber ?? "-")}<br/>
-      Date: ${escapeHtml(vm.dateLabel)}<br/>
-      Cashier: ${escapeHtml(vm.cashierName)}${vm.branchName ? ` &middot; Branch: ${escapeHtml(vm.branchName)}` : ""}
+      Date: ${escapeHtml(vm.dateLabel)}
+      ${vm.cashierName ? `<br/>Cashier: ${escapeHtml(vm.cashierName)}${vm.branchName ? ` &middot; Branch: ${escapeHtml(vm.branchName)}` : ""}` : ""}
       ${vm.customerName ? `<br/>Customer: ${escapeHtml(vm.customerName)}` : ""}
     </p>
     <table class="items">
@@ -1220,13 +1220,13 @@ function buildInvoiceHtml(
 
     <table class="meta-table">
       <thead>
-        <tr><th>Invoice Date</th><th>Due Date</th><th>Issued By</th><th>Your VAT No.</th></tr>
+        <tr><th>Invoice Date</th><th>Due Date</th>${sale.includeBusinessInfo ? `<th>Issued By</th>` : ""}<th>Your VAT No.</th></tr>
       </thead>
       <tbody>
         <tr>
           <td>${formatInvoiceDate(sale.invoiceDate)}</td>
           <td>${formatInvoiceDate(sale.dueDate)}</td>
-          <td>${escapeHtml(sale.employeeName)}</td>
+          ${sale.includeBusinessInfo ? `<td>${escapeHtml(sale.employeeName)}</td>` : ""}
           <td>${escapeHtml(sale.customerKraPin ?? "-")}</td>
         </tr>
       </tbody>
@@ -1442,8 +1442,8 @@ function buildInvoiceThermalHtml(sale: Sale, business: DocumentBusinessInfo): st
     <p class="muted">
       Bill To: ${escapeHtml(sale.customerName ?? "Walk-in Customer")}<br/>
       Invoice Date: ${formatInvoiceDate(sale.invoiceDate)}<br/>
-      Due Date: ${formatInvoiceDate(sale.dueDate)}<br/>
-      ${sale.includeBusinessInfo ? `Storefront: ${escapeHtml(sale.locationName)} &middot; ` : ""}Issued By: ${escapeHtml(sale.employeeName)}
+      Due Date: ${formatInvoiceDate(sale.dueDate)}
+      ${sale.includeBusinessInfo ? `<br/>Storefront: ${escapeHtml(sale.locationName)} &middot; Issued By: ${escapeHtml(sale.employeeName)}` : ""}
     </p>
     <table class="items">
       <thead>
@@ -1602,13 +1602,13 @@ function buildQuotationHtml(
 
     <table class="meta-table">
       <thead>
-        <tr><th>Date Prepared</th><th>Valid Until</th><th>Prepared By</th></tr>
+        <tr><th>Date Prepared</th><th>Valid Until</th>${quotation.includeBusinessInfo ? `<th>Prepared By</th>` : ""}</tr>
       </thead>
       <tbody>
         <tr>
           <td>${formatInvoiceDate(quotation.createdAt)}</td>
           <td>${formatInvoiceDate(quotation.validUntil)}</td>
-          <td>${escapeHtml(quotation.employeeName)}</td>
+          ${quotation.includeBusinessInfo ? `<td>${escapeHtml(quotation.employeeName)}</td>` : ""}
         </tr>
       </tbody>
     </table>
@@ -1810,8 +1810,8 @@ function buildQuotationThermalHtml(quotation: Quotation, business: DocumentBusin
     <p class="muted">
       Quoted To: ${escapeHtml(quotation.customerName ?? "Walk-in Customer")}<br/>
       Date Prepared: ${formatInvoiceDate(quotation.createdAt)}<br/>
-      Valid Until: ${formatInvoiceDate(quotation.validUntil)}<br/>
-      ${quotation.includeBusinessInfo ? `Storefront: ${escapeHtml(quotation.locationName)} &middot; ` : ""}Prepared By: ${escapeHtml(quotation.employeeName)}
+      Valid Until: ${formatInvoiceDate(quotation.validUntil)}
+      ${quotation.includeBusinessInfo ? `<br/>Storefront: ${escapeHtml(quotation.locationName)} &middot; Prepared By: ${escapeHtml(quotation.employeeName)}` : ""}
     </p>
     <table class="items">
       <thead>

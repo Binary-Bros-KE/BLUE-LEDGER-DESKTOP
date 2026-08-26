@@ -65,9 +65,12 @@ export type ReceiptBusinessInfo = {
 
 /** "CASH RECEIPT" replaces businessName as the printed heading when Sale["includeBusinessInfo"] is
  * false — see that field's own doc comment (shared/types/sale.ts). Every other identity field is
- * blanked the same way, including branchName (the storefront name), whose only consumers are the
- * "Cashier: X · Branch: Y" metadata line in printer-service.ts/ReceiptPreview.tsx — those already
- * omit the "· Branch: Y" segment entirely when branchName is empty. */
+ * blanked the same way, including cashierName/branchName (who served the customer and which
+ * storefront) — per the client's own explicit follow-up correction, staff identity is off-limits
+ * too when this is on, not just the shop's: "if we want to see who made the sale we can just look
+ * up the sale." The only consumers of either field are the "Cashier: X · Branch: Y" metadata line
+ * in printer-service.ts/ReceiptPreview.tsx — those omit the whole line whenever cashierName is
+ * empty (branchName is always empty right alongside it, never independently). */
 const GENERIC_RECEIPT_HEADING = "CASH RECEIPT";
 
 export function buildReceiptViewModel(sale: Sale, business: ReceiptBusinessInfo): ReceiptViewModel {
@@ -81,7 +84,7 @@ export function buildReceiptViewModel(sale: Sale, business: ReceiptBusinessInfo)
     currency: business.currency,
     receiptNumber: sale.receiptNumber,
     dateLabel: formatDocumentDateTime(sale.completedAt ?? sale.createdAt),
-    cashierName: sale.employeeName,
+    cashierName: showBusinessInfo ? sale.employeeName : "",
     branchName: showBusinessInfo ? sale.locationName : "",
     customerName: sale.customerName,
     items: sale.items.map((item) => ({

@@ -155,9 +155,13 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
           Receipt: {vm.receiptNumber ?? "-"}
           <br />
           Date: {vm.dateLabel}
-          <br />
-          Cashier: {vm.cashierName}
-          {vm.branchName && <> · Branch: {vm.branchName}</>}
+          {vm.cashierName && (
+            <>
+              <br />
+              Cashier: {vm.cashierName}
+              {vm.branchName && <> · Branch: {vm.branchName}</>}
+            </>
+          )}
           {vm.customerName && (
             <>
               <br />
