@@ -233,6 +233,7 @@ export const ipcChannels = {
   deliveryNoteGetForQuotation: "delivery-note:get-for-quotation",
   deliveryNoteSetDelivered: "delivery-note:set-delivered",
   deliveryNoteAttachToSale: "delivery-note:attach-to-sale",
+  deliveryNoteAttachToQuotation: "delivery-note:attach-to-quotation",
   exportToPdf: "export:to-pdf",
   exportToCsv: "export:to-csv",
   exportToExcel: "export:to-excel",

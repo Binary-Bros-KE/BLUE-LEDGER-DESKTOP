@@ -125,6 +125,7 @@ import {
   testPrinterConnection
 } from "@main/services/printer-service";
 import {
+  attachDeliveryToQuotation,
   attachDeliveryToSale,
   getDeliveryNote,
   getDeliveryNoteForQuotation,
@@ -778,6 +779,9 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.deliveryNoteAttachToSale, (_event, saleId: string, input: unknown) =>
     attachDeliveryToSale(saleId, input)
+  );
+  ipcMain.handle(ipcChannels.deliveryNoteAttachToQuotation, (_event, quotationId: string, input: unknown) =>
+    attachDeliveryToQuotation(quotationId, input)
   );
   ipcMain.handle(ipcChannels.exportToPdf, (_event, request: ExportListRequest) => exportListToPdf(request));
   ipcMain.handle(ipcChannels.exportToCsv, (_event, request: ExportListRequest) => exportListToCsv(request));

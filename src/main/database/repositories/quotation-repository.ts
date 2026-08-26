@@ -38,6 +38,7 @@ export type QuotationDetailRow = QuotationRow & {
   customer_name: string | null;
   location_name: string;
   employee_name: string;
+  has_delivery_note: number;
 };
 
 export type QuotationListRow = QuotationDetailRow;
@@ -69,7 +70,8 @@ const DETAIL_SELECT = `
     q.*,
     c.name AS customer_name,
     l.location_name AS location_name,
-    (e.first_name || ' ' || e.last_name) AS employee_name
+    (e.first_name || ' ' || e.last_name) AS employee_name,
+    EXISTS(SELECT 1 FROM delivery_notes dn WHERE dn.quotation_id = q.id) AS has_delivery_note
   FROM quotations q
   LEFT JOIN customers c ON c.id = q.customer_id
   JOIN locations l ON l.id = q.location_id
@@ -459,6 +461,7 @@ export function mapQuotationListRow(row: QuotationListRow): QuotationListItem {
     status: liveStatus(row),
     grandTotalCents: row.grand_total_cents,
     validUntil: row.valid_until,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    hasDeliveryNote: row.has_delivery_note === 1
   };
 }

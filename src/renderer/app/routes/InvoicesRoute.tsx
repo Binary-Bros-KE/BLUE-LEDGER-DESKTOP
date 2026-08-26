@@ -9,6 +9,7 @@ import {
   FileText,
   Loader2,
   Package,
+  PackagePlus,
   Plus,
   Printer,
   Receipt,
@@ -17,6 +18,7 @@ import {
   Wallet,
   X
 } from "lucide-react";
+import { AttachDeliveryModal } from "@renderer/shared/components/AttachDeliveryModal";
 import { Button } from "@renderer/shared/components/Button";
 import { useConfirm } from "@renderer/shared/components/ConfirmModal";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
@@ -212,6 +214,7 @@ export function InvoicesRoute(): React.JSX.Element {
     saleId: string;
   } | null>(null);
   const [deliveryLoading, setDeliveryLoading] = useState(false);
+  const [attachingDeliveryInvoice, setAttachingDeliveryInvoice] = useState<InvoiceListItem | null>(null);
 
   const [statementPickerOpen, setStatementPickerOpen] = useState(false);
   const [statementSearch, setStatementSearch] = useState("");
@@ -1291,6 +1294,20 @@ export function InvoicesRoute(): React.JSX.Element {
                               <Package className="size-3.5" aria-hidden="true" />
                             </button>
                           )}
+                          {!invoice.hasDeliveryNote && canEdit && (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setAttachingDeliveryInvoice(invoice);
+                              }}
+                              aria-label="Attach delivery"
+                              title="Attach Delivery"
+                              className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-primary cursor-pointer"
+                            >
+                              <PackagePlus className="size-3.5" aria-hidden="true" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1755,6 +1772,20 @@ export function InvoicesRoute(): React.JSX.Element {
           />
         ) : null}
       </Modal>
+
+      {attachingDeliveryInvoice && (
+        <AttachDeliveryModal
+          parentEntity="sale"
+          parentId={attachingDeliveryInvoice.id}
+          customerName={attachingDeliveryInvoice.customerName}
+          onClose={() => setAttachingDeliveryInvoice(null)}
+          onAttached={() => {
+            setAttachingDeliveryInvoice(null);
+            showSuccessToast("Delivery attached");
+            void loadAll();
+          }}
+        />
+      )}
 
       <Modal
         open={statementPickerOpen}

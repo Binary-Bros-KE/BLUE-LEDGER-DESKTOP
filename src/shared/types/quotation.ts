@@ -88,6 +88,7 @@ export type QuotationListItem = {
   grandTotalCents: number;
   validUntil: string;
   createdAt: string;
+  hasDeliveryNote: boolean;
 };
 
 /** Aggregate counts for the Quotations dashboard's summary cards. */

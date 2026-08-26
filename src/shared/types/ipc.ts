@@ -1005,6 +1005,10 @@ export type IpcInvokeMap = {
     args: [string, DeliveryInput];
     result: SaleDelivery;
   };
+  "delivery-note:attach-to-quotation": {
+    args: [string, DeliveryInput];
+    result: SaleDelivery;
+  };
   "export:to-pdf": {
     args: [ExportListRequest];
     result: void;
@@ -1732,6 +1736,10 @@ export type BlueLedgerApi = {
       saleId: string,
       input: DeliveryInput
     ) => Promise<IpcInvokeMap["delivery-note:attach-to-sale"]["result"]>;
+    attachToQuotation: (
+      quotationId: string,
+      input: DeliveryInput
+    ) => Promise<IpcInvokeMap["delivery-note:attach-to-quotation"]["result"]>;
   };
   export: {
     toPdf: (request: ExportListRequest) => Promise<IpcInvokeMap["export:to-pdf"]["result"]>;

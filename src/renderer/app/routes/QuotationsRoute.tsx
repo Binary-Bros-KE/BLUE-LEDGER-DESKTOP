@@ -7,6 +7,8 @@ import {
   Eye,
   FileText,
   Loader2,
+  Package,
+  PackagePlus,
   Plus,
   Printer,
   Receipt,
@@ -17,9 +19,11 @@ import {
   Trash2,
   XCircle
 } from "lucide-react";
+import { AttachDeliveryModal } from "@renderer/shared/components/AttachDeliveryModal";
 import { Button } from "@renderer/shared/components/Button";
 import { useConfirm } from "@renderer/shared/components/ConfirmModal";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { DeliveryNotePreview } from "@renderer/shared/components/DeliveryNotePreview";
 import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import {
   ExtraChargesSection,
@@ -58,6 +62,7 @@ import type { ExportListRequest } from "@shared/types/export";
 import { isStorefrontType, type Location } from "@shared/types/location";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import type { ProductListItem } from "@shared/types/product";
+import type { SaleDelivery } from "@shared/types/sale";
 import type { Supplier } from "@shared/types/supplier";
 import {
   QUOTATION_STATUS_OPTIONS,
@@ -162,6 +167,18 @@ export function QuotationsRoute(): React.JSX.Element {
   const [sharing, setSharing] = useState(false);
   const [viewLoading, setViewLoading] = useState(false);
   const [printingThermal, setPrintingThermal] = useState(false);
+
+  const [viewingDelivery, setViewingDelivery] = useState<{
+    delivery: SaleDelivery;
+    sourceNumber: string | null;
+    locationId: string;
+    quotationId: string;
+  } | null>(null);
+  const [deliveryLoading, setDeliveryLoading] = useState(false);
+  const [attachingDeliveryQuotation, setAttachingDeliveryQuotation] = useState<{
+    id: string;
+    customerName: string | null;
+  } | null>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
   // Non-null while the create modal is actually editing an existing draft in place — see
@@ -348,6 +365,26 @@ export function QuotationsRoute(): React.JSX.Element {
   function closeView(): void {
     setViewingQuotation(null);
     setNotice(null);
+  }
+
+  async function openDeliveryNote(quotation: { id: string; quotationNumber: string; locationId: string }): Promise<void> {
+    setDeliveryLoading(true);
+    setActionError(null);
+    try {
+      const delivery = await window.blueLedger.deliveryNote.getForQuotation(quotation.id);
+      if (delivery) {
+        setViewingDelivery({
+          delivery,
+          sourceNumber: quotation.quotationNumber,
+          locationId: quotation.locationId,
+          quotationId: quotation.id
+        });
+      }
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to load delivery note"));
+    } finally {
+      setDeliveryLoading(false);
+    }
   }
 
   async function refreshViewing(id: string): Promise<void> {
@@ -1096,7 +1133,7 @@ export function QuotationsRoute(): React.JSX.Element {
                         <DashedPill tone={statusTone(quotation.status)}>{statusLabel(quotation.status)}</DashedPill>
                       </td>
                       <td className="px-3 py-2.5">
-                        <div className="flex items-center justify-end">
+                        <div className="flex items-center justify-end gap-2">
                           <button
                             type="button"
                             onClick={(event) => {
@@ -1108,6 +1145,34 @@ export function QuotationsRoute(): React.JSX.Element {
                           >
                             <Eye className="size-3.5" aria-hidden="true" />
                           </button>
+                          {quotation.hasDeliveryNote && (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void openDeliveryNote(quotation);
+                              }}
+                              aria-label="View delivery note"
+                              title="View Delivery Note"
+                              className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-primary cursor-pointer"
+                            >
+                              <Package className="size-3.5" aria-hidden="true" />
+                            </button>
+                          )}
+                          {!quotation.hasDeliveryNote && canEdit && (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setAttachingDeliveryQuotation(quotation);
+                              }}
+                              aria-label="Attach delivery"
+                              title="Attach Delivery"
+                              className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-primary cursor-pointer"
+                            >
+                              <PackagePlus className="size-3.5" aria-hidden="true" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1280,10 +1345,27 @@ export function QuotationsRoute(): React.JSX.Element {
                     </div>
                   )}
                 </div>
-                <p className="mt-2 text-[10px] font-semibold text-muted">
-                  Nothing has been delivered yet — a Delivery Note becomes available once this quotation is
-                  converted into a sale or invoice.
-                </p>
+                <Button
+                  type="button"
+                  onClick={() => void openDeliveryNote(viewingQuotation)}
+                  className="mt-3 h-8 w-full border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+                >
+                  <Package className="mr-1.5 size-3.5" aria-hidden="true" />
+                  View Delivery Note
+                </Button>
+              </div>
+            )}
+
+            {!viewingQuotation.delivery && canEdit && (
+              <div className="mt-4">
+                <Button
+                  type="button"
+                  onClick={() => setAttachingDeliveryQuotation(viewingQuotation)}
+                  className="h-9 w-full border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+                >
+                  <PackagePlus className="mr-1.5 size-3.5" aria-hidden="true" />
+                  Attach Delivery
+                </Button>
               </div>
             )}
 
@@ -1465,6 +1547,46 @@ export function QuotationsRoute(): React.JSX.Element {
           </div>
         ) : null}
       </Modal>
+
+      <Modal
+        open={viewingDelivery !== null || deliveryLoading}
+        onClose={() => setViewingDelivery(null)}
+        title={viewingDelivery?.delivery.deliveryNoteNumber ?? "Delivery Note"}
+        description="Print, download, share, or mark this delivery as delivered."
+        widthClassName="max-w-lg"
+      >
+        {deliveryLoading ? (
+          <div className="flex min-h-[160px] items-center justify-center text-muted">
+            <Loader2 className="size-6 animate-spin" aria-hidden="true" />
+          </div>
+        ) : viewingDelivery && tenantContext ? (
+          <DeliveryNotePreview
+            delivery={viewingDelivery.delivery}
+            tenant={tenantContext}
+            locationId={viewingDelivery.locationId}
+            sourceDocumentLabel="Quotation"
+            sourceDocumentNumber={viewingDelivery.sourceNumber}
+            parentEntity="quotation"
+            parentEntityId={viewingDelivery.quotationId}
+            onDeliveredChange={(next) => setViewingDelivery((prev) => (prev ? { ...prev, delivery: next } : prev))}
+          />
+        ) : null}
+      </Modal>
+
+      {attachingDeliveryQuotation && (
+        <AttachDeliveryModal
+          parentEntity="quotation"
+          parentId={attachingDeliveryQuotation.id}
+          customerName={attachingDeliveryQuotation.customerName}
+          onClose={() => setAttachingDeliveryQuotation(null)}
+          onAttached={() => {
+            setAttachingDeliveryQuotation(null);
+            showSuccessToast("Delivery attached");
+            if (viewingQuotation?.id === attachingDeliveryQuotation.id) void refreshViewing(attachingDeliveryQuotation.id);
+            void loadAll();
+          }}
+        />
+      )}
 
       <Modal
         open={convertSaleOpen}

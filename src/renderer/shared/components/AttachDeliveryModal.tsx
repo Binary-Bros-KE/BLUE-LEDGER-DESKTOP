@@ -10,17 +10,20 @@ import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { Rider } from "@shared/types/rider";
 import type { SaleDelivery } from "@shared/types/sale";
 
-/** For a sale that was completed without delivery info being entered (e.g. the cashier forgot to
- * check "Add delivery" at checkout) — mints a real, numbered delivery note against it after the
- * fact. Deliberately never touches the sale's own totals (see attachDeliveryToSale's own doc
- * comment in delivery-note-service.ts) — fee/cost here are recorded for reference only. */
+/** For a sale/invoice/quotation that was created without delivery info being entered (e.g. the
+ * cashier forgot to check "Add delivery") — mints a real, numbered delivery note against it after
+ * the fact. Deliberately never touches the parent document's own totals (see attachDeliveryToSale's
+ * own doc comment in delivery-note-service.ts) — fee/cost here are recorded for reference only.
+ * Shared by Receipts, Invoices, and Quotations — parentEntity picks which IPC call to make. */
 export function AttachDeliveryModal({
-  saleId,
+  parentEntity,
+  parentId,
   customerName,
   onClose,
   onAttached
 }: {
-  saleId: string;
+  parentEntity: "sale" | "quotation";
+  parentId: string;
   customerName: string | null;
   onClose: () => void;
   onAttached: (delivery: SaleDelivery) => void;
@@ -46,7 +49,7 @@ export function AttachDeliveryModal({
     setSaving(true);
     setError(null);
     try {
-      const delivery = await window.blueLedger.deliveryNote.attachToSale(saleId, {
+      const input = {
         riderId: draft.riderId,
         recipientName: draft.recipientName,
         country: draft.country,
@@ -55,7 +58,11 @@ export function AttachDeliveryModal({
         notes: draft.notes,
         feeCents: draft.fee.trim() ? toCents(draft.fee) : 0,
         costCents: draft.cost.trim() ? toCents(draft.cost) : 0
-      });
+      };
+      const delivery =
+        parentEntity === "quotation"
+          ? await window.blueLedger.deliveryNote.attachToQuotation(parentId, input)
+          : await window.blueLedger.deliveryNote.attachToSale(parentId, input);
       showSuccessToast("Delivery attached");
       onAttached(delivery);
     } catch (err) {

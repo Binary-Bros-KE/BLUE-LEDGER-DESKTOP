@@ -830,7 +830,8 @@ export function ReceiptsRoute(): React.JSX.Element {
 
       {attachingDeliverySale && (
         <AttachDeliveryModal
-          saleId={attachingDeliverySale.id}
+          parentEntity="sale"
+          parentId={attachingDeliverySale.id}
           customerName={attachingDeliverySale.customerName}
           onClose={() => setAttachingDeliverySale(null)}
           onAttached={() => {

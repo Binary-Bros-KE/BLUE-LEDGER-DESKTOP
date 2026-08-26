@@ -1,5 +1,6 @@
 import { getDatabase, runInTransaction } from "@main/database/connection";
 import * as deliveryNoteRepository from "@main/database/repositories/delivery-note-repository";
+import * as quotationRepository from "@main/database/repositories/quotation-repository";
 import * as saleRepository from "@main/database/repositories/sale-repository";
 import { requirePermission } from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
@@ -86,6 +87,47 @@ export function attachDeliveryToSale(saleId: string, input: unknown): SaleDelive
     // device silently ignores the new delivery forever (this exact trap already bit
     // setDeliveryNoteDeliveredRow once — see its own comment).
     getDatabase().prepare("UPDATE sales SET updated_at = ? WHERE id = ?").run(new Date().toISOString(), saleId);
+
+    return deliveryNoteRepository.mapDeliveryNoteRow(row);
+  });
+}
+
+/** Same purpose as attachDeliveryToSale but for a quotation that was created without delivery info —
+ * mirrors it exactly, including never touching the quotation's own totals. */
+export function attachDeliveryToQuotation(quotationId: string, input: unknown): SaleDelivery {
+  requirePermission("quotations", "edit");
+  const parsed = deliveryInputSchema.parse(input);
+  const { tenantId } = getCurrentTenant();
+
+  const quotationRow = quotationRepository.findQuotationRowById(quotationId);
+  if (!quotationRow || quotationRow.tenant_id !== tenantId) {
+    throw new Error("Quotation not found");
+  }
+  if (deliveryNoteRepository.findDeliveryNoteRowByQuotationId(quotationId)) {
+    throw new Error("This quotation already has a delivery attached");
+  }
+
+  return runInTransaction(() => {
+    const row = deliveryNoteRepository.insertDeliveryNoteRow({
+      tenantId,
+      deliveryNoteNumber: generateDeliveryNoteNumber(tenantId),
+      saleId: null,
+      quotationId,
+      riderId: parsed.riderId,
+      recipientName: parsed.recipientName,
+      country: parsed.country,
+      town: parsed.town,
+      physicalAddress: parsed.physicalAddress,
+      notes: parsed.notes,
+      feeCents: parsed.feeCents,
+      costCents: parsed.costCents
+    });
+
+    // Same reasoning as attachDeliveryToSale's own comment: the delivery_notes INSERT trigger
+    // already re-queues the parent quotation for push, but without bumping updated_at here, a
+    // receiving device's pull guard would see "no newer timestamp" and silently skip the fresh
+    // delivery forever.
+    getDatabase().prepare("UPDATE quotations SET updated_at = ? WHERE id = ?").run(new Date().toISOString(), quotationId);
 
     return deliveryNoteRepository.mapDeliveryNoteRow(row);
   });

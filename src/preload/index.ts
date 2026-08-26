@@ -313,7 +313,8 @@ const api: BlueLedgerApi = {
     getForSale: (saleId) => invoke("delivery-note:get-for-sale", saleId),
     getForQuotation: (quotationId) => invoke("delivery-note:get-for-quotation", quotationId),
     setDelivered: (id, delivered) => invoke("delivery-note:set-delivered", id, delivered),
-    attachToSale: (saleId, input) => invoke("delivery-note:attach-to-sale", saleId, input)
+    attachToSale: (saleId, input) => invoke("delivery-note:attach-to-sale", saleId, input),
+    attachToQuotation: (quotationId, input) => invoke("delivery-note:attach-to-quotation", quotationId, input)
   },
   export: {
     toPdf: (request) => invoke("export:to-pdf", request),
