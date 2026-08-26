@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { runInTransaction } from "@main/database/connection";
+import * as inventoryRepository from "@main/database/repositories/inventory-repository";
 import * as locationRepository from "@main/database/repositories/location-repository";
 import * as paymentMethodRepository from "@main/database/repositories/payment-method-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
@@ -24,7 +25,15 @@ import {
 } from "@shared/schemas/purchase";
 import { computeLineTax, resolveProductTaxConfig } from "@shared/lib/tax-calculation";
 import type { ProductTaxType } from "@shared/types/product";
-import type { Purchase, PurchaseListItem, PurchasePayment, PurchaseStatus, PurchaseSummary } from "@shared/types/purchase";
+import type {
+  Purchase,
+  PurchaseListItem,
+  PurchasePayment,
+  PurchaseReceivingEvent,
+  PurchaseReceivingEventItem,
+  PurchaseStatus,
+  PurchaseSummary
+} from "@shared/types/purchase";
 
 /** No longer a client-supplied value (see purchaseCreateSchema) — Purchase.taxType is now a
  * legacy, unused-going-forward column, kept only so historical POs created before tax became
@@ -347,6 +356,8 @@ export function receivePurchaseGoods(id: string, input: unknown): Purchase {
   const parsed = receiveGoodsSchema.parse(input);
   const { tenantId } = getCurrentTenant();
   const employeeId = getCurrentEmployeeId();
+  const session = getSession();
+  const receivedByName = session ? `${session.employee.firstName} ${session.employee.lastName}` : "Unknown";
 
   const purchase = purchaseRepository.findPurchaseRowById(id);
   if (!purchase || purchase.tenant_id !== tenantId) {
@@ -356,7 +367,7 @@ export function receivePurchaseGoods(id: string, input: unknown): Purchase {
     throw new Error("Only ordered or partially received purchases can receive stock");
   }
 
-  const existingItems = purchaseRepository.findPurchaseItemRowsForPurchase(id);
+  const existingItems = purchaseRepository.findPurchaseItemDetailRowsForPurchase(id);
   const itemById = new Map(existingItems.map((item) => [item.id, item]));
 
   for (const entry of parsed.items) {
@@ -372,9 +383,14 @@ export function receivePurchaseGoods(id: string, input: unknown): Purchase {
   }
 
   return runInTransaction(() => {
+    const eventItems: PurchaseReceivingEventItem[] = [];
+
     for (const entry of parsed.items) {
       const item = itemById.get(entry.purchaseItemId);
       if (!item || entry.receivingQuantity <= 0) continue;
+
+      const previousQuantity = inventoryRepository.findInventoryRow(item.product_id, purchase.location_id)?.quantity ?? 0;
+      const newQuantity = previousQuantity + entry.receivingQuantity;
 
       const newReceivedQuantity = item.received_quantity + entry.receivingQuantity;
       purchaseRepository.updatePurchaseItemReceivedQuantityRow(item.id, newReceivedQuantity);
@@ -392,6 +408,31 @@ export function receivePurchaseGoods(id: string, input: unknown): Purchase {
         },
         tenantId
       );
+
+      eventItems.push({
+        purchaseItemId: item.id,
+        productId: item.product_id,
+        productName: item.product_name,
+        sku: item.sku,
+        receivingQuantity: entry.receivingQuantity,
+        previousQuantity,
+        newQuantity
+      });
+    }
+
+    if (eventItems.length > 0) {
+      const existingEvents = JSON.parse(purchase.receiving_events) as PurchaseReceivingEvent[];
+      const newEvent: PurchaseReceivingEvent = {
+        id: `purchase_receiving_${randomUUID()}`,
+        receivedBy: employeeId ?? "",
+        receivedByName,
+        receivedAt: new Date().toISOString(),
+        items: eventItems
+      };
+      purchaseRepository.appendReceivingEventToPurchaseRow({
+        id,
+        receivingEvents: [...existingEvents, newEvent]
+      });
     }
 
     const updatedItems = purchaseRepository.findPurchaseItemRowsForPurchase(id);

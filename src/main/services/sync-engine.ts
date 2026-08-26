@@ -1094,6 +1094,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       paymentStatus: row.payment_status,
       amountPaidCents: row.amount_paid_cents,
       payments: JSON.parse(row.payments) as unknown,
+      receivingEvents: JSON.parse(row.receiving_events) as unknown,
       notes: row.notes,
       // attachmentPath deliberately NOT sent — local file path, no shared cloud storage yet.
       orderedAt: row.ordered_at,
@@ -2500,7 +2501,10 @@ function applyPurchasePulledRow(row: Record<string, unknown>, force: boolean): v
     const localTenantId = upsertDocumentHeader(
       "purchases",
       PURCHASE_HEADER_COLUMNS,
-      [{ local: "payments", cloud: "payments" }],
+      [
+        { local: "payments", cloud: "payments" },
+        { local: "receiving_events", cloud: "receivingEvents" }
+      ],
       row,
       force
     );

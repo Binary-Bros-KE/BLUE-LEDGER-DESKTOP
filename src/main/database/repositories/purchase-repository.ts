@@ -6,6 +6,7 @@ import type {
   PurchaseListItem,
   PurchasePayment,
   PurchasePaymentStatus,
+  PurchaseReceivingEvent,
   PurchaseStatus,
   PurchaseSummary,
   PurchaseSyncStatus,
@@ -31,6 +32,7 @@ export type PurchaseRow = {
   payment_status: string;
   amount_paid_cents: number;
   payments: string;
+  receiving_events: string;
   notes: string | null;
   attachment_path: string | null;
   ordered_at: string | null;
@@ -552,6 +554,34 @@ export function appendPaymentToPurchaseRow(input: {
   return row;
 }
 
+/** Appends one receiving event (one "Receive Goods"/"Receive All" click) to the purchase's receiving
+ * history — each event's before/after quantities are frozen at the moment it happened and are never
+ * recomputed by a later partial receive. */
+export function appendReceivingEventToPurchaseRow(input: {
+  id: string;
+  receivingEvents: PurchaseReceivingEvent[];
+}): PurchaseRow {
+  const now = new Date().toISOString();
+
+  getDatabase()
+    .prepare(
+      `
+      UPDATE purchases SET
+        receiving_events = ?,
+        sync_status = 'pending',
+        updated_at = ?
+      WHERE id = ?
+    `
+    )
+    .run(JSON.stringify(input.receivingEvents), now, input.id);
+
+  const row = findPurchaseRowById(input.id);
+  if (!row) {
+    throw new Error("Purchase not found after recording receiving event");
+  }
+  return row;
+}
+
 export function deletePurchaseRow(id: string): void {
   getDatabase().prepare("DELETE FROM purchases WHERE id = ?").run(id);
 }
@@ -585,6 +615,15 @@ function parsePurchasePayments(raw: string): PurchasePayment[] {
   }
 }
 
+function parsePurchaseReceivingEvents(raw: string): PurchaseReceivingEvent[] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as PurchaseReceivingEvent[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 export function mapPurchaseDetailRow(row: PurchaseDetailRow, items: PurchaseItem[]): Purchase {
   return {
     id: row.id,
@@ -611,6 +650,7 @@ export function mapPurchaseDetailRow(row: PurchaseDetailRow, items: PurchaseItem
     }),
     amountPaidCents: row.amount_paid_cents,
     payments: parsePurchasePayments(row.payments),
+    receivingEvents: parsePurchaseReceivingEvents(row.receiving_events),
     notes: row.notes,
     attachmentPath: row.attachment_path,
     orderedAt: row.ordered_at,

@@ -2521,6 +2521,17 @@ const migrations = [
       ALTER TABLE stock_receipt_items ADD COLUMN main_store_previous_quantity INTEGER;
       ALTER TABLE stock_receipt_items ADD COLUMN main_store_new_quantity INTEGER;
     `
+  },
+  {
+    version: 71,
+    name: "purchase_receiving_events",
+    sql: `
+      -- Same "frozen at the moment it happened" JSON-array-of-events shape as the existing
+      -- payments column (see appendPaymentToPurchaseRow's own pattern) — a purchase can be received
+      -- across several separate partial sessions, and each one's own before/after quantity must stay
+      -- exactly what it was at that moment, never recomputed against current stock later.
+      ALTER TABLE purchases ADD COLUMN receiving_events TEXT NOT NULL DEFAULT '[]';
+    `
   }
 ] as const;
 

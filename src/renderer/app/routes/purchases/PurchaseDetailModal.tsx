@@ -527,6 +527,33 @@ export function PurchaseDetailModal({
           )}
         </div>
 
+        {purchase.receivingEvents.length > 0 && (
+          <div className="mt-4 rounded-lg border border-line bg-soft p-3">
+            <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Receiving History</p>
+            <div className="mt-2 space-y-2">
+              {purchase.receivingEvents.map((event) => (
+                <div key={event.id} className="rounded-lg border border-line bg-white px-3 py-2">
+                  <p className="text-[10px] font-semibold text-muted">
+                    {formatDate(event.receivedAt)} · {event.receivedByName}
+                  </p>
+                  <div className="mt-1.5 space-y-1">
+                    {event.items.map((item) => (
+                      <div key={item.purchaseItemId} className="flex items-center justify-between gap-2 text-xs">
+                        <span className="min-w-0 truncate font-bold text-ink">{item.productName}</span>
+                        <span className="flex-none whitespace-nowrap font-semibold text-muted">
+                          +{item.receivingQuantity} · Qty Before ({purchase.locationName}):{" "}
+                          <span className="text-ink">{item.previousQuantity}</span> · Qty After (
+                          {purchase.locationName}): <span className="font-extrabold text-success">{item.newQuantity}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {canEdit && (
           <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-4">
             {purchase.status === "draft" && (

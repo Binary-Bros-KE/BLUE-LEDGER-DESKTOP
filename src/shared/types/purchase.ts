@@ -44,6 +44,31 @@ export type PurchasePayment = {
   notes: string | null;
 };
 
+/** One product line within a single receiving action (see PurchaseReceivingEvent) — a purchase can
+ * be received across several separate sessions (e.g. 10 of 15 units today, the remaining 5 next
+ * week), and each session freezes its own before/after independently: a later partial receive never
+ * retroactively changes what an earlier one's own numbers showed, even if the store has sold some of
+ * that stock in between. */
+export type PurchaseReceivingEventItem = {
+  purchaseItemId: string;
+  productId: string;
+  productName: string;
+  sku: string;
+  receivingQuantity: number;
+  previousQuantity: number;
+  newQuantity: number;
+};
+
+/** One "Receive Goods"/"Receive All" click — a purchase can have several of these over time as
+ * partial deliveries arrive. Frozen at the moment it happened, same discipline as PurchasePayment. */
+export type PurchaseReceivingEvent = {
+  id: string;
+  receivedBy: string;
+  receivedByName: string;
+  receivedAt: string;
+  items: PurchaseReceivingEventItem[];
+};
+
 export type PurchaseItem = {
   id: PurchaseItemId;
   purchaseId: string;
@@ -97,6 +122,7 @@ export type Purchase = {
   paymentStatus: PurchasePaymentStatus;
   amountPaidCents: number;
   payments: PurchasePayment[];
+  receivingEvents: PurchaseReceivingEvent[];
   notes: string | null;
   attachmentPath: string | null;
   orderedAt: string | null;
