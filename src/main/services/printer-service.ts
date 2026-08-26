@@ -2304,6 +2304,8 @@ type StockReceiptDocumentViewModel = {
     quantityReceived: number;
     previousQuantity: number;
     newQuantity: number;
+    mainStorePreviousQuantity: number | null;
+    mainStoreNewQuantity: number | null;
   }>;
 };
 
@@ -2328,7 +2330,9 @@ function loadStockReceiptData(stockReceiptId: string): { vm: StockReceiptDocumen
         sku: item.sku,
         quantityReceived: item.quantity_received,
         previousQuantity: item.previous_quantity,
-        newQuantity: item.new_quantity
+        newQuantity: item.new_quantity,
+        mainStorePreviousQuantity: item.main_store_previous_quantity,
+        mainStoreNewQuantity: item.main_store_new_quantity
       }))
     },
     locationId: row.location_id
@@ -2348,11 +2352,25 @@ function buildStockReceiptHtml(vm: StockReceiptDocumentViewModel, business: Docu
         <td>${index + 1}</td>
         <td>${escapeHtml(item.productName)}<div class="muted">${escapeHtml(item.sku)}</div></td>
         <td class="center">${item.quantityReceived}</td>
+        ${vm.isTransfer ? `<td class="right">${item.mainStorePreviousQuantity}</td><td class="right">${item.mainStoreNewQuantity}</td>` : ""}
         <td class="right">${item.previousQuantity}</td>
         <td class="right">${item.newQuantity}</td>
       </tr>`
     )
     .join("");
+
+  // A transfer shows both sides of the movement (Main Store losing stock, the storefront gaining
+  // it); a plain purchase receipt only has the one receiving location — either way, the bracketed
+  // location under each header is what makes a two-Before/two-After transfer table unambiguous.
+  const qtyHeaders = vm.isTransfer
+    ? `
+        <th class="right">Qty Before<div class="loc">(Main Store)</div></th>
+        <th class="right">Qty After<div class="loc">(Main Store)</div></th>
+        <th class="right">Qty Before<div class="loc">(${escapeHtml(vm.locationName)})</div></th>
+        <th class="right">Qty After<div class="loc">(${escapeHtml(vm.locationName)})</div></th>`
+    : `
+        <th class="right">Qty Before<div class="loc">(${escapeHtml(vm.locationName)})</div></th>
+        <th class="right">Qty After<div class="loc">(${escapeHtml(vm.locationName)})</div></th>`;
 
   return `<!doctype html>
 <html>
@@ -2373,6 +2391,7 @@ function buildStockReceiptHtml(vm: StockReceiptDocumentViewModel, business: Docu
   .meta-block .label { font-size: 10px; text-transform: uppercase; color: #83795f; font-weight: bold; }
   table { width: 100%; border-collapse: collapse; margin-top: 20px; }
   th { text-align: left; font-size: 10px; text-transform: uppercase; color: #83795f; border-bottom: 2px solid #ddd5c2; padding: 6px 4px; }
+  th .loc { text-transform: none; font-weight: normal; font-size: 9px; color: #a89f88; white-space: nowrap; }
   td { padding: 8px 4px; border-bottom: 1px solid #eee; vertical-align: top; }
   .center { text-align: center; }
   .right { text-align: right; white-space: nowrap; }
@@ -2416,8 +2435,7 @@ function buildStockReceiptHtml(vm: StockReceiptDocumentViewModel, business: Docu
           <th>#</th>
           <th>Product</th>
           <th class="center">Qty Received</th>
-          <th class="right">Stock Before</th>
-          <th class="right">Stock After</th>
+          ${qtyHeaders}
         </tr>
       </thead>
       <tbody>${itemRows}</tbody>

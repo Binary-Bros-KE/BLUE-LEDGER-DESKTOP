@@ -2509,6 +2509,18 @@ const migrations = [
         VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'working_hours', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
       END;
     `
+  },
+  {
+    version: 70,
+    name: "stock_receipt_main_store_before_after",
+    sql: `
+      -- Only ever populated for a Main Store transfer receipt item (see stock-receipt-service.ts's
+      -- createStockReceipt) — the Main Store's OWN on-hand quantity immediately before/after this
+      -- item was drawn out, alongside the already-existing previous_quantity/new_quantity columns
+      -- (which describe the RECEIVING storefront's own stock). NULL for a plain purchase receipt.
+      ALTER TABLE stock_receipt_items ADD COLUMN main_store_previous_quantity INTEGER;
+      ALTER TABLE stock_receipt_items ADD COLUMN main_store_new_quantity INTEGER;
+    `
   }
 ] as const;
 

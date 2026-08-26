@@ -544,6 +544,8 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       quantity_received: number;
       previous_quantity: number;
       new_quantity: number;
+      main_store_previous_quantity: number | null;
+      main_store_new_quantity: number | null;
       created_at: string;
     }>;
 
@@ -564,6 +566,8 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
         quantityReceived: i.quantity_received,
         previousQuantity: i.previous_quantity,
         newQuantity: i.new_quantity,
+        mainStorePreviousQuantity: i.main_store_previous_quantity,
+        mainStoreNewQuantity: i.main_store_new_quantity,
         createdAt: i.created_at
       })),
       localCreatedAt: row.created_at,
@@ -2709,8 +2713,10 @@ function applyStockReceiptPulledRow(row: Record<string, unknown>, force: boolean
     const items = (row.items as Array<Record<string, unknown>>) ?? [];
     for (const item of items) {
       db.prepare(
-        `INSERT INTO stock_receipt_items (id, stock_receipt_id, product_id, quantity_received, previous_quantity, new_quantity, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO stock_receipt_items (
+          id, stock_receipt_id, product_id, quantity_received, previous_quantity, new_quantity,
+          main_store_previous_quantity, main_store_new_quantity, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         item.id as string,
         id,
@@ -2718,6 +2724,11 @@ function applyStockReceiptPulledRow(row: Record<string, unknown>, force: boolean
         item.quantityReceived as number,
         item.previousQuantity as number,
         item.newQuantity as number,
+        // Older rows pushed before this feature shipped simply omit these two keys entirely — ?? null
+        // (not `as number | null`, which would coerce `undefined` into a bound param SQLite rejects)
+        // keeps that case a clean NULL rather than a bind error.
+        (item.mainStorePreviousQuantity as number | null | undefined) ?? null,
+        (item.mainStoreNewQuantity as number | null | undefined) ?? null,
         item.createdAt as string
       );
     }

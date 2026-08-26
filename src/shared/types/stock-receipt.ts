@@ -8,6 +8,12 @@ export type StockReceiptItem = {
    * shows exactly what was true then, even if the product's stock has since moved on. */
   previousQuantity: number;
   newQuantity: number;
+  /** Only ever set for a Main Store transfer (sourceType "transfer") — the Main Store's OWN on-hand
+   * quantity immediately before/after this item was drawn out, alongside previousQuantity/newQuantity
+   * above (which describe the RECEIVING storefront). Null for a plain purchase receipt, where there's
+   * no Main Store side to show. Frozen the same way, at the moment of receiving. */
+  mainStorePreviousQuantity: number | null;
+  mainStoreNewQuantity: number | null;
 };
 
 /** One row for the Receive Goods history list. */

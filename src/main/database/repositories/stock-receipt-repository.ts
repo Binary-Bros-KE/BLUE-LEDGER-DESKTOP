@@ -35,6 +35,8 @@ export type StockReceiptItemRow = {
   quantity_received: number;
   previous_quantity: number;
   new_quantity: number;
+  main_store_previous_quantity: number | null;
+  main_store_new_quantity: number | null;
 };
 
 const SELECT_WITH_JOINS = `
@@ -77,7 +79,7 @@ export function findStockReceiptItemRows(stockReceiptId: string): StockReceiptIt
     .prepare(
       `
       SELECT sri.id, sri.stock_receipt_id, sri.product_id, sri.quantity_received, sri.previous_quantity,
-        sri.new_quantity, p.name AS product_name, p.sku
+        sri.new_quantity, sri.main_store_previous_quantity, sri.main_store_new_quantity, p.name AS product_name, p.sku
       FROM stock_receipt_items sri
       JOIN products p ON p.id = sri.product_id
       WHERE sri.stock_receipt_id = ?
@@ -130,6 +132,8 @@ export function insertStockReceiptItemRow(input: {
   quantityReceived: number;
   previousQuantity: number;
   newQuantity: number;
+  mainStorePreviousQuantity?: number | null;
+  mainStoreNewQuantity?: number | null;
 }): void {
   const id = `sreceipti_${randomUUID()}`;
   const now = new Date().toISOString();
@@ -137,8 +141,19 @@ export function insertStockReceiptItemRow(input: {
   getDatabase()
     .prepare(
       `INSERT INTO stock_receipt_items (
-        id, stock_receipt_id, product_id, quantity_received, previous_quantity, new_quantity, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+        id, stock_receipt_id, product_id, quantity_received, previous_quantity, new_quantity,
+        main_store_previous_quantity, main_store_new_quantity, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(id, input.stockReceiptId, input.productId, input.quantityReceived, input.previousQuantity, input.newQuantity, now);
+    .run(
+      id,
+      input.stockReceiptId,
+      input.productId,
+      input.quantityReceived,
+      input.previousQuantity,
+      input.newQuantity,
+      input.mainStorePreviousQuantity ?? null,
+      input.mainStoreNewQuantity ?? null,
+      now
+    );
 }

@@ -47,7 +47,9 @@ function mapItemRow(row: stockReceiptRepository.StockReceiptItemRow): StockRecei
     sku: row.sku,
     quantityReceived: row.quantity_received,
     previousQuantity: row.previous_quantity,
-    newQuantity: row.new_quantity
+    newQuantity: row.new_quantity,
+    mainStorePreviousQuantity: row.main_store_previous_quantity,
+    mainStoreNewQuantity: row.main_store_new_quantity
   };
 }
 
@@ -91,12 +93,13 @@ export function getStockReceipt(id: string): StockReceipt {
  * the actual field complaint this batch mode exists to fix (transferring a multi-product delivery one
  * product at a time).
  *
- * previousQuantity/newQuantity are captured HERE, immediately before each item's movement applies —
- * not recomputed later — so the printed/reprinted document always shows exactly what was true at
- * the moment of receiving, even if the product's stock has moved on since. For a transfer,
- * previous/newQuantity describe the RECEIVING storefront's own on-hand stock (mirroring the "direct
- * to storefront" case) — not the Main Store side, which the stock ledger and Main Store screen
- * already cover on their own. */
+ * previousQuantity/newQuantity (and, for a transfer, mainStorePreviousQuantity/mainStoreNewQuantity)
+ * are captured HERE, immediately before each item's movement applies — not recomputed later — so the
+ * printed/reprinted document always shows exactly what was true at the moment of receiving, even if
+ * the product's stock has moved on since. previousQuantity/newQuantity always describe the RECEIVING
+ * location's own on-hand stock (mirroring the "direct to storefront" case even for a transfer);
+ * mainStorePreviousQuantity/mainStoreNewQuantity are the OTHER side of a transfer specifically — null
+ * for a plain purchase, where there's no Main Store side to show. */
 export function createStockReceipt(input: unknown): StockReceipt {
   requirePermission("inventory", "edit");
   const parsed: StockReceiptCreateInput = stockReceiptCreateSchema.parse(input);
@@ -108,6 +111,9 @@ export function createStockReceipt(input: unknown): StockReceipt {
 
   let targetLocationId: string;
   let allocationStorefrontId: string | null;
+  // Only ever resolved for main_store_transfer — needed to capture the Main Store's OWN before/after
+  // quantity per item, alongside the receiving storefront's own (targetLocationId, below).
+  let mainStoreLocationId: string | null = null;
 
   if (parsed.destination === "main_store") {
     // Same boundary role-service.ts's own DEFAULT_SYSTEM_ROLES comment describes: Manager keeps
@@ -132,6 +138,11 @@ export function createStockReceipt(input: unknown): StockReceipt {
     // difference is which movement each item's loop iteration below actually applies.
     if (parsed.destination === "main_store_transfer") {
       requirePermission("stock_transfers", "create");
+      const mainStore = locationRepository.findMainStoreLocationRow(tenantId);
+      if (!mainStore) {
+        throw new Error("No Main Store is set up for this business yet");
+      }
+      mainStoreLocationId = mainStore.id;
     }
     const branchScope = getCurrentBranchScope();
     const storefrontId = branchScope ?? parsed.locationId;
@@ -164,6 +175,12 @@ export function createStockReceipt(input: unknown): StockReceipt {
         parsed.destination === "main_store"
           ? (mainStoreAllocationRepository.findAllocationRow(item.productId, allocationStorefrontId)?.quantity ?? 0)
           : (inventoryRepository.findInventoryRow(item.productId, targetLocationId)?.quantity ?? 0);
+
+      // Main Store's own physical on-hand quantity for this product, captured BEFORE
+      // distributeMainStoreStockCore below draws it down — same "freeze at the moment of receiving"
+      // discipline as previousQuantity/newQuantity above, just for the other side of the transfer.
+      const mainStorePreviousQuantity =
+        mainStoreLocationId != null ? (inventoryRepository.findInventoryRow(item.productId, mainStoreLocationId)?.quantity ?? 0) : null;
 
       if (parsed.destination === "main_store_transfer") {
         // Draws from Main Store (this storefront's own earmarked allocation first, then unallocated
@@ -202,7 +219,9 @@ export function createStockReceipt(input: unknown): StockReceipt {
         productId: item.productId,
         quantityReceived: item.quantityReceived,
         previousQuantity,
-        newQuantity: previousQuantity + item.quantityReceived
+        newQuantity: previousQuantity + item.quantityReceived,
+        mainStorePreviousQuantity,
+        mainStoreNewQuantity: mainStorePreviousQuantity != null ? mainStorePreviousQuantity - item.quantityReceived : null
       });
     }
   });

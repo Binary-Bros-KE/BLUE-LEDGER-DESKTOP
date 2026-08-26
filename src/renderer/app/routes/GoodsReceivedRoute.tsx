@@ -44,6 +44,18 @@ function Th({ children, className }: { children: React.ReactNode; className?: st
   );
 }
 
+/** A "Qty Before"/"Qty After" column header with the location it refers to on its own line — a
+ * transfer receipt shows two of these pairs (Main Store's own side, then the receiving storefront's),
+ * so without the location label it's ambiguous which side a number belongs to. */
+function QtyTh({ label, location }: { label: string; location: string }): React.JSX.Element {
+  return (
+    <th className="whitespace-nowrap px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider text-muted">
+      {label}
+      <span className="block normal-case text-muted/70">({location})</span>
+    </th>
+  );
+}
+
 export function GoodsReceivedRoute(): React.JSX.Element {
   const { can, session } = usePermissions();
   const canCreate = can("inventory", "edit");
@@ -804,7 +816,7 @@ export function GoodsReceivedRoute(): React.JSX.Element {
               </span>
             </div>
 
-            <div className="rounded-lg border border-line">
+            <div className="overflow-x-auto rounded-lg border border-line">
               <table className="w-full border-collapse text-sm">
                 <thead>
                   <tr className="bg-soft">
@@ -814,12 +826,14 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                     <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider text-muted">
                       Received
                     </th>
-                    <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider text-muted">
-                      Before
-                    </th>
-                    <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider text-muted">
-                      After
-                    </th>
+                    {viewingReceipt.sourceType === "transfer" && (
+                      <>
+                        <QtyTh label="Qty Before" location="Main Store" />
+                        <QtyTh label="Qty After" location="Main Store" />
+                      </>
+                    )}
+                    <QtyTh label="Qty Before" location={viewingReceipt.locationName} />
+                    <QtyTh label="Qty After" location={viewingReceipt.locationName} />
                   </tr>
                 </thead>
                 <tbody>
@@ -830,6 +844,12 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                         <p className="text-[10px] font-semibold text-muted">{item.sku}</p>
                       </td>
                       <td className="px-3 py-2 text-right font-extrabold tabular-nums">{item.quantityReceived}</td>
+                      {viewingReceipt.sourceType === "transfer" && (
+                        <>
+                          <td className="px-3 py-2 text-right font-bold tabular-nums text-muted">{item.mainStorePreviousQuantity}</td>
+                          <td className="px-3 py-2 text-right font-extrabold tabular-nums text-danger">{item.mainStoreNewQuantity}</td>
+                        </>
+                      )}
                       <td className="px-3 py-2 text-right font-bold tabular-nums text-muted">{item.previousQuantity}</td>
                       <td className="px-3 py-2 text-right font-extrabold tabular-nums text-success">{item.newQuantity}</td>
                     </tr>
