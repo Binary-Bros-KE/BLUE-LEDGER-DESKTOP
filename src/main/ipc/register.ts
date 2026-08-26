@@ -484,8 +484,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.stockMovementList, (_event, productId: string, input?: { limit?: number }) =>
     listStockMovements(productId, input?.limit)
   );
-  ipcMain.handle(ipcChannels.stockMovementListAll, (_event, input?: { limit?: number }) =>
-    listAllStockMovements(input?.limit)
+  ipcMain.handle(ipcChannels.stockMovementListAll, (_event, input?: { startDate?: string; endDate?: string; limit?: number }) =>
+    listAllStockMovements(input?.startDate, input?.endDate, input?.limit)
   );
   ipcMain.handle(ipcChannels.stockMovementCreate, (_event, input: unknown) => recordStockMovement(input));
   ipcMain.handle(ipcChannels.stockMovementTransfer, (_event, input: unknown) => recordStockTransfer(input));

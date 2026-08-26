@@ -338,7 +338,7 @@ export type IpcInvokeMap = {
     result: StockMovement[];
   };
   "stock-movement:list-all": {
-    args: [{ limit?: number }];
+    args: [{ startDate?: string; endDate?: string; limit?: number }];
     result: StockMovementFeedItem[];
   };
   "stock-movement:create": {
@@ -1360,7 +1360,9 @@ export type BlueLedgerApi = {
       productId: string,
       input?: { limit?: number }
     ) => Promise<IpcInvokeMap["stock-movement:list"]["result"]>;
-    listAll: (input?: { limit?: number }) => Promise<IpcInvokeMap["stock-movement:list-all"]["result"]>;
+    listAll: (
+      input?: { startDate?: string; endDate?: string; limit?: number }
+    ) => Promise<IpcInvokeMap["stock-movement:list-all"]["result"]>;
     create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["stock-movement:create"]["result"]>;
     transfer: (
       input: Record<string, unknown>

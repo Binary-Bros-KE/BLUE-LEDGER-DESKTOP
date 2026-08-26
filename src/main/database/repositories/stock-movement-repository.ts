@@ -108,11 +108,17 @@ export type StockMovementFeedRow = StockMovementListRow & {
 };
 
 /** Pass null for locationId to see every branch's movements (e.g. a super-admin with no assigned
- * branch, or an audit view). Powers the global Stock Ledger feed. */
+ * branch, or an audit view). Powers the global Stock Ledger feed. startDateIso/endDateIsoExclusive
+ * (pass both null to skip date filtering entirely) mirror report-repository.ts's own
+ * `created_at >= ? AND created_at < ?` convention — the caller is responsible for converting a plain
+ * calendar date into the device-local-timezone-correct ISO bound (see inventory-service.ts's
+ * startOfDayIso/addDaysIso, ported from report-service.ts). */
 export function findAllStockMovementRows(
   tenantId: string,
   locationId: string | null,
-  limit: number
+  limit: number,
+  startDateIso: string | null,
+  endDateIsoExclusive: string | null
 ): StockMovementFeedRow[] {
   return getDatabase()
     .prepare(
@@ -123,11 +129,22 @@ export function findAllStockMovementRows(
       JOIN products p ON p.id = sm.product_id
       WHERE sm.tenant_id = ?
         AND (? IS NULL OR sm.location_id = ?)
+        AND (? IS NULL OR sm.created_at >= ?)
+        AND (? IS NULL OR sm.created_at < ?)
       ORDER BY sm.created_at DESC
       LIMIT ?
     `
     )
-    .all(tenantId, locationId, locationId, limit) as StockMovementFeedRow[];
+    .all(
+      tenantId,
+      locationId,
+      locationId,
+      startDateIso,
+      startDateIso,
+      endDateIsoExclusive,
+      endDateIsoExclusive,
+      limit
+    ) as StockMovementFeedRow[];
 }
 
 export function mapStockMovementRow(row: StockMovementListRow): StockMovement {

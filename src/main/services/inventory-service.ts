@@ -221,12 +221,33 @@ export function listStockMovements(productId: string, limit?: number): StockMove
 
 /** Every product's stock movements in one feed — the Stock Ledger. Branch-scoped like everything
  * else: a storekeeper assigned to the Main Store sees only its movements, a super-admin sees all. */
-export function listAllStockMovements(limit = 200): StockMovementFeedItem[] {
+// Ported from report-service.ts's own startOfDayIso/addDaysIso — same reasoning: a plain
+// "T00:00:00.000Z" suffix silently treats every calendar day as UTC, which is wrong the moment a
+// movement near midnight is checked from a timezone ahead of UTC. Kept as a small local duplicate
+// rather than shared/imported, matching this codebase's existing convention for these two helpers
+// (report-service.ts doesn't export them either).
+function startOfDayIso(dateStr: string): string {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return new Date(year ?? 0, (month ?? 1) - 1, day ?? 1).toISOString();
+}
+
+function addDaysIso(dateStr: string, days: number): string {
+  const date = new Date(`${dateStr}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+/** startDate/endDate are plain YYYY-MM-DD (inclusive) — pass neither to skip date filtering
+ * entirely. limit stays as a safety cap even with a date range (e.g. a genuinely huge storefront
+ * picking "All Years"), same as every other capped feed in this app. */
+export function listAllStockMovements(startDate?: string, endDate?: string, limit = 5000): StockMovementFeedItem[] {
   requirePermission("inventory", "view");
   const { tenantId } = getCurrentTenant();
   const locationId = getCurrentBranchScope();
+  const startIso = startDate ? startOfDayIso(startDate) : null;
+  const endIsoExclusive = endDate ? startOfDayIso(addDaysIso(endDate, 1)) : null;
   return stockMovementRepository
-    .findAllStockMovementRows(tenantId, locationId, limit)
+    .findAllStockMovementRows(tenantId, locationId, limit, startIso, endIsoExclusive)
     .map(stockMovementRepository.mapStockMovementFeedRow);
 }
 

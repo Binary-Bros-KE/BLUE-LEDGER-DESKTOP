@@ -11,19 +11,25 @@ import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import { showErrorToast } from "@renderer/shared/lib/toast";
-import {
-  ALL_YEARS_VALUE,
-  buildAvailableYears,
-  currentYear,
-  matchesYearFilter,
-  yearFilterOptions
-} from "@renderer/shared/lib/year-filter";
+import { todayIso } from "@renderer/app/routes/reports/salesReportDate";
+import { ALL_YEARS_VALUE, currentYear, yearFilterOptions } from "@renderer/shared/lib/year-filter";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import type { ExportListRequest } from "@shared/types/export";
 import type { Location } from "@shared/types/location";
 import { STOCK_MOVEMENT_TYPE_OPTIONS, type StockMovementFeedItem, type StockMovementType } from "@shared/types/stock-movement";
 
 const INCREASING_TYPES = new Set<StockMovementType>(["purchase", "transfer_in", "return", "opening_stock"]);
+const EARLIEST_DATE = "2000-01-01";
+const YEAR_LOOKBACK = 5;
+
+/** Stock movements now fetch scoped to [dateFrom, dateTo] (see loadMovements) rather than an
+ * over-fetch-then-filter-client-side cap — same lever TransactionsRoute's own boundsForYear uses,
+ * just a one-click preset for the common case; From/To below can still narrow it further. */
+function boundsForYear(value: string): { from: string; to: string } {
+  if (value === ALL_YEARS_VALUE) return { from: EARLIEST_DATE, to: todayIso() };
+  const year = Number(value);
+  return { from: `${year}-01-01`, to: year === currentYear() ? todayIso() : `${year}-12-31` };
+}
 
 function movementTone(type: StockMovementType): "success" | "danger" | "neutral" {
   if (INCREASING_TYPES.has(type)) return "success";
@@ -54,13 +60,27 @@ export function StockLedgerRoute(): React.JSX.Element {
   const [searchTerm, setSearchTerm] = useState("");
   const [typeFilter, setTypeFilter] = useState<StockMovementType | "all">("all");
   const [yearFilter, setYearFilter] = useState<string>(String(currentYear()));
+  const [dateFrom, setDateFrom] = useState(() => boundsForYear(String(currentYear())).from);
+  const [dateTo, setDateTo] = useState(() => boundsForYear(String(currentYear())).to);
   const [locations, setLocations] = useState<Location[]>([]);
   const [locationFilter, setLocationFilter] = useState("");
 
-  const loadMovements = useCallback(async (limit: number) => {
+  const yearOptions = useMemo(
+    () => yearFilterOptions(Array.from({ length: YEAR_LOOKBACK + 1 }, (_, index) => currentYear() - index)),
+    []
+  );
+
+  function handleYearFilterChange(value: string): void {
+    setYearFilter(value);
+    const bounds = boundsForYear(value);
+    setDateFrom(bounds.from);
+    setDateTo(bounds.to);
+  }
+
+  const loadMovements = useCallback(async (startDate: string, endDate: string) => {
     setLoadError(null);
     try {
-      const result = await window.blueLedger.stockMovement.listAll({ limit });
+      const result = await window.blueLedger.stockMovement.listAll({ startDate, endDate });
       setMovements(result);
     } catch (err) {
       const message = getErrorMessage(err, "Failed to load stock movements");
@@ -70,10 +90,8 @@ export function StockLedgerRoute(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    // The default (current year) only needs the recent-300 feed; picking "All Years" or a past year
-    // re-fetches with a much wider cap so older movements are actually there to filter into view.
-    void loadMovements(yearFilter === String(currentYear()) ? 300 : 5000);
-  }, [loadMovements, yearFilter]);
+    void loadMovements(dateFrom, dateTo);
+  }, [loadMovements, dateFrom, dateTo]);
 
   useEffect(() => {
     if (!showStorefrontFilter) return;
@@ -85,11 +103,6 @@ export function StockLedgerRoute(): React.JSX.Element {
       .catch(() => undefined);
   }, [showStorefrontFilter]);
 
-  const availableYears = useMemo(
-    () => buildAvailableYears((movements ?? []).map((movement) => movement.createdAt)),
-    [movements]
-  );
-
   const filteredMovements = useMemo(() => {
     if (!movements) return null;
     let list = movements;
@@ -97,8 +110,6 @@ export function StockLedgerRoute(): React.JSX.Element {
     if (typeFilter !== "all") {
       list = list.filter((movement) => movement.movementType === typeFilter);
     }
-
-    list = list.filter((movement) => matchesYearFilter(movement.createdAt, yearFilter));
 
     if (locationFilter) {
       list = list.filter((movement) => movement.locationId === locationFilter);
@@ -112,7 +123,7 @@ export function StockLedgerRoute(): React.JSX.Element {
     }
 
     return list;
-  }, [movements, searchTerm, typeFilter, yearFilter, locationFilter]);
+  }, [movements, searchTerm, typeFilter, locationFilter]);
 
   const summary = useMemo(() => {
     if (!movements) return null;
@@ -127,10 +138,9 @@ export function StockLedgerRoute(): React.JSX.Element {
 
   const exportRequest = useMemo<ExportListRequest | null>(() => {
     if (!filteredMovements) return null;
-    const filterParts: string[] = [];
+    const filterParts: string[] = [`Date: ${dateFrom} to ${dateTo}`];
     if (typeFilter !== "all") filterParts.push(`Type: ${movementTypeLabel(typeFilter)}`);
     if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
-    if (yearFilter !== ALL_YEARS_VALUE) filterParts.push(`Year: ${yearFilter}`);
     if (locationFilter) {
       filterParts.push(`Storefront: ${locations.find((l) => l.id === locationFilter)?.locationName ?? locationFilter}`);
     }
@@ -166,9 +176,9 @@ export function StockLedgerRoute(): React.JSX.Element {
             { label: "Stock Out Value", value: `${currency} ${formatCents(summary.stockOutValueCents)}` }
           ]
         : [],
-      fileBaseName: `StockLedger_${new Date().toISOString().slice(0, 10)}`
+      fileBaseName: `StockLedger_${dateFrom}_to_${dateTo}`
     };
-  }, [filteredMovements, summary, typeFilter, searchTerm, yearFilter, locationFilter, locations, currency]);
+  }, [filteredMovements, summary, typeFilter, searchTerm, dateFrom, dateTo, locationFilter, locations, currency]);
 
   return (
     <motion.div
@@ -272,13 +282,25 @@ export function StockLedgerRoute(): React.JSX.Element {
               />
             </div>
           </label>
-          <SelectField
-            label="Year"
-            value={yearFilter}
-            onChange={setYearFilter}
-            options={yearFilterOptions(availableYears)}
-            className="w-32"
-          />
+          <SelectField label="Year" value={yearFilter} onChange={handleYearFilterChange} options={yearOptions} className="w-32" />
+          <label className="block">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">From</span>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(event) => setDateFrom(event.target.value)}
+              className="mt-1.5 h-10 rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+            />
+          </label>
+          <label className="block">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">To</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(event) => setDateTo(event.target.value)}
+              className="mt-1.5 h-10 rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+            />
+          </label>
           {showStorefrontFilter && (
             <SelectField
               label="Storefront"
@@ -305,7 +327,7 @@ export function StockLedgerRoute(): React.JSX.Element {
               </div>
               <h3 className="mt-4 text-lg font-extrabold">No stock movements found</h3>
               <p className="mt-1 max-w-sm text-sm font-semibold text-muted">
-                {movements.length === 0 ? "Nothing recorded yet." : "Try a different filter or search term."}
+                {movements.length === 0 ? "Nothing recorded in this date range." : "Try a different filter or search term."}
               </p>
             </div>
           ) : (
