@@ -39,6 +39,7 @@ export function ProductSalesHistorySection(): React.JSX.Element {
     const trimmed = query.trim().toLowerCase();
     if (trimmed.length === 0 || selected) return [];
     return allProducts
+      .filter((product) => product.status === "active")
       .filter((product) => product.name.toLowerCase().includes(trimmed) || product.sku.toLowerCase().includes(trimmed))
       .slice(0, 8);
   }, [allProducts, query, selected]);
