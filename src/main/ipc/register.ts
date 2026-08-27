@@ -99,6 +99,7 @@ import {
   generateReceiptPdf,
   generateSalaryPdf,
   generateStatementPdf,
+  generateSupplierStatementPdf,
   generateStockReceiptPdf,
   getPdfPreviewData,
   getPrinterSettings,
@@ -109,6 +110,7 @@ import {
   previewReceiptPdf,
   previewSalaryPdf,
   previewStatementPdf,
+  previewSupplierStatementPdf,
   previewStockReceiptPdf,
   printDeliveryNote,
   printDeliveryNoteViaThermal,
@@ -119,6 +121,7 @@ import {
   printQuotationViaThermal,
   printReceipt,
   printStatementDocument,
+  printSupplierStatementDocument,
   printStockReceipt,
   savePrinterSettings,
   shareSalaryPayslip,
@@ -133,6 +136,7 @@ import {
   setDeliveryNoteDelivered
 } from "@main/services/delivery-note-service";
 import { getCustomerStatement } from "@main/services/statement-service";
+import { getSupplierStatement } from "@main/services/supplier-statement-service";
 import { exportListToCsv, exportListToExcel, exportListToPdf } from "@main/services/export-service";
 import { exportReportToExcel, exportReportToPdf } from "@main/services/report-export-service";
 import { createStockReceipt, getStockReceipt, listStockReceipts } from "@main/services/stock-receipt-service";
@@ -756,6 +760,15 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.printerPrintStatementDocument, (_event, customerId: string) =>
     printStatementDocument(customerId)
   );
+  ipcMain.handle(ipcChannels.printerGenerateSupplierStatementPdf, (_event, supplierId: string) =>
+    generateSupplierStatementPdf(supplierId)
+  );
+  ipcMain.handle(ipcChannels.printerPreviewSupplierStatementPdf, (_event, supplierId: string) =>
+    previewSupplierStatementPdf(supplierId)
+  );
+  ipcMain.handle(ipcChannels.printerPrintSupplierStatementDocument, (_event, supplierId: string) =>
+    printSupplierStatementDocument(supplierId)
+  );
   ipcMain.handle(ipcChannels.printerGenerateStockReceiptPdf, (_event, stockReceiptId: string) =>
     generateStockReceiptPdf(stockReceiptId)
   );
@@ -769,6 +782,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.printerPrintPdfPreview, (_event, previewId: string) => printPdfPreview(previewId));
   ipcMain.handle(ipcChannels.printerDownloadPdfPreview, (_event, previewId: string) => downloadPdfPreview(previewId));
   ipcMain.handle(ipcChannels.statementGetForCustomer, (_event, customerId: string) => getCustomerStatement(customerId));
+  ipcMain.handle(ipcChannels.supplierStatementGetForSupplier, (_event, supplierId: string) => getSupplierStatement(supplierId));
   ipcMain.handle(ipcChannels.deliveryNoteGet, (_event, id: string) => getDeliveryNote(id));
   ipcMain.handle(ipcChannels.deliveryNoteGetForSale, (_event, saleId: string) => getDeliveryNoteForSale(saleId));
   ipcMain.handle(ipcChannels.deliveryNoteGetForQuotation, (_event, quotationId: string) =>

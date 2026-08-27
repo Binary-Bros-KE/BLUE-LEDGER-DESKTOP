@@ -75,6 +75,7 @@ import type {
 } from "./import";
 import type { ShareDocumentEntity } from "./share";
 import type { CustomerStatementViewModel } from "./statement";
+import type { SupplierStatementViewModel } from "./supplier-statement";
 
 export type IpcInvokeMap = {
   "app:get-context": {
@@ -913,6 +914,18 @@ export type IpcInvokeMap = {
     args: [string];
     result: PrinterActionResult;
   };
+  "printer:generate-supplier-statement-pdf": {
+    args: [string];
+    result: string | null;
+  };
+  "printer:preview-supplier-statement-pdf": {
+    args: [string];
+    result: void;
+  };
+  "printer:print-supplier-statement-document": {
+    args: [string];
+    result: PrinterActionResult;
+  };
   "printer:generate-stock-receipt-pdf": {
     args: [string];
     result: string | null;
@@ -996,6 +1009,10 @@ export type IpcInvokeMap = {
   "statement:get-for-customer": {
     args: [string];
     result: CustomerStatementViewModel;
+  };
+  "supplier-statement:get-for-supplier": {
+    args: [string];
+    result: SupplierStatementViewModel;
   };
   "delivery-note:set-delivered": {
     args: [string, boolean];
@@ -1706,6 +1723,15 @@ export type BlueLedgerApi = {
     printStatementDocument: (
       customerId: string
     ) => Promise<IpcInvokeMap["printer:print-statement-document"]["result"]>;
+    generateSupplierStatementPdf: (
+      supplierId: string
+    ) => Promise<IpcInvokeMap["printer:generate-supplier-statement-pdf"]["result"]>;
+    previewSupplierStatementPdf: (
+      supplierId: string
+    ) => Promise<IpcInvokeMap["printer:preview-supplier-statement-pdf"]["result"]>;
+    printSupplierStatementDocument: (
+      supplierId: string
+    ) => Promise<IpcInvokeMap["printer:print-supplier-statement-document"]["result"]>;
     generateStockReceiptPdf: (
       stockReceiptId: string
     ) => Promise<IpcInvokeMap["printer:generate-stock-receipt-pdf"]["result"]>;
@@ -1721,6 +1747,9 @@ export type BlueLedgerApi = {
   };
   statement: {
     getForCustomer: (customerId: string) => Promise<IpcInvokeMap["statement:get-for-customer"]["result"]>;
+  };
+  supplierStatement: {
+    getForSupplier: (supplierId: string) => Promise<IpcInvokeMap["supplier-statement:get-for-supplier"]["result"]>;
   };
   deliveryNote: {
     get: (id: string) => Promise<IpcInvokeMap["delivery-note:get"]["result"]>;

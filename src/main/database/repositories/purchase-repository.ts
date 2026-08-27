@@ -164,6 +164,42 @@ export function findCancelledPurchaseRowsInRange(
     .all(tenantId, locationId, locationId, startIso, endIsoExclusive) as PurchaseListRow[];
 }
 
+/** Every purchase from this supplier not yet fully paid off — the basis of a Supplier Statement of
+ * Account. Excludes drafts (never actually placed with the supplier, nothing owed yet) and cancelled
+ * orders, same reasoning as sale-repository.ts's findOutstandingInvoiceRowsForCustomer excluding a
+ * cancelled invoice. Oldest first, matching how a real statement reads. Same row shape as
+ * findAllPurchaseListRows (reuses mapPurchaseListRow) — just scoped to one supplier and pre-filtered
+ * to outstanding balances instead of covering every purchase tenant-wide. */
+export function findOutstandingPurchaseRowsForSupplier(tenantId: string, supplierId: string): PurchaseListRow[] {
+  return getDatabase()
+    .prepare(
+      `
+      SELECT
+        p.id,
+        p.purchase_number,
+        p.supplier_id,
+        s.business_name AS supplier_name,
+        p.supplier_invoice_number,
+        p.location_id,
+        l.location_name AS location_name,
+        p.status,
+        p.tax_type,
+        p.grand_total_cents,
+        p.payment_status,
+        p.amount_paid_cents,
+        p.ordered_at,
+        p.received_at,
+        p.created_at
+      FROM purchases p
+      JOIN suppliers s ON s.id = p.supplier_id
+      JOIN locations l ON l.id = p.location_id
+      WHERE p.tenant_id = ? AND p.supplier_id = ? AND p.status NOT IN ('draft', 'cancelled') AND p.payment_status != 'paid'
+      ORDER BY COALESCE(p.ordered_at, p.created_at) ASC
+    `
+    )
+    .all(tenantId, supplierId) as PurchaseListRow[];
+}
+
 export function mapPurchaseListRow(row: PurchaseListRow): PurchaseListItem {
   return {
     id: row.id,

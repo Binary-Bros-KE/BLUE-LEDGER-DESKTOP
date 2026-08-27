@@ -298,6 +298,9 @@ const api: BlueLedgerApi = {
     generateStatementPdf: (customerId) => invoke("printer:generate-statement-pdf", customerId),
     previewStatementPdf: (customerId) => invoke("printer:preview-statement-pdf", customerId),
     printStatementDocument: (customerId) => invoke("printer:print-statement-document", customerId),
+    generateSupplierStatementPdf: (supplierId) => invoke("printer:generate-supplier-statement-pdf", supplierId),
+    previewSupplierStatementPdf: (supplierId) => invoke("printer:preview-supplier-statement-pdf", supplierId),
+    printSupplierStatementDocument: (supplierId) => invoke("printer:print-supplier-statement-document", supplierId),
     generateStockReceiptPdf: (stockReceiptId) => invoke("printer:generate-stock-receipt-pdf", stockReceiptId),
     previewStockReceiptPdf: (stockReceiptId) => invoke("printer:preview-stock-receipt-pdf", stockReceiptId),
     printStockReceiptDocument: (stockReceiptId) => invoke("printer:print-stock-receipt-document", stockReceiptId),
@@ -307,6 +310,9 @@ const api: BlueLedgerApi = {
   },
   statement: {
     getForCustomer: (customerId) => invoke("statement:get-for-customer", customerId)
+  },
+  supplierStatement: {
+    getForSupplier: (supplierId) => invoke("supplier-statement:get-for-supplier", supplierId)
   },
   deliveryNote: {
     get: (id) => invoke("delivery-note:get", id),

@@ -4,6 +4,7 @@ import {
   Boxes,
   CheckCircle2,
   Eye,
+  FileBarChart,
   FileClock,
   Loader2,
   Package,
@@ -46,6 +47,7 @@ import {
 import type { Supplier } from "@shared/types/supplier";
 import { PurchaseDetailModal } from "./purchases/PurchaseDetailModal";
 import { PurchaseFormModal } from "./purchases/PurchaseFormModal";
+import { SupplierStatementModal } from "./purchases/SupplierStatementModal";
 
 type StatusFilter = "all" | PurchaseStatus;
 type PaymentStatusFilter = "all" | PurchasePaymentStatus;
@@ -100,6 +102,8 @@ export function PurchasesRoute(): React.JSX.Element {
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  const [statementOpen, setStatementOpen] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -382,6 +386,14 @@ export function PurchasesRoute(): React.JSX.Element {
           </div>
           <div className="flex items-center gap-2">
             {canExport && exportRequest && <ExportMenu request={exportRequest} />}
+            <Button
+              type="button"
+              onClick={() => setStatementOpen(true)}
+              className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+            >
+              <FileBarChart className="mr-1.5 size-4" aria-hidden="true" />
+              Statement
+            </Button>
             {canCreate && (
               <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
                 <Plus className="mr-1.5 size-4" aria-hidden="true" />
@@ -627,6 +639,8 @@ export function PurchasesRoute(): React.JSX.Element {
           onChanged={refreshViewing}
         />
       )}
+
+      <SupplierStatementModal open={statementOpen} onClose={() => setStatementOpen(false)} suppliers={suppliers} />
     </motion.div>
   );
 }
