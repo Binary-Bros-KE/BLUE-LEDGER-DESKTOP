@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { optionalText } from "@shared/schemas/common";
 
-const cents = z.coerce.number().int().min(0).max(1_000_000_000);
+const cents = z.coerce.number().int().min(0).max(100_000_000_000);
 
 export const salaryLineItemSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(120),
-  amountCents: z.coerce.number().int().positive("Amount must be greater than 0").max(1_000_000_000)
+  amountCents: z.coerce.number().int().positive("Amount must be greater than 0").max(100_000_000_000)
 });
 
 export type SalaryLineItemInput = z.infer<typeof salaryLineItemSchema>;

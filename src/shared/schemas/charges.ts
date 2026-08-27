@@ -5,8 +5,8 @@ import { optionalText } from "@shared/schemas/common";
  * internal-only and never printed. Shared by the sale/invoice/quotation cart schemas. */
 export const serviceChargeInputSchema = z.object({
   name: z.string().trim().min(1, "Charge name is required").max(120),
-  feeCents: z.coerce.number().int().min(0).max(100_000_000),
-  costCents: z.coerce.number().int().min(0).max(100_000_000).optional().default(0)
+  feeCents: z.coerce.number().int().min(0).max(100_000_000_000),
+  costCents: z.coerce.number().int().min(0).max(100_000_000_000).optional().default(0)
 });
 
 export type ServiceChargeInput = z.infer<typeof serviceChargeInputSchema>;
@@ -20,8 +20,8 @@ export const deliveryInputSchema = z.object({
   town: optionalText(100),
   physicalAddress: z.string().trim().min(1, "Delivery address is required").max(500),
   notes: optionalText(500),
-  feeCents: z.coerce.number().int().min(0).max(100_000_000),
-  costCents: z.coerce.number().int().min(0).max(100_000_000).optional().default(0)
+  feeCents: z.coerce.number().int().min(0).max(100_000_000_000),
+  costCents: z.coerce.number().int().min(0).max(100_000_000_000).optional().default(0)
 });
 
 export type DeliveryInput = z.infer<typeof deliveryInputSchema>;

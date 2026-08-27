@@ -56,7 +56,7 @@ const employeeBaseFields = {
     .number()
     .int()
     .min(0)
-    .max(1_000_000_000)
+    .max(100_000_000_000)
     .nullable()
     .optional()
     .transform((value) => value ?? null),

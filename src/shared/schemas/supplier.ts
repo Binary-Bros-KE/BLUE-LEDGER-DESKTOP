@@ -67,7 +67,7 @@ export const supplierInputSchema = z.object({
     .number()
     .int()
     .min(0, "Credit limit can't be negative")
-    .max(100_000_000)
+    .max(100_000_000_000)
     .nullable()
     .optional()
     .transform((value) => (value === undefined ? null : value)),

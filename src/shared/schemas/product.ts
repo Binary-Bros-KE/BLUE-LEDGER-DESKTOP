@@ -19,12 +19,12 @@ const nullableUnitOfMeasure = z
   .optional()
   .transform((value) => (value ? value : null));
 
-const priceCents = z.coerce.number().int().min(0).max(100_000_000);
+const priceCents = z.coerce.number().int().min(0).max(100_000_000_000);
 const nullablePriceCents = z.coerce
   .number()
   .int()
   .min(0)
-  .max(100_000_000)
+  .max(100_000_000_000)
   .nullable()
   .optional()
   .transform((value) => (value === undefined ? null : value));

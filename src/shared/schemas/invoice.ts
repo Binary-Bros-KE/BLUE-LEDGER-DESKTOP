@@ -5,19 +5,19 @@ import { optionalText } from "@shared/schemas/common";
 const invoiceCartItemSchema = z.object({
   productId: z.string().trim().min(1),
   quantity: z.coerce.number().int().positive("Quantity must be greater than 0"),
-  discountAmountCents: z.coerce.number().int().min(0).max(100_000_000).optional().default(0),
+  discountAmountCents: z.coerce.number().int().min(0).max(100_000_000_000).optional().default(0),
   // A cashier-entered markup/override price, same as saleCartItemSchema's own field — WITHOUT this,
   // Zod silently strips any unitPriceCents the renderer sends (z.object() drops unrecognized keys
   // by default), so an edited price would parse away invisibly and prepareCart would fall back to
   // the product's own current price. That's exactly the bug this field fixes: the invoice creation
   // form let a user type a custom price, but the created invoice always used the product's default
   // price instead.
-  unitPriceCents: z.coerce.number().int().positive().max(100_000_000).optional(),
+  unitPriceCents: z.coerce.number().int().positive().max(100_000_000_000).optional(),
   // Same locally-sourced fields as saleCartItemSchema (shared/schemas/sale.ts) — an invoice is a
   // sale like any other, and a customer wanting something this shop doesn't stock is just as
   // likely to want it billed on credit as paid for on the spot.
   isLocallySourced: z.coerce.boolean().optional().default(false),
-  localCostCents: z.coerce.number().int().min(0).max(100_000_000).optional(),
+  localCostCents: z.coerce.number().int().min(0).max(100_000_000_000).optional(),
   localSupplierId: optionalText(64)
 });
 

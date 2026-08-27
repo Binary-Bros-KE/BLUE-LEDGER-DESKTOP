@@ -18,7 +18,7 @@ export const customerInputSchema = z.object({
     .number()
     .int()
     .min(0)
-    .max(100_000_000)
+    .max(100_000_000_000)
     .nullable()
     .optional()
     .transform((value) => (value === undefined ? null : value)),

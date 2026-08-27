@@ -4,7 +4,7 @@ import { TAX_TYPE_OPTIONS } from "@shared/types/product";
 
 const productTaxTypeValues = TAX_TYPE_OPTIONS.map((option) => option.value) as [string, ...string[]];
 
-const cents = z.coerce.number().int().min(0).max(1_000_000_000);
+const cents = z.coerce.number().int().min(0).max(100_000_000_000);
 
 export const purchaseItemInputSchema = z.object({
   productId: z.string().trim().min(1),
