@@ -185,8 +185,18 @@ export function LoginRoute(): React.JSX.Element {
                 onChange={setEmployeeCode}
                 placeholder="e.g. EMP-001"
                 required
+                onKeyDown={(event) => {
+                  // Without this, Enter here submits the form immediately (native browser
+                  // behavior for any text input inside a form with a submit button) — with the
+                  // PIN field still empty, that's just an annoying failed attempt. Jump to PIN
+                  // instead; Enter there is left alone since submitting IS what should happen.
+                  if (event.key !== "Enter") return;
+                  event.preventDefault();
+                  document.getElementById("login-pin")?.focus();
+                }}
               />
               <Field
+                id="login-pin"
                 label="PIN"
                 type="password"
                 maxLength={20}

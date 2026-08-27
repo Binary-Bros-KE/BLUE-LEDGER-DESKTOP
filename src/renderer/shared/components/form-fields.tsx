@@ -13,7 +13,8 @@ export function Field({
   disabled = false,
   maxLength,
   placeholder,
-  className
+  className,
+  id
 }: {
   label: string;
   value: string;
@@ -25,6 +26,9 @@ export function Field({
   maxLength?: number;
   placeholder?: string;
   className?: string;
+  /** Only needed when something outside this component must target the input directly — e.g.
+   * LoginRoute.tsx focusing the PIN field by id after Enter on the Employee Code field. */
+  id?: string;
 }): React.JSX.Element {
   return (
     <label className={cn("block", className)}>
@@ -33,6 +37,7 @@ export function Field({
         {required && <span className="text-danger"> *</span>}
       </span>
       <input
+        id={id}
         type={type}
         value={value}
         maxLength={maxLength}
