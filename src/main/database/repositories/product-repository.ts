@@ -265,6 +265,36 @@ export function updateProductRow(
   return row;
 }
 
+/** Narrow update fired when a purchase is saved as "ordered" — buyingPriceCents always updates (the
+ * line's own new unit cost), sellingPriceCents only when that line actually provided one,
+ * minimumPriceCents is unconditionally pinned to the new buying price so a sale can never be rung up
+ * below what this product now costs to restock (see sale-service.ts's own minimum-price floor check,
+ * the exact validation this exists to keep satisfied). Same narrow-update shape as
+ * setProductStatusRow — never touches any other product field. */
+export function updatePricingFromPurchaseRow(
+  id: string,
+  input: { buyingPriceCents: number; sellingPriceCents: number | null }
+): ProductRow {
+  const now = new Date().toISOString();
+  if (input.sellingPriceCents !== null) {
+    getDatabase()
+      .prepare(
+        "UPDATE products SET buying_price_cents = ?, selling_price_cents = ?, minimum_price_cents = ?, sync_status = 'pending', updated_at = ? WHERE id = ?"
+      )
+      .run(input.buyingPriceCents, input.sellingPriceCents, input.buyingPriceCents, now, id);
+  } else {
+    getDatabase()
+      .prepare("UPDATE products SET buying_price_cents = ?, minimum_price_cents = ?, sync_status = 'pending', updated_at = ? WHERE id = ?")
+      .run(input.buyingPriceCents, input.buyingPriceCents, now, id);
+  }
+
+  const row = findProductRowById(id);
+  if (!row) {
+    throw new Error("Product not found after pricing update");
+  }
+  return row;
+}
+
 export function setProductStatusRow(id: string, status: ProductStatus): ProductRow {
   const now = new Date().toISOString();
 

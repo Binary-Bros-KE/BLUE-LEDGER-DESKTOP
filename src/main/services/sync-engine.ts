@@ -1055,6 +1055,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       ordered_quantity: number;
       received_quantity: number;
       unit_cost_cents: number;
+      selling_price_cents: number | null;
       discount_amount_cents: number;
       tax_type: string;
       tax_amount_cents: number;
@@ -1071,6 +1072,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       orderedQuantity: i.ordered_quantity,
       receivedQuantity: i.received_quantity,
       unitCostCents: i.unit_cost_cents,
+      sellingPriceCents: i.selling_price_cents,
       discountAmountCents: i.discount_amount_cents,
       taxType: i.tax_type,
       taxAmountCents: i.tax_amount_cents,
@@ -2530,8 +2532,8 @@ function applyPurchasePulledRow(row: Record<string, unknown>, force: boolean): v
     const items = (row.items as Array<Record<string, unknown>>) ?? [];
     for (const item of items) {
       db.prepare(
-        `INSERT INTO purchase_items (id, purchase_id, product_id, ordered_quantity, received_quantity, unit_cost_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO purchase_items (id, purchase_id, product_id, ordered_quantity, received_quantity, unit_cost_cents, selling_price_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         item.id as string,
         id,
@@ -2539,6 +2541,7 @@ function applyPurchasePulledRow(row: Record<string, unknown>, force: boolean): v
         item.orderedQuantity as number,
         (item.receivedQuantity as number | undefined) ?? 0,
         item.unitCostCents as number,
+        (item.sellingPriceCents as number | undefined) ?? null,
         (item.discountAmountCents as number | undefined) ?? 0,
         (item.taxType as string | undefined) ?? "vat",
         (item.taxAmountCents as number | undefined) ?? 0,

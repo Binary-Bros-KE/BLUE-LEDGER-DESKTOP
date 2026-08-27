@@ -79,6 +79,11 @@ export type PurchaseItem = {
   receivedQuantity: number;
   remainingQuantity: number;
   unitCostCents: number;
+  /** The product's NEW selling price as of this order — null on historical lines recorded before
+   * this existed, or when the user left it unchanged. Saving the purchase as "ordered" pushes this
+   * (plus unitCostCents as the new buying/minimum price) onto the product itself — see
+   * purchase-service.ts's syncProductPricingFromOrder. */
+  sellingPriceCents: number | null;
   discountAmountCents: number;
   /** Per-line, defaulting from the product's own category when added to the cart but editable —
    * unlike the deprecated header-level Purchase.taxType below, a real supplier invoice routinely

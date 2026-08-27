@@ -10,6 +10,9 @@ export const purchaseItemInputSchema = z.object({
   productId: z.string().trim().min(1),
   orderedQuantity: z.coerce.number().int().positive("Quantity must be greater than 0"),
   unitCostCents: cents,
+  // Optional: when the purchase is saved as "ordered", provided lines push their new selling price
+  // onto the product alongside unitCostCents — see purchase-service.ts's syncProductPricingFromOrder.
+  sellingPriceCents: cents.optional(),
   discountAmountCents: cents.optional().default(0),
   // Defaults to "vat" only as a last resort (e.g. a very old client build that never sends it) —
   // the UI always pre-fills this from the product's own category. Tax is computed server-side from

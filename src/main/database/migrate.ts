@@ -2557,6 +2557,19 @@ const migrations = [
       -- once a document exists; never overrides an in-progress draft's already-chosen value.
       ALTER TABLE locations ADD COLUMN default_include_business_info INTEGER NOT NULL DEFAULT 1;
     `
+  },
+  {
+    version: 74,
+    name: "purchase_item_selling_price",
+    sql: `
+      -- Lets a purchase line record the NEW selling price alongside its unit cost, so saving a
+      -- purchase as "ordered" can push both figures onto the product at once (see
+      -- purchase-service.ts's syncProductPricingFromOrder) — a fresh restock is the moment the
+      -- business actually knows its new cost, so that's when buying/selling/minimum price all get
+      -- re-set together. Nullable: existing historical lines never captured this, and a line can
+      -- still be saved with only its cost changing.
+      ALTER TABLE purchase_items ADD COLUMN selling_price_cents INTEGER;
+    `
   }
 ] as const;
 

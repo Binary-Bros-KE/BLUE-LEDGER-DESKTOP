@@ -44,6 +44,7 @@ type PreparedPurchaseItem = {
   productId: string;
   orderedQuantity: number;
   unitCostCents: number;
+  sellingPriceCents: number | null;
   discountAmountCents: number;
   taxType: ProductTaxType;
   taxAmountCents: number;
@@ -125,6 +126,7 @@ function prepareCart(tenantId: string, items: PurchaseItemInput[], shippingCostC
       productId: product.id,
       orderedQuantity: item.orderedQuantity,
       unitCostCents: item.unitCostCents,
+      sellingPriceCents: item.sellingPriceCents ?? null,
       discountAmountCents: item.discountAmountCents,
       taxType,
       taxAmountCents: taxCents,
@@ -155,6 +157,21 @@ function prepareCart(tenantId: string, items: PurchaseItemInput[], shippingCostC
     shippingCostCents,
     grandTotalCents
   };
+}
+
+/** The moment a purchase is saved as "ordered" is when the business actually knows its new cost for
+ * these products — so this is when buying/selling/minimum price all get re-set on the product
+ * itself, not just recorded on the purchase line. Deliberately NOT run for a "draft" save (nothing
+ * is confirmed yet) or on receiving goods (that's stock arrival, a separate concern — see the
+ * Stock Before/After freeze pattern). See product-repository.ts's updatePricingFromPurchaseRow for
+ * the actual column-level behavior (minimum price always pinned to the new buying price). */
+function syncProductPricingFromOrder(items: Array<{ productId: string; unitCostCents: number; sellingPriceCents: number | null }>): void {
+  for (const item of items) {
+    productRepository.updatePricingFromPurchaseRow(item.productId, {
+      buyingPriceCents: item.unitCostCents,
+      sellingPriceCents: item.sellingPriceCents
+    });
+  }
 }
 
 export function getPurchaseDetail(id: string): Purchase {
@@ -230,11 +247,16 @@ export function createPurchase(input: unknown): Purchase {
         productId: item.productId,
         orderedQuantity: item.orderedQuantity,
         unitCostCents: item.unitCostCents,
+        sellingPriceCents: item.sellingPriceCents,
         discountAmountCents: item.discountAmountCents,
         taxType: item.taxType,
         taxAmountCents: item.taxAmountCents,
         lineTotalCents: item.lineTotalCents
       });
+    }
+
+    if (parsed.intent === "ordered") {
+      syncProductPricingFromOrder(cart.items);
     }
 
     return getPurchaseDetail(purchaseId);
@@ -293,6 +315,7 @@ export function updatePurchase(id: string, input: unknown): Purchase {
         productId: item.productId,
         orderedQuantity: item.orderedQuantity,
         unitCostCents: item.unitCostCents,
+        sellingPriceCents: item.sellingPriceCents,
         discountAmountCents: item.discountAmountCents,
         taxType: item.taxType,
         taxAmountCents: item.taxAmountCents,
@@ -302,6 +325,7 @@ export function updatePurchase(id: string, input: unknown): Purchase {
 
     if (parsed.intent === "ordered") {
       purchaseRepository.updatePurchaseStatusRow(id, "ordered", { orderedAt: now });
+      syncProductPricingFromOrder(cart.items);
     }
 
     return getPurchaseDetail(id);
@@ -321,8 +345,23 @@ export function markPurchaseOrdered(id: string): Purchase {
     throw new Error("Only draft purchases can be marked as ordered");
   }
 
-  purchaseRepository.updatePurchaseStatusRow(id, "ordered", { orderedAt: new Date().toISOString() });
-  return getPurchaseDetail(id);
+  return runInTransaction(() => {
+    purchaseRepository.updatePurchaseStatusRow(id, "ordered", { orderedAt: new Date().toISOString() });
+
+    // No items are resubmitted on this path (it's a status-only flip on an already-saved draft) —
+    // read back what's already stored, same syncProductPricingFromOrder every other "save as
+    // ordered" path runs.
+    const itemRows = purchaseRepository.findPurchaseItemDetailRowsForPurchase(id);
+    syncProductPricingFromOrder(
+      itemRows.map((row) => ({
+        productId: row.product_id,
+        unitCostCents: row.unit_cost_cents,
+        sellingPriceCents: row.selling_price_cents
+      }))
+    );
+
+    return getPurchaseDetail(id);
+  });
 }
 
 /** Cancels a purchase that hasn't received any stock yet. Once any quantity has arrived, cancelling

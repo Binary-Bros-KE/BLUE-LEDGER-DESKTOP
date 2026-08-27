@@ -21,6 +21,11 @@ type ItemLine = {
   sku: string;
   orderedQuantity: number;
   unitCostCents: number;
+  /** The product's NEW selling price as of this order — defaults from the product's current price,
+   * editable per line. Saving as "ordered" pushes this (and unitCostCents, as the new buying AND
+   * minimum price) onto the product itself — see purchase-service.ts's syncProductPricingFromOrder.
+   * 0 is treated as "leave the product's selling price alone" at submit time, not "set it to zero". */
+  sellingPriceCents: number;
   discountAmountCents: number;
   /** Defaults from the product's own category when added, but a real supplier invoice can
    * classify a line differently — editable per line, unlike the old whole-order dropdown. */
@@ -34,6 +39,7 @@ function emptyItemLine(product: Product | ProductListItem): ItemLine {
     sku: product.sku,
     orderedQuantity: 1,
     unitCostCents: product.buyingPriceCents,
+    sellingPriceCents: product.sellingPriceCents,
     discountAmountCents: 0,
     taxType: product.taxType
   };
@@ -122,6 +128,9 @@ export function PurchaseFormModal({
           sku: item.sku,
           orderedQuantity: item.orderedQuantity,
           unitCostCents: item.unitCostCents,
+          // Historical lines never recorded a selling price — fall back to the product's current
+          // one so the field isn't just blank/zero when re-opening an old draft.
+          sellingPriceCents: item.sellingPriceCents ?? products.find((p) => p.id === item.productId)?.sellingPriceCents ?? 0,
           discountAmountCents: item.discountAmountCents,
           taxType: item.taxType
         }))
@@ -261,6 +270,8 @@ export function PurchaseFormModal({
         productId: item.productId,
         orderedQuantity: item.orderedQuantity,
         unitCostCents: item.unitCostCents,
+        // 0 means "leave this product's selling price alone" — never send it as a real value.
+        sellingPriceCents: item.sellingPriceCents > 0 ? item.sellingPriceCents : undefined,
         discountAmountCents: item.discountAmountCents,
         taxType: item.taxType
       })),
@@ -442,7 +453,7 @@ export function PurchaseFormModal({
                         Remove
                       </button>
                     </div>
-                    <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
                       <label className="block">
                         <span className="text-[10px] font-bold uppercase text-muted">Qty</span>
                         <input
@@ -477,6 +488,21 @@ export function PurchaseFormModal({
                           value={fromCents(line.unitCostCents) || "0.00"}
                           onChange={(event) =>
                             updateItemLine(line.productId, { unitCostCents: toCents(event.target.value) })
+                          }
+                          className="mt-1 h-8 w-full rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[10px] font-bold uppercase text-muted" title="Saved as this product's new selling price when this purchase is saved as Ordered">
+                          Selling Price
+                        </span>
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={fromCents(line.sellingPriceCents) || "0.00"}
+                          onChange={(event) =>
+                            updateItemLine(line.productId, { sellingPriceCents: toCents(event.target.value) })
                           }
                           className="mt-1 h-8 w-full rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
                         />
@@ -599,7 +625,12 @@ export function PurchaseFormModal({
             </div>
           </div>
 
-          <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
+          <p className="mt-6 text-[11px] font-semibold text-muted">
+            Saving as Ordered updates each product&apos;s buying and selling price to what&apos;s entered above
+            (its minimum price moves with the new buying price too, so a sale can never go below it).
+          </p>
+
+          <div className="mt-2 flex items-center justify-end gap-3 border-t border-line pt-5">
             <Button
               type="button"
               onClick={onClose}
