@@ -20,13 +20,19 @@ type ItemLine = {
   name: string;
   sku: string;
   orderedQuantity: number;
-  unitCostCents: number;
+  /** Raw decimal text, not cents — see CheckoutRoute's own `discount`/`priceOverride` fields for the
+   * same pattern (and money.ts's fromCents/toCents split doc comment). Deriving a controlled input's
+   * `value` from `fromCents(someCentsNumber)` on every render fights the browser's own typing/
+   * selection: select-all-and-type would get silently reformatted mid-edit, so only the last digit
+   * or two visibly "stuck". Converted to cents only at the point of use (lineTaxableCents, totals,
+   * submit payload), never stored as cents in this component's own state. */
+  unitCost: string;
   /** The product's NEW selling price as of this order — defaults from the product's current price,
-   * editable per line. Saving as "ordered" pushes this (and unitCostCents, as the new buying AND
-   * minimum price) onto the product itself — see purchase-service.ts's syncProductPricingFromOrder.
-   * 0 is treated as "leave the product's selling price alone" at submit time, not "set it to zero". */
-  sellingPriceCents: number;
-  discountAmountCents: number;
+   * editable per line. Saving as "ordered" pushes this (and unitCost, as the new buying AND minimum
+   * price) onto the product itself — see purchase-service.ts's syncProductPricingFromOrder. Blank/0
+   * is treated as "leave the product's selling price alone" at submit time, not "set it to zero". */
+  sellingPrice: string;
+  discount: string;
   /** Defaults from the product's own category when added, but a real supplier invoice can
    * classify a line differently — editable per line, unlike the old whole-order dropdown. */
   taxType: ProductTaxType;
@@ -38,16 +44,16 @@ function emptyItemLine(product: Product | ProductListItem): ItemLine {
     name: product.name,
     sku: product.sku,
     orderedQuantity: 1,
-    unitCostCents: product.buyingPriceCents,
-    sellingPriceCents: product.sellingPriceCents,
-    discountAmountCents: 0,
+    unitCost: fromCents(product.buyingPriceCents),
+    sellingPrice: fromCents(product.sellingPriceCents),
+    discount: "0.00",
     taxType: product.taxType
   };
 }
 
 /** Net-of-discount amount before tax is applied — same convention as sale-service.ts's prepareCart. */
 function lineTaxableCents(line: ItemLine): number {
-  return line.orderedQuantity * line.unitCostCents - line.discountAmountCents;
+  return line.orderedQuantity * toCents(line.unitCost) - toCents(line.discount);
 }
 
 /** Resolves this line's own product's inclusive/exclusive override (falling back to the tenant
@@ -127,11 +133,11 @@ export function PurchaseFormModal({
           name: item.productName,
           sku: item.sku,
           orderedQuantity: item.orderedQuantity,
-          unitCostCents: item.unitCostCents,
+          unitCost: fromCents(item.unitCostCents),
           // Historical lines never recorded a selling price — fall back to the product's current
           // one so the field isn't just blank/zero when re-opening an old draft.
-          sellingPriceCents: item.sellingPriceCents ?? products.find((p) => p.id === item.productId)?.sellingPriceCents ?? 0,
-          discountAmountCents: item.discountAmountCents,
+          sellingPrice: fromCents(item.sellingPriceCents ?? products.find((p) => p.id === item.productId)?.sellingPriceCents ?? 0),
+          discount: fromCents(item.discountAmountCents),
           taxType: item.taxType
         }))
       );
@@ -178,8 +184,8 @@ export function PurchaseFormModal({
     let lineGrossCentsSum = 0;
     for (const item of items) {
       const product = productById.get(item.productId);
-      subtotalCents += item.orderedQuantity * item.unitCostCents;
-      discountAmountCents += item.discountAmountCents;
+      subtotalCents += item.orderedQuantity * toCents(item.unitCost);
+      discountAmountCents += toCents(item.discount);
       taxAmountCents += lineTaxCents(item, product, tenantTaxConfig);
       lineGrossCentsSum += lineGrossCents(item, product, tenantTaxConfig);
     }
@@ -269,10 +275,10 @@ export function PurchaseFormModal({
       items: items.map((item) => ({
         productId: item.productId,
         orderedQuantity: item.orderedQuantity,
-        unitCostCents: item.unitCostCents,
+        unitCostCents: toCents(item.unitCost),
         // 0 means "leave this product's selling price alone" — never send it as a real value.
-        sellingPriceCents: item.sellingPriceCents > 0 ? item.sellingPriceCents : undefined,
-        discountAmountCents: item.discountAmountCents,
+        sellingPriceCents: toCents(item.sellingPrice) > 0 ? toCents(item.sellingPrice) : undefined,
+        discountAmountCents: toCents(item.discount),
         taxType: item.taxType
       })),
       intent
@@ -485,10 +491,8 @@ export function PurchaseFormModal({
                           type="number"
                           min={0}
                           step="0.01"
-                          value={fromCents(line.unitCostCents) || "0.00"}
-                          onChange={(event) =>
-                            updateItemLine(line.productId, { unitCostCents: toCents(event.target.value) })
-                          }
+                          value={line.unitCost}
+                          onChange={(event) => updateItemLine(line.productId, { unitCost: event.target.value })}
                           className="mt-1 h-8 w-full rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
                         />
                       </label>
@@ -500,10 +504,8 @@ export function PurchaseFormModal({
                           type="number"
                           min={0}
                           step="0.01"
-                          value={fromCents(line.sellingPriceCents) || "0.00"}
-                          onChange={(event) =>
-                            updateItemLine(line.productId, { sellingPriceCents: toCents(event.target.value) })
-                          }
+                          value={line.sellingPrice}
+                          onChange={(event) => updateItemLine(line.productId, { sellingPrice: event.target.value })}
                           className="mt-1 h-8 w-full rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
                         />
                       </label>
@@ -513,10 +515,8 @@ export function PurchaseFormModal({
                           type="number"
                           min={0}
                           step="0.01"
-                          value={fromCents(line.discountAmountCents) || "0.00"}
-                          onChange={(event) =>
-                            updateItemLine(line.productId, { discountAmountCents: toCents(event.target.value) })
-                          }
+                          value={line.discount}
+                          onChange={(event) => updateItemLine(line.productId, { discount: event.target.value })}
                           className="mt-1 h-8 w-full rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
                         />
                       </label>
