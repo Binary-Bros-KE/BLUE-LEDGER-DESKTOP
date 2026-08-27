@@ -45,7 +45,7 @@ import { useProductStockOverview } from "@renderer/shared/hooks/use-product-stoc
 import { computeLinePricing, isPriceBelowMinimum } from "@renderer/shared/lib/cart-pricing";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
-import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
+import { formatCents, fromCents, toCents, totalCentsToUnitCostText, unitCostToTotalCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { computeAddedTaxCents, computeTaxBreakdown, taxModeBadgeLabel } from "@shared/lib/tax-calculation";
 import {
@@ -842,7 +842,9 @@ export function InvoicesRoute(): React.JSX.Element {
         // CURRENT price" reasoning as duplicateInvoice's own cart-building (see invoice-service.ts).
         priceOverride: fromCents(item.unitPriceCents),
         isLocallySourced: item.isLocallySourced,
-        localCost: item.localCostCents !== null ? fromCents(item.localCostCents) : "",
+        // item.localCostCents is stored as the TOTAL for this line (see money.ts's own doc comment
+        // on the pair below) — back it out to the per-unit figure this field shows.
+        localCost: totalCentsToUnitCostText(item.localCostCents, item.quantity),
         localSupplierId: item.localSupplierId
       }))
     );
@@ -994,7 +996,11 @@ export function InvoicesRoute(): React.JSX.Element {
         discountAmountCents: line.discountAmountCents,
         unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined,
         isLocallySourced: line.isLocallySourced,
-        localCostCents: line.isLocallySourced && line.localCost.trim() ? toCents(line.localCost) : undefined,
+        // line.localCost is what the user typed as the PER-UNIT cost — localCostCents itself is
+        // still stored/reported as the line's total (see money.ts's own doc comment), so multiply
+        // here rather than changing anything downstream.
+        localCostCents:
+          line.isLocallySourced && line.localCost.trim() ? unitCostToTotalCents(line.localCost, line.quantity) : undefined,
         localSupplierId: line.localSupplierId
       })),
       serviceCharges: createServiceCharges.map((charge) => ({
@@ -1426,7 +1432,7 @@ export function InvoicesRoute(): React.JSX.Element {
                           <p className="truncate text-muted">{item.localSupplierName ?? "No supplier recorded"}</p>
                         </div>
                         <span className="mt-0.5 flex-none font-bold tabular-nums text-ink">
-                          Cost {item.localCostCents !== null ? formatCents(item.localCostCents) : "—"}
+                          Unit Cost {item.localCostCents !== null ? formatCents(Math.round(item.localCostCents / item.quantity)) : "—"}
                         </span>
                       </div>
                     ))}
@@ -2205,7 +2211,7 @@ export function InvoicesRoute(): React.JSX.Element {
                     {line.isLocallySourced && (
                       <div className="mt-2 flex flex-col gap-2.5 rounded-md bg-soft/60 p-2.5">
                         <label className="block text-sm font-extrabold text-ink">
-                          Cost paid
+                          Unit Cost
                           <input
                             type="number"
                             min={0}
@@ -2216,6 +2222,11 @@ export function InvoicesRoute(): React.JSX.Element {
                             className="mt-1 h-10 w-full rounded-md border border-line px-3 text-sm font-semibold outline-none focus:border-accent"
                           />
                         </label>
+                        {line.localCost.trim() && (
+                          <p className="text-[10px] font-semibold text-muted">
+                            Total for {line.quantity}: {formatCents(unitCostToTotalCents(line.localCost, line.quantity))}
+                          </p>
+                        )}
                         <div>
                           <p className="text-sm font-extrabold text-ink">Local supplier</p>
                           <SupplierPicker

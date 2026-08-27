@@ -40,7 +40,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { computeLinePricing, isPriceBelowMinimum, type LinePricing } from "@renderer/shared/lib/cart-pricing";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
-import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
+import { formatCents, fromCents, toCents, totalCentsToUnitCostText, unitCostToTotalCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { computeAddedTaxCents, computeTaxBreakdown, taxModeBadgeLabel } from "@shared/lib/tax-calculation";
@@ -239,7 +239,9 @@ export function CheckoutRoute(): React.JSX.Element {
                   // Unlike priceOverride, this IS a sticky fact about the line, not a pricing decision
                   // — it was bought from another shop or it wasn't.
                   isLocallySourced: item.isLocallySourced,
-                  localCost: item.localCostCents !== null ? fromCents(item.localCostCents) : "",
+                  // item.localCostCents is stored as the TOTAL for this line (see money.ts's own doc
+                  // comment on the pair below) — back it out to the per-unit figure this field shows.
+                  localCost: totalCentsToUnitCostText(item.localCostCents, item.quantity),
                   localSupplierId: item.localSupplierId
                 };
               }),
@@ -814,7 +816,11 @@ export function CheckoutRoute(): React.JSX.Element {
           discountAmountCents: toCents(line.discount),
           unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined,
           isLocallySourced: line.isLocallySourced,
-          localCostCents: line.isLocallySourced && line.localCost.trim() ? toCents(line.localCost) : undefined,
+          // line.localCost is what the cashier typed as the PER-UNIT cost — localCostCents itself is
+          // still stored/reported as the line's total (see money.ts's own doc comment), so multiply
+          // here rather than changing anything downstream.
+          localCostCents:
+            line.isLocallySourced && line.localCost.trim() ? unitCostToTotalCents(line.localCost, line.quantity) : undefined,
           localSupplierId: line.localSupplierId
         })),
         ...buildExtrasPayload(activeDraft),
@@ -864,7 +870,11 @@ export function CheckoutRoute(): React.JSX.Element {
           discountAmountCents: toCents(line.discount),
           unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined,
           isLocallySourced: line.isLocallySourced,
-          localCostCents: line.isLocallySourced && line.localCost.trim() ? toCents(line.localCost) : undefined,
+          // line.localCost is what the cashier typed as the PER-UNIT cost — localCostCents itself is
+          // still stored/reported as the line's total (see money.ts's own doc comment), so multiply
+          // here rather than changing anything downstream.
+          localCostCents:
+            line.isLocallySourced && line.localCost.trim() ? unitCostToTotalCents(line.localCost, line.quantity) : undefined,
           localSupplierId: line.localSupplierId
         })),
         ...buildExtrasPayload(activeDraft),
@@ -1230,7 +1240,7 @@ export function CheckoutRoute(): React.JSX.Element {
                           {line.isLocallySourced && (
                             <div className="mt-2 flex flex-col gap-2.5 rounded-md bg-soft/60 p-2.5">
                               <label className="block text-sm font-extrabold text-ink">
-                                Cost paid
+                                Unit Cost
                                 <input
                                   type="number"
                                   min={0}
@@ -1241,6 +1251,11 @@ export function CheckoutRoute(): React.JSX.Element {
                                   className="mt-1 h-10 w-full rounded-md border border-line px-3 text-sm font-semibold outline-none focus:border-accent"
                                 />
                               </label>
+                              {line.localCost.trim() && (
+                                <p className="text-[10px] font-semibold text-muted">
+                                  Total for {line.quantity}: {formatCents(unitCostToTotalCents(line.localCost, line.quantity))}
+                                </p>
+                              )}
                               <div>
                                 <p className="text-sm font-extrabold text-ink">Local supplier</p>
                                 <SupplierPicker

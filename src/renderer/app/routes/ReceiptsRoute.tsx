@@ -758,7 +758,7 @@ export function ReceiptsRoute(): React.JSX.Element {
                           <p className="truncate text-muted">{item.localSupplierName ?? "No supplier recorded"}</p>
                         </div>
                         <span className="mt-0.5 flex-none font-bold tabular-nums text-ink">
-                          Cost {item.localCostCents !== null ? formatCents(item.localCostCents) : "—"}
+                          Unit Cost {item.localCostCents !== null ? formatCents(Math.round(item.localCostCents / item.quantity)) : "—"}
                         </span>
                       </div>
                     ))}
