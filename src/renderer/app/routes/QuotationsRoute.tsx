@@ -90,11 +90,13 @@ type CartLine = {
   name: string;
   sku: string;
   quantity: number;
-  discountAmountCents: number;
+  /** Raw decimal text, not cents — same reasoning as priceOverride below (see money.ts's own
+   * fromCents/toCents split doc comment). Converted to cents only at the point of use
+   * (computeLinePricing calls, the submit payload), never stored as cents in this component's state. */
+  discount: string;
   /** Cashier-entered price override for this line only (e.g. product is 450, cashier quotes 600) —
    * never written back to the product's own selling price. Empty string means "use the normal/
-   * wholesale price". Raw text on purpose (see money.ts's own fromCents/toCents split) — converting
-   * on every keystroke like discountAmountCents does would fight the user mid-type. */
+   * wholesale price". Raw text on purpose (see money.ts's own fromCents/toCents split). */
   priceOverride: string;
   isLocallySourced: boolean;
   localCost: string;
@@ -621,7 +623,7 @@ export function QuotationsRoute(): React.JSX.Element {
             pricing: computeLinePricing(
               product,
               line.quantity,
-              line.discountAmountCents,
+              toCents(line.discount),
               { vatRatePercent: tenantContext?.vatRatePercent ?? 16, pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true },
               line.priceOverride.trim() ? toCents(line.priceOverride) : null
             )
@@ -726,7 +728,7 @@ export function QuotationsRoute(): React.JSX.Element {
         name: item.productName,
         sku: item.sku,
         quantity: item.quantity,
-        discountAmountCents: item.discountAmountCents,
+        discount: fromCents(item.discountAmountCents),
         // Pre-filled with the item's own current price so re-submitting without touching this line
         // keeps its price exactly as it was — same reasoning as InvoicesRoute's openEditInvoice.
         priceOverride: fromCents(item.unitPriceCents),
@@ -777,7 +779,7 @@ export function QuotationsRoute(): React.JSX.Element {
           name: product.name,
           sku: product.sku,
           quantity: 1,
-          discountAmountCents: 0,
+          discount: "0.00",
           priceOverride: "",
           isLocallySourced: false,
           localCost: "",
@@ -804,10 +806,7 @@ export function QuotationsRoute(): React.JSX.Element {
   }
 
   function updateCreateDiscount(productId: string, value: string): void {
-    const cents = toCents(value);
-    setCreateItems((prev) =>
-      prev.map((line) => (line.productId === productId ? { ...line, discountAmountCents: cents } : line))
-    );
+    setCreateItems((prev) => prev.map((line) => (line.productId === productId ? { ...line, discount: value } : line)));
   }
 
   function updateCreatePriceOverride(productId: string, value: string): void {
@@ -874,7 +873,7 @@ export function QuotationsRoute(): React.JSX.Element {
       items: createItems.map((line) => ({
         productId: line.productId,
         quantity: line.quantity,
-        discountAmountCents: line.discountAmountCents,
+        discountAmountCents: toCents(line.discount),
         unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined,
         isLocallySourced: line.isLocallySourced,
         // line.localCost is what the user typed as the PER-UNIT cost — localCostCents itself is
@@ -1999,7 +1998,7 @@ export function QuotationsRoute(): React.JSX.Element {
                           type="number"
                           min={0}
                           step="0.01"
-                          value={fromCents(line.discountAmountCents) || "0.00"}
+                          value={line.discount}
                           onChange={(event) => updateCreateDiscount(line.productId, event.target.value)}
                           className="h-8 w-20 rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
                         />
