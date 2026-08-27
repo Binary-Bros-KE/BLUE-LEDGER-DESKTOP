@@ -796,7 +796,9 @@ export function CheckoutRoute(): React.JSX.Element {
   async function handleSuspend(): Promise<void> {
     if (!activeDraft || activeDraft.items.length === 0) return;
     if (session && !session.branch && !storefrontId) {
-      setActionError("Choose a storefront before holding this sale.");
+      const message = "Choose a storefront before holding this sale.";
+      setActionError(message);
+      showErrorToast(message);
       return;
     }
     setSuspending(true);
@@ -844,7 +846,9 @@ export function CheckoutRoute(): React.JSX.Element {
     event.preventDefault();
     if (!activeDraft) return;
     if (session && !session.branch && !storefrontId) {
-      setActionError("Choose a storefront before completing this sale.");
+      const message = "Choose a storefront before completing this sale.";
+      setActionError(message);
+      showErrorToast(message);
       return;
     }
     setCompleting(true);

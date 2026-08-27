@@ -973,7 +973,9 @@ export function InvoicesRoute(): React.JSX.Element {
       return;
     }
     if (!editingInvoiceId && session && !session.branch && !createStorefrontId) {
-      setCreateError("Choose a storefront for this invoice");
+      const message = "Choose a storefront for this invoice";
+      setCreateError(message);
+      showErrorToast(message);
       setCreateSaving(false);
       return;
     }
@@ -2068,7 +2070,9 @@ export function InvoicesRoute(): React.JSX.Element {
                   // unexplained bug rather than this. Same guard/message as submitting the
                   // invoice itself (below), just earlier.
                   if (session && !session.branch && !createStorefrontId) {
-                    setCreateError("Choose a storefront above before adding a new product");
+                    const message = "Choose a storefront above before adding a new product";
+                    setCreateError(message);
+                    showErrorToast(message);
                     return;
                   }
                   setQuickCreateProductOpen(true);

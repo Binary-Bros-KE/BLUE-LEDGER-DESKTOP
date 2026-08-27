@@ -855,7 +855,9 @@ export function QuotationsRoute(): React.JSX.Element {
       return;
     }
     if (!editingQuotationId && session && !session.branch && !createStorefrontId) {
-      setCreateError("Choose a storefront for this quotation");
+      const message = "Choose a storefront for this quotation";
+      setCreateError(message);
+      showErrorToast(message);
       setCreateSaving(false);
       return;
     }
@@ -1883,7 +1885,9 @@ export function QuotationsRoute(): React.JSX.Element {
                   // QuickCreateProductModal's storefrontId prop). Same guard/message as
                   // submitting the quotation itself (below), just earlier.
                   if (session && !session.branch && !createStorefrontId) {
-                    setCreateError("Choose a storefront above before adding a new product");
+                    const message = "Choose a storefront above before adding a new product";
+                    setCreateError(message);
+                    showErrorToast(message);
                     return;
                   }
                   setQuickCreateProductOpen(true);
