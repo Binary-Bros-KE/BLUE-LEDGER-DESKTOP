@@ -45,10 +45,11 @@ function LowStockBadge(): React.JSX.Element {
   );
 }
 
-/** A storefront is "out" once its own shelf stock hits zero (or below, if negative stock is
- * allowed) — distinct from "low", which is relative to that product's configurable reorder level. */
+/** A product is "out" once its TRUE total (Main Store + every storefront combined) hits zero —
+ * matches ProductsRoute.tsx's own totalStock<=0 convention. Not "any one storefront's shelf is at
+ * zero" — plenty of total stock elsewhere means it isn't actually out. */
 function rowHasOutOfStock(row: MainStoreProductRow): boolean {
-  return row.storefronts.some((entry) => entry.onHandQuantity <= 0);
+  return row.totalStock <= 0;
 }
 
 function OutOfStockBadge(): React.JSX.Element {
@@ -132,14 +133,6 @@ export function MainStoreRoute(): React.JSX.Element {
     return () => clearTimeout(timer);
   }, [notice]);
 
-  const storefrontName = useCallback(
-    (storefrontId: string | null): string => {
-      if (!storefrontId) return "All Storefronts";
-      return locations?.find((location) => location.id === storefrontId)?.locationName ?? "Unknown Storefront";
-    },
-    [locations]
-  );
-
   const filteredRows = useMemo(() => {
     if (!rows) return null;
     let list = rows;
@@ -180,26 +173,22 @@ export function MainStoreRoute(): React.JSX.Element {
     if (outOfStockOnly) filterParts.push("Out of Stock Only");
     if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
 
-    const rowsOut = filteredRows.flatMap((row) => {
-      const base = {
+    // One row per product now (not one per product-storefront pair) — Main Store is a single
+    // combined figure (unallocated + allocated), and every storefront gets its own column instead
+    // of its own row, so the whole picture for a product reads left-to-right on one line.
+    const rowsOut = filteredRows.map((row, index) => {
+      const out: Record<string, string> = {
+        number: String(index + 1),
         product: row.productName,
-        sku: row.sku,
         category: row.categoryName ?? "Uncategorized",
-        status: row.status
+        mainStore: String(row.totalAtMainStore),
+        totalStock: String(row.totalStock)
       };
-      const unallocatedRow = {
-        ...base,
-        storefront: "Unallocated",
-        allocated: String(row.unallocatedQuantity),
-        onHand: "—"
-      };
-      const storefrontRows = row.storefronts.map((entry) => ({
-        ...base,
-        storefront: entry.storefrontName,
-        allocated: String(entry.allocatedQuantity),
-        onHand: `${entry.onHandQuantity}${entry.onHandQuantity <= 0 ? " (Out of Stock)" : entry.isLow ? " (Low)" : ""}`
-      }));
-      return [unallocatedRow, ...storefrontRows];
+      for (const location of storefronts) {
+        const entry = row.storefronts.find((s) => s.storefrontId === location.id);
+        out[`storefront_${location.id}`] = String(entry?.onHandQuantity ?? 0);
+      }
+      return out;
     });
 
     return {
@@ -207,13 +196,12 @@ export function MainStoreRoute(): React.JSX.Element {
       title: "Main Store",
       subtitle: filterParts.join(" · "),
       columns: [
+        { key: "number", header: "#" },
         { key: "product", header: "Product" },
-        { key: "sku", header: "SKU" },
         { key: "category", header: "Category" },
-        { key: "storefront", header: "Storefront" },
-        { key: "allocated", header: "Allocated at Main Store", align: "right" },
-        { key: "onHand", header: "On Hand at Shop", align: "right" },
-        { key: "status", header: "Status" }
+        { key: "mainStore", header: "Main Store", align: "right" },
+        ...storefronts.map((location) => ({ key: `storefront_${location.id}`, header: location.locationName, align: "right" as const })),
+        { key: "totalStock", header: "Total Stock", align: "right" }
       ],
       rows: rowsOut,
       stats: summary
@@ -227,7 +215,7 @@ export function MainStoreRoute(): React.JSX.Element {
         : [],
       fileBaseName: `MainStore_${new Date().toISOString().slice(0, 10)}`
     };
-  }, [filteredRows, summary, statusFilter, lowStockOnly, outOfStockOnly, searchTerm]);
+  }, [filteredRows, summary, statusFilter, lowStockOnly, outOfStockOnly, searchTerm, storefronts]);
 
   async function handleProductCreated(): Promise<void> {
     setCreateOpen(false);
@@ -434,11 +422,15 @@ export function MainStoreRoute(): React.JSX.Element {
                         </p>
                       </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <DashedPill tone={row.storefrontTagId === null ? "accent" : "success"}>
-                        {storefrontName(row.storefrontTagId)}
-                      </DashedPill>
-                      <span className="text-xs font-bold text-muted">Main Store: {row.totalAtMainStore}</span>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span
+                        className={cn(
+                          "font-display text-lg font-black tabular-nums",
+                          row.totalStock > 0 ? "text-success" : "text-danger"
+                        )}
+                      >
+                        Total Stock: {row.totalStock}
+                      </span>
                       <button
                         type="button"
                         onClick={() => setHistoryProduct(row)}

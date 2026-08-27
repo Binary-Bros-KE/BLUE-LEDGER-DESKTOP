@@ -71,8 +71,9 @@ export function getMainStoreProductDetail(productId: string): MainStoreProductDe
 
 /**
  * One self-contained row per product for the Main Store list — every storefront's allocated and
- * on-hand quantity, with low-stock flagged right on the storefront's own shelf figure. Built from a
- * handful of bulk queries (not one per product) so the whole catalog loads in a single round trip.
+ * on-hand quantity, plus the product-wide totalStock/hasLowStock figures (see MainStoreProductRow's
+ * own doc comment). Built from a handful of bulk queries (not one per product) so the whole catalog
+ * loads in a single round trip.
  */
 export function listMainStoreProductRows(): MainStoreProductRow[] {
   requirePermission("main_store", "view");
@@ -105,14 +106,16 @@ export function listMainStoreProductRows(): MainStoreProductRow[] {
     const unallocatedQuantity = buckets?.get(null) ?? 0;
 
     let totalAtMainStore = unallocatedQuantity;
-    let hasLowStock = false;
+    let onHandAcrossStorefronts = 0;
 
     const storefronts = storefrontLocations.map((location) => {
       const allocatedQuantity = buckets?.get(location.id) ?? 0;
       totalAtMainStore += allocatedQuantity;
       const onHandQuantity = onHandForProduct?.get(location.id) ?? 0;
+      onHandAcrossStorefronts += onHandQuantity;
+      // Still a per-storefront signal on purpose (this storefront's own shelf is running low),
+      // distinct from the product-wide hasLowStock below — kept exactly as it already was.
       const isLow = product.reorderLevel > 0 && onHandQuantity < product.reorderLevel;
-      if (isLow) hasLowStock = true;
       return {
         storefrontId: location.id,
         storefrontName: location.location_name,
@@ -121,6 +124,12 @@ export function listMainStoreProductRows(): MainStoreProductRow[] {
         isLow
       };
     });
+
+    // The true grand total across every location — mirrors ProductsRoute.tsx's own
+    // totalStock<=reorderLevel convention exactly, inclusive comparison, no reorderLevel>0 guard
+    // (a product with reorderLevel 0 is still correctly flagged once its total hits zero).
+    const totalStock = totalAtMainStore + onHandAcrossStorefronts;
+    const hasLowStock = totalStock <= product.reorderLevel;
 
     return {
       productId: product.id,
@@ -134,6 +143,7 @@ export function listMainStoreProductRows(): MainStoreProductRow[] {
       unallocatedQuantity,
       totalAtMainStore,
       storefronts,
+      totalStock,
       hasLowStock
     };
   });

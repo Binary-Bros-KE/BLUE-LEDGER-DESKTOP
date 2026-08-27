@@ -61,5 +61,11 @@ export type MainStoreProductRow = {
   unallocatedQuantity: number;
   totalAtMainStore: number;
   storefronts: MainStoreRowStorefrontBreakdown[];
+  /** totalAtMainStore + every storefront's own onHandQuantity — the true grand total across every
+   * location this product exists in. hasLowStock/out-of-stock are both derived from THIS figure
+   * (mirrors ProductsRoute.tsx's own totalStock<=reorderLevel convention), not any single
+   * storefront's own shelf count — a product with plenty of stock overall shouldn't read as "out of
+   * stock" just because one particular storefront's shelf happens to be at zero. */
+  totalStock: number;
   hasLowStock: boolean;
 };
