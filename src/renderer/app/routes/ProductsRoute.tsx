@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import {
   AlertTriangle,
   Boxes,
+  Coins,
   Info,
   Loader2,
   Package,
@@ -13,6 +14,7 @@ import {
   PowerOff,
   Search,
   TrendingDown,
+  TrendingUp,
   Wallet
 } from "lucide-react";
 import { BulkTaxCategoryModal } from "@renderer/app/routes/products/BulkTaxCategoryModal";
@@ -174,13 +176,23 @@ export function ProductsRoute(): React.JSX.Element {
     };
   }, [products]);
 
-  // Cost-based valuation (quantity × buying price) — matches the "Stock Value" figure used
+  // Cost-based valuation (quantity × buying price) — matches the "Total Buying" figure used
   // throughout the Inventory Report, not the selling price (which would be projected revenue, not
   // the value of stock actually sitting on the shelf).
   const stockValueCents = useMemo(() => {
     if (!products) return 0;
     return products.reduce((sum, product) => sum + product.totalStock * product.buyingPriceCents, 0);
   }, [products]);
+
+  // Same quantity-weighted sum as stockValueCents, priced at what each unit would actually sell
+  // for instead of what it cost — the projected revenue if every unit on the shelf sold at its
+  // current selling price. expectedProfitCents is simply the gap between the two.
+  const totalSellingCents = useMemo(() => {
+    if (!products) return 0;
+    return products.reduce((sum, product) => sum + product.totalStock * product.sellingPriceCents, 0);
+  }, [products]);
+
+  const expectedProfitCents = totalSellingCents - stockValueCents;
 
   const hasActiveFilters = Boolean(
     searchTerm || categoryFilter || statusFilter !== "active" || storefrontFilter || lowStockOnly || outOfStockOnly
@@ -205,26 +217,37 @@ export function ProductsRoute(): React.JSX.Element {
       title: "Products",
       subtitle: filterParts.length > 0 ? filterParts.join(" · ") : "Full product catalog",
       columns: [
+        { key: "number", header: "#", align: "right" },
         { key: "name", header: "Product" },
-        { key: "sku", header: "SKU" },
         { key: "category", header: "Category" },
-        { key: "price", header: "Price", align: "right" },
-        { key: "stock", header: "Stock", align: "right" },
-        { key: "status", header: "Status" }
+        { key: "stock", header: "Total Stock", align: "right" },
+        { key: "buyingPrice", header: "Buying Price", align: "right" },
+        { key: "sellingPrice", header: "Selling Price", align: "right" },
+        { key: "margin", header: "Margin", align: "right" },
+        { key: "marginPercent", header: "Margin %", align: "right" }
       ],
-      rows: filteredProducts.map((product) => ({
-        name: product.name,
-        sku: product.sku,
-        category: product.categoryName ?? "Uncategorized",
-        price: `${currency} ${formatCents(product.sellingPriceCents)}`,
-        stock: String(product.totalStock),
-        status: product.status
-      })),
+      rows: filteredProducts.map((product, index) => {
+        const marginCents = product.sellingPriceCents - product.buyingPriceCents;
+        const marginPercent =
+          product.sellingPriceCents > 0 ? (marginCents / product.sellingPriceCents) * 100 : 0;
+        return {
+          number: String(index + 1),
+          name: product.name,
+          category: product.categoryName ?? "Uncategorized",
+          stock: String(product.totalStock),
+          buyingPrice: `${currency} ${formatCents(product.buyingPriceCents)}`,
+          sellingPrice: `${currency} ${formatCents(product.sellingPriceCents)}`,
+          margin: `${currency} ${formatCents(marginCents)}`,
+          marginPercent: `${marginPercent.toFixed(1)}%`
+        };
+      }),
       stats: [
         { label: "Total Products", value: String(filteredProducts.length) },
         { label: "Low Stock Alerts", value: String(stockAlerts.lowStockCount) },
         { label: "Out of Stock Alerts", value: String(stockAlerts.outOfStockCount) },
-        { label: "Stock Value", value: `${currency} ${formatCents(stockValueCents)}` }
+        { label: "Total Buying", value: `${currency} ${formatCents(stockValueCents)}` },
+        { label: "Total Selling", value: `${currency} ${formatCents(totalSellingCents)}` },
+        { label: "Expected Profit", value: `${currency} ${formatCents(expectedProfitCents)}` }
       ],
       fileBaseName: `Products_${new Date().toISOString().slice(0, 10)}`
     };
@@ -232,6 +255,8 @@ export function ProductsRoute(): React.JSX.Element {
     filteredProducts,
     stockAlerts,
     stockValueCents,
+    totalSellingCents,
+    expectedProfitCents,
     searchTerm,
     categoryFilter,
     statusFilter,
@@ -364,7 +389,7 @@ export function ProductsRoute(): React.JSX.Element {
         )}
 
         {products !== null && products.length > 0 && (
-          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
             <StatTile icon={Package} label="Total Products" value={String(products.length)} tone="primary" />
             <StatTile
               icon={AlertTriangle}
@@ -380,8 +405,20 @@ export function ProductsRoute(): React.JSX.Element {
             />
             <StatTile
               icon={Wallet}
-              label="Stock Value"
+              label="Total Buying"
               value={`${currency} ${formatCents(stockValueCents)}`}
+              tone="success"
+            />
+            <StatTile
+              icon={Coins}
+              label="Total Selling"
+              value={`${currency} ${formatCents(totalSellingCents)}`}
+              tone="success"
+            />
+            <StatTile
+              icon={TrendingUp}
+              label="Expected Profit"
+              value={`${currency} ${formatCents(expectedProfitCents)}`}
               tone="success"
             />
           </div>
