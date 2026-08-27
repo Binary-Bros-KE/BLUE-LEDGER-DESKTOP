@@ -3,7 +3,6 @@ import { motion } from "framer-motion";
 import {
   AlertTriangle,
   Boxes,
-  Coins,
   Info,
   Loader2,
   Package,
@@ -13,9 +12,7 @@ import {
   Power,
   PowerOff,
   Search,
-  TrendingDown,
-  TrendingUp,
-  Wallet
+  TrendingDown
 } from "lucide-react";
 import { BulkTaxCategoryModal } from "@renderer/app/routes/products/BulkTaxCategoryModal";
 import { ProductCreateModal } from "@renderer/app/routes/products/ProductCreateModal";
@@ -389,6 +386,10 @@ export function ProductsRoute(): React.JSX.Element {
         )}
 
         {products !== null && products.length > 0 && (
+          // Only count-based tiles are shown here — Total Buying/Selling/Expected Profit reveal
+          // cost and margin data that cashiers (who have access to this tab) must not see. Those
+          // money stats still exist and appear in the PDF/CSV/Excel export below, which is not
+          // exposed to cashiers the same way.
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
             <StatTile icon={Package} label="Total Products" value={String(products.length)} tone="primary" />
             <StatTile
@@ -402,24 +403,6 @@ export function ProductsRoute(): React.JSX.Element {
               label="Out of Stock Alerts"
               value={String(stockAlerts.outOfStockCount)}
               tone="danger"
-            />
-            <StatTile
-              icon={Wallet}
-              label="Total Buying"
-              value={`${currency} ${formatCents(stockValueCents)}`}
-              tone="success"
-            />
-            <StatTile
-              icon={Coins}
-              label="Total Selling"
-              value={`${currency} ${formatCents(totalSellingCents)}`}
-              tone="success"
-            />
-            <StatTile
-              icon={TrendingUp}
-              label="Expected Profit"
-              value={`${currency} ${formatCents(expectedProfitCents)}`}
-              tone="success"
             />
           </div>
         )}
