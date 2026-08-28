@@ -244,13 +244,20 @@ export function GoodsReceivedRoute(): React.JSX.Element {
           item.productId === product.id ? { ...item, quantity: item.quantity + 1 } : item
         );
       }
-      return [...prev, { productId: product.id, productName: product.name, sku: product.sku, quantity: 1 }];
+      // Starts at 0 (renders as an empty input — see the quantity input's own value prop) rather
+      // than defaulting to 1: forcing a plausible-looking "1" onto a freshly-added line is bad UX —
+      // it's too easy to leave unedited and record the wrong quantity. submitCreateReceipt below
+      // blocks the whole submission if any line is left at 0.
+      return [...prev, { productId: product.id, productName: product.name, sku: product.sku, quantity: 0 }];
     });
     setProductSearch("");
   }
 
   function updateDraftItemQuantity(productId: string, quantity: number): void {
-    const next = Number.isFinite(quantity) && quantity > 0 ? Math.floor(quantity) : 1;
+    // 0 (not 1) on an invalid/empty blur — leaves the field genuinely empty rather than silently
+    // planting a "1" the user never typed. submitCreateReceipt's own guard is what actually stops an
+    // empty line from being submitted.
+    const next = Number.isFinite(quantity) && quantity > 0 ? Math.floor(quantity) : 0;
     setCreateItems((prev) => prev.map((item) => (item.productId === productId ? { ...item, quantity: next } : item)));
   }
 
@@ -273,6 +280,11 @@ export function GoodsReceivedRoute(): React.JSX.Element {
 
     if (createItems.length === 0) {
       setCreateError("Add at least one product");
+      return;
+    }
+    const emptyItem = createItems.find((item) => item.quantity <= 0);
+    if (emptyItem) {
+      setCreateError(`Enter a quantity for ${emptyItem.productName}`);
       return;
     }
     if (destination !== "main_store" && needsStorefrontPicker && !createLocationId) {
@@ -795,7 +807,7 @@ export function GoodsReceivedRoute(): React.JSX.Element {
         onClose={() => setViewingReceipt(null)}
         title={viewingReceipt?.receiptNumber ?? "Goods Received"}
         description="Frozen at the moment of receiving — reflects exactly what was true then, even if stock has moved since."
-        widthClassName="max-w-lg"
+        widthClassName="max-w-3xl"
       >
         {viewLoading ? (
           <div className="flex min-h-[160px] items-center justify-center text-muted">

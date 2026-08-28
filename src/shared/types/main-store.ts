@@ -40,6 +40,19 @@ export type MainStoreAllocationSummary = {
   allocatedByStorefront: Record<string, number>;
 };
 
+/** Purely informational — "how much could actually ship to my storefront if I asked" (unallocated +
+ * this storefront's own earmark, the exact same formula distributeMainStoreStockCore itself draws
+ * from), shown as a hint on the New Stock Request form so a requester isn't guessing blind. Never
+ * enforced: a request for more than this is still allowed to submit, and still allowed to be
+ * approved as long as stock is actually there BY THE TIME it's reviewed. Deliberately scoped to one
+ * storefront rather than the whole allocation breakdown (MainStoreAllocationSummary) — a branch-scoped
+ * Cashier/Manager creating a request has no "main_store" permission and must never see another
+ * storefront's own earmarked stock. */
+export type StockRequestAvailability = {
+  productId: string;
+  availableQuantity: number;
+};
+
 /** One storefront's slice of a product row in the Main Store list — flags low stock right where
  * it's relevant (a storefront's own shelf, not Main Store's central holding). */
 export type MainStoreRowStorefrontBreakdown = MainStoreStorefrontBreakdown & {

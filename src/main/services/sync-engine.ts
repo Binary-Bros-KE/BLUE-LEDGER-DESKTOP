@@ -489,7 +489,16 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
 
     const itemRows = getDatabase()
       .prepare("SELECT * FROM stock_request_items WHERE stock_request_id = ? ORDER BY created_at ASC")
-      .all(id) as Array<{ id: string; product_id: string; quantity_requested: number; created_at: string }>;
+      .all(id) as Array<{
+      id: string;
+      product_id: string;
+      quantity_requested: number;
+      previous_quantity: number | null;
+      new_quantity: number | null;
+      main_store_previous_quantity: number | null;
+      main_store_new_quantity: number | null;
+      created_at: string;
+    }>;
 
     return {
       id: row.id,
@@ -509,6 +518,13 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
         // this device's own local id with a different cloud id at any time).
         productId: resolveCloudRef("products", i.product_id),
         quantityRequested: i.quantity_requested,
+        // Null for a still-pending or rejected request's items — see stock-request-service.ts's
+        // approveStockRequest for where these get frozen at approval, mirroring stock_receipts'
+        // own previous/new quantity pair below.
+        previousQuantity: i.previous_quantity,
+        newQuantity: i.new_quantity,
+        mainStorePreviousQuantity: i.main_store_previous_quantity,
+        mainStoreNewQuantity: i.main_store_new_quantity,
         createdAt: i.created_at
       })),
       localCreatedAt: row.created_at,
@@ -2684,10 +2700,11 @@ const STOCK_REQUEST_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEnt
 
 /** Last entity in "buy a new device, get everything back" — back to the plain document-with-
  * line-items pattern (same shape as applySaleReturnPulledRow): a header upsert via the shared
- * upsertDocumentHeader helper, then replace-all its items. Safe because stock_request_items are
- * only ever inserted once at creation and never independently edited afterward (confirmed — no
- * update/delete function exists for them anywhere in the codebase) — approving/rejecting only ever
- * touches the header (status/reviewedBy/reviewedAt), which the header upsert already covers. */
+ * upsertDocumentHeader helper, then replace-all its items. Once created-only, stock_request_items are
+ * now also updated in place at approval time (previousQuantity/newQuantity/mainStorePreviousQuantity/
+ * mainStoreNewQuantity — see stock-request-service.ts's approveStockRequest) — replace-all on every
+ * pull stays safe regardless, since it's driven by whatever the pushing device's item rows currently
+ * hold, not by an "only ever inserted once" assumption. */
 function applyStockRequestPulledRow(row: Record<string, unknown>, force: boolean): void {
   runInTransaction(() => {
     const id = row.id as string;
@@ -2699,13 +2716,23 @@ function applyStockRequestPulledRow(row: Record<string, unknown>, force: boolean
     const items = (row.items as Array<Record<string, unknown>>) ?? [];
     for (const item of items) {
       db.prepare(
-        `INSERT INTO stock_request_items (id, stock_request_id, product_id, quantity_requested, created_at)
-         VALUES (?, ?, ?, ?, ?)`
+        `INSERT INTO stock_request_items (
+          id, stock_request_id, product_id, quantity_requested, previous_quantity, new_quantity,
+          main_store_previous_quantity, main_store_new_quantity, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         item.id as string,
         id,
         resolveRef("products", item.productId) as string,
         item.quantityRequested as number,
+        // Older rows pushed before this feature shipped simply omit these keys entirely — ?? null
+        // (not `as number | null`, which would coerce `undefined` into a bound param SQLite rejects)
+        // keeps that case a clean NULL rather than a bind error. Same convention as
+        // applyStockReceiptPulledRow's own mainStorePreviousQuantity/mainStoreNewQuantity below.
+        (item.previousQuantity as number | null | undefined) ?? null,
+        (item.newQuantity as number | null | undefined) ?? null,
+        (item.mainStorePreviousQuantity as number | null | undefined) ?? null,
+        (item.mainStoreNewQuantity as number | null | undefined) ?? null,
         item.createdAt as string
       );
     }

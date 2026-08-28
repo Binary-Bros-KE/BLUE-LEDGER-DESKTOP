@@ -29,6 +29,16 @@ export type StockRequestItemRow = {
   product_name: string;
   sku: string;
   quantity_requested: number;
+  /** Frozen at the moment this item was approved and shipped — never recomputed, so a reprint months
+   * later shows exactly what was true then. NULL while the request is still pending or if it was
+   * rejected (nothing has shipped yet). Mirrors stock_receipt_items' own previous/new quantity pair. */
+  previous_quantity: number | null;
+  new_quantity: number | null;
+  /** The OTHER side of the same approval — Main Store's own on-hand quantity immediately before/after
+   * this item was drawn out via distributeMainStoreStockCore. NULL under the same conditions as
+   * previous_quantity/new_quantity above. */
+  main_store_previous_quantity: number | null;
+  main_store_new_quantity: number | null;
 };
 
 const SELECT_WITH_JOINS = `
@@ -69,7 +79,8 @@ export function findStockRequestItemRows(stockRequestId: string): StockRequestIt
   return getDatabase()
     .prepare(
       `
-      SELECT sri.id, sri.stock_request_id, sri.product_id, sri.quantity_requested, p.name AS product_name, p.sku
+      SELECT sri.id, sri.stock_request_id, sri.product_id, sri.quantity_requested, sri.previous_quantity,
+        sri.new_quantity, sri.main_store_previous_quantity, sri.main_store_new_quantity, p.name AS product_name, p.sku
       FROM stock_request_items sri
       JOIN products p ON p.id = sri.product_id
       WHERE sri.stock_request_id = ?
@@ -117,6 +128,27 @@ export function insertStockRequestItemRow(input: {
       "INSERT INTO stock_request_items (id, stock_request_id, product_id, quantity_requested, created_at) VALUES (?, ?, ?, ?, ?)"
     )
     .run(id, input.stockRequestId, input.productId, input.quantityRequested, now);
+}
+
+/** Called once per item, at approval time, immediately after distributeMainStoreStockCore ships it —
+ * see stock-request-service.ts's approveStockRequest for where the before/after values themselves are
+ * captured. Never called for a rejected request's items (they stay NULL forever). */
+export function updateStockRequestItemFulfillmentRow(
+  id: string,
+  input: {
+    previousQuantity: number;
+    newQuantity: number;
+    mainStorePreviousQuantity: number;
+    mainStoreNewQuantity: number;
+  }
+): void {
+  getDatabase()
+    .prepare(
+      `UPDATE stock_request_items
+       SET previous_quantity = ?, new_quantity = ?, main_store_previous_quantity = ?, main_store_new_quantity = ?
+       WHERE id = ?`
+    )
+    .run(input.previousQuantity, input.newQuantity, input.mainStorePreviousQuantity, input.mainStoreNewQuantity, id);
 }
 
 export function updateStockRequestStatusRow(

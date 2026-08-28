@@ -1,4 +1,5 @@
 import { runInTransaction } from "@main/database/connection";
+import * as inventoryRepository from "@main/database/repositories/inventory-repository";
 import * as locationRepository from "@main/database/repositories/location-repository";
 import * as stockRequestRepository from "@main/database/repositories/stock-request-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
@@ -49,7 +50,11 @@ function mapItemRow(row: stockRequestRepository.StockRequestItemRow): StockReque
     productId: row.product_id,
     productName: row.product_name,
     sku: row.sku,
-    quantityRequested: row.quantity_requested
+    quantityRequested: row.quantity_requested,
+    previousQuantity: row.previous_quantity,
+    newQuantity: row.new_quantity,
+    mainStorePreviousQuantity: row.main_store_previous_quantity,
+    mainStoreNewQuantity: row.main_store_new_quantity
   };
 }
 
@@ -134,6 +139,12 @@ export function createStockRequest(input: unknown): StockRequest {
  * every item under one transaction and traced back to this request via `reference_id` in the stock
  * ledger. If ANY item doesn't have enough stock at Main Store, the whole approval rolls back — nothing
  * partially fulfils, so the approver must free up stock (or reject) and try again.
+ *
+ * previousQuantity/newQuantity (storefront) and mainStorePreviousQuantity/mainStoreNewQuantity (Main
+ * Store) are captured HERE, immediately before/after each item's transfer applies — not recomputed
+ * later — so the printed/reprinted request always shows exactly what was true at the moment of
+ * approval, even if the product's stock has moved on since. Same "freeze at the moment of the action"
+ * discipline as stock-receipt-service.ts's own createStockReceipt.
  */
 export async function approveStockRequest(id: string): Promise<StockRequest> {
   requirePermission("stock_requests", "approve");
@@ -153,9 +164,16 @@ export async function approveStockRequest(id: string): Promise<StockRequest> {
   await assertNotAlreadyDecidedRemotely("stock_requests", id, "pending");
 
   const items = stockRequestRepository.findStockRequestItemRows(id);
+  const mainStore = locationRepository.findMainStoreLocationRow(tenantId);
+  if (!mainStore) {
+    throw new Error("No Main Store is set up for this business yet");
+  }
 
   runInTransaction(() => {
     for (const item of items) {
+      const previousQuantity = inventoryRepository.findInventoryRow(item.product_id, row.storefront_id)?.quantity ?? 0;
+      const mainStorePreviousQuantity = inventoryRepository.findInventoryRow(item.product_id, mainStore.id)?.quantity ?? 0;
+
       try {
         distributeMainStoreStockCore({
           tenantId,
@@ -171,6 +189,13 @@ export async function approveStockRequest(id: string): Promise<StockRequest> {
         const message = err instanceof Error ? err.message : "Failed to fulfil item";
         throw new Error(`${item.product_name}: ${message}`);
       }
+
+      stockRequestRepository.updateStockRequestItemFulfillmentRow(item.id, {
+        previousQuantity,
+        newQuantity: previousQuantity + item.quantity_requested,
+        mainStorePreviousQuantity,
+        mainStoreNewQuantity: mainStorePreviousQuantity - item.quantity_requested
+      });
     }
 
     stockRequestRepository.updateStockRequestStatusRow(id, {

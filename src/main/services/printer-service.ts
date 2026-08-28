@@ -14,6 +14,7 @@ import * as quotationRepository from "@main/database/repositories/quotation-repo
 import * as saleRepository from "@main/database/repositories/sale-repository";
 import * as serviceChargeRepository from "@main/database/repositories/service-charge-repository";
 import * as stockReceiptRepository from "@main/database/repositories/stock-receipt-repository";
+import * as stockRequestRepository from "@main/database/repositories/stock-request-repository";
 import * as tenantRepository from "@main/database/repositories/tenant-repository";
 import { buildRendererCsp } from "@main/security/content-security-policy";
 import { requirePermission } from "@main/services/auth-service";
@@ -2567,6 +2568,240 @@ export async function previewStockReceiptPdf(stockReceiptId: string): Promise<vo
   const html = buildStockReceiptHtml(vm, business, logo);
   const buffer = await renderHtmlToPdfBuffer(html);
   await openPdfPreviewWindow(buffer, `${vm.receiptNumber}.pdf`, `${vm.isTransfer ? "Stock Transfer" : "Goods Received"} ${vm.receiptNumber}`);
+}
+
+type StockRequestDocumentViewModel = {
+  requestNumber: string;
+  storefrontName: string;
+  status: "pending" | "approved" | "rejected";
+  requestedByName: string;
+  requestedAt: string;
+  reviewedByName: string | null;
+  reviewedAt: string | null;
+  rejectionReason: string | null;
+  notes: string | null;
+  items: Array<{
+    productName: string;
+    sku: string;
+    quantityRequested: number;
+    /** Populated only once this request is approved — see stock-request-service.ts's
+     * approveStockRequest for where these get frozen. Still null for a pending or rejected request. */
+    previousQuantity: number | null;
+    newQuantity: number | null;
+    mainStorePreviousQuantity: number | null;
+    mainStoreNewQuantity: number | null;
+  }>;
+};
+
+function loadStockRequestData(stockRequestId: string): { vm: StockRequestDocumentViewModel; locationId: string } {
+  const row = stockRequestRepository.findStockRequestRowById(stockRequestId);
+  if (!row) {
+    throw new Error("Stock request not found");
+  }
+  const items = stockRequestRepository.findStockRequestItemRows(stockRequestId);
+
+  return {
+    vm: {
+      requestNumber: row.request_number,
+      storefrontName: row.storefront_name,
+      status: row.status,
+      requestedByName: row.requested_by_name,
+      requestedAt: row.requested_at,
+      reviewedByName: row.reviewed_by_name,
+      reviewedAt: row.reviewed_at,
+      rejectionReason: row.rejection_reason,
+      notes: row.notes,
+      items: items.map((item) => ({
+        productName: item.product_name,
+        sku: item.sku,
+        quantityRequested: item.quantity_requested,
+        previousQuantity: item.previous_quantity,
+        newQuantity: item.new_quantity,
+        mainStorePreviousQuantity: item.main_store_previous_quantity,
+        mainStoreNewQuantity: item.main_store_new_quantity
+      }))
+    },
+    locationId: row.storefront_id
+  };
+}
+
+/** Same plain A4 portrait table document as buildStockReceiptHtml — an internal stock record, not a
+ * customer-facing document, so no tenant-configurable custom header/footer. The frozen Qty Before/
+ * After columns only appear once the request is approved (they're null before then); a pending or
+ * rejected request instead just shows what was asked for. */
+function buildStockRequestHtml(vm: StockRequestDocumentViewModel, business: DocumentBusinessInfo, logo: DocumentLogo): string {
+  const isApproved = vm.status === "approved";
+
+  const itemRows = vm.items
+    .map(
+      (item, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${escapeHtml(item.productName)}<div class="muted">${escapeHtml(item.sku)}</div></td>
+        <td class="center">${item.quantityRequested}</td>
+        ${isApproved ? `<td class="right">${item.mainStorePreviousQuantity}</td><td class="right">${item.mainStoreNewQuantity}</td>` : ""}
+        ${isApproved ? `<td class="right">${item.previousQuantity}</td><td class="right">${item.newQuantity}</td>` : ""}
+      </tr>`
+    )
+    .join("");
+
+  const qtyHeaders = isApproved
+    ? `
+        <th class="right">Qty Before<div class="loc">(Main Store)</div></th>
+        <th class="right">Qty After<div class="loc">(Main Store)</div></th>
+        <th class="right">Qty Before<div class="loc">(${escapeHtml(vm.storefrontName)})</div></th>
+        <th class="right">Qty After<div class="loc">(${escapeHtml(vm.storefrontName)})</div></th>`
+    : "";
+
+  const statusLabel = vm.status.toUpperCase();
+  const statusColor = vm.status === "approved" ? "#0f7a3d" : vm.status === "rejected" ? "#b3261e" : "#8a6d1f";
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  * { box-sizing: border-box; }
+  @page { size: A4 portrait; margin: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #1c1710; margin: 0; padding: 48px; font-size: 13px; }
+  .sheet { max-width: 720px; margin: 0 auto; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #061e64; padding-bottom: 16px; }
+  .logo { display: block; height: auto; max-height: 64px; width: auto; max-width: 220px; object-fit: contain; margin-bottom: 8px; }
+  .business-name { font-size: 20px; font-weight: bold; color: #061e64; margin: 0; }
+  .muted { color: #666; font-size: 11px; }
+  .doc-title { font-size: 24px; font-weight: bold; text-align: right; color: #061e64; margin: 0; letter-spacing: 1px; }
+  .status-pill { display: inline-block; margin-top: 6px; padding: 2px 10px; border-radius: 999px; font-size: 10px; font-weight: bold; letter-spacing: 0.5px; color: #fff; }
+  .meta { display: flex; justify-content: space-between; margin-top: 20px; gap: 24px; }
+  .meta-block p { margin: 2px 0; }
+  .meta-block .label { font-size: 10px; text-transform: uppercase; color: #83795f; font-weight: bold; }
+  table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+  th { text-align: left; font-size: 10px; text-transform: uppercase; color: #83795f; border-bottom: 2px solid #ddd5c2; padding: 6px 4px; }
+  th .loc { text-transform: none; font-weight: normal; font-size: 9px; color: #a89f88; white-space: nowrap; }
+  td { padding: 8px 4px; border-bottom: 1px solid #eee; vertical-align: top; }
+  .center { text-align: center; }
+  .right { text-align: right; white-space: nowrap; }
+  .notes { margin-top: 24px; padding: 12px; background: #f1ede1; border-radius: 8px; }
+  .rejection { margin-top: 24px; padding: 12px; background: #fbeceb; border-radius: 8px; color: #b3261e; }
+  .footer { margin-top: 32px; text-align: center; color: #83795f; font-size: 11px; }
+</style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="header">
+      <div>
+        ${logo.logoDataUrl ? `<img src="${logo.logoDataUrl}" class="logo" alt="" />` : ""}
+        <p class="business-name">${escapeHtml(business.businessName)}</p>
+        ${business.physicalAddress ? `<p class="muted">${escapeHtml(business.physicalAddress)}</p>` : ""}
+        ${business.primaryPhone ? `<p class="muted">${escapeHtml(business.primaryPhone)}</p>` : ""}
+      </div>
+      <div>
+        <p class="doc-title">STOCK REQUEST</p>
+        <p class="muted" style="text-align:right;">${escapeHtml(vm.requestNumber)}</p>
+        <p style="text-align:right;"><span class="status-pill" style="background:${statusColor};">${statusLabel}</span></p>
+      </div>
+    </div>
+
+    <div class="meta">
+      <div class="meta-block">
+        <p class="label">Requested For</p>
+        <p><strong>${escapeHtml(vm.storefrontName)}</strong></p>
+        <p class="label" style="margin-top:10px;">Source</p>
+        <p>Main Store</p>
+      </div>
+      <div class="meta-block">
+        <p class="label">Requested By</p>
+        <p>${escapeHtml(vm.requestedByName)}</p>
+        <p class="label" style="margin-top:10px;">Date</p>
+        <p>${formatInvoiceDate(vm.requestedAt)}</p>
+        ${
+          vm.reviewedByName
+            ? `<p class="label" style="margin-top:10px;">Reviewed By</p><p>${escapeHtml(vm.reviewedByName)} · ${formatInvoiceDate(vm.reviewedAt)}</p>`
+            : ""
+        }
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Product</th>
+          <th class="center">Qty Requested</th>
+          ${qtyHeaders}
+        </tr>
+      </thead>
+      <tbody>${itemRows}</tbody>
+    </table>
+
+    ${vm.status === "rejected" && vm.rejectionReason ? `<div class="rejection"><strong>Rejection Reason</strong><p>${escapeHtml(vm.rejectionReason)}</p></div>` : ""}
+    ${vm.notes ? `<div class="notes"><strong>Notes</strong><p>${escapeHtml(vm.notes)}</p></div>` : ""}
+
+    <div class="footer">Internal stock record — generated by Blue Ledger POS</div>
+  </div>
+</body>
+</html>`;
+}
+
+export async function printStockRequest(stockRequestId: string): Promise<PrinterActionResult> {
+  requirePermission("stock_requests", "view");
+  const { vm, locationId } = loadStockRequestData(stockRequestId);
+  const tenantRow = tenantRepository.findTenantRow();
+  if (!tenantRow) {
+    throw new Error("Business profile not found");
+  }
+  const business = resolveDocumentBusiness(locationId, tenantRow);
+  const logo = await resolveDocumentLogo(locationId, tenantRow);
+  const html = buildStockRequestHtml(vm, business, logo);
+
+  try {
+    await printHtmlViaSystemPrinter(html, "stock-request");
+    return { success: true, message: "Sent to printer" };
+  } catch (err) {
+    return { success: false, message: err instanceof Error ? err.message : "Failed to print stock request" };
+  }
+}
+
+/** Renders the stock request to PDF and prompts the user for a save location. Returns the saved path,
+ * or null if cancelled. */
+export async function generateStockRequestPdf(stockRequestId: string): Promise<string | null> {
+  requirePermission("stock_requests", "view");
+  const { vm, locationId } = loadStockRequestData(stockRequestId);
+  const tenantRow = tenantRepository.findTenantRow();
+  if (!tenantRow) {
+    throw new Error("Business profile not found");
+  }
+  const business = resolveDocumentBusiness(locationId, tenantRow);
+  const logo = await resolveDocumentLogo(locationId, tenantRow);
+  const html = buildStockRequestHtml(vm, business, logo);
+  const buffer = await renderHtmlToPdfBuffer(html);
+
+  const result = await dialog.showSaveDialog({
+    title: "Save Stock Request",
+    defaultPath: `${vm.requestNumber}.pdf`,
+    filters: [{ name: "PDF", extensions: ["pdf"] }]
+  });
+  if (result.canceled || !result.filePath) {
+    return null;
+  }
+
+  await writeFile(result.filePath, buffer);
+  return result.filePath;
+}
+
+/** Opens the stock request in a preview window instead of prompting for a save location — see
+ * openPdfPreviewWindow's own doc comment. Same data-loading/HTML-build as generateStockRequestPdf. */
+export async function previewStockRequestPdf(stockRequestId: string): Promise<void> {
+  requirePermission("stock_requests", "view");
+  const { vm, locationId } = loadStockRequestData(stockRequestId);
+  const tenantRow = tenantRepository.findTenantRow();
+  if (!tenantRow) {
+    throw new Error("Business profile not found");
+  }
+  const business = resolveDocumentBusiness(locationId, tenantRow);
+  const logo = await resolveDocumentLogo(locationId, tenantRow);
+  const html = buildStockRequestHtml(vm, business, logo);
+  const buffer = await renderHtmlToPdfBuffer(html);
+  await openPdfPreviewWindow(buffer, `${vm.requestNumber}.pdf`, `Stock Request ${vm.requestNumber}`);
 }
 
 /** Builds a Statement of Account — not tied to one storefront (a customer's invoices can span

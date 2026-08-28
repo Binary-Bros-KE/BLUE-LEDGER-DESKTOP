@@ -8,6 +8,7 @@ import {
   Loader2,
   PackagePlus,
   Plus,
+  Printer,
   Search,
   Trash2,
   XCircle
@@ -24,6 +25,7 @@ import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { buildAvailableYears, currentYear, matchesYearFilter, yearFilterOptions } from "@renderer/shared/lib/year-filter";
 import { isStorefrontType, type Location } from "@shared/types/location";
+import type { StockRequestAvailability } from "@shared/types/main-store";
 import type { ProductListItem } from "@shared/types/product";
 import type { StockRequest, StockRequestListItem, StockRequestStatus } from "@shared/types/stock-request";
 
@@ -66,6 +68,19 @@ function Th({ children, className }: { children: React.ReactNode; className?: st
   );
 }
 
+/** A "Qty Before"/"Qty After" column header with the location it refers to on its own line — an
+ * approved request shows two of these pairs (Main Store's own side, then the receiving storefront's),
+ * so without the location label it's ambiguous which side a number belongs to. Same helper as
+ * GoodsReceivedRoute's own QtyTh (not shared — each route file stays self-contained here). */
+function QtyTh({ label, location }: { label: string; location: string }): React.JSX.Element {
+  return (
+    <th className="whitespace-nowrap px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider text-muted">
+      {label}
+      <span className="block normal-case text-muted/70">({location})</span>
+    </th>
+  );
+}
+
 export function StockRequestsRoute(): React.JSX.Element {
   const { can, session } = usePermissions();
   const canCreate = can("stock_requests", "create");
@@ -92,9 +107,12 @@ export function StockRequestsRoute(): React.JSX.Element {
   const [productSearch, setProductSearch] = useState("");
   const [createSaving, setCreateSaving] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [availability, setAvailability] = useState<StockRequestAvailability[]>([]);
 
   const [viewingRequest, setViewingRequest] = useState<StockRequest | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
+  const [printing, setPrinting] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
 
   const [approvingId, setApprovingId] = useState<string | null>(null);
 
@@ -137,6 +155,28 @@ export function StockRequestsRoute(): React.JSX.Element {
     () => locations.filter((location) => isStorefrontType(location.locationType)),
     [locations]
   );
+
+  // Purely informational hint on the create form — refreshed whenever the target storefront changes
+  // (a branch-scoped requester's own branch never changes mid-modal; a branch-less caller's picker
+  // choice does). Never used to block a submission — see getAvailableAtMainStore's own doc comment.
+  useEffect(() => {
+    if (!createOpen) return;
+    if (needsStorefrontPicker && !createStorefrontId) {
+      setAvailability([]);
+      return;
+    }
+    window.blueLedger.mainStore
+      .availabilityForStockRequest(needsStorefrontPicker ? createStorefrontId : null)
+      .then(setAvailability)
+      .catch(() => undefined);
+  }, [createOpen, needsStorefrontPicker, createStorefrontId]);
+
+  /** How much could actually ship to this storefront right now, purely as a hint — never enforced.
+   * See StockRequestAvailability's own doc comment (shared/types/main-store.ts) for the exact
+   * formula and why over-requesting is still allowed to submit. */
+  function getAvailableAtMainStore(productId: string): number {
+    return availability.find((row) => row.productId === productId)?.availableQuantity ?? 0;
+  }
 
   const filteredPickerProducts = useMemo(() => {
     const term = productSearch.trim().toLowerCase();
@@ -187,6 +227,7 @@ export function StockRequestsRoute(): React.JSX.Element {
     setCreateItems([]);
     setProductSearch("");
     setCreateError(null);
+    setAvailability([]);
     setCreateOpen(true);
   }
 
@@ -198,13 +239,20 @@ export function StockRequestsRoute(): React.JSX.Element {
           item.productId === product.id ? { ...item, quantity: item.quantity + 1 } : item
         );
       }
-      return [...prev, { productId: product.id, productName: product.name, sku: product.sku, quantity: 1 }];
+      // Starts at 0 (renders as an empty input — see the quantity input's own value prop) rather
+      // than defaulting to 1: forcing a plausible-looking "1" onto a freshly-added line is bad UX —
+      // it's too easy to leave unedited and submit the wrong quantity. submitCreateRequest below
+      // blocks the whole submission if any line is left at 0.
+      return [...prev, { productId: product.id, productName: product.name, sku: product.sku, quantity: 0 }];
     });
     setProductSearch("");
   }
 
   function updateDraftItemQuantity(productId: string, quantity: number): void {
-    const next = Number.isFinite(quantity) && quantity > 0 ? Math.floor(quantity) : 1;
+    // 0 (not 1) on an invalid/empty blur — leaves the field genuinely empty rather than silently
+    // planting a "1" the user never typed. submitCreateRequest's own guard is what actually stops an
+    // empty line from being submitted.
+    const next = Number.isFinite(quantity) && quantity > 0 ? Math.floor(quantity) : 0;
     setCreateItems((prev) => prev.map((item) => (item.productId === productId ? { ...item, quantity: next } : item)));
   }
 
@@ -228,6 +276,11 @@ export function StockRequestsRoute(): React.JSX.Element {
 
     if (createItems.length === 0) {
       setCreateError("Add at least one product");
+      return;
+    }
+    const emptyItem = createItems.find((item) => item.quantity <= 0);
+    if (emptyItem) {
+      setCreateError(`Enter a quantity for ${emptyItem.productName}`);
       return;
     }
     if (needsStorefrontPicker && !createStorefrontId) {
@@ -264,6 +317,42 @@ export function StockRequestsRoute(): React.JSX.Element {
       setActionError(getErrorMessage(err, "Failed to load stock request"));
     } finally {
       setViewLoading(false);
+    }
+  }
+
+  async function handlePrint(): Promise<void> {
+    if (!viewingRequest) return;
+    setPrinting(true);
+    setActionError(null);
+    try {
+      const result = await window.blueLedger.printer.printStockRequestDocument(viewingRequest.id);
+      if (result.success) {
+        showSuccessToast(result.message);
+      } else {
+        setActionError(result.message);
+        showErrorToast(result.message);
+      }
+    } catch (err) {
+      const message = getErrorMessage(err, "Failed to print stock request");
+      setActionError(message);
+      showErrorToast(message);
+    } finally {
+      setPrinting(false);
+    }
+  }
+
+  async function handlePreview(): Promise<void> {
+    if (!viewingRequest) return;
+    setPreviewing(true);
+    setActionError(null);
+    try {
+      await window.blueLedger.printer.previewStockRequestPdf(viewingRequest.id);
+    } catch (err) {
+      const message = getErrorMessage(err, "Failed to open preview");
+      setActionError(message);
+      showErrorToast(message);
+    } finally {
+      setPreviewing(false);
     }
   }
 
@@ -575,7 +664,7 @@ export function StockRequestsRoute(): React.JSX.Element {
         onClose={() => setCreateOpen(false)}
         title="New Stock Request"
         description="Ask Main Store to ship products to your storefront."
-        widthClassName="max-w-lg"
+        widthClassName="max-w-2xl"
       >
         <form onSubmit={submitCreateRequest}>
           {createError && (
@@ -626,39 +715,56 @@ export function StockRequestsRoute(): React.JSX.Element {
           </div>
 
           {createItems.length > 0 && (
-            <div className="mt-3 space-y-1.5">
-              {createItems.map((item) => (
-                <div
-                  key={item.productId}
-                  className="flex items-start justify-between gap-2 rounded-lg border border-dashed border-line bg-soft/40 px-3 py-2"
-                >
-                  <div className="min-w-0">
-                    <p className="line-clamp-2 text-xs font-extrabold leading-snug text-ink" title={item.productName}>
-                      {item.productName}
-                    </p>
-                    <p className="text-[10px] font-semibold text-muted">{item.sku}</p>
-                  </div>
-                  <div className="mt-0.5 flex items-center gap-2">
-                    <input
-                      type="number"
-                      min={1}
-                      value={item.quantity === 0 ? "" : item.quantity}
-                      onChange={(event) => updateDraftItemQuantityDraft(item.productId, event.target.value)}
-                      onBlur={() => updateDraftItemQuantity(item.productId, item.quantity)}
-                      aria-label={`Quantity for ${item.productName}`}
-                      className="h-8 w-16 rounded-md border border-line px-2 text-center text-sm font-extrabold tabular-nums text-ink outline-none focus:border-accent"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeDraftItem(item.productId)}
-                      aria-label={`Remove ${item.productName}`}
-                      className="grid size-7 place-items-center rounded-md text-muted transition hover:bg-danger-soft hover:text-danger cursor-pointer"
-                    >
-                      <Trash2 className="size-3.5" aria-hidden="true" />
-                    </button>
-                  </div>
-                </div>
-              ))}
+            <div className="mt-3 overflow-x-auto rounded-lg border border-line">
+              <table className="w-full border-collapse text-xs">
+                <thead>
+                  <tr className="bg-soft">
+                    <th className="px-3 py-2 text-left font-extrabold uppercase tracking-wider text-muted">Product</th>
+                    <th className="px-3 py-2 text-right font-extrabold uppercase tracking-wider text-muted">Qty Requested</th>
+                    <th className="px-3 py-2 text-right font-extrabold uppercase tracking-wider text-muted">
+                      Available at Main Store
+                    </th>
+                    <th className="px-3 py-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {createItems.map((item) => (
+                    <tr key={item.productId} className="border-t border-line">
+                      <td className="px-3 py-2">
+                        <p className="font-extrabold text-ink">{item.productName}</p>
+                        <p className="text-[10px] font-semibold text-muted">{item.sku}</p>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <input
+                          type="number"
+                          min={1}
+                          value={item.quantity === 0 ? "" : item.quantity}
+                          onChange={(event) => updateDraftItemQuantityDraft(item.productId, event.target.value)}
+                          onBlur={() => updateDraftItemQuantity(item.productId, item.quantity)}
+                          aria-label={`Quantity for ${item.productName}`}
+                          className="h-8 w-16 rounded-md border border-line px-2 text-center text-sm font-extrabold tabular-nums text-ink outline-none focus:border-accent"
+                        />
+                      </td>
+                      <td
+                        className="px-3 py-2 text-right font-bold tabular-nums text-muted"
+                        title="How much could ship right now — just a hint, requesting more is still allowed"
+                      >
+                        {getAvailableAtMainStore(item.productId)}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <button
+                          type="button"
+                          onClick={() => removeDraftItem(item.productId)}
+                          aria-label={`Remove ${item.productName}`}
+                          className="grid size-7 place-items-center rounded-md text-muted transition hover:bg-danger-soft hover:text-danger cursor-pointer"
+                        >
+                          <Trash2 className="size-3.5" aria-hidden="true" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
 
@@ -695,8 +801,12 @@ export function StockRequestsRoute(): React.JSX.Element {
         open={viewingRequest !== null || viewLoading}
         onClose={() => setViewingRequest(null)}
         title={viewingRequest?.requestNumber ?? "Stock Request"}
-        description="Full detail of this stock request."
-        widthClassName="max-w-lg"
+        description={
+          viewingRequest?.status === "approved"
+            ? "Frozen at the moment of approval — reflects exactly what was true then, even if stock has moved since."
+            : "Full detail of this stock request."
+        }
+        widthClassName="max-w-3xl"
       >
         {viewLoading ? (
           <div className="flex min-h-[160px] items-center justify-center text-muted">
@@ -712,7 +822,7 @@ export function StockRequestsRoute(): React.JSX.Element {
               </span>
             </div>
 
-            <div className="rounded-lg border border-line">
+            <div className="overflow-x-auto rounded-lg border border-line">
               <table className="w-full border-collapse text-sm">
                 <thead>
                   <tr className="bg-soft">
@@ -720,8 +830,16 @@ export function StockRequestsRoute(): React.JSX.Element {
                       Product
                     </th>
                     <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider text-muted">
-                      Quantity
+                      Requested
                     </th>
+                    {viewingRequest.status === "approved" && (
+                      <>
+                        <QtyTh label="Qty Before" location="Main Store" />
+                        <QtyTh label="Qty After" location="Main Store" />
+                        <QtyTh label="Qty Before" location={viewingRequest.storefrontName} />
+                        <QtyTh label="Qty After" location={viewingRequest.storefrontName} />
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -732,6 +850,14 @@ export function StockRequestsRoute(): React.JSX.Element {
                         <p className="text-[10px] font-semibold text-muted">{item.sku}</p>
                       </td>
                       <td className="px-3 py-2 text-right font-extrabold tabular-nums">{item.quantityRequested}</td>
+                      {viewingRequest.status === "approved" && (
+                        <>
+                          <td className="px-3 py-2 text-right font-bold tabular-nums text-muted">{item.mainStorePreviousQuantity}</td>
+                          <td className="px-3 py-2 text-right font-extrabold tabular-nums text-danger">{item.mainStoreNewQuantity}</td>
+                          <td className="px-3 py-2 text-right font-bold tabular-nums text-muted">{item.previousQuantity}</td>
+                          <td className="px-3 py-2 text-right font-extrabold tabular-nums text-success">{item.newQuantity}</td>
+                        </>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -757,6 +883,35 @@ export function StockRequestsRoute(): React.JSX.Element {
                 Reviewed by {viewingRequest.reviewedByName} · {formatDateTime(viewingRequest.reviewedAt)}
               </p>
             )}
+
+            <div className="grid grid-cols-2 gap-2 border-t border-line pt-4">
+              <Button
+                type="button"
+                onClick={() => void handlePrint()}
+                disabled={printing}
+                className="h-9 border border-line bg-white text-[11px] text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {printing ? (
+                  <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Printer className="mr-1.5 size-3.5" aria-hidden="true" />
+                )}
+                Print
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void handlePreview()}
+                disabled={previewing}
+                className="h-9 border border-line bg-white text-[11px] text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {previewing ? (
+                  <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Eye className="mr-1.5 size-3.5" aria-hidden="true" />
+                )}
+                Preview
+              </Button>
+            </div>
           </div>
         ) : null}
       </Modal>

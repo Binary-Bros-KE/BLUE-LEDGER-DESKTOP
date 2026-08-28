@@ -2570,6 +2570,36 @@ const migrations = [
       -- still be saved with only its cost changing.
       ALTER TABLE purchase_items ADD COLUMN selling_price_cents INTEGER;
     `
+  },
+  {
+    version: 75,
+    name: "stock_request_item_fulfillment_quantities",
+    sql: `
+      -- Mirrors stock_receipt_items' own previous/new quantity columns (see migration 40's comment,
+      -- which claimed stock_request_items are "never edited after creation" — that stops being true
+      -- as of this migration): stock-request-service.ts's approveStockRequest now captures the
+      -- storefront's and Main Store's own on-hand quantity immediately before/after each item is
+      -- fulfilled via distributeMainStoreStockCore, frozen at the moment of approval so a reprint
+      -- later shows exactly what was true then. All four stay NULL for a pending or rejected
+      -- request's items (nothing has shipped yet) and for historical rows approved before this
+      -- feature shipped.
+      ALTER TABLE stock_request_items ADD COLUMN previous_quantity INTEGER;
+      ALTER TABLE stock_request_items ADD COLUMN new_quantity INTEGER;
+      ALTER TABLE stock_request_items ADD COLUMN main_store_previous_quantity INTEGER;
+      ALTER TABLE stock_request_items ADD COLUMN main_store_new_quantity INTEGER;
+
+      -- The INSERT-side reenqueue trigger (migration 40) covered creation; this is its UPDATE-side
+      -- counterpart so writing the fulfillment quantities onto an existing item row (approval no
+      -- longer only touches the stock_requests header) also re-pushes the parent document. Belt and
+      -- braces alongside the header's own trg_stock_requests_sync_au, which already fires in the same
+      -- approval transaction — this way the item table's own sync correctness never depends on the
+      -- header being touched in lockstep.
+      CREATE TRIGGER trg_stock_request_items_reenqueue_au AFTER UPDATE ON stock_request_items BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), sr.tenant_id, (SELECT client_id FROM tenant WHERE id = sr.tenant_id), 'stock_requests', sr.id, 'upsert', 'push', 'queued', 0, '{}', sr.id || ':' || sr.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+        FROM stock_requests sr WHERE sr.id = NEW.stock_request_id;
+      END;
+    `
   }
 ] as const;
 

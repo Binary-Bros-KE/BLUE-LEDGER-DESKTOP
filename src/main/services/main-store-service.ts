@@ -4,7 +4,7 @@ import * as inventoryRepository from "@main/database/repositories/inventory-repo
 import * as locationRepository from "@main/database/repositories/location-repository";
 import * as mainStoreAllocationRepository from "@main/database/repositories/main-store-allocation-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
-import { getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
+import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { isStorefrontType, type LocationType } from "@shared/types/location";
@@ -23,7 +23,8 @@ import {
 import type {
   MainStoreAllocationSummary,
   MainStoreProductDetail,
-  MainStoreProductRow
+  MainStoreProductRow,
+  StockRequestAvailability
 } from "@shared/types/main-store";
 
 function requireMainStoreLocation(tenantId: string): locationRepository.LocationRow {
@@ -171,6 +172,39 @@ export function getMainStoreAllocationSummary(): MainStoreAllocationSummary[] {
     byProduct.set(row.product_id, entry);
   }
 
+  return Array.from(byProduct.values());
+}
+
+/**
+ * Powers the "Available at Main Store" hint on the New Stock Request form — permission-gated by
+ * "stock_requests":"create" (NOT "main_store":"view", which Cashier/Manager deliberately never get)
+ * precisely so it can be shown to the same requesters who fill out that form. Resolves the target
+ * storefront the exact same way createStockRequest itself does: a branch-scoped caller's own session
+ * branch always wins over whatever storefrontId was passed in (never trusted from the client for
+ * them); a branch-less caller (Storekeeper/Super Admin picking a storefront) must supply one
+ * explicitly. Returns an empty list rather than throwing when no storefront can be resolved yet —
+ * this is a read that renders before the form is fully filled in, not a submission.
+ */
+export function getMainStoreAvailabilityForStockRequest(storefrontId: string | null): StockRequestAvailability[] {
+  requirePermission("stock_requests", "create");
+  const { tenantId } = getCurrentTenant();
+  const branchScope = getCurrentBranchScope();
+  const target = branchScope ?? storefrontId;
+  if (!target) return [];
+
+  const location = locationRepository.findLocationRowById(target);
+  if (!location || location.tenant_id !== tenantId || !isStorefrontType(location.location_type as LocationType)) {
+    return [];
+  }
+
+  const rows = mainStoreAllocationRepository.findAllAllocationRows(tenantId);
+  const byProduct = new Map<string, StockRequestAvailability>();
+  for (const row of rows) {
+    if (row.storefront_id !== null && row.storefront_id !== target) continue;
+    const entry = byProduct.get(row.product_id) ?? { productId: row.product_id, availableQuantity: 0 };
+    entry.availableQuantity += row.quantity;
+    byProduct.set(row.product_id, entry);
+  }
   return Array.from(byProduct.values());
 }
 

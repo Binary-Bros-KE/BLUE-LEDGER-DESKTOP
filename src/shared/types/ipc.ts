@@ -16,7 +16,12 @@ import type { MpesaStatusResult, MpesaStkPushResult, MpesaTillSettings } from ".
 import type { PaymentMethod } from "./payment-method";
 import type { WorkingHoursLockStatus } from "../lib/working-hours-lock";
 import type { WorkingHours, WorkingHoursStorefrontEntry } from "./working-hours";
-import type { MainStoreAllocationSummary, MainStoreProductDetail, MainStoreProductRow } from "./main-store";
+import type {
+  MainStoreAllocationSummary,
+  MainStoreProductDetail,
+  MainStoreProductRow,
+  StockRequestAvailability
+} from "./main-store";
 import type { Product, ProductListItem, ProductStatus, ProductStockSummary } from "./product";
 import type { ProductSalesHistoryEntry, ProductsPerformanceReport } from "./product-report";
 import type { CustomerPurchaseHistoryEntry, OutstandingInvoicesSummary, TopCustomerRow } from "./customer-report";
@@ -293,6 +298,10 @@ export type IpcInvokeMap = {
   "main-store:allocation-summary": {
     args: [];
     result: MainStoreAllocationSummary[];
+  };
+  "main-store:availability-for-stock-request": {
+    args: [string | null];
+    result: StockRequestAvailability[];
   };
   "main-store:product-rows": {
     args: [];
@@ -938,6 +947,18 @@ export type IpcInvokeMap = {
     args: [string];
     result: PrinterActionResult;
   };
+  "printer:generate-stock-request-pdf": {
+    args: [string];
+    result: string | null;
+  };
+  "printer:preview-stock-request-pdf": {
+    args: [string];
+    result: void;
+  };
+  "printer:print-stock-request-document": {
+    args: [string];
+    result: PrinterActionResult;
+  };
   "printer:get-pdf-preview-data": {
     args: [string];
     result: { data: string; filename: string; title: string } | null;
@@ -1369,6 +1390,9 @@ export type BlueLedgerApi = {
       locationId: string | null
     ) => Promise<IpcInvokeMap["main-store:product-list"]["result"]>;
     allocationSummary: () => Promise<IpcInvokeMap["main-store:allocation-summary"]["result"]>;
+    availabilityForStockRequest: (
+      storefrontId: string | null
+    ) => Promise<IpcInvokeMap["main-store:availability-for-stock-request"]["result"]>;
     listProductRows: () => Promise<IpcInvokeMap["main-store:product-rows"]["result"]>;
     getProductDetail: (productId: string) => Promise<IpcInvokeMap["main-store:product-detail"]["result"]>;
     receive: (input: Record<string, unknown>) => Promise<IpcInvokeMap["main-store:receive"]["result"]>;
@@ -1741,6 +1765,15 @@ export type BlueLedgerApi = {
     printStockReceiptDocument: (
       stockReceiptId: string
     ) => Promise<IpcInvokeMap["printer:print-stock-receipt-document"]["result"]>;
+    generateStockRequestPdf: (
+      stockRequestId: string
+    ) => Promise<IpcInvokeMap["printer:generate-stock-request-pdf"]["result"]>;
+    previewStockRequestPdf: (
+      stockRequestId: string
+    ) => Promise<IpcInvokeMap["printer:preview-stock-request-pdf"]["result"]>;
+    printStockRequestDocument: (
+      stockRequestId: string
+    ) => Promise<IpcInvokeMap["printer:print-stock-request-document"]["result"]>;
     getPdfPreviewData: (previewId: string) => Promise<IpcInvokeMap["printer:get-pdf-preview-data"]["result"]>;
     printPdfPreview: (previewId: string) => Promise<IpcInvokeMap["printer:print-pdf-preview"]["result"]>;
     downloadPdfPreview: (previewId: string) => Promise<IpcInvokeMap["printer:download-pdf-preview"]["result"]>;

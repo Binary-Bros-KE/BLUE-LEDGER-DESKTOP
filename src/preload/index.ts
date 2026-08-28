@@ -88,6 +88,8 @@ const api: BlueLedgerApi = {
   mainStore: {
     listProducts: (locationId) => invoke("main-store:product-list", locationId),
     allocationSummary: () => invoke("main-store:allocation-summary"),
+    availabilityForStockRequest: (storefrontId) =>
+      invoke("main-store:availability-for-stock-request", storefrontId),
     listProductRows: () => invoke("main-store:product-rows"),
     getProductDetail: (productId) => invoke("main-store:product-detail", productId),
     receive: (input) => invoke("main-store:receive", input),
@@ -304,6 +306,9 @@ const api: BlueLedgerApi = {
     generateStockReceiptPdf: (stockReceiptId) => invoke("printer:generate-stock-receipt-pdf", stockReceiptId),
     previewStockReceiptPdf: (stockReceiptId) => invoke("printer:preview-stock-receipt-pdf", stockReceiptId),
     printStockReceiptDocument: (stockReceiptId) => invoke("printer:print-stock-receipt-document", stockReceiptId),
+    generateStockRequestPdf: (stockRequestId) => invoke("printer:generate-stock-request-pdf", stockRequestId),
+    previewStockRequestPdf: (stockRequestId) => invoke("printer:preview-stock-request-pdf", stockRequestId),
+    printStockRequestDocument: (stockRequestId) => invoke("printer:print-stock-request-document", stockRequestId),
     getPdfPreviewData: (previewId) => invoke("printer:get-pdf-preview-data", previewId),
     printPdfPreview: (previewId) => invoke("printer:print-pdf-preview", previewId),
     downloadPdfPreview: (previewId) => invoke("printer:download-pdf-preview", previewId)

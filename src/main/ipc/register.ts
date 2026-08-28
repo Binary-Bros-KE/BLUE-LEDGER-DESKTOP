@@ -101,6 +101,7 @@ import {
   generateStatementPdf,
   generateSupplierStatementPdf,
   generateStockReceiptPdf,
+  generateStockRequestPdf,
   getPdfPreviewData,
   getPrinterSettings,
   downloadPdfPreview,
@@ -112,6 +113,7 @@ import {
   previewStatementPdf,
   previewSupplierStatementPdf,
   previewStockReceiptPdf,
+  previewStockRequestPdf,
   printDeliveryNote,
   printDeliveryNoteViaThermal,
   printInvoiceDocument,
@@ -123,6 +125,7 @@ import {
   printStatementDocument,
   printSupplierStatementDocument,
   printStockReceipt,
+  printStockRequest,
   savePrinterSettings,
   shareSalaryPayslip,
   testPrinterConnection
@@ -181,6 +184,7 @@ import {
 import {
   distributeFromMainStore,
   getMainStoreAllocationSummary,
+  getMainStoreAvailabilityForStockRequest,
   getMainStoreProductDetail,
   listMainStoreProductRows,
   reallocateMainStoreStock,
@@ -472,6 +476,9 @@ export function registerIpcHandlers(): void {
     listProductsForStorefront(locationId)
   );
   ipcMain.handle(ipcChannels.mainStoreAllocationSummary, () => getMainStoreAllocationSummary());
+  ipcMain.handle(ipcChannels.mainStoreAvailabilityForStockRequest, (_event, storefrontId: string | null) =>
+    getMainStoreAvailabilityForStockRequest(storefrontId)
+  );
   ipcMain.handle(ipcChannels.mainStoreProductRows, () => listMainStoreProductRows());
   ipcMain.handle(ipcChannels.mainStoreProductDetail, (_event, productId: string) =>
     getMainStoreProductDetail(productId)
@@ -777,6 +784,15 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.printerPrintStockReceiptDocument, (_event, stockReceiptId: string) =>
     printStockReceipt(stockReceiptId)
+  );
+  ipcMain.handle(ipcChannels.printerGenerateStockRequestPdf, (_event, stockRequestId: string) =>
+    generateStockRequestPdf(stockRequestId)
+  );
+  ipcMain.handle(ipcChannels.printerPreviewStockRequestPdf, (_event, stockRequestId: string) =>
+    previewStockRequestPdf(stockRequestId)
+  );
+  ipcMain.handle(ipcChannels.printerPrintStockRequestDocument, (_event, stockRequestId: string) =>
+    printStockRequest(stockRequestId)
   );
   ipcMain.handle(ipcChannels.printerGetPdfPreviewData, (_event, previewId: string) => getPdfPreviewData(previewId));
   ipcMain.handle(ipcChannels.printerPrintPdfPreview, (_event, previewId: string) => printPdfPreview(previewId));
