@@ -113,6 +113,10 @@ export function StockRequestsRoute(): React.JSX.Element {
   const [viewLoading, setViewLoading] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+  // Only ever populated for a pending request — the moment this hint is actually useful (deciding
+  // whether to approve). An approved request already shows its own frozen before/after quantities
+  // (a better, exact answer); a rejected one has no pending decision left to inform.
+  const [viewAvailability, setViewAvailability] = useState<StockRequestAvailability[]>([]);
 
   const [approvingId, setApprovingId] = useState<string | null>(null);
 
@@ -310,14 +314,25 @@ export function StockRequestsRoute(): React.JSX.Element {
   async function openView(id: string): Promise<void> {
     setViewLoading(true);
     setActionError(null);
+    setViewAvailability([]);
     try {
       const request = await window.blueLedger.stockRequest.get(id);
       setViewingRequest(request);
+      if (request.status === "pending") {
+        window.blueLedger.mainStore
+          .availabilityForStockRequest(request.storefrontId)
+          .then(setViewAvailability)
+          .catch(() => undefined);
+      }
     } catch (err) {
       setActionError(getErrorMessage(err, "Failed to load stock request"));
     } finally {
       setViewLoading(false);
     }
+  }
+
+  function getViewAvailability(productId: string): number {
+    return viewAvailability.find((row) => row.productId === productId)?.availableQuantity ?? 0;
   }
 
   async function handlePrint(): Promise<void> {
@@ -832,6 +847,11 @@ export function StockRequestsRoute(): React.JSX.Element {
                     <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider text-muted">
                       Requested
                     </th>
+                    {viewingRequest.status === "pending" && (
+                      <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider text-muted">
+                        Available at Main Store
+                      </th>
+                    )}
                     {viewingRequest.status === "approved" && (
                       <>
                         <QtyTh label="Qty Before" location="Main Store" />
@@ -850,6 +870,14 @@ export function StockRequestsRoute(): React.JSX.Element {
                         <p className="text-[10px] font-semibold text-muted">{item.sku}</p>
                       </td>
                       <td className="px-3 py-2 text-right font-extrabold tabular-nums">{item.quantityRequested}</td>
+                      {viewingRequest.status === "pending" && (
+                        <td
+                          className="px-3 py-2 text-right font-bold tabular-nums text-muted"
+                          title="How much could ship right now — just a hint, approving anyway is still allowed"
+                        >
+                          {getViewAvailability(item.productId)}
+                        </td>
+                      )}
                       {viewingRequest.status === "approved" && (
                         <>
                           <td className="px-3 py-2 text-right font-bold tabular-nums text-muted">{item.mainStorePreviousQuantity}</td>

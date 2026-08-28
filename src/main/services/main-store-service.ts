@@ -4,7 +4,12 @@ import * as inventoryRepository from "@main/database/repositories/inventory-repo
 import * as locationRepository from "@main/database/repositories/location-repository";
 import * as mainStoreAllocationRepository from "@main/database/repositories/main-store-allocation-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
-import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
+import {
+  getCurrentBranchScope,
+  getCurrentEmployeeId,
+  requirePermission,
+  requirePermissionAnyOf
+} from "@main/services/auth-service";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { isStorefrontType, type LocationType } from "@shared/types/location";
@@ -176,17 +181,24 @@ export function getMainStoreAllocationSummary(): MainStoreAllocationSummary[] {
 }
 
 /**
- * Powers the "Available at Main Store" hint on the New Stock Request form — permission-gated by
- * "stock_requests":"create" (NOT "main_store":"view", which Cashier/Manager deliberately never get)
- * precisely so it can be shown to the same requesters who fill out that form. Resolves the target
+ * Powers the "Available at Main Store" hint on both the New Stock Request form (the requester) and
+ * the request detail modal (the Storekeeper/Super Admin deciding whether to approve) — permission-
+ * gated by "stock_requests":"create" OR "stock_requests":"approve" (NOT "main_store":"view", which
+ * Cashier/Manager deliberately never get) precisely so it can be shown to both. Deliberately excludes
+ * plain "stock_requests":"view" — every default role that can see requests at all also has create or
+ * approve, but a hypothetical view-only custom role has no action to inform here. Resolves the target
  * storefront the exact same way createStockRequest itself does: a branch-scoped caller's own session
  * branch always wins over whatever storefrontId was passed in (never trusted from the client for
- * them); a branch-less caller (Storekeeper/Super Admin picking a storefront) must supply one
- * explicitly. Returns an empty list rather than throwing when no storefront can be resolved yet —
- * this is a read that renders before the form is fully filled in, not a submission.
+ * them — irrelevant for a Storekeeper/Super Admin viewing someone else's request, who is always
+ * branch-less and so always falls through to the passed storefrontId); a branch-less caller must
+ * supply one explicitly. Returns an empty list rather than throwing when no storefront can be
+ * resolved yet — this is a read that renders before the form is fully filled in, not a submission.
  */
 export function getMainStoreAvailabilityForStockRequest(storefrontId: string | null): StockRequestAvailability[] {
-  requirePermission("stock_requests", "create");
+  requirePermissionAnyOf([
+    ["stock_requests", "create"],
+    ["stock_requests", "approve"]
+  ]);
   const { tenantId } = getCurrentTenant();
   const branchScope = getCurrentBranchScope();
   const target = branchScope ?? storefrontId;
