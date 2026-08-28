@@ -180,20 +180,45 @@ function buildDeliveryExpenseDescription(params: {
   return lines.join("\n");
 }
 
+/** Falls back to the tenant's own "Cash" payment method — matching how a delivery cost (paid to a
+ * rider or courier, out of pocket) is almost always actually settled in practice — then to whatever
+ * active payment method exists at all, for the cases createDeliveryCostExpenseIfNeeded now has no
+ * document payment to go on (an invoice with no payment yet, a quotation-to-invoice conversion,
+ * duplicateInvoice). Every tenant has "Cash" seeded by ensureDefaultPaymentMethods at bootstrap, so
+ * the final `null` (genuinely no payment method exists at all) should never actually happen in
+ * practice — it's there only so this can never throw. */
+function resolveDeliveryExpensePaymentMethodId(tenantId: string, paymentMethodId: string | null): string | null {
+  if (paymentMethodId) return paymentMethodId;
+  const cash = paymentMethodRepository.findPaymentMethodByCodeRow(tenantId, "CASH");
+  if (cash && cash.is_active) return cash.id;
+  const anyActive = paymentMethodRepository.findAllPaymentMethodRows(tenantId).find((row) => row.is_active);
+  return anyActive?.id ?? null;
+}
+
 /**
  * Auto-books the seller's own delivery cost as a real, auditable "Delivery Costs" expense the
- * moment a sale or invoice with a delivery is created — a client-requested alternative to the old
- * behavior of folding delivery cost into a flat, uncategorized "hidden cost" figure on the Sales
- * Report (see report-service.ts's own comment on totalExpensesCents, which no longer counts
- * delivery cost separately to avoid double-deducting it now that it lands here instead). Bypasses
- * requirePermission/getCurrentEmployeeId deliberately — this runs as a side effect of a sale/invoice
- * a cashier just created inside its own transaction, not a standalone user action, so it must not
- * fail just because that cashier individually lacks "expenses:create".
+ * moment a sale/invoice/quotation-conversion with a delivery is created (or a delivery is attached
+ * afterward) — a client-requested alternative to the old behavior of folding delivery cost into a
+ * flat, uncategorized "hidden cost" figure on the Sales Report (see report-service.ts's own comment
+ * on totalExpensesCents, which no longer counts delivery cost separately to avoid double-deducting
+ * it now that it lands here instead). Bypasses requirePermission/getCurrentEmployeeId deliberately —
+ * this runs as a side effect of a sale/invoice a cashier just created inside its own transaction, not
+ * a standalone user action, so it must not fail just because that cashier individually lacks
+ * "expenses:create".
  *
- * Silently no-ops (does NOT throw) when there's no cost to book, or no payment method to attribute
- * it to — an invoice created with no initial payment has no payment method in scope at all, and
- * inventing one would misrepresent how the business actually paid for the delivery. Never called
- * for quotations (nothing has actually shipped or been paid for yet — see persistCartExtras).
+ * Books UNCONDITIONALLY once there's a cost, regardless of the invoice's own payment status — a
+ * deliberate client decision: recording a delivery cost means money has already gone out (to a
+ * rider, a courier, fuel) the moment it's recorded, whether or not the CUSTOMER has paid the invoice
+ * yet. (The delivery FEE charged to the customer is a separate figure that's already folded into the
+ * document's own total — nothing to do here.) When the document itself has no payment method to
+ * point to (an invoice with no initial payment, a quotation converting straight to invoice, a
+ * duplicated invoice), falls back via resolveDeliveryExpensePaymentMethodId instead of skipping.
+ *
+ * Only genuinely skipped when there's no cost at all. Never called for a delivery still attached to
+ * a QUOTATION (as opposed to a sale/invoice) — nothing has actually shipped yet at that stage; the
+ * cost only becomes a real expense once/if the quotation converts (see persistCartExtras and
+ * quotation-service.ts's buildConversionCart, which is what carries the delivery over into the
+ * resulting sale/invoice and triggers this).
  */
 export function createDeliveryCostExpenseIfNeeded(params: {
   tenantId: string;
@@ -205,7 +230,9 @@ export function createDeliveryCostExpenseIfNeeded(params: {
   paymentMethodId: string | null;
   date: string;
 }): void {
-  if (params.delivery.costCents <= 0 || !params.paymentMethodId) return;
+  if (params.delivery.costCents <= 0) return;
+  const paymentMethodId = resolveDeliveryExpensePaymentMethodId(params.tenantId, params.paymentMethodId);
+  if (!paymentMethodId) return;
 
   const category = findOrCreateExpenseCategoryByName(params.tenantId, DELIVERY_COST_CATEGORY_NAME);
 
@@ -219,7 +246,7 @@ export function createDeliveryCostExpenseIfNeeded(params: {
     categoryId: category.id,
     amountCents: params.delivery.costCents,
     paidBy: null,
-    paymentMethodId: params.paymentMethodId,
+    paymentMethodId,
     storefrontId: params.locationId,
     reference: null,
     description: buildDeliveryExpenseDescription(params),
