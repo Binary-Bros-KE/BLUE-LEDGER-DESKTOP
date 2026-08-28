@@ -2243,15 +2243,31 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
   });
 }
 
-/** Inserts one pulled delivery note. Deliberately strict — a UNIQUE(tenant_id, delivery_note_number)
- * collision here throws and the whole sale/quotation retries next cycle, same as any other pull
- * failure. An earlier version of this function silently swallowed that collision (reasoning: it can
- * only mean a stale pre-migration-51 duplicate, so drop the dead one and keep going) — that reasoning
+/** True only for the exact UNIQUE(tenant_id, delivery_note_number) violation — never for the
+ * sale_id/quotation_id partial-unique indexes (both pre-cleared by a DELETE right before every call
+ * site calls this) or any unrelated failure, which insertPulledDeliveryNote below must still let
+ * through unchanged. SQLite's own constraint-failed message lists the exact column pair, so matching
+ * on that text is precise, not a guess. */
+function isDeliveryNoteNumberCollision(err: unknown): boolean {
+  return err instanceof Error && err.message.includes("delivery_notes.tenant_id, delivery_notes.delivery_note_number");
+}
+
+/** Inserts one pulled delivery note. A UNIQUE(tenant_id, delivery_note_number) collision here means
+ * two devices independently minted the identical number — almost always the pre-activation hash-tag
+ * fallback in document-number-service.ts's getDeviceTag colliding across two devices that both
+ * started before either had picked up its real device sequence (a genuinely rare but real
+ * possibility with a short 4-hex-char tag — see that function's own comment). Retries ONCE with a
+ * disambiguated number (this delivery's own id appended) instead of giving up.
+ *
+ * An earlier version of this function silently DROPPED the collision instead (reasoning: it can only
+ * mean a stale pre-migration-51 duplicate, so discard the dead one and keep going) — that reasoning
  * was wrong in practice: it couldn't distinguish "this is provably dead orphaned data" from "this is
- * a real, currently-relevant delivery," and ended up silently dropping delivery notes off genuine
- * sales on other devices. The actual fix for the historical duplicates is a one-time cleanup of the
- * cloud data itself (purging leftover `saleStatus = 'pending'` rows — see the held-sales cleanup),
- * not leniency in the pull path. */
+ * a real, currently-relevant delivery on another device," and ended up silently dropping delivery
+ * notes off genuine sales. Disambiguating instead of dropping keeps BOTH real records — the sale/
+ * quotation this delivery belongs to can still fully land locally, its number is just no longer the
+ * exact one another device's delivery happens to also be using. Any OTHER error (a genuinely
+ * different failure) is rethrown unchanged, same as before — this only ever intercepts this one
+ * specific, identifiable collision. */
 function insertPulledDeliveryNote(
   db: ReturnType<typeof getDatabase>,
   fields: {
@@ -2274,31 +2290,51 @@ function insertPulledDeliveryNote(
     updatedAt: string;
   }
 ): void {
-  db.prepare(
-    `INSERT INTO delivery_notes (
-      id, tenant_id, delivery_note_number, sale_id, quotation_id, rider_id, recipient_name,
-      country, town, physical_address, notes, fee_cents, cost_cents, is_delivered, delivered_at,
-      created_at, updated_at, sync_status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')`
-  ).run(
-    fields.id,
-    fields.tenantId,
-    fields.deliveryNoteNumber,
-    fields.saleId,
-    fields.quotationId ?? null,
-    fields.riderId,
-    fields.recipientName,
-    fields.country,
-    fields.town,
-    fields.physicalAddress,
-    fields.notes,
-    fields.feeCents,
-    fields.costCents,
-    fields.isDelivered,
-    fields.deliveredAt,
-    fields.createdAt,
-    fields.updatedAt
-  );
+  const insert = (deliveryNoteNumber: string): void => {
+    db.prepare(
+      `INSERT INTO delivery_notes (
+        id, tenant_id, delivery_note_number, sale_id, quotation_id, rider_id, recipient_name,
+        country, town, physical_address, notes, fee_cents, cost_cents, is_delivered, delivered_at,
+        created_at, updated_at, sync_status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')`
+    ).run(
+      fields.id,
+      fields.tenantId,
+      deliveryNoteNumber,
+      fields.saleId,
+      fields.quotationId ?? null,
+      fields.riderId,
+      fields.recipientName,
+      fields.country,
+      fields.town,
+      fields.physicalAddress,
+      fields.notes,
+      fields.feeCents,
+      fields.costCents,
+      fields.isDelivered,
+      fields.deliveredAt,
+      fields.createdAt,
+      fields.updatedAt
+    );
+  };
+
+  try {
+    insert(fields.deliveryNoteNumber);
+  } catch (err) {
+    if (!isDeliveryNoteNumberCollision(err)) throw err;
+    // Deterministic per delivery id (not random/timestamp-based) — so if this same pulled row is
+    // retried on a later cycle before it's ever fully committed, it renumbers to the exact same
+    // disambiguated value every time instead of drifting.
+    const suffix = fields.id.replace(/[^a-zA-Z0-9]/g, "").slice(-6).toUpperCase();
+    const disambiguated = `${fields.deliveryNoteNumber}-${suffix}`;
+    console.error(
+      `[sync] delivery note number "${fields.deliveryNoteNumber}" collided with an existing local ` +
+        `record belonging to a DIFFERENT delivery — two devices minted the identical number. ` +
+        `Renumbering this one to "${disambiguated}" so its sale/quotation can still land locally. ` +
+        `Flag to support if this recurs for the same tenant.`
+    );
+    insert(disambiguated);
+  }
 }
 
 /** Shared header-upsert for the other three BESPOKE_APPLY_ENTITIES (quotations/purchases/
@@ -3057,9 +3093,17 @@ export async function checkDrift(): Promise<DriftReport | null> {
 export async function getEntitySyncOverview(): Promise<EntitySyncOverviewRow[]> {
   const db = getDatabase();
   const rows: EntitySyncOverviewRow[] = SYNC_ENTITIES.map((entity) => {
-    const localRow = db.prepare(`SELECT COUNT(*) as count FROM ${entity}`).get() as { count: number };
+    // Same carve-out as checkDrift() above, for the same reason: a merely-held sale (sale_status =
+    // 'pending') deliberately never reaches the outbox at all (see trg_sales_sync_ai/au's own WHEN
+    // clause in migrate.ts), so it never has a remote counterpart to compare against — counting it
+    // here inflated BOTH localCount and pendingCount for "sales" by however many open tickets happen
+    // to be sitting in Checkout at read time, which is exactly what made this table disagree with
+    // checkDrift()'s own banner just above it despite both claiming to describe the same moment.
+    const where = entity === "sales" ? " WHERE sale_status != 'pending'" : "";
+    const pendingExtra = entity === "sales" ? " AND sale_status != 'pending'" : "";
+    const localRow = db.prepare(`SELECT COUNT(*) as count FROM ${entity}${where}`).get() as { count: number };
     const pendingRow = db
-      .prepare(`SELECT COUNT(*) as count FROM ${entity} WHERE sync_status != 'synced'`)
+      .prepare(`SELECT COUNT(*) as count FROM ${entity} WHERE sync_status != 'synced'${pendingExtra}`)
       .get() as { count: number };
     const lastSyncedRow = db
       .prepare(`SELECT MAX(last_synced_at) as lastSyncedAt FROM ${entity}`)
