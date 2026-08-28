@@ -1,9 +1,11 @@
 import { getDatabase, runInTransaction } from "@main/database/connection";
+import * as customerRepository from "@main/database/repositories/customer-repository";
 import * as deliveryNoteRepository from "@main/database/repositories/delivery-note-repository";
 import * as quotationRepository from "@main/database/repositories/quotation-repository";
 import * as saleRepository from "@main/database/repositories/sale-repository";
-import { requirePermission } from "@main/services/auth-service";
+import { getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
+import { createDeliveryCostExpenseIfNeeded } from "@main/services/expense-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { deliveryInputSchema } from "@shared/schemas/charges";
 import type { SaleDelivery } from "@shared/types/sale";
@@ -42,17 +44,36 @@ export function getDeliveryNoteForQuotation(quotationId: string): SaleDelivery |
   return row ? deliveryNoteRepository.mapDeliveryNoteRow(row) : null;
 }
 
-/** Attaches a delivery to a sale that was completed without one — e.g. a cashier forgot to check
- * "Add delivery for this sale" at checkout. Deliberately never touches the sale's own totals
+/** A sale/invoice row's own payment method, however it actually got paid — sales/checkout store it
+ * directly on payment_method_id; invoices (and anything paid in installments) store it inside the
+ * payments JSON array instead, so the first entry there is the fallback. Null for an invoice with no
+ * payment recorded yet, same "nothing to attribute this to" case createDeliveryCostExpenseIfNeeded
+ * already handles by silently skipping. */
+function resolveSalePaymentMethodId(row: saleRepository.SaleRow): string | null {
+  if (row.payment_method_id) return row.payment_method_id;
+  return saleRepository.parseSalePayments(row.payments)[0]?.paymentMethodId ?? null;
+}
+
+/** Attaches a delivery to a sale/invoice that was completed without one — e.g. a cashier forgot to
+ * check "Add delivery for this sale" at checkout. Deliberately never touches the sale's own totals
  * (subtotal/tax/grandTotal) — the sale was already rung up and paid for at whatever the customer
  * actually paid, and retroactively folding a delivery fee into an already-closed, already-reported
  * sale would silently corrupt that day's Sales Report and the Amount Paid vs Total reconciliation.
  * feeCents/costCents are still collected and stored (same record-keeping purpose as any other
- * delivery — see SaleDelivery's own costCents comment), they just don't move any money figures. */
+ * delivery — see SaleDelivery's own costCents comment), they just don't move any money figures.
+ *
+ * The delivery COST is still booked as a real expense here though (same createDeliveryCostExpenseIfNeeded
+ * used at sale/invoice creation time — see expense-service.ts) — dated today rather than backdated to
+ * the original sale, since today is when the business actually learns about and records this cost.
+ * Silently skipped for an invoice with no payment recorded yet, same as at creation time. */
 export function attachDeliveryToSale(saleId: string, input: unknown): SaleDelivery {
   requirePermission("sales", "edit");
   const parsed = deliveryInputSchema.parse(input);
   const { tenantId } = getCurrentTenant();
+  const employeeId = getCurrentEmployeeId();
+  if (!employeeId) {
+    throw new Error("You must be signed in to do that");
+  }
 
   const saleRow = saleRepository.findSaleRowById(saleId);
   if (!saleRow || saleRow.tenant_id !== tenantId) {
@@ -87,6 +108,18 @@ export function attachDeliveryToSale(saleId: string, input: unknown): SaleDelive
     // device silently ignores the new delivery forever (this exact trap already bit
     // setDeliveryNoteDeliveredRow once — see its own comment).
     getDatabase().prepare("UPDATE sales SET updated_at = ? WHERE id = ?").run(new Date().toISOString(), saleId);
+
+    const customer = saleRow.customer_id ? customerRepository.findCustomerRowById(saleRow.customer_id) : undefined;
+    createDeliveryCostExpenseIfNeeded({
+      tenantId,
+      documentNumber: saleRow.invoice_number ?? saleRow.receipt_number,
+      customerName: customer?.name ?? null,
+      delivery: parsed,
+      locationId: saleRow.location_id,
+      employeeId,
+      paymentMethodId: resolveSalePaymentMethodId(saleRow),
+      date: new Date().toISOString()
+    });
 
     return deliveryNoteRepository.mapDeliveryNoteRow(row);
   });

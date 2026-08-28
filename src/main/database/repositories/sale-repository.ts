@@ -788,7 +788,10 @@ export function mapSaleItemDetailRow(row: SaleItemDetailRow): SaleItem {
   };
 }
 
-function parseSalePayments(raw: string): SalePayment[] {
+/** Exported for delivery-note-service.ts's attachDeliveryToSale, which needs a sale/invoice row's own
+ * payment method to attribute a retroactively-added delivery's cost expense to — the same "however
+ * they actually paid" reasoning as the two at-creation call sites in sale-service.ts/invoice-service.ts. */
+export function parseSalePayments(raw: string): SalePayment[] {
   try {
     const parsed: unknown = JSON.parse(raw);
     return Array.isArray(parsed) ? (parsed as SalePayment[]) : [];
