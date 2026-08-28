@@ -27,6 +27,25 @@ export type SalesTopProduct = {
   revenueCents: number;
 };
 
+/** Every distinct product sold in the period (not capped to a top-N, unlike SalesTopProduct — that
+ * one backs the Dashboard's "Top 10 selling products" widget, which genuinely wants a short list;
+ * this backs the Sales Report PDF's own product breakdown, which a client explicitly asked to see
+ * in full rather than the old "every individual transaction" table). costCents uses each line's
+ * buying_price_cents at query time (current cost), same convention as the rest of this report's own
+ * COGS math (costOfGoodsSoldCents) — not a historical cost-at-time-of-sale snapshot. */
+export type SalesProductSold = {
+  productId: string;
+  productName: string;
+  quantitySold: number;
+  revenueCents: number;
+  costCents: number;
+  marginCents: number;
+  /** Gross margin (marginCents / revenueCents), 0 when revenueCents is 0 — never "markup" (÷ cost). */
+  marginPercent: number;
+  /** This product's revenue as a share of every product's combined revenue in the period. */
+  percentOfRevenue: number;
+};
+
 export type SalesPaymentSplitEntry = {
   paymentMethodId: string | null;
   paymentMethodName: string;
@@ -117,6 +136,7 @@ export type SalesFinancialOverview = {
   spansMultipleDays: boolean;
   averageDailyRevenueCents: number;
   topProducts: SalesTopProduct[];
+  productsSold: SalesProductSold[];
   paymentSplit: SalesPaymentSplitEntry[];
 
   // --- Revenue breakdown: what Total Revenue is actually built from ---

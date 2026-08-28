@@ -23,6 +23,7 @@ import type {
   SalesLedgerParty,
   SalesPaymentSplitEntry,
   SalesProcessedReturn,
+  SalesProductSold,
   SalesReportMode,
   SalesTopProduct,
   SalesTransactionKind,
@@ -427,19 +428,38 @@ export function getSalesFinancialOverview(input: unknown): SalesFinancialOvervie
   const itemsSold = itemRows.reduce((sum, item) => sum + item.quantity, 0);
   const averageDailyRevenueCents = span > 0 ? Math.round(grossSalesCents / span) : 0;
 
-  const productMap = new Map<string, SalesTopProduct>();
+  const productMap = new Map<string, SalesTopProduct & { costCents: number }>();
   for (const item of itemRows) {
     const existing = productMap.get(item.product_id) ?? {
       productId: item.product_id,
       productName: item.product_name,
       quantitySold: 0,
       revenueCents: 0,
+      costCents: 0,
     };
     existing.quantitySold += item.quantity;
     existing.revenueCents += item.line_total_cents;
+    existing.costCents += item.quantity * item.buying_price_cents;
     productMap.set(item.product_id, existing);
   }
-  const topProducts = [...productMap.values()].sort((a, b) => b.revenueCents - a.revenueCents).slice(0, TOP_LIMIT);
+  const productsByRevenueDesc = [...productMap.values()].sort((a, b) => b.revenueCents - a.revenueCents);
+  // Backs the Dashboard's "Top 10 selling products today" widget, which genuinely wants a short
+  // list — see SalesTopProduct's own doc comment for why productsSold below is the unsliced sibling.
+  const topProducts = productsByRevenueDesc.slice(0, TOP_LIMIT);
+  const totalProductRevenueCents = productsByRevenueDesc.reduce((sum, p) => sum + p.revenueCents, 0);
+  const productsSold: SalesProductSold[] = productsByRevenueDesc.map((product) => {
+    const marginCents = product.revenueCents - product.costCents;
+    return {
+      productId: product.productId,
+      productName: product.productName,
+      quantitySold: product.quantitySold,
+      revenueCents: product.revenueCents,
+      costCents: product.costCents,
+      marginCents,
+      marginPercent: product.revenueCents > 0 ? (marginCents / product.revenueCents) * 100 : 0,
+      percentOfRevenue: totalProductRevenueCents > 0 ? (product.revenueCents / totalProductRevenueCents) * 100 : 0,
+    };
+  });
 
   const taxCollectedCents = rows.reduce((sum, row) => sum + row.tax_amount_cents, 0);
   const discountGivenCents = rows.reduce((sum, row) => sum + row.discount_amount_cents, 0);
@@ -493,6 +513,7 @@ export function getSalesFinancialOverview(input: unknown): SalesFinancialOvervie
     spansMultipleDays: span > 1,
     averageDailyRevenueCents,
     topProducts,
+    productsSold,
     paymentSplit: currentCash.paymentSplit,
     retailWholesaleRevenueCents: currentCash.retailWholesaleCents,
     retailWholesaleDocumentCount: currentCash.retailWholesaleDocumentCount,

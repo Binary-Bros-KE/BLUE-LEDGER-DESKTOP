@@ -25,7 +25,6 @@ import type {
   SalesByStorefrontRow,
   SalesFinancialOverview,
   SalesReportMode,
-  SalesTransactionKind,
   SalesTransactionRow,
   SalesTrendWindowResult,
 } from "@shared/types/report";
@@ -77,16 +76,6 @@ function GrossVsNetFootnote({ overview }: { overview: SalesFinancialOverview }):
       ({money(overview.totalRevenueCents)}) is net of those.
     </p>
   );
-}
-
-const TRANSACTION_KIND_LABEL: Record<SalesTransactionKind, string> = {
-  retail_sale: "Retail Sale",
-  wholesale_sale: "Wholesale Sale",
-  invoice: "Invoice",
-};
-
-function transactionStatusLabel(row: Pick<SalesTransactionRow, "amountCents" | "amountPaidCents">): string {
-  return row.amountPaidCents >= row.amountCents ? "Paid" : "Partially Paid";
 }
 
 const TREND_TITLE: Record<SalesReportMode, string> = {
@@ -290,18 +279,29 @@ export function SalesReportRoute(): React.JSX.Element {
           color: categoricalColor(index)
         }))
       },
-      overview.topProducts.length > 0 && {
+      overview.productsSold.length > 0 && {
         type: "table",
-        title: "Top 10 Products Sold",
+        title: "Products Sold",
+        description: `Every distinct product sold ${resolvedRange.startDate} to ${resolvedRange.endDate}, most revenue first`,
         columns: [
+          { key: "number", header: "#", align: "right" },
           { key: "product", header: "Product" },
-          { key: "qty", header: "Qty Sold", align: "right" },
-          { key: "revenue", header: "Revenue", align: "right" }
+          { key: "qty", header: "Units Sold", align: "right" },
+          { key: "revenue", header: "Revenue", align: "right" },
+          { key: "cost", header: "Cost", align: "right" },
+          { key: "margin", header: "Margin", align: "right" },
+          { key: "marginPercent", header: "Margin %", align: "right" },
+          { key: "percentOfRevenue", header: "% of Revenue", align: "right" }
         ],
-        rows: overview.topProducts.map((product) => ({
+        rows: overview.productsSold.map((product, index) => ({
+          number: String(index + 1),
           product: product.productName,
           qty: String(product.quantitySold),
-          revenue: money(product.revenueCents)
+          revenue: money(product.revenueCents),
+          cost: money(product.costCents),
+          margin: money(product.marginCents),
+          marginPercent: `${product.marginPercent.toFixed(1)}%`,
+          percentOfRevenue: `${product.percentOfRevenue.toFixed(1)}%`
         }))
       },
       {
@@ -407,35 +407,6 @@ export function SalesReportRoute(): React.JSX.Element {
           count: String(entry.documentCount),
           total: money(entry.totalCents),
           percent: `${entry.percentOfTotal.toFixed(1)}%`
-        }))
-      },
-      {
-        type: "table",
-        title: "All Transactions",
-        description: `${resolvedRange.startDate} to ${resolvedRange.endDate}`,
-        columns: [
-          { key: "occurredAt", header: "Date & Time" },
-          { key: "document", header: "Document" },
-          { key: "type", header: "Type" },
-          { key: "location", header: "Location" },
-          { key: "employee", header: "Employee" },
-          { key: "customer", header: "Customer" },
-          { key: "method", header: "Method" },
-          { key: "amount", header: "Amount", align: "right" },
-          { key: "paid", header: "Paid", align: "right" },
-          { key: "status", header: "Status" }
-        ],
-        rows: transactions.map((row) => ({
-          occurredAt: new Date(row.occurredAt).toLocaleString(),
-          document: row.documentNumber ?? "—",
-          type: TRANSACTION_KIND_LABEL[row.kind],
-          location: row.locationName,
-          employee: row.employeeName,
-          customer: row.customerName ?? "—",
-          method: row.paymentMethodName ?? "Other",
-          amount: money(row.amountCents),
-          paid: money(row.amountPaidCents),
-          status: transactionStatusLabel(row)
         }))
       },
       {
@@ -574,7 +545,7 @@ export function SalesReportRoute(): React.JSX.Element {
       sections,
       fileBaseName: `SalesReport_${resolvedRange.startDate}_to_${resolvedRange.endDate}`
     };
-  }, [overview, transactions, byStorefront, byEmployee, byPaymentMethod, taxReport, localSourcingReport, resolvedRange]);
+  }, [overview, byStorefront, byEmployee, byPaymentMethod, taxReport, localSourcingReport, resolvedRange]);
 
   return (
     <motion.div
