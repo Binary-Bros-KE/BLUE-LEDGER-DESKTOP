@@ -193,7 +193,16 @@ export function CloudSyncRoute(): React.JSX.Element {
   }
 
   const statusCopy = SYNC_STATUS_COPY[snapshot.status];
-  const driftEntries = Object.entries(snapshot.drift);
+  // Derived from the SAME live entityOverview fetch the "Sync Status by Entity" table below renders
+  // from — not snapshot.drift, which is a separately cached value from whenever the last periodic
+  // background checkDrift() happened to run (could be minutes stale). Two different data sources for
+  // what's supposed to be the same fact is exactly what let this banner show "18 vs 19" directly
+  // above a table already showing "20 vs 21" for the same entity — confusing and, worse, made the
+  // banner look wrong even when the underlying signal was real. This way the banner can never
+  // disagree with the table sitting right below it.
+  const driftEntries = entityOverview
+    .filter((row) => row.remoteCount !== null && row.remoteCount !== row.localCount)
+    .map((row) => [row.entity, { local: row.localCount, remote: row.remoteCount }] as const);
 
   return (
     <motion.div
