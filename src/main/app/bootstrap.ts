@@ -5,6 +5,7 @@ import { ensureExpensesHaveStorefront } from "@main/services/expense-service";
 import { registerIpcHandlers } from "@main/ipc/register";
 import { ensureDefaultSystemEmployee } from "@main/services/employee-service";
 import { ensureMainStoreLocation } from "@main/services/location-service";
+import { reconcileMainStoreAllocations } from "@main/services/main-store-service";
 import { ensureCreditPaymentMethodDeactivated, ensureDefaultPaymentMethods } from "@main/services/payment-method-service";
 import {
   consolidateToFourCoreRoles,
@@ -115,6 +116,7 @@ export async function bootstrap(): Promise<void> {
   restrictReportsToAdminRoles(tenant.tenantId);
   fixCashierPermissionDrift(tenant.tenantId);
   ensureMainStoreLocation(tenant.tenantId);
+  reconcileMainStoreAllocations(tenant.tenantId);
   ensureDefaultSystemEmployee(tenant.tenantId);
   ensureDefaultPaymentMethods(tenant.tenantId);
   ensureCreditPaymentMethodDeactivated(tenant.tenantId);
