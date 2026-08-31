@@ -165,7 +165,21 @@ export async function bootstrap(): Promise<void> {
     void checkInWithServer();
     void syncCycle();
   }, SYNC_INTERVAL_MS);
-  setInterval(() => void checkDrift(), SYNC_DRIFT_CHECK_INTERVAL_MS);
+  // reconcileMainStoreAllocations rides the SAME interval as checkDrift (not just once at boot) —
+  // its own root cause (main_store_allocations is a conflict-aware, separately-synced table that can
+  // silently miss an update a two-device race touches, unlike the always-correct append-only ledger
+  // — see its own doc comment) isn't itself patched, only its effect self-healed here, and a real POS
+  // terminal can stay open for a full business day between restarts. Never awaited/blocking, and a
+  // pure local DB operation with no network dependency, so tying it to checkDrift's cadence is just
+  // reusing an existing "periodically re-verify correctness" clock, not a real coupling between them.
+  setInterval(() => {
+    void checkDrift();
+    try {
+      reconcileMainStoreAllocations(tenant.tenantId);
+    } catch (err) {
+      console.error("[bootstrap] reconcileMainStoreAllocations failed:", err);
+    }
+  }, SYNC_DRIFT_CHECK_INTERVAL_MS);
   setInterval(() => void checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);
 
   await createMainWindow();
