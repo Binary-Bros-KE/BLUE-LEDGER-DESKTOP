@@ -360,6 +360,10 @@ export type IpcInvokeMap = {
     args: [Record<string, unknown>];
     result: StockTransferResult;
   };
+  "stock-movement:bulk-transfer": {
+    args: [Record<string, unknown>];
+    result: { transferredCount: number };
+  };
   "role:list": {
     args: [];
     result: RoleListItem[];
@@ -1429,6 +1433,9 @@ export type BlueLedgerApi = {
     transfer: (
       input: Record<string, unknown>
     ) => Promise<IpcInvokeMap["stock-movement:transfer"]["result"]>;
+    bulkTransfer: (
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["stock-movement:bulk-transfer"]["result"]>;
   };
   role: {
     list: () => Promise<IpcInvokeMap["role:list"]["result"]>;

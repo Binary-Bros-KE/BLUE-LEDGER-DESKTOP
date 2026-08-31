@@ -15,6 +15,7 @@ import {
   TrendingDown
 } from "lucide-react";
 import { BulkTaxCategoryModal } from "@renderer/app/routes/products/BulkTaxCategoryModal";
+import { BulkTransferModal } from "@renderer/app/routes/products/BulkTransferModal";
 import { ProductCreateModal } from "@renderer/app/routes/products/ProductCreateModal";
 import { ProductDetailModal } from "@renderer/app/routes/products/ProductDetailModal";
 import { ProductEditModal } from "@renderer/app/routes/products/ProductEditModal";
@@ -85,6 +86,7 @@ export function ProductsRoute(): React.JSX.Element {
   const canEdit = can("products", "edit");
   const canViewInventory = can("inventory", "view");
   const canExport = can("products", "export");
+  const canTransfer = can("stock_transfers", "create");
 
   const [products, setProducts] = useState<ProductListItem[] | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -109,6 +111,7 @@ export function ProductsRoute(): React.JSX.Element {
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkTaxModalOpen, setBulkTaxModalOpen] = useState(false);
+  const [bulkTransferModalOpen, setBulkTransferModalOpen] = useState(false);
 
   // The storefront filter is resolved server-side (see product-service.ts's listProducts) — it
   // narrows down to just that storefront's tagged products AND makes totalStock reflect only that
@@ -295,6 +298,14 @@ export function ProductsRoute(): React.JSX.Element {
     setSelectedIds(new Set());
     await loadAll();
     const message = `Updated tax category on ${updatedCount} product${updatedCount === 1 ? "" : "s"}.`;
+    setNotice(message);
+    showSuccessToast(message);
+  }
+
+  async function handleBulkTransferApplied(transferredCount: number): Promise<void> {
+    setSelectedIds(new Set());
+    await loadAll();
+    const message = `Transferred ${transferredCount} product${transferredCount === 1 ? "" : "s"}.`;
     setNotice(message);
     showSuccessToast(message);
   }
@@ -491,7 +502,7 @@ export function ProductsRoute(): React.JSX.Element {
           </div>
         )}
 
-        {canEdit && selectedIds.size > 0 && (
+        {(canEdit || canTransfer) && selectedIds.size > 0 && (
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-accent/30 bg-accent/10 px-4 py-3">
             <p className="text-xs font-extrabold text-ink">
               {selectedIds.size} product{selectedIds.size === 1 ? "" : "s"} selected
@@ -504,9 +515,16 @@ export function ProductsRoute(): React.JSX.Element {
               >
                 Clear selection
               </button>
-              <Button type="button" onClick={() => setBulkTaxModalOpen(true)} className="h-8 text-xs">
-                Set Tax Category
-              </Button>
+              {canEdit && (
+                <Button type="button" onClick={() => setBulkTaxModalOpen(true)} className="h-8 text-xs">
+                  Set Tax Category
+                </Button>
+              )}
+              {canTransfer && (
+                <Button type="button" onClick={() => setBulkTransferModalOpen(true)} className="h-8 text-xs">
+                  Transfer Stock
+                </Button>
+              )}
             </div>
           </div>
         )}
@@ -734,6 +752,15 @@ export function ProductsRoute(): React.JSX.Element {
           onClose={() => setBulkTaxModalOpen(false)}
           productIds={Array.from(selectedIds)}
           onApplied={handleBulkTaxApplied}
+        />
+      )}
+      {canTransfer && bulkTransferModalOpen && (
+        <BulkTransferModal
+          open={bulkTransferModalOpen}
+          onClose={() => setBulkTransferModalOpen(false)}
+          products={(products ?? []).filter((product) => selectedIds.has(product.id))}
+          locations={locations}
+          onApplied={handleBulkTransferApplied}
         />
       )}
     </motion.div>
