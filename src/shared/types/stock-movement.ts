@@ -41,6 +41,9 @@ export type StockMovement = {
   referenceType: string | null;
   referenceId: string | null;
   performedBy: string | null;
+  /** Resolved display name, e.g. "Jane Wanjiru" — null for a historical movement recorded before
+   * this existed, or one with no employee attached (e.g. a system/import action). */
+  performedByName: string | null;
   notes: string | null;
   createdAt: string;
   syncStatus: StockMovementSyncStatus;

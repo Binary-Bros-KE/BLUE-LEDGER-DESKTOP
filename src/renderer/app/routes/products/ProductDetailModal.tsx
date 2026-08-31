@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { ArrowLeftRight, Loader2, PackagePlus } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import { Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
@@ -10,6 +11,7 @@ import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
+import type { ExportListRequest } from "@shared/types/export";
 import type { InventoryBalance } from "@shared/types/inventory";
 import type { Location } from "@shared/types/location";
 import type { ProductListItem } from "@shared/types/product";
@@ -86,6 +88,7 @@ export function ProductDetailModal({
   const canRecordMovement = can("inventory", "edit");
   const canRecordTransfer = can("stock_transfers", "create");
   const canRecordAny = canRecordMovement || canRecordTransfer;
+  const canExport = can("inventory", "export");
 
   const [overview, setOverview] = useState<InventoryBalance[] | null>(null);
   const [movements, setMovements] = useState<StockMovement[] | null>(null);
@@ -95,16 +98,37 @@ export function ProductDetailModal({
   const [transferForm, setTransferForm] = useState<TransferFormState>(emptyTransferForm);
   const [recording, setRecording] = useState(false);
   const [recordError, setRecordError] = useState<string | null>(null);
+  // Empty string on either end means "no bound" — the default view (most recent 50, any date) most
+  // people open this modal for; From/To below narrow it.
+  const [movementDateFrom, setMovementDateFrom] = useState("");
+  const [movementDateTo, setMovementDateTo] = useState("");
 
+  const loadMovements = useCallback(async () => {
+    try {
+      const movementsResult = await window.blueLedger.stockMovement.list(product.id, {
+        limit: 500,
+        ...(movementDateFrom ? { startDate: movementDateFrom } : {}),
+        ...(movementDateTo ? { endDate: movementDateTo } : {})
+      });
+      setMovements(movementsResult);
+    } catch (err) {
+      const message = getErrorMessage(err, "Failed to load stock movements");
+      setLoadError(message);
+      showErrorToast(message);
+    }
+  }, [product.id, movementDateFrom, movementDateTo]);
+
+  useEffect(() => {
+    void loadMovements();
+  }, [loadMovements]);
+
+  // Handles just the "Inventory by location" table — separate from loadMovements (its own effect,
+  // below) so the date filter only ever re-fetches movements, not this too.
   const refresh = useCallback(async () => {
     setLoadError(null);
     try {
-      const [overviewResult, movementsResult] = await Promise.all([
-        window.blueLedger.inventory.overview(product.id),
-        window.blueLedger.stockMovement.list(product.id, { limit: 50 })
-      ]);
+      const overviewResult = await window.blueLedger.inventory.overview(product.id);
       setOverview(overviewResult);
-      setMovements(movementsResult);
     } catch (err) {
       const message = getErrorMessage(err, "Failed to load inventory data");
       setLoadError(message);
@@ -172,7 +196,7 @@ export function ProductDetailModal({
       });
       showSuccessToast("Stock movement recorded");
       setSingleForm(emptySingleForm());
-      await refresh();
+      await Promise.all([refresh(), loadMovements()]);
     } catch (err) {
       const message = getErrorMessage(err, "Failed to record movement");
       setRecordError(message);
@@ -211,7 +235,7 @@ export function ProductDetailModal({
       });
       showSuccessToast("Stock transferred");
       setTransferForm(emptyTransferForm());
-      await refresh();
+      await Promise.all([refresh(), loadMovements()]);
     } catch (err) {
       const message = getErrorMessage(err, "Failed to record transfer");
       setRecordError(message);
@@ -220,6 +244,36 @@ export function ProductDetailModal({
       setRecording(false);
     }
   }
+
+  const movementExportRequest = useMemo<ExportListRequest | null>(() => {
+    if (!movements) return null;
+    const filterParts: string[] = [];
+    if (movementDateFrom || movementDateTo) {
+      filterParts.push(`Date: ${movementDateFrom || "earliest"} to ${movementDateTo || "today"}`);
+    }
+
+    return {
+      module: "inventory",
+      title: `${product.name} — Stock Movements`,
+      subtitle: filterParts.length > 0 ? filterParts.join(" · ") : "Every recorded movement",
+      columns: [
+        { key: "date", header: "Date" },
+        { key: "location", header: "Location" },
+        { key: "type", header: "Type" },
+        { key: "change", header: "Change", align: "right" },
+        { key: "recordedBy", header: "Recorded By" }
+      ],
+      rows: movements.map((movement) => ({
+        date: format(new Date(movement.createdAt), "MMM d, yyyy · HH:mm"),
+        location: movement.locationName,
+        type: movementTypeLabel(movement.movementType),
+        change: `${movement.quantityChange > 0 ? "+" : ""}${movement.quantityChange}`,
+        recordedBy: movement.performedByName ?? "—"
+      })),
+      stats: [{ label: "Total Movements", value: String(movements.length) }],
+      fileBaseName: `${product.sku}_StockMovements`
+    };
+  }, [movements, movementDateFrom, movementDateTo, product.name, product.sku]);
 
   return (
     <Modal
@@ -432,12 +486,53 @@ export function ProductDetailModal({
           )}
 
           <section>
-            <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
-              Recent movements
-            </p>
-            <div className="mt-2 max-h-72 overflow-y-auto rounded-lg border border-line">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
+                Recent movements
+              </p>
+              {canExport && movementExportRequest && <ExportMenu request={movementExportRequest} />}
+            </div>
+
+            <div className="mt-2 flex flex-wrap items-end gap-3">
+              <label className="block">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">From</span>
+                <input
+                  type="date"
+                  value={movementDateFrom}
+                  onChange={(event) => setMovementDateFrom(event.target.value)}
+                  className="mt-1.5 h-9 rounded-lg border border-line bg-white px-3 text-xs font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+                />
+              </label>
+              <label className="block">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">To</span>
+                <input
+                  type="date"
+                  value={movementDateTo}
+                  onChange={(event) => setMovementDateTo(event.target.value)}
+                  className="mt-1.5 h-9 rounded-lg border border-line bg-white px-3 text-xs font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+                />
+              </label>
+              {(movementDateFrom || movementDateTo) && (
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setMovementDateFrom("");
+                    setMovementDateTo("");
+                  }}
+                  className="h-9 border border-line bg-white px-3 text-[11px] text-ink shadow-none hover:bg-soft"
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
+
+            <div className="mt-3 max-h-72 overflow-y-auto rounded-lg border border-line">
               {movements.length === 0 ? (
-                <p className="p-4 text-sm font-semibold text-muted">No stock movements recorded yet.</p>
+                <p className="p-4 text-sm font-semibold text-muted">
+                  {movementDateFrom || movementDateTo
+                    ? "No stock movements in this date range."
+                    : "No stock movements recorded yet."}
+                </p>
               ) : (
                 <table className="w-full min-w-[560px] border-collapse text-sm">
                   <thead className="sticky top-0">
@@ -446,7 +541,7 @@ export function ProductDetailModal({
                       <Th>Location</Th>
                       <Th>Type</Th>
                       <Th className="text-right">Change</Th>
-                      <Th>Notes</Th>
+                      <Th>Recorded By</Th>
                     </tr>
                   </thead>
                   <tbody>
@@ -474,7 +569,7 @@ export function ProductDetailModal({
                           {movement.quantityChange}
                         </td>
                         <td className="px-4 py-2.5 text-xs font-semibold text-muted">
-                          {movement.notes ?? "—"}
+                          {movement.performedByName ?? "—"}
                         </td>
                       </tr>
                     ))}

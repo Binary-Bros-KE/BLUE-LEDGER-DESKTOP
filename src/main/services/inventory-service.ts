@@ -235,10 +235,20 @@ export function getInventoryOverview(productId: string): InventoryBalance[] {
     .map((row) => inventoryRepository.mapInventoryOverviewRow(row, tenantId, productId));
 }
 
-export function listStockMovements(productId: string, limit?: number): StockMovement[] {
+/** startDate/endDate are plain YYYY-MM-DD (inclusive) — pass neither to skip date filtering entirely
+ * (the default "recent" view both ProductDetailModal and Main Store's ProductHistoryModal open with).
+ * Same convention as listAllStockMovements just below. */
+export function listStockMovements(
+  productId: string,
+  limit = 100,
+  startDate?: string,
+  endDate?: string
+): StockMovement[] {
   requirePermission("inventory", "view");
+  const startIso = startDate ? startOfDayIso(startDate) : null;
+  const endIsoExclusive = endDate ? startOfDayIso(addDaysIso(endDate, 1)) : null;
   return stockMovementRepository
-    .findStockMovementRowsForProduct(productId, limit)
+    .findStockMovementRowsForProduct(productId, limit, startIso, endIsoExclusive)
     .map(stockMovementRepository.mapStockMovementRow);
 }
 

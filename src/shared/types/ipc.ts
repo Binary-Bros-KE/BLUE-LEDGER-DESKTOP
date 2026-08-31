@@ -345,7 +345,7 @@ export type IpcInvokeMap = {
     result: LocationStockLevel[];
   };
   "stock-movement:list": {
-    args: [string, { limit?: number }];
+    args: [string, { limit?: number; startDate?: string; endDate?: string }];
     result: StockMovement[];
   };
   "stock-movement:list-all": {
@@ -1420,7 +1420,7 @@ export type BlueLedgerApi = {
   stockMovement: {
     list: (
       productId: string,
-      input?: { limit?: number }
+      input?: { limit?: number; startDate?: string; endDate?: string }
     ) => Promise<IpcInvokeMap["stock-movement:list"]["result"]>;
     listAll: (
       input?: { startDate?: string; endDate?: string; limit?: number }

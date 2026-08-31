@@ -496,8 +496,10 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.inventoryListForLocation, (_event, locationId: string) =>
     listInventoryForLocation(locationId)
   );
-  ipcMain.handle(ipcChannels.stockMovementList, (_event, productId: string, input?: { limit?: number }) =>
-    listStockMovements(productId, input?.limit)
+  ipcMain.handle(
+    ipcChannels.stockMovementList,
+    (_event, productId: string, input?: { limit?: number; startDate?: string; endDate?: string }) =>
+      listStockMovements(productId, input?.limit, input?.startDate, input?.endDate)
   );
   ipcMain.handle(ipcChannels.stockMovementListAll, (_event, input?: { startDate?: string; endDate?: string; limit?: number }) =>
     listAllStockMovements(input?.startDate, input?.endDate, input?.limit)

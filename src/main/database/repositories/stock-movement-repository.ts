@@ -32,15 +32,17 @@ export type StockMovementRow = {
 
 export type StockMovementListRow = StockMovementRow & {
   location_name: string;
+  performed_by_name: string | null;
 };
 
 export function findStockMovementRowById(id: string): StockMovementListRow | undefined {
   return getDatabase()
     .prepare(
       `
-      SELECT sm.*, l.location_name AS location_name
+      SELECT sm.*, l.location_name AS location_name, (e.first_name || ' ' || e.last_name) AS performed_by_name
       FROM stock_movements sm
       JOIN locations l ON l.id = sm.location_id
+      LEFT JOIN employees e ON e.id = sm.performed_by
       WHERE sm.id = ?
     `
     )
@@ -86,19 +88,31 @@ export function insertStockMovementRow(
   return row;
 }
 
-export function findStockMovementRowsForProduct(productId: string, limit = 100): StockMovementListRow[] {
+/** Pass null for both date bounds to skip date filtering entirely (the default "recent" view) — same
+ * `created_at >= ? AND created_at < ?` convention as findAllStockMovementRows/report-repository.ts's
+ * own date-range queries; the caller converts a plain calendar date into the device-local-timezone-
+ * correct ISO bound (inventory-service.ts's startOfDayIso/addDaysIso). */
+export function findStockMovementRowsForProduct(
+  productId: string,
+  limit: number,
+  startDateIso: string | null,
+  endDateIsoExclusive: string | null
+): StockMovementListRow[] {
   return getDatabase()
     .prepare(
       `
-      SELECT sm.*, l.location_name AS location_name
+      SELECT sm.*, l.location_name AS location_name, (e.first_name || ' ' || e.last_name) AS performed_by_name
       FROM stock_movements sm
       JOIN locations l ON l.id = sm.location_id
+      LEFT JOIN employees e ON e.id = sm.performed_by
       WHERE sm.product_id = ?
+        AND (? IS NULL OR sm.created_at >= ?)
+        AND (? IS NULL OR sm.created_at < ?)
       ORDER BY sm.created_at DESC
       LIMIT ?
     `
     )
-    .all(productId, limit) as StockMovementListRow[];
+    .all(productId, startDateIso, startDateIso, endDateIsoExclusive, endDateIsoExclusive, limit) as StockMovementListRow[];
 }
 
 export type StockMovementFeedRow = StockMovementListRow & {
@@ -123,10 +137,12 @@ export function findAllStockMovementRows(
   return getDatabase()
     .prepare(
       `
-      SELECT sm.*, l.location_name AS location_name, p.name AS product_name, p.sku AS sku, p.buying_price_cents AS buying_price_cents
+      SELECT sm.*, l.location_name AS location_name, p.name AS product_name, p.sku AS sku, p.buying_price_cents AS buying_price_cents,
+        (e.first_name || ' ' || e.last_name) AS performed_by_name
       FROM stock_movements sm
       JOIN locations l ON l.id = sm.location_id
       JOIN products p ON p.id = sm.product_id
+      LEFT JOIN employees e ON e.id = sm.performed_by
       WHERE sm.tenant_id = ?
         AND (? IS NULL OR sm.location_id = ?)
         AND (? IS NULL OR sm.created_at >= ?)
@@ -159,6 +175,7 @@ export function mapStockMovementRow(row: StockMovementListRow): StockMovement {
     referenceType: row.reference_type,
     referenceId: row.reference_id,
     performedBy: row.performed_by,
+    performedByName: row.performed_by_name,
     notes: row.notes,
     createdAt: row.created_at,
     syncStatus: row.sync_status as StockMovementSyncStatus,
