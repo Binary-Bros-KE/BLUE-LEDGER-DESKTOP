@@ -38,9 +38,10 @@ export function BulkTransferModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Every time "From" changes, fetch what's actually on hand there and default each selected
-  // product's quantity to it — the common case is "move everything", not typing every amount by
-  // hand; still fully editable, and a product with 0 on hand there just starts blank.
+  // Every time "From" changes, fetch what's actually on hand there — shown as a reference column
+  // only. Quantities themselves are deliberately never pre-filled from it: they stay exactly what
+  // the user typed (or blank) until they enter a value on purpose, same "an honest blank beats a
+  // silently-filled-in default" reasoning as the From/To pickers themselves.
   useEffect(() => {
     if (!fromLocationId) {
       setOnHandByProduct({});
@@ -55,14 +56,6 @@ export function BulkTransferModal({
         const byProduct: Record<string, number> = {};
         for (const row of rows) byProduct[row.productId] = row.quantity;
         setOnHandByProduct(byProduct);
-        setQuantities((prev) => {
-          const next = { ...prev };
-          for (const product of products) {
-            const onHand = byProduct[product.id] ?? 0;
-            next[product.id] = onHand > 0 ? String(onHand) : "";
-          }
-          return next;
-        });
       })
       .catch(() => {
         if (!cancelled) setOnHandByProduct({});
@@ -73,9 +66,6 @@ export function BulkTransferModal({
     return () => {
       cancelled = true;
     };
-    // products is the fixed selection this modal opened with — intentionally not a dependency, so
-    // re-running this fetch is driven purely by which location is being read from.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fromLocationId]);
 
   function handleFromChange(value: string): void {
@@ -201,8 +191,7 @@ export function BulkTransferModal({
           </table>
         </div>
         <p className="mt-1.5 text-[11px] font-semibold text-muted">
-          Leave a quantity at 0 to skip that product. Quantities default to what's currently on hand at the From
-          location once chosen — edit any of them freely.
+          Leave a quantity blank to skip that product — only products you enter an amount for are transferred.
         </p>
       </div>
 
