@@ -2600,6 +2600,40 @@ const migrations = [
         FROM stock_requests sr WHERE sr.id = NEW.stock_request_id;
       END;
     `
+  },
+  {
+    version: 76,
+    name: "fix_working_hours_sync_loop",
+    sql: `
+      -- CRITICAL: migration 69's trg_working_hours_sync_au was created with no
+      -- WHEN NEW.updated_at != OLD.updated_at guard — the ONE AFTER UPDATE sync trigger in this whole
+      -- schema missing it (every other entity already has it, several fixed this exact way in past
+      -- migrations). That guard exists precisely so the sync engine's OWN bookkeeping writes never
+      -- re-trigger themselves: markSourceRowSynced (sync_status/last_synced_at) and, since
+      -- working_hours is a CONFLICT_AWARE_ENTITIES member, markSyncedBaseline (synced_updated_at) —
+      -- BOTH called after every successful push, NEITHER touching updated_at — fired this unguarded
+      -- trigger on every single one, re-enqueuing a fresh 'queued' row, which got pushed successfully,
+      -- which fired the trigger again, forever. A genuine infinite self-perpetuating sync loop with
+      -- zero user edits involved. Confirmed live: one real tenant's single working_hours row had
+      -- generated 265+ outbox rows over ~50 minutes, hammering /sync/push roughly every 20s
+      -- indefinitely — matching a field report of "constant 2 pending, every cycle, and I haven't
+      -- touched Working Hours" exactly (2 = markSourceRowSynced + markSyncedBaseline, one re-trigger
+      -- each per push).
+      DROP TRIGGER trg_working_hours_sync_au;
+      CREATE TRIGGER trg_working_hours_sync_au AFTER UPDATE ON working_hours WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'working_hours', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      -- One-time cleanup of the garbage this already produced on any device that hit it — every
+      -- already-'synced' breadcrumb is pure noise (harmless to leave, but hundreds of rows serves no
+      -- purpose), and any still-'queued'/'failed' ones are collapsed into one fresh reconcile row per
+      -- distinct working_hours row instead of separately pushing hundreds of near-identical payloads.
+      DELETE FROM sync_outbox WHERE entity = 'working_hours' AND status IN ('synced', 'queued', 'failed');
+      INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = working_hours.tenant_id), 'working_hours', id, 'upsert', 'push', 'queued', 0, '{}', id || ':migration76:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+      FROM working_hours;
+    `
   }
 ] as const;
 
