@@ -24,6 +24,7 @@ import * as saleVoidRepository from "@main/database/repositories/sale-void-repos
 import * as salaryRepository from "@main/database/repositories/salary-repository";
 import * as serviceChargeRepository from "@main/database/repositories/service-charge-repository";
 import * as stockMovementRepository from "@main/database/repositories/stock-movement-repository";
+import * as stockReceiptRepository from "@main/database/repositories/stock-receipt-repository";
 import * as stockRequestRepository from "@main/database/repositories/stock-request-repository";
 import * as supplierRepository from "@main/database/repositories/supplier-repository";
 import * as tenantRepository from "@main/database/repositories/tenant-repository";
@@ -3220,11 +3221,124 @@ const CONFLICT_LABEL_BUILDERS: Partial<Record<SyncEntity, (entityId: string) => 
   locations: (id) => {
     const row = locationRepository.findLocationRowById(id);
     return row ? row.location_name : id;
+  },
+  categories: (id) => {
+    const row = categoryRepository.findCategoryRowById(id);
+    return row ? row.name : id;
+  },
+  riders: (id) => {
+    const row = riderRepository.findRiderRowById(id);
+    return row ? row.name : id;
+  },
+  suppliers: (id) => {
+    const row = supplierRepository.findSupplierRowById(id);
+    return row ? row.business_name : id;
+  },
+  customers: (id) => {
+    const row = customerRepository.findCustomerRowById(id);
+    return row ? row.name : id;
+  },
+  sales: (id) => {
+    const row = saleRepository.findSaleRowById(id);
+    if (!row) return id;
+    return row.invoice_number ?? row.receipt_number ?? "Sale";
+  },
+  quotations: (id) => {
+    const row = quotationRepository.findQuotationRowById(id);
+    return row ? row.quotation_number : id;
+  },
+  purchases: (id) => {
+    const row = purchaseRepository.findPurchaseRowById(id);
+    return row ? row.purchase_number : id;
+  },
+  stock_requests: (id) => {
+    const row = stockRequestRepository.findStockRequestRowById(id);
+    return row ? row.request_number : id;
+  },
+  stock_receipts: (id) => {
+    const row = stockReceiptRepository.findStockReceiptRowById(id);
+    return row ? row.receipt_number : id;
+  },
+  expenses: (id) => {
+    const row = expenseRepository.findExpenseRowById(id);
+    return row ? row.expense_number : id;
+  },
+  salaries: (id) => {
+    const row = salaryRepository.findSalaryRowById(id);
+    return row ? `Payslip ${row.payslip_number}` : id;
+  },
+  recurring_bills: (id) => {
+    const row = recurringBillRepository.findRecurringBillRowById(id);
+    return row ? row.name : id;
+  },
+  sale_returns: (id) => {
+    const row = saleReturnRepository.findSaleReturnDetailRowById(id);
+    return row ? `Return — Receipt ${row.receipt_number ?? "?"}` : id;
+  },
+  sale_voids: (id) => {
+    const row = saleVoidRepository.findSaleVoidDetailRowById(id);
+    return row ? `Void — Receipt ${row.receipt_number ?? "?"}` : id;
+  },
+  invoice_cancellations: (id) => {
+    const row = invoiceCancellationRepository.findInvoiceCancellationDetailRowById(id);
+    return row ? `Cancellation — Invoice ${row.invoice_number ?? "?"}` : id;
+  },
+  // Stock movements and Main Store allocations have no document number of their own — the most
+  // useful identifying label is which product moved and where, same information a person reading
+  // the Stock Ledger would look for first.
+  stock_movements: (id) => {
+    const row = stockMovementRepository.findStockMovementRowById(id);
+    if (!row) return id;
+    const productName = productRepository.findProductRowById(row.product_id)?.name ?? "Unknown product";
+    const sign = row.quantity_change > 0 ? "+" : "";
+    return `Stock Movement — ${productName} (${sign}${row.quantity_change}) at ${row.location_name}`;
+  },
+  main_store_allocations: (id) => {
+    const row = mainStoreAllocationRepository.findAllocationRowById(id);
+    if (!row) return id;
+    const productName = productRepository.findProductRowById(row.product_id)?.name ?? "Unknown product";
+    const bucket = row.storefront_id ? (locationRepository.findLocationRowById(row.storefront_id)?.location_name ?? "a storefront") : "Unallocated";
+    return `Main Store Allocation — ${productName} (${bucket})`;
   }
 };
 
 function labelFor(entity: SyncEntity, entityId: string): string {
   return CONFLICT_LABEL_BUILDERS[entity]?.(entityId) ?? entityId;
+}
+
+/** stock_movements/main_store_allocations sync directly against their own table, never through the
+ * generic header-column machinery refColumnsFor (above) reads from — so they need their own short,
+ * hand-written ref-field list here instead. Every other entity is already fully covered by
+ * refColumnsFor. */
+const EXTRA_CONFLICT_REF_FIELDS: Partial<Record<SyncEntity, Array<{ cloud: string; refEntity: SyncEntity }>>> = {
+  stock_movements: [
+    { cloud: "productId", refEntity: "products" },
+    { cloud: "locationId", refEntity: "locations" },
+    { cloud: "allocationStorefrontId", refEntity: "locations" }
+  ],
+  main_store_allocations: [
+    { cloud: "productId", refEntity: "products" },
+    { cloud: "storefrontId", refEntity: "locations" }
+  ]
+};
+
+/** Replaces every ref-shaped field's raw id with the same human label labelFor uses for the
+ * conflict's own row label — this is specifically what turns a diff row that used to read
+ * "locationId: loc_8f3a... → loc_9d4e..." into "Location: Nairobi CBD → Westlands". Applied to BOTH
+ * snapshots (they're already in the same id-space at this point — see this function's own caller for
+ * why); a field whose id doesn't resolve to a local row falls back to the bare id, same as labelFor
+ * everywhere else — not worse than the unresolved case, just not improved. */
+function humanizeConflictSnapshot(entity: SyncEntity, snapshot: Record<string, unknown>): Record<string, unknown> {
+  const refFields = [...refColumnsFor(entity), ...(EXTRA_CONFLICT_REF_FIELDS[entity] ?? [])];
+  if (refFields.length === 0) return snapshot;
+  const result = { ...snapshot };
+  for (const field of refFields) {
+    const value = result[field.cloud];
+    if (typeof value === "string") {
+      result[field.cloud] = labelFor(field.refEntity, value);
+    }
+  }
+  return result;
 }
 
 type ConflictRow = {
@@ -3260,13 +3374,14 @@ export function listConflicts(): SyncConflictItem[] {
   return rows.map((row) => {
     const rawPayload = PAYLOAD_BUILDERS[row.entity](row.entity_id);
     const localSnapshot = rawPayload ? (resolvePayloadRefsForPush(row.entity, rawPayload) as Record<string, unknown>) : {};
+    const remoteSnapshot = row.remote_snapshot_json ? (JSON.parse(row.remote_snapshot_json) as Record<string, unknown>) : {};
     return {
       id: row.id,
       entity: row.entity,
       entityId: row.entity_id,
       label: labelFor(row.entity, row.entity_id),
-      localSnapshot,
-      remoteSnapshot: row.remote_snapshot_json ? (JSON.parse(row.remote_snapshot_json) as Record<string, unknown>) : {},
+      localSnapshot: humanizeConflictSnapshot(row.entity, localSnapshot),
+      remoteSnapshot: humanizeConflictSnapshot(row.entity, remoteSnapshot),
       detectedAt: row.updated_at
     };
   });

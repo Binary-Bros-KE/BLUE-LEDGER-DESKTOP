@@ -45,6 +45,31 @@ function diffFields(
   return rows;
 }
 
+/** Turns a raw payload field name into something a non-technical person can read — "quantityChange"
+ * -> "Quantity Change", "locationId" -> "Location" (the "Id" suffix is dropped because by the time
+ * this renders, sync-engine.ts's listConflicts has already replaced that field's VALUE with a real
+ * name via humanizeConflictSnapshot, so "Location Id: Nairobi CBD" would read oddly — "Location:
+ * Nairobi CBD" doesn't), "amountCents" -> "Amount" (formatDiffValue below already renders the value
+ * as real currency, so the field name doesn't need to also say "Cents"). */
+/** "stock_movements" -> "Stock Movements" — used for the small category tag under a conflict's own
+ * label, e.g. "Stock Movement — 10" Android Car Stereo (-6) at Main Store / Stock Movements ·
+ * detected ...". */
+function humanizeEntityName(entity: string): string {
+  return entity
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function humanizeFieldKey(key: string): string {
+  let stripped = key;
+  if (stripped.endsWith("Cents")) stripped = stripped.slice(0, -5);
+  else if (stripped.endsWith("Id")) stripped = stripped.slice(0, -2);
+  if (!stripped) return key;
+  const spaced = stripped.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 /** Every synced money field is named `*Cents` and stores an integer cent amount — shown raw here
  * before this fix (e.g. a basic salary of 400,000 rendered as "40000000"), which is exactly why the
  * user's own "Yours"/"Theirs" figures looked 100x too large the moment the diff table started
@@ -282,7 +307,7 @@ export function CloudSyncRoute(): React.JSX.Element {
                 const mismatched = row.remoteCount !== null && row.remoteCount !== row.localCount;
                 return (
                   <tr key={row.entity} className="border-b border-line last:border-0 odd:bg-white even:bg-soft/30">
-                    <td className="px-4 py-2.5 font-bold">{row.entity}</td>
+                    <td className="px-4 py-2.5 font-bold">{humanizeEntityName(row.entity)}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums">{row.localCount}</td>
                     <td className={`px-4 py-2.5 text-right tabular-nums ${mismatched ? "font-bold text-danger" : ""}`}>
                       {row.remoteCount === null ? "—" : row.remoteCount}
@@ -307,7 +332,7 @@ export function CloudSyncRoute(): React.JSX.Element {
             <ul className="mt-1 space-y-0.5 text-xs font-semibold">
               {driftEntries.map(([entity, counts]) => (
                 <li key={entity}>
-                  {entity}: {counts?.local} local vs {counts?.remote} cloud
+                  {humanizeEntityName(entity)}: {counts?.local} local vs {counts?.remote} cloud
                 </li>
               ))}
             </ul>
@@ -376,7 +401,7 @@ export function CloudSyncRoute(): React.JSX.Element {
                     <div>
                       <p className="text-sm font-extrabold text-ink">{conflict.label}</p>
                       <p className="text-xs font-semibold text-muted">
-                        {conflict.entity} · detected {formatDate(conflict.detectedAt)}
+                        {humanizeEntityName(conflict.entity)} · detected {formatDate(conflict.detectedAt)}
                       </p>
                     </div>
                     {canRunSync && (
@@ -415,7 +440,7 @@ export function CloudSyncRoute(): React.JSX.Element {
                         <tbody>
                           {rows.map((r) => (
                             <tr key={r.key} className="border-b border-line last:border-0">
-                              <td className="px-3 py-2 font-bold text-ink">{r.key}</td>
+                              <td className="px-3 py-2 font-bold text-ink">{humanizeFieldKey(r.key)}</td>
                               <td className="px-3 py-2 text-ink">{formatDiffValue(r.key, r.local)}</td>
                               <td className="px-3 py-2 text-ink">{formatDiffValue(r.key, r.remote)}</td>
                             </tr>
@@ -454,7 +479,7 @@ export function CloudSyncRoute(): React.JSX.Element {
                     key={`${item.entity}-${item.localId}-${index}`}
                     className="border-b border-line last:border-0 odd:bg-white even:bg-soft/30"
                   >
-                    <td className="px-4 py-2.5 font-bold">{item.entity}</td>
+                    <td className="px-4 py-2.5 font-bold">{humanizeEntityName(item.entity)}</td>
                     <td className="px-4 py-2.5 text-ink">{item.label}</td>
                     <td className="px-4 py-2.5 text-muted">{formatDate(item.detectedAt)}</td>
                   </tr>
@@ -490,7 +515,7 @@ export function CloudSyncRoute(): React.JSX.Element {
               <tbody>
                 {queue.map((item) => (
                   <tr key={item.id} className="border-b border-line last:border-0 odd:bg-white even:bg-soft/30">
-                    <td className="px-4 py-2.5 font-bold">{item.entity}</td>
+                    <td className="px-4 py-2.5 font-bold">{humanizeEntityName(item.entity)}</td>
                     <td className="max-w-[180px] truncate px-4 py-2.5 font-mono text-xs text-muted" title={item.entityId}>
                       {item.entityId}
                     </td>
