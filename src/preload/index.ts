@@ -107,8 +107,7 @@ const api: BlueLedgerApi = {
     list: (productId, input) => invoke("stock-movement:list", productId, input ?? {}),
     listAll: (input) => invoke("stock-movement:list-all", input ?? {}),
     create: (input) => invoke("stock-movement:create", input),
-    transfer: (input) => invoke("stock-movement:transfer", input),
-    bulkTransfer: (input) => invoke("stock-movement:bulk-transfer", input)
+    transfer: (input) => invoke("stock-movement:transfer", input)
   },
   role: {
     list: () => invoke("role:list"),

@@ -32,6 +32,7 @@ import { buildDeliveryNoteViewModel, type DeliveryNoteViewModel } from "@shared/
 import { buildReceiptViewModel, formatReceiptCents, type ReceiptViewModel } from "@shared/lib/receipt";
 import { computeAddedTaxCents, computeTaxBreakdown, taxBreakdownLabel, type TaxBreakdownEntry } from "@shared/lib/tax-calculation";
 import { printerSettingsSchema } from "@shared/schemas/printer";
+import { isStorefrontType, type LocationType } from "@shared/types/location";
 import type { LogoRatio } from "@shared/types/logo";
 import {
   DEFAULT_PRINTER_SETTINGS,
@@ -2355,8 +2356,17 @@ type StockReceiptDocumentViewModel = {
   notes: string | null;
   createdAt: string;
   /** See StockReceiptRow.is_transfer's own comment (stock-receipt-repository.ts) — derived, not
-   * stored; distinguishes a plain Goods Received Note from an internal Main Store transfer note. */
+   * stored; distinguishes a plain Goods Received Note from an internal transfer note (either kind —
+   * see transferFromLocationName/isLocationTransfer below for which). */
   isTransfer: boolean;
+  /** Whether the transfer's source is an ordinary storefront (true) rather than Main Store (false) —
+   * only meaningful when isTransfer is true. Drives the "TRANSFER BETWEEN LOCATIONS" vs
+   * "STOCK TRANSFER" heading the user asked this be clearly labeled with. */
+  isLocationTransfer: boolean;
+  /** The sending location's name for either transfer kind — "Main Store" was hardcoded here before
+   * location_transfer existed; now always the real resolved name for both. Null when isTransfer is
+   * false. */
+  transferFromLocationName: string | null;
   items: Array<{
     productName: string;
     sku: string;
@@ -2375,6 +2385,10 @@ function loadStockReceiptData(stockReceiptId: string): { vm: StockReceiptDocumen
   }
   const items = stockReceiptRepository.findStockReceiptItemRows(stockReceiptId);
 
+  const isTransfer = row.is_transfer > 0;
+  const isLocationTransfer =
+    isTransfer && row.transfer_from_location_type != null && isStorefrontType(row.transfer_from_location_type as LocationType);
+
   return {
     vm: {
       receiptNumber: row.receipt_number,
@@ -2383,7 +2397,9 @@ function loadStockReceiptData(stockReceiptId: string): { vm: StockReceiptDocumen
       receivedByName: row.received_by_name,
       notes: row.notes,
       createdAt: row.created_at,
-      isTransfer: row.is_transfer > 0,
+      isTransfer,
+      isLocationTransfer,
+      transferFromLocationName: isTransfer ? (row.transfer_from_location_name ?? "Main Store") : null,
       items: items.map((item) => ({
         productName: item.product_name,
         sku: item.sku,
@@ -2418,13 +2434,15 @@ function buildStockReceiptHtml(vm: StockReceiptDocumentViewModel, business: Docu
     )
     .join("");
 
-  // A transfer shows both sides of the movement (Main Store losing stock, the storefront gaining
-  // it); a plain purchase receipt only has the one receiving location — either way, the bracketed
-  // location under each header is what makes a two-Before/two-After transfer table unambiguous.
+  // A transfer shows both sides of the movement (the sending location losing stock, the receiving
+  // one gaining it); a plain purchase receipt only has the one receiving location — either way, the
+  // bracketed location under each header is what makes a two-Before/two-After transfer table
+  // unambiguous. The sending side's own name (Main Store, or an ordinary storefront for a
+  // location_transfer) comes from transferFromLocationName — never hardcoded.
   const qtyHeaders = vm.isTransfer
     ? `
-        <th class="right">Qty Before<div class="loc">(Main Store)</div></th>
-        <th class="right">Qty After<div class="loc">(Main Store)</div></th>
+        <th class="right">Qty Before<div class="loc">(${escapeHtml(vm.transferFromLocationName ?? "")})</div></th>
+        <th class="right">Qty After<div class="loc">(${escapeHtml(vm.transferFromLocationName ?? "")})</div></th>
         <th class="right">Qty Before<div class="loc">(${escapeHtml(vm.locationName)})</div></th>
         <th class="right">Qty After<div class="loc">(${escapeHtml(vm.locationName)})</div></th>`
     : `
@@ -2468,7 +2486,7 @@ function buildStockReceiptHtml(vm: StockReceiptDocumentViewModel, business: Docu
         ${business.primaryPhone ? `<p class="muted">${escapeHtml(business.primaryPhone)}</p>` : ""}
       </div>
       <div>
-        <p class="doc-title">${vm.isTransfer ? "STOCK TRANSFER" : "GOODS RECEIVED"}</p>
+        <p class="doc-title">${vm.isTransfer ? (vm.isLocationTransfer ? "TRANSFER BETWEEN LOCATIONS" : "STOCK TRANSFER") : "GOODS RECEIVED"}</p>
         <p class="muted" style="text-align:right;">${escapeHtml(vm.receiptNumber)}</p>
       </div>
     </div>
@@ -2477,7 +2495,7 @@ function buildStockReceiptHtml(vm: StockReceiptDocumentViewModel, business: Docu
       <div class="meta-block">
         <p class="label">${vm.isTransfer ? "Transferred To" : "Received Into"}</p>
         <p><strong>${escapeHtml(vm.locationName)}</strong></p>
-        ${vm.isTransfer ? `<p class="label" style="margin-top:10px;">Source</p><p>Main Store</p>` : ""}
+        ${vm.isTransfer ? `<p class="label" style="margin-top:10px;">Source</p><p>${escapeHtml(vm.transferFromLocationName ?? "")}</p>` : ""}
         ${vm.allocationStorefrontName ? `<p class="label" style="margin-top:10px;">Earmarked For</p><p>${escapeHtml(vm.allocationStorefrontName)}</p>` : ""}
       </div>
       <div class="meta-block">
@@ -2567,7 +2585,8 @@ export async function previewStockReceiptPdf(stockReceiptId: string): Promise<vo
   const logo = await resolveDocumentLogo(locationId, tenantRow);
   const html = buildStockReceiptHtml(vm, business, logo);
   const buffer = await renderHtmlToPdfBuffer(html);
-  await openPdfPreviewWindow(buffer, `${vm.receiptNumber}.pdf`, `${vm.isTransfer ? "Stock Transfer" : "Goods Received"} ${vm.receiptNumber}`);
+  const previewLabel = vm.isTransfer ? (vm.isLocationTransfer ? "Transfer Between Locations" : "Stock Transfer") : "Goods Received";
+  await openPdfPreviewWindow(buffer, `${vm.receiptNumber}.pdf`, `${previewLabel} ${vm.receiptNumber}`);
 }
 
 type StockRequestDocumentViewModel = {

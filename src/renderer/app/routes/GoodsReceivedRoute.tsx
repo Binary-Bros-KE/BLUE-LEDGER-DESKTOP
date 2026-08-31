@@ -5,6 +5,7 @@ import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
+import { LocationTransferModal } from "@renderer/app/routes/goods-received/LocationTransferModal";
 import { QuickCreateProductModal } from "@renderer/shared/components/QuickCreateProductModal";
 import { StatTile } from "@renderer/shared/components/StatTile";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
@@ -64,7 +65,10 @@ export function GoodsReceivedRoute(): React.JSX.Element {
   // straight to a storefront doesn't need it; earmarking stock at Main Store does.
   const canReceiveIntoMainStore = can("main_store", "edit");
   // Same permission MainStoreStockModal's own Transfer tab (distributeFromMainStore) checks — this
-  // is the bulk counterpart of that single-product flow, not a separate capability.
+  // is the bulk counterpart of that single-product flow, not a separate capability. Also gates the
+  // separate "Transfer Between Locations" button below (LocationTransferModal) — same underlying
+  // operation (a plain transfer_out/transfer_in pair), just between two ordinary storefronts instead
+  // of from Main Store.
   const canTransferFromMainStore = can("stock_transfers", "create");
 
   const needsStorefrontPicker = session?.branch == null;
@@ -81,6 +85,7 @@ export function GoodsReceivedRoute(): React.JSX.Element {
   const [locationFilter, setLocationFilter] = useState("");
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [locationTransferOpen, setLocationTransferOpen] = useState(false);
   const [destination, setDestination] = useState<Destination>(canReceiveIntoMainStore ? "main_store" : "storefront");
   const [allocationStorefrontId, setAllocationStorefrontId] = useState("");
   const [createLocationId, setCreateLocationId] = useState("");
@@ -401,12 +406,23 @@ export function GoodsReceivedRoute(): React.JSX.Element {
               Receive many products in one batch, with a permanent record you can reprint anytime.
             </p>
           </div>
-          {canCreate && (
-            <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
-              <Plus className="mr-1.5 size-4" aria-hidden="true" />
-              New Receipt
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {canTransferFromMainStore && (
+              <Button
+                type="button"
+                onClick={() => setLocationTransferOpen(true)}
+                className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+              >
+                Transfer Between Locations
+              </Button>
+            )}
+            {canCreate && (
+              <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
+                <Plus className="mr-1.5 size-4" aria-hidden="true" />
+                New Receipt
+              </Button>
+            )}
+          </div>
         </div>
 
         {(loadError ?? actionError) && (
@@ -540,7 +556,12 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                           {receipt.allocationStorefrontName && (
                             <DashedPill tone="accent">For {receipt.allocationStorefrontName}</DashedPill>
                           )}
-                          {receipt.sourceType === "transfer" && <DashedPill tone="warning">Transfer</DashedPill>}
+                          {receipt.sourceType === "transfer" && <DashedPill tone="warning">Transfer from Main Store</DashedPill>}
+                          {receipt.sourceType === "location_transfer" && (
+                            <DashedPill tone="warning">
+                              Transfer from {receipt.transferFromLocationName ?? "another location"}
+                            </DashedPill>
+                          )}
                         </div>
                       </td>
                       <td className="px-4 py-3 text-xs font-bold tabular-nums text-muted">
@@ -820,8 +841,10 @@ export function GoodsReceivedRoute(): React.JSX.Element {
               {viewingReceipt.allocationStorefrontName && (
                 <DashedPill tone="accent">For {viewingReceipt.allocationStorefrontName}</DashedPill>
               )}
-              {viewingReceipt.sourceType === "transfer" && (
-                <DashedPill tone="warning">Transferred from Main Store</DashedPill>
+              {(viewingReceipt.sourceType === "transfer" || viewingReceipt.sourceType === "location_transfer") && (
+                <DashedPill tone="warning">
+                  Transferred from {viewingReceipt.transferFromLocationName ?? "Main Store"}
+                </DashedPill>
               )}
               <span className="text-xs font-semibold text-muted">
                 Received by {viewingReceipt.receivedByName} · {formatDateTime(viewingReceipt.createdAt)}
@@ -838,10 +861,10 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                     <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider text-muted">
                       Received
                     </th>
-                    {viewingReceipt.sourceType === "transfer" && (
+                    {(viewingReceipt.sourceType === "transfer" || viewingReceipt.sourceType === "location_transfer") && (
                       <>
-                        <QtyTh label="Qty Before" location="Main Store" />
-                        <QtyTh label="Qty After" location="Main Store" />
+                        <QtyTh label="Qty Before" location={viewingReceipt.transferFromLocationName ?? "Main Store"} />
+                        <QtyTh label="Qty After" location={viewingReceipt.transferFromLocationName ?? "Main Store"} />
                       </>
                     )}
                     <QtyTh label="Qty Before" location={viewingReceipt.locationName} />
@@ -856,7 +879,7 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                         <p className="text-[10px] font-semibold text-muted">{item.sku}</p>
                       </td>
                       <td className="px-3 py-2 text-right font-extrabold tabular-nums">{item.quantityReceived}</td>
-                      {viewingReceipt.sourceType === "transfer" && (
+                      {(viewingReceipt.sourceType === "transfer" || viewingReceipt.sourceType === "location_transfer") && (
                         <>
                           <td className="px-3 py-2 text-right font-bold tabular-nums text-muted">{item.mainStorePreviousQuantity}</td>
                           <td className="px-3 py-2 text-right font-extrabold tabular-nums text-danger">{item.mainStoreNewQuantity}</td>
@@ -922,6 +945,19 @@ export function GoodsReceivedRoute(): React.JSX.Element {
           setQuickCreateProductOpen(false);
         }}
       />
+
+      {canTransferFromMainStore && (
+        <LocationTransferModal
+          open={locationTransferOpen}
+          onClose={() => setLocationTransferOpen(false)}
+          products={products}
+          locations={locations}
+          onCreated={async () => {
+            await loadReceipts();
+            showSuccessToast("Stock transferred between locations");
+          }}
+        />
+      )}
     </motion.div>
   );
 }

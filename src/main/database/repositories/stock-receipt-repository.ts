@@ -17,13 +17,22 @@ export type StockReceiptRow = {
   item_count: number;
   total_quantity_received: number;
   /** Derived, not stored — 1 if any of this receipt's own stock_movements rows is a transfer_in
-   * (see createStockReceipt's main_store_transfer branch), 0 for the plain purchase case. Computed
-   * at read time from stock_movements instead of a real column deliberately: stock_receipts is a
-   * synced entity (see sync-engine.ts's STOCK_RECEIPT_HEADER_COLUMNS/PAYLOAD_BUILDERS), and adding a
-   * genuinely new persisted field there means extending the cloud schema too (a live production
-   * Postgres migration) for what's purely a display distinction — this way "was it a transfer" is
-   * always correctly derivable from data that already exists and already syncs on its own. */
+   * (see createStockReceipt's main_store_transfer/location_transfer branches), 0 for the plain
+   * purchase case. Computed at read time from stock_movements instead of a real column
+   * deliberately: stock_receipts is a synced entity (see sync-engine.ts's
+   * STOCK_RECEIPT_HEADER_COLUMNS/PAYLOAD_BUILDERS), and adding a genuinely new persisted field there
+   * means extending the cloud schema too (a live production Postgres migration) for what's purely a
+   * display distinction — this way "was it a transfer, and from where" is always correctly derivable
+   * from data that already exists and already syncs on its own. */
   is_transfer: number;
+  /** The sending location for either transfer kind, resolved from the receipt's own transfer_out
+   * movements (see the LEFT JOIN below) — null for a plain purchase. transfer_from_location_type
+   * (a raw locations.location_type value) is what actually distinguishes "transfer" (Main Store —
+   * warehouse/distribution_center) from "location_transfer" (an ordinary storefront) in
+   * stock-receipt-service.ts's mapListRow; never exposed to the renderer directly. */
+  transfer_from_location_id: string | null;
+  transfer_from_location_name: string | null;
+  transfer_from_location_type: string | null;
 };
 
 export type StockReceiptItemRow = {
@@ -46,11 +55,26 @@ const SELECT_WITH_JOINS = `
     (rec.first_name || ' ' || rec.last_name) AS received_by_name,
     (SELECT COUNT(*) FROM stock_receipt_items sri WHERE sri.stock_receipt_id = sr.id) AS item_count,
     (SELECT COALESCE(SUM(sri.quantity_received), 0) FROM stock_receipt_items sri WHERE sri.stock_receipt_id = sr.id) AS total_quantity_received,
-    (SELECT COUNT(*) FROM stock_movements sm WHERE sm.reference_type = 'stock_receipt' AND sm.reference_id = sr.id AND sm.movement_type = 'transfer_in') AS is_transfer
+    (SELECT COUNT(*) FROM stock_movements sm WHERE sm.reference_type = 'stock_receipt' AND sm.reference_id = sr.id AND sm.movement_type = 'transfer_in') AS is_transfer,
+    tf.location_id AS transfer_from_location_id,
+    tf.location_name AS transfer_from_location_name,
+    tf.location_type AS transfer_from_location_type
   FROM stock_receipts sr
   JOIN locations l ON l.id = sr.location_id
   LEFT JOIN locations als ON als.id = sr.allocation_storefront_id
   JOIN employees rec ON rec.id = sr.received_by
+  -- One row per receipt that had ANY transfer_out movement — a main_store_transfer with 2+ items can
+  -- generate several transfer_out rows (even two per item, allocated + unallocated buckets — see
+  -- distributeMainStoreStockCore), but they all share the same location_id (wherever stock left
+  -- from), so GROUP BY reference_id picking one arbitrary row's location_id/name/type is still
+  -- correct — every row in the group agrees on that value.
+  LEFT JOIN (
+    SELECT sm.reference_id AS receipt_id, sm.location_id, tl.location_name, tl.location_type
+    FROM stock_movements sm
+    JOIN locations tl ON tl.id = sm.location_id
+    WHERE sm.reference_type = 'stock_receipt' AND sm.movement_type = 'transfer_out'
+    GROUP BY sm.reference_id
+  ) tf ON tf.receipt_id = sr.id
 `;
 
 // Returns every matching number, not just the max — see document-number-service.ts's own comment.

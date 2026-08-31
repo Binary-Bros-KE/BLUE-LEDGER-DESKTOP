@@ -8,7 +8,6 @@ import * as stockMovementRepository from "@main/database/repositories/stock-move
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission, requirePermissionAnyOf } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import {
-  bulkStockTransferInputSchema,
   stockMovementInputSchema,
   stockTransferInputSchema,
   type StockMovementInput
@@ -224,54 +223,6 @@ export function recordStockTransfer(input: unknown): StockTransferResult {
     );
 
     return { transferOut, transferIn };
-  });
-}
-
-/**
- * Several products, one From/To pair, in a single atomic action — e.g. a storefront closing down and
- * everything on its shelf moving to another branch at once. Same transfer_out/transfer_in pair per
- * product as recordStockTransfer, all inside ONE transaction: if any single product doesn't have
- * enough stock, applyValidatedStockMovement's own error (already names the product — see its own doc
- * comment) rolls back every item in the batch, not just that one, so a bulk transfer never leaves a
- * confusing "some products moved, some didn't" partial state.
- */
-export function recordBulkStockTransfer(input: unknown): { transferredCount: number } {
-  requirePermission("stock_transfers", "create");
-  const parsed = bulkStockTransferInputSchema.parse(input);
-  const { tenantId } = getCurrentTenant();
-  const performedBy = getCurrentEmployeeId();
-  const transferId = `transfer_${randomUUID()}`;
-
-  return runInTransaction(() => {
-    for (const item of parsed.items) {
-      applyValidatedStockMovement(
-        {
-          productId: item.productId,
-          locationId: parsed.fromLocationId,
-          movementType: "transfer_out",
-          quantityChange: -item.quantity,
-          referenceType: "transfer",
-          referenceId: transferId,
-          performedBy,
-          notes: parsed.notes
-        },
-        tenantId
-      );
-      applyValidatedStockMovement(
-        {
-          productId: item.productId,
-          locationId: parsed.toLocationId,
-          movementType: "transfer_in",
-          quantityChange: item.quantity,
-          referenceType: "transfer",
-          referenceId: transferId,
-          performedBy,
-          notes: parsed.notes
-        },
-        tenantId
-      );
-    }
-    return { transferredCount: parsed.items.length };
   });
 }
 

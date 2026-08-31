@@ -70,7 +70,6 @@ export const ipcChannels = {
   stockMovementListAll: "stock-movement:list-all",
   stockMovementCreate: "stock-movement:create",
   stockMovementTransfer: "stock-movement:transfer",
-  stockMovementBulkTransfer: "stock-movement:bulk-transfer",
   roleList: "role:list",
   roleListForPicker: "role:list-for-picker",
   roleGet: "role:get",

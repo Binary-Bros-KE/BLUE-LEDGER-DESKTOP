@@ -59,7 +59,6 @@ import {
   listAllStockMovements,
   listInventoryForLocation,
   listStockMovements,
-  recordBulkStockTransfer,
   recordStockMovement,
   recordStockTransfer
 } from "@main/services/inventory-service";
@@ -507,7 +506,6 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.stockMovementCreate, (_event, input: unknown) => recordStockMovement(input));
   ipcMain.handle(ipcChannels.stockMovementTransfer, (_event, input: unknown) => recordStockTransfer(input));
-  ipcMain.handle(ipcChannels.stockMovementBulkTransfer, (_event, input: unknown) => recordBulkStockTransfer(input));
   ipcMain.handle(ipcChannels.roleList, () => listRoles());
   ipcMain.handle(ipcChannels.roleListForPicker, () => listRolesForPicker());
   ipcMain.handle(ipcChannels.roleGet, (_event, id: string) => getRole(id));
