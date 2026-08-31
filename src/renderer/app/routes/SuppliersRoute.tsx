@@ -30,6 +30,7 @@ import {
   type Supplier,
   type SupplierPaymentOption
 } from "@shared/types/supplier";
+import { SupplierBalanceAdjustmentModal } from "./suppliers/SupplierBalanceAdjustmentModal";
 import { SupplierDetailModal } from "./suppliers/SupplierDetailModal";
 
 type StatusFilter = "all" | "active" | "inactive";
@@ -124,6 +125,7 @@ export function SuppliersRoute(): React.JSX.Element {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [viewingSupplier, setViewingSupplier] = useState<Supplier | null>(null);
+  const [showBalanceAdjustModal, setShowBalanceAdjustModal] = useState(false);
   const [form, setForm] = useState<FormState>(() => emptyForm());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -234,6 +236,7 @@ export function SuppliersRoute(): React.JSX.Element {
     setEditingSupplier(null);
     setForm(emptyForm());
     setError(null);
+    setShowBalanceAdjustModal(false);
     setModalOpen(true);
   }
 
@@ -241,6 +244,7 @@ export function SuppliersRoute(): React.JSX.Element {
     setEditingSupplier(supplier);
     setForm(toFormState(supplier));
     setError(null);
+    setShowBalanceAdjustModal(false);
     setModalOpen(true);
   }
 
@@ -754,6 +758,33 @@ export function SuppliersRoute(): React.JSX.Element {
             </div>
           </div>
 
+          {editingSupplier && (
+            <div className="mt-5 border-t border-line pt-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Balance</p>
+                <Button
+                  type="button"
+                  onClick={() => setShowBalanceAdjustModal(true)}
+                  className="h-7 border border-line bg-white px-2.5 text-[11px] text-ink shadow-none hover:bg-soft"
+                >
+                  <Wallet className="mr-1.5 size-3.5" aria-hidden="true" />
+                  Record Balance Adjustment
+                </Button>
+              </div>
+              <div className="mt-2 rounded-lg border border-line bg-soft px-3 py-2.5">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Owed to this supplier</p>
+                <p
+                  className={cn(
+                    "mt-0.5 text-lg font-extrabold",
+                    editingSupplier.balanceCents > 0 ? "text-danger" : "text-ink"
+                  )}
+                >
+                  {formatCents(editingSupplier.balanceCents)}
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="mt-5 border-t border-line pt-4">
             <TextAreaField
               label="Notes"
@@ -784,12 +815,18 @@ export function SuppliersRoute(): React.JSX.Element {
       </Modal>
 
       {viewingSupplier && (
-        <SupplierDetailModal
-          supplier={viewingSupplier}
-          onClose={() => setViewingSupplier(null)}
-          onSupplierUpdated={(updated) => {
-            setViewingSupplier(updated);
-            setSuppliers((prev) => prev?.map((s) => (s.id === updated.id ? updated : s)) ?? prev);
+        <SupplierDetailModal supplier={viewingSupplier} onClose={() => setViewingSupplier(null)} />
+      )}
+
+      {showBalanceAdjustModal && editingSupplier && (
+        <SupplierBalanceAdjustmentModal
+          supplier={editingSupplier}
+          onClose={() => setShowBalanceAdjustModal(false)}
+          onSaved={(updatedBalanceCents) => {
+            setEditingSupplier((prev) => (prev ? { ...prev, balanceCents: updatedBalanceCents } : prev));
+            setSuppliers((prev) =>
+              prev?.map((s) => (s.id === editingSupplier.id ? { ...s, balanceCents: updatedBalanceCents } : s)) ?? prev
+            );
           }}
         />
       )}

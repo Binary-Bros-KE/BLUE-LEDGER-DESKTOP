@@ -41,18 +41,11 @@ export function SupplierBalanceAdjustmentModal({
       showErrorToast(message);
       return;
     }
-    if (!notes.trim()) {
-      const message = 'Add a note explaining this adjustment (e.g. "Carried forward from old system")';
-      setActionError(message);
-      showErrorToast(message);
-      return;
-    }
-
     setSaving(true);
     try {
       const entry = await window.blueLedger.supplier.adjustBalance(supplier.id, {
         amountCents: direction === "increase" ? magnitudeCents : -magnitudeCents,
-        notes: notes.trim()
+        notes: notes.trim() || null
       });
       onSaved(supplier.balanceCents + entry.amountCents);
       showSuccessToast("Balance updated.");
@@ -116,7 +109,7 @@ export function SupplierBalanceAdjustmentModal({
           value={notes}
           onChange={setNotes}
           rows={2}
-          placeholder='e.g. "Carried forward from old system as of Jan 2026"'
+          placeholder='Optional — e.g. "Carried forward from old system as of Jan 2026"'
         />
 
         <div className="mt-5 flex justify-end gap-2 border-t border-line pt-4">
