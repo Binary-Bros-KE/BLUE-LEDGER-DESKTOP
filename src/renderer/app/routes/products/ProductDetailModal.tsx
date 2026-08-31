@@ -49,19 +49,23 @@ type TransferFormState = {
   notes: string;
 };
 
-function emptySingleForm(locations: Location[]): SingleFormState {
+// Deliberately never pre-picked from locations[0]/[1] — see updateTransferField's own comment for
+// the exact bug that caused (both here and in the single-location form, for the same underlying
+// reason: a stale-looking-valid default is worse than an honest blank one the disabled Record/
+// Transfer button already guards against).
+function emptySingleForm(): SingleFormState {
   return {
-    locationId: locations[0]?.id ?? "",
+    locationId: "",
     movementType: "purchase",
     quantity: "",
     notes: ""
   };
 }
 
-function emptyTransferForm(locations: Location[]): TransferFormState {
+function emptyTransferForm(): TransferFormState {
   return {
-    fromLocationId: locations[0]?.id ?? "",
-    toLocationId: locations[1]?.id ?? "",
+    fromLocationId: "",
+    toLocationId: "",
     quantity: "",
     notes: ""
   };
@@ -87,8 +91,8 @@ export function ProductDetailModal({
   const [movements, setMovements] = useState<StockMovement[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [mode, setMode] = useState<MovementMode>(canRecordMovement ? "single" : "transfer");
-  const [singleForm, setSingleForm] = useState<SingleFormState>(() => emptySingleForm(locations));
-  const [transferForm, setTransferForm] = useState<TransferFormState>(() => emptyTransferForm(locations));
+  const [singleForm, setSingleForm] = useState<SingleFormState>(emptySingleForm);
+  const [transferForm, setTransferForm] = useState<TransferFormState>(emptyTransferForm);
   const [recording, setRecording] = useState(false);
   const [recordError, setRecordError] = useState<string | null>(null);
 
@@ -120,7 +124,22 @@ export function ProductDetailModal({
     key: K,
     value: TransferFormState[K]
   ): void {
-    setTransferForm((prev) => ({ ...prev, [key]: value }));
+    setTransferForm((prev) => {
+      const next = { ...prev, [key]: value };
+      // "To Location"'s own options list always filters out whatever "From" currently is (below) —
+      // if changing "From" to this new value would make it match the CURRENTLY selected "To", that
+      // option just vanished from the To dropdown. A real bug lived here: the browser then falls
+      // back to visually showing a different option (whichever is now first in the filtered list),
+      // while React's own `toLocationId` state silently stayed at the old, now-hidden value — which
+      // is the SAME as the new `fromLocationId`. The two dropdowns LOOK like they show different
+      // locations, but the state underneath secretly matches, so submitting throws "Choose two
+      // different locations" no matter what's on screen. Clearing "To" here the moment this happens
+      // forces a genuine, visible re-choice instead of a silently-stale one.
+      if (key === "fromLocationId" && next.toLocationId === value) {
+        next.toLocationId = "";
+      }
+      return next;
+    });
   }
 
   async function handleRecordSingleMovement(event: React.FormEvent): Promise<void> {
@@ -152,7 +171,7 @@ export function ProductDetailModal({
         notes: singleForm.notes
       });
       showSuccessToast("Stock movement recorded");
-      setSingleForm(emptySingleForm(locations));
+      setSingleForm(emptySingleForm());
       await refresh();
     } catch (err) {
       const message = getErrorMessage(err, "Failed to record movement");
@@ -191,7 +210,7 @@ export function ProductDetailModal({
         notes: transferForm.notes
       });
       showSuccessToast("Stock transferred");
-      setTransferForm(emptyTransferForm(locations));
+      setTransferForm(emptyTransferForm());
       await refresh();
     } catch (err) {
       const message = getErrorMessage(err, "Failed to record transfer");
@@ -310,10 +329,10 @@ export function ProductDetailModal({
                     label="Location"
                     value={singleForm.locationId}
                     onChange={(value) => updateSingleField("locationId", value)}
-                    options={locations.map((location) => ({
-                      value: location.id,
-                      label: location.locationName
-                    }))}
+                    options={[
+                      { value: "", label: "Choose location" },
+                      ...locations.map((location) => ({ value: location.id, label: location.locationName }))
+                    ]}
                   />
                   <SelectField
                     label="Action"
@@ -361,18 +380,21 @@ export function ProductDetailModal({
                     label="From Location"
                     value={transferForm.fromLocationId}
                     onChange={(value) => updateTransferField("fromLocationId", value)}
-                    options={locations.map((location) => ({
-                      value: location.id,
-                      label: location.locationName
-                    }))}
+                    options={[
+                      { value: "", label: "Choose location" },
+                      ...locations.map((location) => ({ value: location.id, label: location.locationName }))
+                    ]}
                   />
                   <SelectField
                     label="To Location"
                     value={transferForm.toLocationId}
                     onChange={(value) => updateTransferField("toLocationId", value)}
-                    options={locations
-                      .filter((location) => location.id !== transferForm.fromLocationId)
-                      .map((location) => ({ value: location.id, label: location.locationName }))}
+                    options={[
+                      { value: "", label: "Choose location" },
+                      ...locations
+                        .filter((location) => location.id !== transferForm.fromLocationId)
+                        .map((location) => ({ value: location.id, label: location.locationName }))
+                    ]}
                   />
                   <Field
                     label="Quantity"
