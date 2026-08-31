@@ -5,6 +5,10 @@ release
 dist
 *.log
 *.tsbuildinfo
+# electron-vite's own transient compiled copy of electron.vite.config.ts, timestamped and normally
+# deleted after the build/dev process that created it finishes — caught once already committed by a
+# `git add -A` that ran while a build had left one on disk mid-run.
+electron.vite.config.*.mjs
 .env
 .env.*
 !.env.example
