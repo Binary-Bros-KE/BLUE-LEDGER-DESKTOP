@@ -3176,6 +3176,11 @@ export async function syncCycle(): Promise<void> {
   } catch (err) {
     console.error("[sync] pushOutbox failed:", err);
   }
+  try {
+    clearStalePhantomConflicts();
+  } catch (err) {
+    console.error("[sync] clearStalePhantomConflicts failed:", err);
+  }
 }
 
 export async function syncNow(): Promise<void> {
@@ -3349,6 +3354,56 @@ type ConflictRow = {
   updated_at: string;
 };
 
+/** Pure bookkeeping/timestamp fields every conflict-aware payload carries — expected to differ even
+ * when the actual DATA is identical, so ignored when deciding whether a conflict has become moot.
+ * Mirrors CloudSyncRoute.tsx's own DIFF_IGNORED_FIELDS exactly (kept in sync by hand — both are
+ * short, stable lists that only change if a conflict-aware payload shape itself changes). */
+const CONFLICT_IGNORED_FIELDS = new Set(["id", "tenantId", "deviceId", "syncedAt", "baseUpdatedAt", "localCreatedAt", "localUpdatedAt"]);
+
+function snapshotsEffectivelyMatch(local: Record<string, unknown>, remote: Record<string, unknown>): boolean {
+  const keys = new Set([...Object.keys(local), ...Object.keys(remote)]);
+  for (const key of keys) {
+    if (CONFLICT_IGNORED_FIELDS.has(key)) continue;
+    if (JSON.stringify(local[key]) !== JSON.stringify(remote[key])) return false;
+  }
+  return true;
+}
+
+/**
+ * A 'conflict' outbox row can outlive whatever it was actually about: markOutboxSynced (called
+ * after every FRESH successful push) deliberately only matches status IN ('queued', 'failed'), not
+ * 'conflict' — a still-open conflict must never be silently clobbered by an unrelated push landing
+ * for the same row. But that means once the real disagreement resolves through some OTHER path (a
+ * later edit that happens to push clean, or a normal pull that lands the same data another way),
+ * the ORIGINAL 'conflict' marker is left behind with nothing left to actually decide — caught live:
+ * a product's Conflicts card showing only a name/category/timestamp and an EMPTY diff table, because
+ * local and the stored remote snapshot had already become byte-identical on every real field. Rather
+ * than chase every possible path that can make a conflict moot, this just checks the one fact that
+ * actually matters — do local and remote now agree — and clears it if so. Run once at boot and again
+ * after every sync cycle (see syncCycle's own call), so a phantom conflict never has to wait for a
+ * person to notice and manually dismiss something there was nothing left to decide.
+ */
+function clearStalePhantomConflicts(): void {
+  const db = getDatabase();
+  const rows = db
+    .prepare(`SELECT id, entity, entity_id, remote_snapshot_json, updated_at FROM sync_outbox WHERE status = 'conflict'`)
+    .all() as ConflictRow[];
+
+  for (const row of rows) {
+    if (!row.remote_snapshot_json) continue;
+    const rawPayload = PAYLOAD_BUILDERS[row.entity](row.entity_id);
+    if (!rawPayload) continue;
+    const localSnapshot = resolvePayloadRefsForPush(row.entity, rawPayload) as Record<string, unknown>;
+    const remoteSnapshot = JSON.parse(row.remote_snapshot_json) as Record<string, unknown>;
+    if (!snapshotsEffectivelyMatch(localSnapshot, remoteSnapshot)) continue;
+
+    db.prepare(
+      `UPDATE sync_outbox SET status = 'synced', remote_snapshot_json = NULL, updated_at = ?
+       WHERE entity = ? AND entity_id = ? AND status = 'conflict'`
+    ).run(new Date().toISOString(), row.entity, row.entity_id);
+  }
+}
+
 /**
  * "Yours" is computed LIVE from the local row via PAYLOAD_BUILDERS — the exact same function push
  * itself uses — rather than read back from the outbox row's own payload_json column. That column
@@ -3364,10 +3419,26 @@ type ConflictRow = {
  * ref-shaped field (e.g. roleId) shows the same cloud-resolved value "theirs" already does,
  * instead of a false-looking mismatch. */
 export function listConflicts(): SyncConflictItem[] {
+  // One row per (entity, entity_id), not one per raw sync_outbox row — a product edited twice
+  // locally before a conflicting push leaves TWO 'queued' breadcrumb rows behind (each edit's own
+  // AFTER UPDATE trigger insert; harmless for pushOutbox itself, which already groups by entity_id
+  // via loadPendingOutboxGroups), and markOutboxConflict's WHERE clause has no LIMIT — it marks
+  // every one of them 'conflict' in one UPDATE. Without this dedup, that showed as two (or more)
+  // identical conflict cards for what a person experiences as ONE disagreement to resolve — caught
+  // live: a product with no manual edit that day still carried an old queued breadcrumb from
+  // earlier testing, and clicking "Keep Mine" on one card left the other still sitting there
+  // looking unresolved (see resolveConflict's own matching fix, just below, for that half of it).
   const rows = getDatabase()
     .prepare(
-      `SELECT id, entity, entity_id, remote_snapshot_json, updated_at
-       FROM sync_outbox WHERE status = 'conflict' ORDER BY updated_at DESC`
+      `SELECT so.id, so.entity, so.entity_id, so.remote_snapshot_json, so.updated_at
+       FROM sync_outbox so
+       JOIN (
+         SELECT entity, entity_id, MAX(id) AS latest_id
+         FROM sync_outbox
+         WHERE status = 'conflict'
+         GROUP BY entity, entity_id
+       ) latest ON latest.latest_id = so.id
+       ORDER BY so.updated_at DESC`
     )
     .all() as ConflictRow[];
 
@@ -3425,14 +3496,21 @@ export function resolveConflict(outboxId: string, resolution: ConflictResolution
     : null;
   const now = new Date().toISOString();
 
+  // Every row this WHERE matches, not just outboxId itself — listConflicts() only ever shows ONE
+  // card per (entity, entity_id) (see its own comment on why more than one 'conflict' row can exist
+  // for the same real row), so resolving that one card must clear every sibling breadcrumb sharing
+  // its entity/entity_id too. Without this, clicking "Keep Mine"/"Keep Theirs" only touched the
+  // single representative row listConflicts() happened to pick, leaving any duplicate still sitting
+  // at status='conflict' — invisible until the next listConflicts() call re-surfaced it, looking
+  // exactly like the conflict had never actually been resolved.
   if (resolution === "theirs") {
     if (remoteSnapshot) {
       applyPulledRow(row.entity, remoteSnapshot, true);
     }
-    db.prepare(`UPDATE sync_outbox SET status = 'synced', remote_snapshot_json = NULL, updated_at = ? WHERE id = ?`).run(
-      now,
-      outboxId
-    );
+    db.prepare(
+      `UPDATE sync_outbox SET status = 'synced', remote_snapshot_json = NULL, updated_at = ?
+       WHERE entity = ? AND entity_id = ? AND status = 'conflict'`
+    ).run(now, row.entity, row.entity_id);
     return;
   }
 
@@ -3444,8 +3522,8 @@ export function resolveConflict(outboxId: string, resolution: ConflictResolution
     db.prepare(`UPDATE ${table} SET synced_updated_at = ? WHERE id = ?`).run(remoteLocalUpdatedAt, row.entity_id);
   }
   db.prepare(`UPDATE ${table} SET updated_at = ? WHERE id = ?`).run(now, row.entity_id);
-  db.prepare(`UPDATE sync_outbox SET status = 'queued', remote_snapshot_json = NULL, updated_at = ? WHERE id = ?`).run(
-    now,
-    outboxId
-  );
+  db.prepare(
+    `UPDATE sync_outbox SET status = 'queued', remote_snapshot_json = NULL, updated_at = ?
+     WHERE entity = ? AND entity_id = ? AND status = 'conflict'`
+  ).run(now, row.entity, row.entity_id);
 }
