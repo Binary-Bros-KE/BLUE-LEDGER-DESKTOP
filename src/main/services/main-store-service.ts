@@ -281,8 +281,13 @@ export function distributeMainStoreStockCore(params: {
   const unallocatedQuantity = mainStoreAllocationRepository.findAllocationRow(params.productId, null)?.quantity ?? 0;
 
   if (allocatedQuantity + unallocatedQuantity < params.quantity) {
+    // Leads with the product name — this is the shared core behind Main Store's own manual
+    // distribute, Goods Received transfers, AND Stock Request approval (which loops this once per
+    // item), so a bare "Not enough stock to distribute 6" with no product name left the approver of
+    // a many-line request no way to tell which product actually came up short.
+    const productName = productRepository.findProductRowById(params.productId)?.name ?? params.productId;
     throw new Error(
-      `Not enough stock to distribute ${params.quantity}. Earmarked for this storefront: ${allocatedQuantity}, unallocated: ${unallocatedQuantity}.`
+      `Not enough stock of "${productName}" to distribute ${params.quantity}. Earmarked for this storefront: ${allocatedQuantity}, unallocated: ${unallocatedQuantity}.`
     );
   }
 

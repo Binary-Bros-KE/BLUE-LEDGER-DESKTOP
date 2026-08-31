@@ -186,8 +186,12 @@ export async function approveStockRequest(id: string): Promise<StockRequest> {
           referenceId: id
         });
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to fulfil item";
-        throw new Error(`${item.product_name}: ${message}`);
+        // distributeMainStoreStockCore's own error already names the product (see its own doc
+        // comment) — rethrown as-is rather than prefixed a second time, which used to read as
+        // "ProductX: Not enough stock of "ProductX" to distribute...". Only the non-Error fallback
+        // case still needs its own message.
+        if (err instanceof Error) throw err;
+        throw new Error(`${item.product_name}: Failed to fulfil item`);
       }
 
       stockRequestRepository.updateStockRequestItemFulfillmentRow(item.id, {

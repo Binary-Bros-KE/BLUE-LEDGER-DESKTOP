@@ -94,8 +94,13 @@ export function applyValidatedStockMovement(
   const nextQuantity = currentQuantity + input.quantityChange;
 
   if (nextQuantity < 0 && !product.allow_negative_stock) {
+    // Leads with the product name — this is the shared validator behind nearly every stock-moving
+    // action in the app (checkout, invoices, quotations, purchases receiving, stock requests, Main
+    // Store), so a generic "Insufficient stock at X. Available: N, requested change: -M" with no
+    // product name was genuinely useless for a real cart/document with many lines: a client with a
+    // 20+ product order had no way to tell which single line the error was even about.
     throw new Error(
-      `Insufficient stock at ${location.location_name}. Available: ${currentQuantity}, requested change: ${input.quantityChange}`
+      `Insufficient stock for "${product.name}" at ${location.location_name}. Available: ${currentQuantity}, requested: ${Math.abs(input.quantityChange)}`
     );
   }
 
