@@ -6,7 +6,7 @@ import * as stockReceiptRepository from "@main/database/repositories/stock-recei
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
-import { distributeMainStoreStockCore } from "@main/services/main-store-service";
+import { deriveUnallocatedQuantity, distributeMainStoreStockCore } from "@main/services/main-store-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { stockReceiptCreateSchema, type StockReceiptCreateInput } from "@shared/schemas/stock-receipt";
 import { isStorefrontType, type LocationType } from "@shared/types/location";
@@ -171,9 +171,16 @@ export function createStockReceipt(input: unknown): StockReceipt {
     });
 
     for (const item of parsed.items) {
+      // A named allocationStorefrontId still reads a real, independently-synced bucket row — but
+      // "unallocated" (allocationStorefrontId null) is never stored any more, so it has to be derived
+      // the same way applyValidatedStockMovement itself derives it below (see that function's own
+      // doc comment, and migration 77). Reading a stored storefront_id IS NULL row here would always
+      // return 0 post-migration, silently printing the wrong "previous quantity" on the receipt.
       const previousQuantity =
         parsed.destination === "main_store"
-          ? (mainStoreAllocationRepository.findAllocationRow(item.productId, allocationStorefrontId)?.quantity ?? 0)
+          ? (allocationStorefrontId
+              ? (mainStoreAllocationRepository.findAllocationRow(item.productId, allocationStorefrontId)?.quantity ?? 0)
+              : deriveUnallocatedQuantity(item.productId, targetLocationId))
           : (inventoryRepository.findInventoryRow(item.productId, targetLocationId)?.quantity ?? 0);
 
       // Main Store's own physical on-hand quantity for this product, captured BEFORE

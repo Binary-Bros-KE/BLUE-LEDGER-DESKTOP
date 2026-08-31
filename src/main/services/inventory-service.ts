@@ -41,21 +41,23 @@ function assertValidDirection(input: StockMovementInput): void {
  *
  * When the movement's location is the tenant's Main Store, this also keeps the Main Store allocation
  * breakdown (main-store-service.ts) in lockstep with the plain inventory total:
- *  - Pass allocationStorefrontId to target a SPECIFIC bucket precisely (throws if that bucket doesn't
- *    have enough — used by the Main Store's own receive/distribute/return actions).
- *  - Leave it unset and the change is reflected in the "unallocated" bucket instead, clamped at zero.
- *    This is the fallback for every other existing caller (manual add/remove, product-creation opening
- *    stock, generic transfers) that doesn't know about allocations — it keeps the total correct, but
- *    can't tell an already-earmarked bucket from a general one, so use the dedicated Main Store actions
- *    when precise per-storefront tracking matters.
+ *  - Pass allocationStorefrontId to target a SPECIFIC named storefront's own earmark precisely (throws
+ *    if that bucket doesn't have enough — used by the Main Store's own receive/distribute/return
+ *    actions).
+ *  - Leave it unset (or pass null) and the change is validated/reflected against the "unallocated"
+ *    pool instead. This is the fallback for every other existing caller (manual add/remove,
+ *    product-creation opening stock, generic transfers) that doesn't know about allocations.
  *
- * The insufficient-stock check and the resulting plain-inventory total both come from the ALLOCATION
- * BUCKETS for a Main Store move, not the plain inventory row itself — that row is a derived rollup
- * that can drift from the buckets (e.g. historical data written straight into main_store_allocations
- * without ever touching the plain row), and validating against a drifted number produces a false
- * "insufficient stock" error even when the bucket actually being touched has plenty. Recomputing the
- * plain total as a fresh sum of every bucket after each Main Store move (rather than incrementing its
- * own possibly-stale value) also self-heals that drift going forward.
+ * The plain inventory row (this location's own running total, rebuilt by replaying stock_movements —
+ * always correct by construction, since that ledger is append-only with no concurrent-edit scenario to
+ * ever drift against) is the single source of truth for the TOTAL at Main Store. A named storefront's
+ * own earmark is the only thing still independently stored/synced; "unallocated" is always derived as
+ * that ledger-true total minus every named earmark, both for validating this movement and for the
+ * write at the bottom of this function — never read from or written to a stored row of its own. This
+ * used to run the other way (buckets treated as truth, the plain row self-healed from their sum) —
+ * that's exactly what let the buckets silently drift from the ledger on a real tenant's machine; see
+ * main-store-service.ts's trueUnallocatedQuantity/deriveUnallocatedQuantity doc comments and migration
+ * 77 for the full root-cause writeup.
  */
 export function applyValidatedStockMovement(
   input: StockMovementInput & { allocationStorefrontId?: string | null },
@@ -75,18 +77,43 @@ export function applyValidatedStockMovement(
 
   const mainStore = locationRepository.findMainStoreLocationRow(tenantId);
   const isMainStoreBucketMove = Boolean(mainStore) && input.locationId === mainStore!.id;
+  // Named earmark (a real storefront) vs the "unallocated" pool — see this function's own doc
+  // comment above the bucket-write section below for why only the FORMER is ever stored anymore.
+  const targetsNamedBucket = isMainStoreBucketMove && input.allocationStorefrontId !== undefined && input.allocationStorefrontId !== null;
 
-  // A Main Store movement's real source of truth is the allocation BUCKET being touched, not the
-  // plain inventory row — that row is a derived rollup (sum of every bucket) that can drift from
-  // the buckets themselves (e.g. historical data written straight into main_store_allocations,
-  // such as an import's opening stock, without ever touching the plain row). Validating against a
-  // drifted plain row produces a false "insufficient stock" error even though the bucket the user
-  // is actually adjusting has plenty — caught live: a product showing 53 unallocated at Main Store
-  // (the correct, bucket-level number) failed a -3 Adjust because the plain row separately read 0.
+  // For a Main Store movement, the plain inventory row (this location's own running ledger total —
+  // always correct, since stock_movements is append-only with no concurrent-edit scenario to ever
+  // drift against, unlike the allocation buckets below) is read once and used for BOTH the
+  // unallocated-pool derivation and the actual write at the bottom of this function.
+  const plainInventoryQuantity = isMainStoreBucketMove
+    ? (inventoryRepository.findInventoryRow(input.productId, input.locationId)?.quantity ?? 0)
+    : 0;
+
+  // currentQuantity is validated against the SPECIFIC bucket this movement actually targets — a
+  // named storefront's own earmark (a real, independently-synced fact — a Storekeeper's own
+  // decision) if allocationStorefrontId names one, or the "unallocated" pool otherwise. Unallocated
+  // is deliberately never read from (or written to — see below) its own stored row: it's always
+  // derived as the ledger-true Main Store total minus every named earmark. Storing it as its own
+  // independently-synced fact is exactly what let it drift from reality — confirmed live: one
+  // product's stored "unallocated" bucket read 4 units higher than what its own stock_movements
+  // ledger supported, traced to a two-device race whose corresponding bucket write silently never
+  // landed on the other device even though the ledger entry itself (and the plain row rebuilt from
+  // it) did. A named bucket genuinely needs its own synced row (two devices really can each
+  // legitimately earmark stock for a DIFFERENT storefront before syncing), so it keeps the same
+  // narrower risk every other conflict-aware entity already carries — this only removes the
+  // needless extra copy of a number that was always fully derivable from data that's already
+  // ledger-true.
   let currentQuantity: number;
   if (isMainStoreBucketMove) {
-    const bucketId = input.allocationStorefrontId !== undefined ? input.allocationStorefrontId : null;
-    currentQuantity = mainStoreAllocationRepository.findAllocationRow(input.productId, bucketId)?.quantity ?? 0;
+    if (targetsNamedBucket) {
+      currentQuantity = mainStoreAllocationRepository.findAllocationRow(input.productId, input.allocationStorefrontId as string)?.quantity ?? 0;
+    } else {
+      const namedTotal = mainStoreAllocationRepository
+        .findAllocationRowsForProduct(input.productId)
+        .filter((row) => row.storefront_id !== null)
+        .reduce((sum, row) => sum + row.quantity, 0);
+      currentQuantity = Math.max(0, plainInventoryQuantity - namedTotal);
+    }
   } else {
     const existing = inventoryRepository.findInventoryRow(input.productId, input.locationId);
     currentQuantity = existing?.quantity ?? 0;
@@ -111,32 +138,23 @@ export function applyValidatedStockMovement(
   });
 
   if (isMainStoreBucketMove) {
-    if (input.allocationStorefrontId !== undefined) {
+    // Only a NAMED bucket is ever written — see targetsNamedBucket's own doc comment above for why
+    // "unallocated" no longer has a row to write at all. The plain inventory row below is what
+    // actually carries the physical total now; unallocated is always re-derived from it on read
+    // (main-store-service.ts's trueUnallocatedQuantity/deriveUnallocatedQuantity), never stored.
+    if (targetsNamedBucket) {
       mainStoreAllocationRepository.adjustAllocationQuantity({
         tenantId,
         productId: input.productId,
-        storefrontId: input.allocationStorefrontId,
+        storefrontId: input.allocationStorefrontId as string,
         delta: input.quantityChange
       });
-    } else {
-      mainStoreAllocationRepository.setAllocationQuantity({
-        tenantId,
-        productId: input.productId,
-        storefrontId: null,
-        quantity: Math.max(0, currentQuantity + input.quantityChange)
-      });
     }
-    // Recomputed fresh as the sum of every bucket, not incremented from the plain row's own
-    // (possibly stale) value — this is what actually self-heals the drift going forward, not just
-    // avoids tripping over it this once.
-    const trueTotal = mainStoreAllocationRepository
-      .findAllocationRowsForProduct(input.productId)
-      .reduce((sum, row) => sum + row.quantity, 0);
     inventoryRepository.upsertInventoryQuantity({
       tenantId,
       productId: input.productId,
       locationId: input.locationId,
-      quantity: trueTotal
+      quantity: plainInventoryQuantity + input.quantityChange
     });
   } else {
     inventoryRepository.upsertInventoryQuantity({

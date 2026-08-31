@@ -32,59 +32,6 @@ import type {
   StockRequestAvailability
 } from "@shared/types/main-store";
 
-/**
- * One-time-per-boot self-heal for the SAME drift trueUnallocatedQuantity corrects at display time —
- * but this one actually WRITES the corrected value back to main_store_allocations, which matters
- * because the operational stock-moving logic (distributeMainStoreStockCore's own insufficient-stock
- * check, and the bucket adjustment it performs) reads that stored row directly, not through any of
- * the display functions above. Without this, a drifted "unallocated" bucket reading higher than the
- * ledger-true total could let a Storekeeper distribute more stock than physically exists at Main
- * Store — confirmed possible, not just a display glitch, once the root cause (main_store_allocations
- * syncing separately from the ledger-replayed plain inventory row, and able to silently miss an
- * update) was traced live. Called once at boot (bootstrap.ts, alongside every other ensure/fix
- * sweep) — cheap (one query per bulk lookup, same shape as listMainStoreProductRows), and if no
- * Main Store is set up yet for this tenant there's nothing to reconcile, so it's a silent no-op
- * rather than throwing.
- */
-export function reconcileMainStoreAllocations(tenantId: string): void {
-  const mainStore = locationRepository.findMainStoreLocationRow(tenantId);
-  if (!mainStore) return;
-
-  const storefrontIds = new Set(
-    locationRepository
-      .findAllLocationRows(tenantId)
-      .filter((row) => isStorefrontType(row.location_type as LocationType))
-      .map((row) => row.id)
-  );
-
-  const allocatedToNamedStorefrontsByProduct = new Map<string, number>();
-  const storedUnallocatedByProduct = new Map<string, number>();
-  for (const row of mainStoreAllocationRepository.findAllAllocationRows(tenantId)) {
-    if (row.storefront_id === null) {
-      storedUnallocatedByProduct.set(row.product_id, row.quantity);
-    } else if (storefrontIds.has(row.storefront_id)) {
-      allocatedToNamedStorefrontsByProduct.set(
-        row.product_id,
-        (allocatedToNamedStorefrontsByProduct.get(row.product_id) ?? 0) + row.quantity
-      );
-    }
-  }
-
-  for (const row of inventoryRepository.findInventoryRowsForLocation(mainStore.id)) {
-    const allocatedToNamedStorefronts = allocatedToNamedStorefrontsByProduct.get(row.product_id) ?? 0;
-    const correctUnallocated = trueUnallocatedQuantity(row.quantity, allocatedToNamedStorefronts);
-    const storedUnallocated = storedUnallocatedByProduct.get(row.product_id) ?? 0;
-    if (storedUnallocated === correctUnallocated) continue;
-
-    mainStoreAllocationRepository.setAllocationQuantity({
-      tenantId,
-      productId: row.product_id,
-      storefrontId: null,
-      quantity: correctUnallocated
-    });
-  }
-}
-
 function requireMainStoreLocation(tenantId: string): locationRepository.LocationRow {
   const mainStore = locationRepository.findMainStoreLocationRow(tenantId);
   if (!mainStore) {
@@ -105,23 +52,43 @@ function requireStorefront(storefrontId: string, tenantId: string): locationRepo
 }
 
 /**
- * Main Store's "unallocated" bucket is stored as its own directly-synced row in
+ * Main Store's "unallocated" pool was ORIGINALLY stored as its own directly-synced row in
  * main_store_allocations (storefront_id IS NULL) — but conceptually it was never really an
  * independent fact, it's always supposed to equal "the ledger-true total at Main Store, minus
  * whatever's earmarked for a named storefront". Storing it as its own writable/syncable number
- * instead of always deriving it is exactly what let it drift: confirmed live, one real product's
- * stored unallocated bucket read 19 while its own stock_movements ledger (replayed by hand) supported
- * only 15 — traced to one transfer_out whose bucket decrement apparently never durably landed on this
- * device even though the ledger movement itself, and the plain inventory row rebuilt from it, both
- * did. A named storefront's own earmark is a real business decision (a Storekeeper's own choice) and
- * is NEVER derived here — only "unallocated," which is inherently a remainder, gets corrected to
- * make the whole breakdown reconcile to the ledger-true total. Clamped at 0 as a last-resort guard
- * (drift should never make named earmarks alone exceed the true total, but this is display code, not
- * the place to throw over it). See reconcileMainStoreAllocations below for the write-back that fixes
- * the STORED drift too, not just what gets displayed.
+ * instead of always deriving it is exactly what let it drift from reality: confirmed live, one real
+ * product's stored unallocated bucket read 19 while its own stock_movements ledger (replayed by
+ * hand) supported only 15 — traced to a two-device race whose bucket write apparently never durably
+ * landed on this device even though the ledger movement itself, and the plain inventory row rebuilt
+ * from it (always correct — stock_movements is append-only, no concurrent-edit scenario to ever
+ * drift against), both did.
+ *
+ * FIXED at the root, not just patched: nothing in this codebase writes a storefront_id-NULL
+ * main_store_allocations row anymore (see inventory-service.ts's applyValidatedStockMovement and
+ * this file's own distributeMainStoreStockCore/recordMainStoreAdjustment/reallocateMainStoreStock) —
+ * unallocated is ALWAYS computed this way, everywhere it's needed, never independently synced, so it
+ * can no longer drift by construction. A named storefront's own earmark stays a real, independently-
+ * synced business decision (a Storekeeper's own choice, and two devices genuinely can each earmark
+ * stock for a DIFFERENT storefront before syncing) — that one keeps the same narrower conflict
+ * surface every other mutable synced row already carries; this just removes the needless extra copy
+ * of a number that was always fully derivable from data that's already ledger-true. Clamped at 0 as
+ * a last-resort guard, never expected to matter now that nothing can push it negative.
  */
 function trueUnallocatedQuantity(totalAtMainStore: number, allocatedToNamedStorefronts: number): number {
   return Math.max(0, totalAtMainStore - allocatedToNamedStorefronts);
+}
+
+/** Fetch-and-derive convenience wrapper around trueUnallocatedQuantity, for the write-path callers
+ * below that need the current unallocated figure to validate or compute a delta against (the
+ * display functions further down build allocatedToNamedStorefronts from a bulk query instead, since
+ * they already need every storefront's own figure individually). */
+export function deriveUnallocatedQuantity(productId: string, mainStoreLocationId: string): number {
+  const totalAtMainStore = inventoryRepository.findInventoryRow(productId, mainStoreLocationId)?.quantity ?? 0;
+  const allocatedToNamedStorefronts = mainStoreAllocationRepository
+    .findAllocationRowsForProduct(productId)
+    .filter((row) => row.storefront_id !== null)
+    .reduce((sum, row) => sum + row.quantity, 0);
+  return trueUnallocatedQuantity(totalAtMainStore, allocatedToNamedStorefronts);
 }
 
 function buildProductDetail(tenantId: string, productId: string): MainStoreProductDetail {
@@ -313,14 +280,27 @@ export function getMainStoreAvailabilityForStockRequest(storefrontId: string | n
   if (!location || location.tenant_id !== tenantId || !isStorefrontType(location.location_type as LocationType)) {
     return [];
   }
+  const mainStore = requireMainStoreLocation(tenantId);
 
-  const rows = mainStoreAllocationRepository.findAllAllocationRows(tenantId);
+  // Per product: this target storefront's own named earmark, plus the derived unallocated pool —
+  // the exact same "could ship right now" formula distributeMainStoreStockCore itself draws from.
+  // Built from bulk queries (not one per product) the same way the display functions above are.
+  const namedTotalByProduct = new Map<string, number>();
+  const targetAllocationByProduct = new Map<string, number>();
+  for (const row of mainStoreAllocationRepository.findAllAllocationRows(tenantId)) {
+    if (row.storefront_id === null) continue;
+    namedTotalByProduct.set(row.product_id, (namedTotalByProduct.get(row.product_id) ?? 0) + row.quantity);
+    if (row.storefront_id === target) {
+      targetAllocationByProduct.set(row.product_id, row.quantity);
+    }
+  }
+
   const byProduct = new Map<string, StockRequestAvailability>();
-  for (const row of rows) {
-    if (row.storefront_id !== null && row.storefront_id !== target) continue;
-    const entry = byProduct.get(row.product_id) ?? { productId: row.product_id, availableQuantity: 0 };
-    entry.availableQuantity += row.quantity;
-    byProduct.set(row.product_id, entry);
+  for (const row of inventoryRepository.findInventoryRowsForLocation(mainStore.id)) {
+    const namedTotal = namedTotalByProduct.get(row.product_id) ?? 0;
+    const unallocated = trueUnallocatedQuantity(row.quantity, namedTotal);
+    const targetAllocation = targetAllocationByProduct.get(row.product_id) ?? 0;
+    byProduct.set(row.product_id, { productId: row.product_id, availableQuantity: unallocated + targetAllocation });
   }
   return Array.from(byProduct.values());
 }
@@ -383,7 +363,7 @@ export function distributeMainStoreStockCore(params: {
 
   const allocatedQuantity =
     mainStoreAllocationRepository.findAllocationRow(params.productId, params.storefrontId)?.quantity ?? 0;
-  const unallocatedQuantity = mainStoreAllocationRepository.findAllocationRow(params.productId, null)?.quantity ?? 0;
+  const unallocatedQuantity = deriveUnallocatedQuantity(params.productId, mainStore.id);
 
   if (allocatedQuantity + unallocatedQuantity < params.quantity) {
     // Leads with the product name — this is the shared core behind Main Store's own manual
@@ -568,8 +548,9 @@ export function recordMainStoreAdjustment(input: unknown): MainStoreProductDetai
   if (parsed.storefrontId) requireStorefront(parsed.storefrontId, tenantId);
 
   runInTransaction(() => {
-    const currentQuantity =
-      mainStoreAllocationRepository.findAllocationRow(parsed.productId, parsed.storefrontId)?.quantity ?? 0;
+    const currentQuantity = parsed.storefrontId
+      ? (mainStoreAllocationRepository.findAllocationRow(parsed.productId, parsed.storefrontId)?.quantity ?? 0)
+      : deriveUnallocatedQuantity(parsed.productId, mainStore.id);
     const delta = parsed.countedQuantity - currentQuantity;
     if (delta === 0) return;
 
@@ -593,28 +574,48 @@ export function recordMainStoreAdjustment(input: unknown): MainStoreProductDetai
 }
 
 /** Bookkeeping-only move between two Main Store buckets — nothing physically relocates, so no stock
- * movement is recorded and the plain inventory total at Main Store is untouched. */
+ * movement is recorded and the plain inventory total at Main Store is untouched. Only ever writes a
+ * NAMED storefront's own bucket (a real, independently-synced earmark decision) — moving to/from the
+ * "unallocated" pool needs no write of its own anymore (see trueUnallocatedQuantity's own doc
+ * comment): reducing a named bucket automatically grows the derived unallocated remainder, and vice
+ * versa, since unallocated is always computed as the ledger-true total minus every named bucket. */
 export function reallocateMainStoreStock(input: unknown): MainStoreProductDetail {
   requirePermission("main_store", "edit");
   const parsed: MainStoreReallocateInput = mainStoreReallocateSchema.parse(input);
   const { tenantId } = getCurrentTenant();
-  requireMainStoreLocation(tenantId);
+  const mainStore = requireMainStoreLocation(tenantId);
   if (parsed.fromStorefrontId) requireStorefront(parsed.fromStorefrontId, tenantId);
   if (parsed.toStorefrontId) requireStorefront(parsed.toStorefrontId, tenantId);
 
   runInTransaction(() => {
-    mainStoreAllocationRepository.adjustAllocationQuantity({
-      tenantId,
-      productId: parsed.productId,
-      storefrontId: parsed.fromStorefrontId,
-      delta: -parsed.quantity
-    });
-    mainStoreAllocationRepository.adjustAllocationQuantity({
-      tenantId,
-      productId: parsed.productId,
-      storefrontId: parsed.toStorefrontId,
-      delta: parsed.quantity
-    });
+    if (parsed.fromStorefrontId) {
+      mainStoreAllocationRepository.adjustAllocationQuantity({
+        tenantId,
+        productId: parsed.productId,
+        storefrontId: parsed.fromStorefrontId,
+        delta: -parsed.quantity
+      });
+    } else {
+      // Coming FROM the unallocated pool — nothing stored to decrement, but still needs the same
+      // "can't go negative" guard adjustAllocationQuantity already gives a named bucket below.
+      const currentUnallocated = deriveUnallocatedQuantity(parsed.productId, mainStore.id);
+      if (parsed.quantity > currentUnallocated) {
+        const productName = productRepository.findProductRowById(parsed.productId)?.name ?? parsed.productId;
+        throw new Error(
+          `Not enough unallocated stock of "${productName}" to reallocate ${parsed.quantity}. Available: ${currentUnallocated}.`
+        );
+      }
+    }
+    if (parsed.toStorefrontId) {
+      mainStoreAllocationRepository.adjustAllocationQuantity({
+        tenantId,
+        productId: parsed.productId,
+        storefrontId: parsed.toStorefrontId,
+        delta: parsed.quantity
+      });
+    }
+    // else: going TO the unallocated pool — nothing to write; the FROM side above already reduced
+    // whichever named bucket unallocated is derived against.
   });
 
   return buildProductDetail(tenantId, parsed.productId);

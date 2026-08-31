@@ -3,12 +3,12 @@ import { runInTransaction } from "@main/database/connection";
 import * as categoryRepository from "@main/database/repositories/category-repository";
 import * as inventoryRepository from "@main/database/repositories/inventory-repository";
 import * as locationRepository from "@main/database/repositories/location-repository";
-import * as mainStoreAllocationRepository from "@main/database/repositories/main-store-allocation-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
 import { deleteManagedProductImage } from "@main/services/image-service";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
+import { deriveUnallocatedQuantity } from "@main/services/main-store-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { bulkSetTaxTypeSchema, productCreateSchema, productUpdateSchema } from "@shared/schemas/product";
 import type { Product, ProductListItem, ProductStatus, ProductStockSummary } from "@shared/types/product";
@@ -117,9 +117,10 @@ export function getProductStockSummary(productId: string): ProductStockSummary {
   const mainStoreQuantity = mainStore
     ? (inventoryRepository.findInventoryRow(productId, mainStore.id)?.quantity ?? 0)
     : 0;
-  const mainStoreUnallocatedQuantity = mainStore
-    ? (mainStoreAllocationRepository.findAllocationRow(productId, null)?.quantity ?? 0)
-    : 0;
+  // Derived, not read from a stored bucket — see main-store-service.ts's deriveUnallocatedQuantity
+  // doc comment for why "unallocated" is never its own independently-synced fact any more (migration
+  // 77 removed the storefront_id IS NULL row this used to read directly).
+  const mainStoreUnallocatedQuantity = mainStore ? deriveUnallocatedQuantity(productId, mainStore.id) : 0;
 
   return {
     ownLocationName: ownLocation?.location_name ?? null,

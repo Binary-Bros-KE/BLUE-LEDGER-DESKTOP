@@ -110,10 +110,30 @@ export function findMainStoreAllocationsByProduct(tenantId: string): MainStoreAl
     .all(tenantId) as MainStoreAllocationByProductRow[];
 }
 
-export function findMainStoreUnallocatedQuantity(tenantId: string): number {
+/** Tenant-wide "Unallocated @ Main Store" total, summed across every product — the same
+ * `trueUnallocatedQuantity` derivation main-store-service.ts uses per-product (ledger-true Main
+ * Store quantity minus what's earmarked to NAMED storefronts, clamped at 0), just aggregated here
+ * for the report's summary stat. Used to read `main_store_allocations`' own storefront_id IS NULL
+ * row directly — that row is gone as of migration 77 (it was an independently-synced fact that
+ * could silently drift from the ledger; see that migration's own comment for the live-confirmed
+ * root cause). Deriving it here the same way the rest of the app now does means this stat can never
+ * again disagree with what Main Store's own product detail or Products tab shows. */
+export function findMainStoreUnallocatedQuantity(tenantId: string, mainStoreLocationId: string): number {
   const row = getDatabase()
-    .prepare(`SELECT COALESCE(SUM(quantity), 0) AS total FROM main_store_allocations WHERE tenant_id = ? AND storefront_id IS NULL`)
-    .get(tenantId) as { total: number };
+    .prepare(
+      `
+      SELECT COALESCE(SUM(MAX(i.quantity - COALESCE(alloc.allocated, 0), 0)), 0) AS total
+      FROM inventory i
+      LEFT JOIN (
+        SELECT product_id, SUM(quantity) AS allocated
+        FROM main_store_allocations
+        WHERE tenant_id = ? AND storefront_id IS NOT NULL
+        GROUP BY product_id
+      ) alloc ON alloc.product_id = i.product_id
+      WHERE i.tenant_id = ? AND i.location_id = ?
+    `
+    )
+    .get(tenantId, tenantId, mainStoreLocationId) as { total: number };
   return row.total;
 }
 

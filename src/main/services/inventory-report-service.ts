@@ -100,7 +100,9 @@ export function getInventoryReportData(input: unknown): InventoryReportData {
   const mainStoreLocationId = activeLocations.find((loc) => isMainStoreType(loc.location_type))?.id ?? null;
   const hasMainStore = mainStoreLocationId !== null;
   const allocationByStorefront = hasMainStore ? inventoryReportRepository.findMainStoreAllocationsByStorefront(tenantId) : [];
-  const unallocatedQuantity = hasMainStore ? inventoryReportRepository.findMainStoreUnallocatedQuantity(tenantId) : 0;
+  const unallocatedQuantity = hasMainStore
+    ? inventoryReportRepository.findMainStoreUnallocatedQuantity(tenantId, mainStoreLocationId as string)
+    : 0;
 
   // Per (product, storefront), how much Main Store has earmarked specifically for that
   // storefront — not yet physically distributed, so it lives alongside (not inside) `rows`.

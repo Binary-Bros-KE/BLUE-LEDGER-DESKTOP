@@ -2634,6 +2634,45 @@ const migrations = [
       SELECT lower(hex(randomblob(16))), tenant_id, (SELECT client_id FROM tenant WHERE id = working_hours.tenant_id), 'working_hours', id, 'upsert', 'push', 'queued', 0, '{}', id || ':migration76:' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
       FROM working_hours;
     `
+  },
+  {
+    version: 77,
+    name: "remove_unallocated_main_store_bucket_rows",
+    sql: `
+      -- CRITICAL: main_store_allocations' storefront_id IS NULL row ("unallocated @ Main Store") used
+      -- to be an independently-stored, independently-synced fact, and main_store_allocations is one
+      -- of the CONFLICT_AWARE_ENTITIES (sync-engine.ts) — a real device can touch the same bucket close
+      -- together and its optimistic-lock pull-guard can legitimately (by design) reject/skip an
+      -- incoming update. Traced live against a real tenant's own ledger: one transfer_out movement
+      -- correctly decremented the plain inventory row (which Products tab reads, rebuilt by REPLAYING
+      -- stock_movements and therefore always ledger-true) but its paired decrement on this bucket row
+      -- silently never landed, leaving the bucket permanently 4 units above the truth with no trace of
+      -- ever being marked a conflict — a silent lost update on pull, not an ignored Conflicts card. The
+      -- user separately reported "a lot of main store allocation errors we left unresolved because the
+      -- errors were vague, we did not know which product they were talking about" on the real client
+      -- machine — before the Conflicts UI got human-readable (see the CONFLICT_LABEL_BUILDERS/
+      -- humanizeConflictSnapshot work), that backlog was exactly this same failure mode piling up
+      -- unresolved, invisible, and unreadable.
+      --
+      -- Root fix (application code, this same release): "unallocated" is no longer written or synced
+      -- as its own row at all. applyValidatedStockMovement/distributeMainStoreStockCore/
+      -- recordMainStoreAdjustment/reallocateMainStoreStock now all derive it on the fly —
+      -- trueUnallocatedQuantity(ledger-true Main Store total, sum of NAMED storefront earmarks) — so
+      -- there is structurally nothing left for a lost update to drift. A named storefront's own earmark
+      -- (storefront_id IS NOT NULL) remains a real, independently-synced business decision — a
+      -- Storekeeper's own choice — and is untouched by this migration.
+      --
+      -- This migration deletes what the old code path leaves behind on every device that ever hit
+      -- this: the now-meaningless storefront_id IS NULL rows themselves, PLUS every sync_outbox entry
+      -- referencing one (queued, failed, synced, or — the actual target here — stuck 'conflict' rows).
+      -- Nothing reads these rows for truth any more, so removing them is purely cleanup: it clears the
+      -- exact vague, unreadable conflict backlog the user flagged, at its source, on every device that
+      -- pulls this migration.
+      DELETE FROM sync_outbox WHERE entity = 'main_store_allocations' AND entity_id IN (
+        SELECT id FROM main_store_allocations WHERE storefront_id IS NULL
+      );
+      DELETE FROM main_store_allocations WHERE storefront_id IS NULL;
+    `
   }
 ] as const;
 
