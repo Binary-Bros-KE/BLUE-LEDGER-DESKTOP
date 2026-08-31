@@ -106,6 +106,8 @@ export const ipcChannels = {
   supplierCreate: "supplier:create",
   supplierUpdate: "supplier:update",
   supplierSetStatus: "supplier:set-status",
+  supplierBalanceAdjust: "supplier:balance-adjust",
+  supplierBalanceHistory: "supplier:balance-history",
   riderList: "rider:list",
   riderGet: "rider:get",
   riderCreate: "rider:create",

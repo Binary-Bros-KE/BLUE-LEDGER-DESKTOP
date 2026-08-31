@@ -2673,6 +2673,69 @@ const migrations = [
       );
       DELETE FROM main_store_allocations WHERE storefront_id IS NULL;
     `
+  },
+  {
+    version: 78,
+    name: "supplier_balance",
+    sql: `
+      -- What's owed to a supplier ("stuff ordered, not yet paid") — client-requested, explicitly
+      -- specified as a running total maintained incrementally (each ordered purchase increases it,
+      -- each payment decreases it, including partial), NOT recomputed by summing Purchases live on
+      -- every read. Deliberately mirrors stock_movements/inventory's own two-table shape, the same
+      -- architecture just proven out this same day for Postgres's mobile stock reads (see SERVER's
+      -- own inventory-balance migration): an append-only, synced EVENT LEDGER (supplier_balance_
+      -- entries, below) is the real source of truth, and suppliers.balance_cents is a purely LOCAL,
+      -- NEVER-SYNCED cache column kept in lockstep with it (see supplier-balance-service.ts). This is
+      -- deliberately NOT the same shape as the OLD main_store_allocations design (a plain mutable
+      -- field synced directly, last-write-wins) — that's exactly what silently drifted (see migration
+      -- 77) and is exactly the same risk CustomerBalance's own currentBalanceCents column already
+      -- flagged and avoided (see sync-engine.ts's PAYLOAD_BUILDERS.suppliers/customers comments):
+      -- 'suppliers' is a CONFLICT_AWARE_ENTITIES member, so a bare synced balance field could have two
+      -- devices each record a purchase/payment for the same supplier around the same moment, and
+      -- whichever device's whole-row upsert loses the optimistic-lock race would silently discard the
+      -- other's balance delta. An append-only ledger has no such race — two devices' entries for the
+      -- same supplier just both land, exactly like two stock_movements rows for the same product.
+      ALTER TABLE suppliers ADD COLUMN balance_cents INTEGER NOT NULL DEFAULT 0;
+
+      CREATE TABLE supplier_balance_entries (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        supplier_id TEXT NOT NULL,
+        entry_type TEXT NOT NULL CHECK (entry_type IN (
+          'purchase_ordered', 'purchase_cancelled', 'payment', 'manual_adjustment'
+        )),
+        amount_cents INTEGER NOT NULL,
+        reference_type TEXT,
+        reference_id TEXT,
+        notes TEXT,
+        performed_by TEXT,
+        created_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
+      );
+
+      CREATE INDEX idx_supplier_balance_entries_supplier ON supplier_balance_entries(supplier_id, created_at);
+      CREATE INDEX idx_supplier_balance_entries_tenant ON supplier_balance_entries(tenant_id);
+
+      -- Push-only, append-only, exactly like trg_stock_movements_sync_ai — no AU trigger, since these
+      -- rows are never edited after creation (a correction is always a NEW entry).
+      CREATE TRIGGER trg_supplier_balance_entries_sync_ai AFTER INSERT ON supplier_balance_entries BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'supplier_balance_entries', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.created_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+
+      -- Deliberately NO backfill from existing Purchases here, even though real unpaid purchases
+      -- already exist in this table — explicit client instruction: every supplier starts at exactly
+      -- 0, and whatever's actually owed for purchases made before this feature shipped gets entered
+      -- by hand via the new "Record Balance Adjustment" action (entry_type 'manual_adjustment'),
+      -- using the business's own external records as the source of truth. Auto-summing this app's
+      -- already-recorded purchases here risked double-counting against whatever the client is about
+      -- to carry forward from their old system, or baking in payment-tracking gaps from before this
+      -- feature existed — a clean, deliberate 0 plus one manual entry per supplier is safer than a
+      -- guessed backfill.
+    `
   }
 ] as const;
 

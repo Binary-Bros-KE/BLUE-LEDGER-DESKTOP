@@ -215,6 +215,7 @@ import {
   setSupplierStatus,
   updateSupplier
 } from "@main/services/supplier-service";
+import { adjustSupplierBalance, listSupplierBalanceEntries } from "@main/services/supplier-balance-service";
 import { createRider, getRider, listRiders, setRiderStatus, updateRider } from "@main/services/rider-service";
 import {
   cancelPurchase,
@@ -563,6 +564,10 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.supplierSetStatus, (_event, id: string, status: SupplierStatus) =>
     setSupplierStatus(id, status)
   );
+  ipcMain.handle(ipcChannels.supplierBalanceAdjust, (_event, id: string, input: unknown) =>
+    adjustSupplierBalance(id, input)
+  );
+  ipcMain.handle(ipcChannels.supplierBalanceHistory, (_event, id: string) => listSupplierBalanceEntries(id));
   ipcMain.handle(ipcChannels.riderList, () => listRiders());
   ipcMain.handle(ipcChannels.riderGet, (_event, id: string) => getRider(id));
   ipcMain.handle(ipcChannels.riderCreate, (_event, input: unknown) => createRider(input));

@@ -10,6 +10,7 @@ export type SyncEntity =
   | "payment_methods"
   | "riders"
   | "suppliers"
+  | "supplier_balance_entries"
   | "customers"
   | "employees"
   | "roles"

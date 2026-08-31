@@ -26,6 +26,7 @@ import * as serviceChargeRepository from "@main/database/repositories/service-ch
 import * as stockMovementRepository from "@main/database/repositories/stock-movement-repository";
 import * as stockReceiptRepository from "@main/database/repositories/stock-receipt-repository";
 import * as stockRequestRepository from "@main/database/repositories/stock-request-repository";
+import * as supplierBalanceRepository from "@main/database/repositories/supplier-balance-repository";
 import * as supplierRepository from "@main/database/repositories/supplier-repository";
 import * as tenantRepository from "@main/database/repositories/tenant-repository";
 import * as workingHoursRepository from "@main/database/repositories/working-hours-repository";
@@ -56,6 +57,11 @@ const SYNC_ENTITIES: SyncEntity[] = [
   "payment_methods",
   "riders",
   "suppliers",
+  // Depends on suppliers already existing locally on pull (FK on supplier_id) — must come after it.
+  // Same "ledger, not a mutable field" shape as stock_movements/main_store_allocations: see this
+  // entity's own PAYLOAD_BUILDER comment for why suppliers.balance_cents (the local cache it drives)
+  // is never itself synced.
+  "supplier_balance_entries",
   "customers",
   "employees",
   "products",
@@ -93,6 +99,10 @@ const BESPOKE_APPLY_ENTITIES = new Set<SyncEntity>([
   // applied as a quantity DELTA to local inventory/allocations, never a plain column-map upsert (see
   // applyStockMovementPulledRow's own doc comment).
   "stock_movements",
+  // Same shape again — an append-only ledger row applied as a delta to a local cache column
+  // (suppliers.balance_cents), never a plain column-map upsert. See
+  // applySupplierBalanceEntryPulledRow's own doc comment.
+  "supplier_balance_entries",
   // Back to a plain document-with-line-items, same shape as sale_returns — a header with a real
   // update path (approve/reject) plus items only ever inserted once at creation.
   "stock_requests",
@@ -354,9 +364,34 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       creditLimitCents: s.creditLimitCents,
       status: s.status,
       notes: s.notes,
+      // balanceCents deliberately NOT sent — see the Supplier type's own doc comment (mirrors
+      // customers' currentBalanceCents exactly, same reasoning). The real, synced source of truth is
+      // supplier_balance_entries, its own entry below.
       localCreatedAt: s.createdAt,
       localUpdatedAt: s.updatedAt,
       baseUpdatedAt: row.synced_updated_at
+    };
+  },
+  // Not conflict-aware — append-only ledger, same shape as stock_movements (no concurrent-edit
+  // scenario: two devices each recording their own purchase/payment for the same supplier just both
+  // land as independent rows, never competing over one). supplier_balance_entries has no APPLY_
+  // CONFIG entry (see refColumnsFor's bespokeColumns map), so — same fix as stock_movements —
+  // supplierId is alias-translated directly here rather than through that generic machinery.
+  supplier_balance_entries: (id) => {
+    const row = supplierBalanceRepository.findBalanceEntryRowById(id);
+    if (!row) return null;
+    return {
+      id: row.id,
+      supplierId: resolveCloudRef("suppliers", row.supplier_id),
+      entryType: row.entry_type,
+      amountCents: row.amount_cents,
+      referenceType: row.reference_type,
+      referenceId: row.reference_id,
+      notes: row.notes,
+      performedBy: row.performed_by,
+      localCreatedAt: row.created_at,
+      // Immutable — no separate updated_at column locally; its "last updated" IS its creation time.
+      localUpdatedAt: row.created_at
     };
   },
   customers: (id) => {
@@ -1920,6 +1955,8 @@ function applyPulledRow(entity: SyncEntity, row: Record<string, unknown>, force 
     // can only ever call applyPulledRow with force:true for a CONFLICT_AWARE_ENTITIES member, which
     // this deliberately isn't, so there's no force parameter to thread through here.
     if (entity === "stock_movements") applyStockMovementPulledRow(row);
+    // Never conflict-aware, same reasoning as stock_movements just above.
+    if (entity === "supplier_balance_entries") applySupplierBalanceEntryPulledRow(row);
     if (entity === "stock_requests") applyStockRequestPulledRow(row, force);
     if (entity === "stock_receipts") applyStockReceiptPulledRow(row, force);
     return;
@@ -2720,6 +2757,47 @@ function applyStockMovementPulledRow(row: Record<string, unknown>): void {
       locationId,
       quantity: (existingInventory?.quantity ?? 0) + quantityChange
     });
+  });
+}
+
+/** supplier_balance_entries' own pull-apply, same shape as applyStockMovementPulledRow just above —
+ * an append-only ledger row applied as a DELTA to the local cache (suppliers.balance_cents), never a
+ * plain column-map upsert. The existence check by id is the whole idempotency guard: either this
+ * device has never seen this entry before (insert it, adjust the cache once) or it already has (do
+ * nothing) — covers both "another device's purchase/payment, arriving for the first time" and "this
+ * device's own entry, echoed back by a pull that doesn't exclude the requester's own rows". */
+function applySupplierBalanceEntryPulledRow(row: Record<string, unknown>): void {
+  runInTransaction(() => {
+    const id = row.id as string;
+    const db = getDatabase();
+
+    const alreadyApplied = db.prepare("SELECT 1 FROM supplier_balance_entries WHERE id = ?").get(id);
+    if (alreadyApplied) return;
+
+    const localTenantId = tenantRepository.findTenantRow()!.id;
+    const supplierId = resolveRef("suppliers", row.supplierId) as string;
+    const amountCents = row.amountCents as number;
+
+    db.prepare(
+      `INSERT INTO supplier_balance_entries (
+         id, tenant_id, supplier_id, entry_type, amount_cents,
+         reference_type, reference_id, notes, performed_by, created_at, sync_status, last_synced_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', ?)`
+    ).run(
+      id,
+      localTenantId,
+      supplierId,
+      row.entryType as string,
+      amountCents,
+      (row.referenceType as string | null) ?? null,
+      (row.referenceId as string | null) ?? null,
+      (row.notes as string | null) ?? null,
+      (row.performedBy as string | null) ?? null,
+      row.localCreatedAt as string,
+      new Date().toISOString()
+    );
+
+    supplierBalanceRepository.adjustSupplierBalanceCents(supplierId, amountCents);
   });
 }
 

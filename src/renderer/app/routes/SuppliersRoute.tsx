@@ -10,6 +10,7 @@ import {
   PowerOff,
   Search,
   Truck,
+  Wallet,
   XCircle
 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
@@ -157,7 +158,8 @@ export function SuppliersRoute(): React.JSX.Element {
     const total = suppliers?.length ?? 0;
     const active = suppliers?.filter((supplier) => supplier.status === "active").length ?? 0;
     const inactive = total - active;
-    return { total, active, inactive };
+    const totalOwedCents = suppliers?.reduce((sum, supplier) => sum + supplier.balanceCents, 0) ?? 0;
+    return { total, active, inactive, totalOwedCents };
   }, [suppliers]);
 
   const filteredSuppliers = useMemo(() => {
@@ -197,6 +199,7 @@ export function SuppliersRoute(): React.JSX.Element {
         { key: "contactPerson", header: "Contact Person" },
         { key: "phone", header: "Phone" },
         { key: "paymentOption", header: "Payment Option" },
+        { key: "balance", header: "Balance", align: "right" },
         { key: "creditLimit", header: "Credit Limit", align: "right" },
         { key: "status", header: "Status" }
       ],
@@ -206,13 +209,18 @@ export function SuppliersRoute(): React.JSX.Element {
         contactPerson: supplier.contactPerson ?? "—",
         phone: supplier.phone1,
         paymentOption: paymentOptionLabel(supplier.paymentOption),
+        balance: formatCents(supplier.balanceCents),
         creditLimit: supplier.creditLimitCents !== null ? formatCents(supplier.creditLimitCents) : "—",
         status: supplier.status === "active" ? "Active" : "Inactive"
       })),
       stats: [
         { label: "Total Suppliers", value: String(stats.total) },
         { label: "Active", value: String(stats.active) },
-        { label: "Inactive", value: String(stats.inactive) }
+        { label: "Inactive", value: String(stats.inactive) },
+        {
+          label: "Total Owed",
+          value: formatCents(filteredSuppliers.reduce((sum, s) => sum + s.balanceCents, 0))
+        }
       ],
       fileBaseName: `Suppliers_${new Date().toISOString().slice(0, 10)}`
     };
@@ -320,10 +328,11 @@ export function SuppliersRoute(): React.JSX.Element {
         aria-hidden="true"
       />
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
         <StatTile icon={Truck} label="Total Suppliers" value={String(stats.total)} tone="primary" />
         <StatTile icon={CheckCircle2} label="Active Suppliers" value={String(stats.active)} tone="success" />
         <StatTile icon={XCircle} label="Inactive Suppliers" value={String(stats.inactive)} tone="warning" />
+        <StatTile icon={Wallet} label="Total Owed" value={formatCents(stats.totalOwedCents)} tone="danger" />
       </div>
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
@@ -453,16 +462,18 @@ export function SuppliersRoute(): React.JSX.Element {
             <div className="overflow-x-auto rounded-lg border border-line">
               <table className="w-full  table-fixed border-collapse text-sm">
                 <colgroup>
-                  <col className="w-[11%]" />
-                  <col className="w-[19%]" />
-                  <col className="w-[11%]" />
-                  <col className="w-[9%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[17%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[8%]" />
                   <col className="w-[10%]" />
                 </colgroup>
                 <thead>
                   <tr className="bg-primary text-white">
                     <Th>Code</Th>
                     <Th>Business Name</Th>
+                    <Th>Balance</Th>
                     <Th>Credit Limit</Th>
                     <Th>Status</Th>
                     <Th className="text-right">Actions</Th>
@@ -486,6 +497,14 @@ export function SuppliersRoute(): React.JSX.Element {
                             {supplier.phone1}
                           </span>
                         </div>
+                      </td>
+                      <td
+                        className={cn(
+                          "truncate px-4 py-3 text-xs font-extrabold tabular-nums",
+                          supplier.balanceCents > 0 ? "text-danger" : "text-muted"
+                        )}
+                      >
+                        {formatCents(supplier.balanceCents)}
                       </td>
                       <td className="truncate px-4 py-3 text-xs font-bold tabular-nums text-muted">
                         {formatCents(supplier.creditLimitCents)}
@@ -765,7 +784,14 @@ export function SuppliersRoute(): React.JSX.Element {
       </Modal>
 
       {viewingSupplier && (
-        <SupplierDetailModal supplier={viewingSupplier} onClose={() => setViewingSupplier(null)} />
+        <SupplierDetailModal
+          supplier={viewingSupplier}
+          onClose={() => setViewingSupplier(null)}
+          onSupplierUpdated={(updated) => {
+            setViewingSupplier(updated);
+            setSuppliers((prev) => prev?.map((s) => (s.id === updated.id ? updated : s)) ?? prev);
+          }}
+        />
       )}
     </motion.div>
   );

@@ -27,6 +27,7 @@ export type SupplierRow = {
   credit_limit_cents: number | null;
   status: string;
   notes: string | null;
+  balance_cents: number;
   created_at: string;
   updated_at: string;
   sync_status: string;
@@ -230,6 +231,7 @@ export function mapSupplierRow(row: SupplierRow): Supplier {
     creditLimitCents: row.credit_limit_cents,
     status: row.status as SupplierStatus,
     notes: row.notes,
+    balanceCents: row.balance_cents,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     syncStatus: row.sync_status as SupplierSyncStatus,

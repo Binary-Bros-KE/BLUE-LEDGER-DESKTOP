@@ -155,7 +155,9 @@ const api: BlueLedgerApi = {
     get: (id) => invoke("supplier:get", id),
     create: (input) => invoke("supplier:create", input),
     update: (id, input) => invoke("supplier:update", id, input),
-    setStatus: (id, status) => invoke("supplier:set-status", id, status)
+    setStatus: (id, status) => invoke("supplier:set-status", id, status),
+    adjustBalance: (id, input) => invoke("supplier:balance-adjust", id, input),
+    balanceHistory: (id) => invoke("supplier:balance-history", id)
   },
   rider: {
     list: () => invoke("rider:list"),

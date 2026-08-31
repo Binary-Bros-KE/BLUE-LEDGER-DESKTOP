@@ -49,6 +49,15 @@ export type Supplier = SupplierInputFields & {
   /** Auto-generated at creation (e.g. SUP-000001) and never editable afterward. */
   supplierCode: string;
   status: SupplierStatus;
+  /** What's currently owed to this supplier — a running total kept correct incrementally by
+   * supplier-balance-service.ts, NEVER recomputed by summing Purchases live (see that file's own doc
+   * comment for why: the exact same "sum the whole history on every read" mistake this business's own
+   * stock reads had, before that got fixed). Deliberately a purely LOCAL cache column, not itself
+   * synced — see sync-engine.ts's PAYLOAD_BUILDERS.suppliers, which omits it the same way it already
+   * omits Customer.currentBalanceCents, for the same reason (a plain synced counter that two devices
+   * can each independently increment/decrement risks a lost update on conflict). The real, synced
+   * source of truth is the supplier_balance_entries ledger this is derived from. */
+  balanceCents: number;
   createdAt: string;
   updatedAt: string;
   syncStatus: SupplierSyncStatus;

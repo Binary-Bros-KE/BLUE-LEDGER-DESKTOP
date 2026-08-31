@@ -52,6 +52,7 @@ import type {
 import type { Quotation, QuotationListItem, QuotationStatus, QuotationStockCheckItem, QuotationSummary } from "./quotation";
 import type { Role, RoleListItem, RolePickerItem } from "./role";
 import type { Supplier, SupplierStatus } from "./supplier";
+import type { SupplierBalanceEntry } from "./supplier-balance";
 import type { Rider, RiderStatus } from "./rider";
 import type { DeliveryInput } from "../schemas/charges";
 import type { PendingSaleListItem, Sale, SaleDelivery, SaleListItem } from "./sale";
@@ -502,6 +503,14 @@ export type IpcInvokeMap = {
   "supplier:set-status": {
     args: [string, SupplierStatus];
     result: Supplier;
+  };
+  "supplier:balance-adjust": {
+    args: [string, Record<string, unknown>];
+    result: SupplierBalanceEntry;
+  };
+  "supplier:balance-history": {
+    args: [string];
+    result: SupplierBalanceEntry[];
   };
   "rider:list": {
     args: [];
@@ -1502,6 +1511,11 @@ export type BlueLedgerApi = {
       id: string,
       status: SupplierStatus
     ) => Promise<IpcInvokeMap["supplier:set-status"]["result"]>;
+    adjustBalance: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["supplier:balance-adjust"]["result"]>;
+    balanceHistory: (id: string) => Promise<IpcInvokeMap["supplier:balance-history"]["result"]>;
   };
   rider: {
     list: () => Promise<IpcInvokeMap["rider:list"]["result"]>;

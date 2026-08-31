@@ -11,6 +11,7 @@ import { getCurrentBranchScope, getCurrentEmployeeId, getSession, requirePermiss
 import { generateDocumentNumber } from "@main/services/document-number-service";
 import { deleteManagedPurchaseAttachment } from "@main/services/image-service";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
+import { recordSupplierBalanceEntry } from "@main/services/supplier-balance-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { computePurchasePaymentStatus, computePurchaseReceivingStatus } from "@shared/lib/purchase";
 import {
@@ -257,6 +258,19 @@ export function createPurchase(input: unknown): Purchase {
 
     if (parsed.intent === "ordered") {
       syncProductPricingFromOrder(cart.items);
+      // "Ordered, not yet paid" is exactly when the client's own spec says the supplier balance
+      // should increase — a draft is never a real commitment, so it never touches this (see
+      // supplier-balance-service.ts's own doc comment for the full design).
+      recordSupplierBalanceEntry({
+        tenantId,
+        supplierId: parsed.supplierId,
+        entryType: "purchase_ordered",
+        amountCents: cart.grandTotalCents,
+        referenceType: "purchase",
+        referenceId: purchaseId,
+        notes: null,
+        performedBy: employeeId
+      });
     }
 
     return getPurchaseDetail(purchaseId);
@@ -326,6 +340,19 @@ export function updatePurchase(id: string, input: unknown): Purchase {
     if (parsed.intent === "ordered") {
       purchaseRepository.updatePurchaseStatusRow(id, "ordered", { orderedAt: now });
       syncProductPricingFromOrder(cart.items);
+      // Same draft→ordered transition as createPurchase's own hook — this is the ONLY way a draft
+      // can reach "ordered" through this function (requireEditableDraft above already guarantees the
+      // purchase was still a draft, so this fires at most once per purchase, never a double-count).
+      recordSupplierBalanceEntry({
+        tenantId,
+        supplierId: parsed.supplierId,
+        entryType: "purchase_ordered",
+        amountCents: cart.grandTotalCents,
+        referenceType: "purchase",
+        referenceId: id,
+        notes: null,
+        performedBy: getCurrentEmployeeId()
+      });
     }
 
     return getPurchaseDetail(id);
@@ -360,6 +387,19 @@ export function markPurchaseOrdered(id: string): Purchase {
       }))
     );
 
+    // Same draft→ordered balance hook as createPurchase/updatePurchase — the guard above already
+    // confirmed this purchase was still a draft, so this fires exactly once.
+    recordSupplierBalanceEntry({
+      tenantId,
+      supplierId: row.supplier_id,
+      entryType: "purchase_ordered",
+      amountCents: row.grand_total_cents,
+      referenceType: "purchase",
+      referenceId: id,
+      notes: null,
+      performedBy: getCurrentEmployeeId()
+    });
+
     return getPurchaseDetail(id);
   });
 }
@@ -380,8 +420,32 @@ export function cancelPurchase(id: string): Purchase {
     throw new Error("This purchase already has received stock and can't be cancelled");
   }
 
-  purchaseRepository.updatePurchaseStatusRow(id, "cancelled");
-  return getPurchaseDetail(id);
+  return runInTransaction(() => {
+    purchaseRepository.updatePurchaseStatusRow(id, "cancelled");
+
+    // Only "ordered" ever increased the supplier balance in the first place (a draft never does —
+    // see createPurchase/updatePurchase/markPurchaseOrdered's own hooks) — reverse exactly the
+    // OUTSTANDING remainder (grand total minus whatever's already been paid), not the full grand
+    // total: any payments already recorded already decreased the balance via applyPayment and stay
+    // exactly as they are, a real historical fact regardless of what happens to the order itself.
+    if (row.status === "ordered") {
+      const outstandingCents = row.grand_total_cents - row.amount_paid_cents;
+      if (outstandingCents > 0) {
+        recordSupplierBalanceEntry({
+          tenantId,
+          supplierId: row.supplier_id,
+          entryType: "purchase_cancelled",
+          amountCents: -outstandingCents,
+          referenceType: "purchase",
+          referenceId: id,
+          notes: null,
+          performedBy: getCurrentEmployeeId()
+        });
+      }
+    }
+
+    return getPurchaseDetail(id);
+  });
 }
 
 /**
@@ -525,6 +589,13 @@ function applyPayment(
   if (row.status === "cancelled") {
     throw new Error("This purchase has been cancelled");
   }
+  // Was never actually enforced before this function started also moving the supplier balance: a
+  // still-draft purchase never went through the "ordered" balance-increase hook (see createPurchase/
+  // updatePurchase/markPurchaseOrdered), so a payment recorded against one here would decrease the
+  // supplier's balance with no corresponding increase to offset it.
+  if (row.status === "draft") {
+    throw new Error("This purchase hasn't been ordered yet — place the order before recording a payment");
+  }
   const balanceDueCents = row.grand_total_cents - row.amount_paid_cents;
   if (balanceDueCents <= 0) {
     throw new Error("This purchase is already fully paid");
@@ -558,13 +629,31 @@ function applyPayment(
     amountPaidCents
   });
 
-  purchaseRepository.appendPaymentToPurchaseRow({
-    id: purchaseId,
-    payments,
-    amountPaidCents,
-    paymentStatus,
-    paymentMethodId: method.id,
-    paymentReference: payment.reference
+  runInTransaction(() => {
+    purchaseRepository.appendPaymentToPurchaseRow({
+      id: purchaseId,
+      payments,
+      amountPaidCents,
+      paymentStatus,
+      paymentMethodId: method.id,
+      paymentReference: payment.reference
+    });
+
+    // Every payment against a purchase — including partial — decreases what's owed to the supplier.
+    // No status check needed here the way cancelPurchase needs one: applyPayment already refuses a
+    // cancelled purchase above, and a payment against a still-draft purchase is impossible (nothing
+    // in this app lets a draft take a payment), so any purchase reaching this point already went
+    // through the "ordered" balance-increase hook at some point.
+    recordSupplierBalanceEntry({
+      tenantId,
+      supplierId: row.supplier_id,
+      entryType: "payment",
+      amountCents: -payment.amountCents,
+      referenceType: "purchase",
+      referenceId: purchaseId,
+      notes: payment.notes,
+      performedBy: employeeId
+    });
   });
 
   return getPurchaseDetail(purchaseId);
