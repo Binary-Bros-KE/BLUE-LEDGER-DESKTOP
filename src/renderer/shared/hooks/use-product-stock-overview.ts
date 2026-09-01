@@ -7,6 +7,13 @@ import type { InventoryBalance } from "@shared/types/inventory";
  * their own doc comments for why Checkout doesn't need this (its ProductInfoModal already covers
  * "check stock without leaving the page" there).
  *
+ * Still fetches EVERY location's balance per product (the same inventory:overview endpoint
+ * ProductDetailModal's own "Inventory by location" table uses) — StockByLocationRow is what narrows
+ * the display down to just the one location the document is actually for, not this hook. Kept this
+ * way rather than a location-scoped fetch: the cache is keyed by productId only, so switching which
+ * storefront a document is for (StorefrontPicker) re-filters instantly against data already in hand
+ * instead of re-fetching.
+ *
  * Silently returns nothing for a role without "inventory","view" — the endpoint that returns every
  * storefront's own count (inventory:overview) is deliberately gated behind that permission, more
  * restrictive than "products","view" (see ProductStockSummary's own doc comment in

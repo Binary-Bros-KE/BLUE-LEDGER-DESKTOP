@@ -222,21 +222,22 @@ export function QuotationsRoute(): React.JSX.Element {
   const [convertSaving, setConvertSaving] = useState(false);
   const [convertError, setConvertError] = useState<string | null>(null);
 
+  // products is deliberately NOT fetched here — see the effectiveCreateLocationId-scoped effect
+  // below, which owns that state exclusively so totalStock always reflects the actual storefront
+  // this document is for, not a tenant-wide sum from whenever this page happened to mount.
   const loadAll = useCallback(async () => {
     setLoadError(null);
     try {
-      const [summaryResult, quotationList, customerList, productList, methodList, supplierList] = await Promise.all([
+      const [summaryResult, quotationList, customerList, methodList, supplierList] = await Promise.all([
         window.blueLedger.quotation.summary(),
         window.blueLedger.quotation.list(),
         window.blueLedger.customer.list(),
-        window.blueLedger.product.list(),
         window.blueLedger.paymentMethod.list(),
         window.blueLedger.supplier.list()
       ]);
       setSummary(summaryResult);
       setQuotations(quotationList);
       setCustomers(customerList);
-      setProducts(productList);
       setPaymentMethods(methodList);
       setSuppliers(supplierList);
     } catch (err) {
@@ -686,6 +687,23 @@ export function QuotationsRoute(): React.JSX.Element {
       .catch(() => {
         if (!cancelled) defaultIncludeBusinessInfoRef.current = true;
       });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveCreateLocationId]);
+
+  // Re-fetches the product list scoped to whichever storefront this document is actually for, so
+  // each product's totalStock reflects THAT location's own quantity — not the tenant-wide sum from
+  // the very first loadAll() call. See InvoicesRoute's identical effect for the full reasoning (same
+  // field report, same fix, same file shape).
+  useEffect(() => {
+    let cancelled = false;
+    window.blueLedger.product
+      .list(effectiveCreateLocationId)
+      .then((productList) => {
+        if (!cancelled) setProducts(productList);
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -1941,7 +1959,7 @@ export function QuotationsRoute(): React.JSX.Element {
                           {line.name}
                         </p>
                         <p className="text-[11px] font-semibold text-muted">@ {formatCents(pricing.unitPriceCents)}</p>
-                        <StockByLocationRow balances={createLineStock.get(line.productId)} />
+                        <StockByLocationRow balances={createLineStock.get(line.productId)} locationId={effectiveCreateLocationId} />
                       </div>
                       <div className="flex flex-none flex-col items-end gap-1">
                         {(() => {
