@@ -97,6 +97,32 @@ export function PurchaseDetailModal({
   const balanceDueCents = purchase.grandTotalCents - purchase.amountPaidCents;
   const canReceive = purchase.status === "ordered" || purchase.status === "partially_received";
 
+  /** One line item can be received across several separate sessions — half today, the rest next
+   * week, say. Each session already freezes its own before/after at the moment it happened (see
+   * "Receiving History" below, which shows every one of them individually — nothing is ever lost).
+   * This is the SUMMARY table's own answer to the same question at the item-row level: "before" is
+   * the very FIRST session's own previousQuantity (stock right before anything on this line was ever
+   * received), "after" is the most RECENT session's own newQuantity (stock right after the latest
+   * receiving action touched it) — a single before-to-after span across the item's whole receiving
+   * history so far, however many sessions it took, rather than picking one arbitrary session's
+   * numbers or trying to force multiple sessions into one row. Genuinely correct even with other
+   * stock movements happening in between sessions (a sale, say) — each session's own before/after was
+   * captured against whatever was ACTUALLY true at that later moment, not derived by adding deltas. */
+  const stockSpanByItem = useMemo(() => {
+    const map = new Map<string, { before: number; after: number }>();
+    for (const event of purchase.receivingEvents) {
+      for (const item of event.items) {
+        const existing = map.get(item.purchaseItemId);
+        if (!existing) {
+          map.set(item.purchaseItemId, { before: item.previousQuantity, after: item.newQuantity });
+        } else {
+          existing.after = item.newQuantity;
+        }
+      }
+    }
+    return map;
+  }, [purchase.receivingEvents]);
+
   /** Same generic ExportListRequest/ExportMenu every list page already uses (Receipts, Invoices,
    * Quotations, the Purchases list itself) — just scoped to this one purchase's own line items
    * instead of a filtered list of documents, so "print a single purchase" gets PDF/Excel/CSV for
@@ -111,21 +137,28 @@ export function PurchaseDetailModal({
         { key: "sku", header: "SKU" },
         { key: "ordered", header: "Ordered Qty", align: "right" },
         { key: "received", header: "Received Qty", align: "right" },
+        { key: "stockBefore", header: "Stock Before", align: "right" },
+        { key: "stockAfter", header: "Stock After", align: "right" },
         { key: "unitCost", header: "Unit Cost", align: "right" },
         { key: "discount", header: "Discount", align: "right" },
         { key: "tax", header: "Tax", align: "right" },
         { key: "lineTotal", header: "Line Total", align: "right" }
       ],
-      rows: purchase.items.map((item) => ({
-        product: item.productName,
-        sku: item.sku,
-        ordered: String(item.orderedQuantity),
-        received: String(item.receivedQuantity),
-        unitCost: formatCents(item.unitCostCents),
-        discount: formatCents(item.discountAmountCents),
-        tax: formatCents(item.taxAmountCents),
-        lineTotal: formatCents(item.lineTotalCents)
-      })),
+      rows: purchase.items.map((item) => {
+        const stockSpan = stockSpanByItem.get(item.id);
+        return {
+          product: item.productName,
+          sku: item.sku,
+          ordered: String(item.orderedQuantity),
+          received: String(item.receivedQuantity),
+          stockBefore: stockSpan ? String(stockSpan.before) : "—",
+          stockAfter: stockSpan ? String(stockSpan.after) : "—",
+          unitCost: formatCents(item.unitCostCents),
+          discount: formatCents(item.discountAmountCents),
+          tax: formatCents(item.taxAmountCents),
+          lineTotal: formatCents(item.lineTotalCents)
+        };
+      }),
       stats: [
         { label: "Supplier Invoice #", value: purchase.supplierInvoiceNumber ?? "—" },
         { label: "Ordered", value: formatDate(purchase.orderedAt) },
@@ -139,7 +172,7 @@ export function PurchaseDetailModal({
       ],
       fileBaseName: `Purchase-${purchase.purchaseNumber}`
     }),
-    [purchase]
+    [purchase, stockSpanByItem]
   );
 
   function updateReceivingQuantity(itemId: string, value: string): void {
@@ -364,13 +397,15 @@ export function PurchaseDetailModal({
           <div className="mt-2 overflow-x-auto rounded-lg border border-line">
             <table className="w-full min-w-[760px] table-fixed border-collapse text-sm">
               <colgroup>
-                <col className="w-[26%]" />
-                <col className="w-[10%]" />
-                <col className="w-[10%]" />
-                <col className="w-[10%]" />
+                <col className="w-[20%]" />
+                <col className="w-[8%]" />
+                <col className="w-[8%]" />
+                <col className="w-[8%]" />
+                <col className="w-[9%]" />
+                <col className="w-[9%]" />
+                <col className="w-[11%]" />
                 <col className="w-[13%]" />
-                <col className="w-[15%]" />
-                {canReceive && <col className="w-[16%]" />}
+                {canReceive && <col className="w-[14%]" />}
               </colgroup>
               <thead>
                 <tr className="bg-primary text-white">
@@ -378,6 +413,8 @@ export function PurchaseDetailModal({
                   <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Ordered</th>
                   <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Received</th>
                   <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Remaining</th>
+                  <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Stock Before</th>
+                  <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Stock After</th>
                   <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Unit Cost</th>
                   <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Line Total</th>
                   {canReceive && (
@@ -388,7 +425,9 @@ export function PurchaseDetailModal({
                 </tr>
               </thead>
               <tbody>
-                {purchase.items.map((item) => (
+                {purchase.items.map((item) => {
+                  const stockSpan = stockSpanByItem.get(item.id);
+                  return (
                   <tr key={item.id} className="border-t border-line odd:bg-white even:bg-soft/50">
                     <td className="line-clamp-2 px-3 py-2 leading-snug font-bold text-ink" title={item.productName}>
                       {item.productName}
@@ -396,6 +435,10 @@ export function PurchaseDetailModal({
                     <td className="px-3 py-2 text-right tabular-nums text-muted">{item.orderedQuantity}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-muted">{item.receivedQuantity}</td>
                     <td className="px-3 py-2 text-right tabular-nums font-bold text-ink">{item.remainingQuantity}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-muted">{stockSpan ? stockSpan.before : "—"}</td>
+                    <td className="px-3 py-2 text-right tabular-nums font-bold text-success">
+                      {stockSpan ? stockSpan.after : "—"}
+                    </td>
                     <td className="px-3 py-2 text-right tabular-nums text-muted">{formatCents(item.unitCostCents)}</td>
                     <td className="px-3 py-2 text-right tabular-nums font-bold text-ink">
                       {formatCents(item.lineTotalCents)}
@@ -418,7 +461,8 @@ export function PurchaseDetailModal({
                       </td>
                     )}
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
