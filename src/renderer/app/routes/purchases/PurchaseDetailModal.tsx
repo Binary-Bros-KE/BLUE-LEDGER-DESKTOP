@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { Ban, CheckCircle2, Loader2, Package, Paperclip, Send, Wallet } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
@@ -98,31 +98,37 @@ export function PurchaseDetailModal({
   const canReceive = purchase.status === "ordered" || purchase.status === "partially_received";
 
   /** One line item can be received across several separate sessions — half today, the rest next
-   * week, say. Each session already freezes its own accurate before/after at the moment it happened
-   * (see "Receiving History" below, which lists every one of them individually — nothing is ever
-   * lost there). This is the SUMMARY table's own answer at the item-row level, and it deliberately
-   * does NOT span "first session's before" to "latest session's after" — tried that, and it actively
-   * lies: if other stock movements (a sale, say) happen BETWEEN two receiving sessions, that span's
-   * two numbers can show a net DROP even though the purchase itself only ever added stock both times
-   * (e.g. before=213 → after=15, when what actually happened was 213 →(+205 first session)→ 218
-   * →(sold down to 10 by unrelated sales)→ 10 →(+5 second session)→ 15 — the purchase never lost
-   * anything, but a naive before/after span makes it look like it did). "Before/after" is only ever a
-   * meaningful, truthful pair for ONE specific moment — so this shows the MOST RECENT session's own
-   * real before/after (always accurate, since it's exactly what Receiving History's own last entry
-   * for this item says), plus a session count so a multi-session item is visibly flagged rather than
-   * silently presented as if only one thing ever happened to it. */
-  const stockSpanByItem = useMemo(() => {
-    const map = new Map<string, { before: number; after: number; sessionCount: number }>();
+   * week, say — and "before/after" is only ever a truthful pair for ONE specific moment (tried
+   * spanning "first session's before" to "latest session's after" in one summary figure; it actively
+   * lies the moment something else touches stock in between — see this same file's own git history
+   * for the real example). So instead of compressing a product's whole receiving history into one
+   * row, EVERY session gets its own nested row directly under that product — full accuracy (each row
+   * is exactly what really happened at that moment) AND full visibility (nothing needs a tooltip or a
+   * trip to a separate section to see "what happened the first time"), while still naturally staying
+   * short for the common case (most lines are received in one session, so most products get zero
+   * extra rows). Replaces the old separate "Receiving History" section entirely — same underlying
+   * data, just grouped BY PRODUCT (what someone actually wants to trace) instead of by date (which
+   * mixed every product touched in one session together, however unrelated).
+   *
+   * Ordered chronologically per item (purchase.receivingEvents itself is append-only chronological —
+   * see appendReceivingEventToPurchaseRow — and this iterates it in that same order), so sessions[0]
+   * is always genuinely "the first time," never a guess. */
+  const sessionsByItem = useMemo(() => {
+    const map = new Map<
+      string,
+      { receivedAt: string; receivedByName: string; receivingQuantity: number; previousQuantity: number; newQuantity: number }[]
+    >();
     for (const event of purchase.receivingEvents) {
       for (const item of event.items) {
-        const existing = map.get(item.purchaseItemId);
-        if (!existing) {
-          map.set(item.purchaseItemId, { before: item.previousQuantity, after: item.newQuantity, sessionCount: 1 });
-        } else {
-          existing.before = item.previousQuantity;
-          existing.after = item.newQuantity;
-          existing.sessionCount += 1;
-        }
+        const list = map.get(item.purchaseItemId) ?? [];
+        list.push({
+          receivedAt: event.receivedAt,
+          receivedByName: event.receivedByName,
+          receivingQuantity: item.receivingQuantity,
+          previousQuantity: item.previousQuantity,
+          newQuantity: item.newQuantity
+        });
+        map.set(item.purchaseItemId, list);
       }
     }
     return map;
@@ -137,38 +143,59 @@ export function PurchaseDetailModal({
       module: "purchases",
       title: `Purchase Order ${purchase.purchaseNumber}`,
       subtitle: `${purchase.supplierName} · ${purchase.locationName} · ${statusLabel(purchase.status)}`,
+      // One row per (product, receiving session) — same "every session gets its own truthful row"
+      // reasoning as sessionsByItem/the modal's own nested rows, just flattened for a spreadsheet.
+      // Pricing columns repeat on every session row for a given product (redundant but keeps each
+      // row self-contained/sortable on its own, the normal convention for a flat export of
+      // parent+child data) rather than only appearing once per product.
       columns: [
         { key: "product", header: "Product" },
         { key: "sku", header: "SKU" },
         { key: "ordered", header: "Ordered Qty", align: "right" },
-        { key: "received", header: "Received Qty", align: "right" },
-        // Both describe the MOST RECENT receiving session only — see stockSpanByItem's own doc
-        // comment for why spanning "first session's before" to "latest session's after" actively
-        // lies when other stock movements happen in between. sessions flags when there's more than
-        // one, since a static export has no room for the table's own hover tooltip explaining that.
-        { key: "stockBefore", header: "Stock Before (Last Session)", align: "right" },
-        { key: "stockAfter", header: "Stock After (Last Session)", align: "right" },
-        { key: "sessions", header: "Receiving Sessions", align: "right" },
+        { key: "session", header: "Session" },
+        { key: "receivedAt", header: "Received At" },
+        { key: "receivedBy", header: "Received By" },
+        { key: "sessionQty", header: "Qty This Session", align: "right" },
+        { key: "stockBefore", header: "Stock Before", align: "right" },
+        { key: "stockAfter", header: "Stock After", align: "right" },
         { key: "unitCost", header: "Unit Cost", align: "right" },
         { key: "discount", header: "Discount", align: "right" },
         { key: "tax", header: "Tax", align: "right" },
         { key: "lineTotal", header: "Line Total", align: "right" }
       ],
-      rows: purchase.items.map((item) => {
-        const stockSpan = stockSpanByItem.get(item.id);
-        return {
+      rows: purchase.items.flatMap((item) => {
+        const sessions = sessionsByItem.get(item.id) ?? [];
+        const pricingColumns = {
           product: item.productName,
           sku: item.sku,
           ordered: String(item.orderedQuantity),
-          received: String(item.receivedQuantity),
-          stockBefore: stockSpan ? String(stockSpan.before) : "—",
-          stockAfter: stockSpan ? String(stockSpan.after) : "—",
-          sessions: stockSpan ? String(stockSpan.sessionCount) : "—",
           unitCost: formatCents(item.unitCostCents),
           discount: formatCents(item.discountAmountCents),
           tax: formatCents(item.taxAmountCents),
           lineTotal: formatCents(item.lineTotalCents)
         };
+        if (sessions.length === 0) {
+          return [
+            {
+              ...pricingColumns,
+              session: "—",
+              receivedAt: "—",
+              receivedBy: "—",
+              sessionQty: "—",
+              stockBefore: "—",
+              stockAfter: "—"
+            }
+          ];
+        }
+        return sessions.map((session, index) => ({
+          ...pricingColumns,
+          session: `${index + 1} of ${sessions.length}`,
+          receivedAt: formatDate(session.receivedAt),
+          receivedBy: session.receivedByName,
+          sessionQty: `+${session.receivingQuantity}`,
+          stockBefore: String(session.previousQuantity),
+          stockAfter: String(session.newQuantity)
+        }));
       }),
       stats: [
         { label: "Supplier Invoice #", value: purchase.supplierInvoiceNumber ?? "—" },
@@ -183,7 +210,7 @@ export function PurchaseDetailModal({
       ],
       fileBaseName: `Purchase-${purchase.purchaseNumber}`
     }),
-    [purchase, stockSpanByItem]
+    [purchase, sessionsByItem]
   );
 
   function updateReceivingQuantity(itemId: string, value: string): void {
@@ -408,15 +435,13 @@ export function PurchaseDetailModal({
           <div className="mt-2 overflow-x-auto rounded-lg border border-line">
             <table className="w-full min-w-[760px] table-fixed border-collapse text-sm">
               <colgroup>
-                <col className="w-[20%]" />
-                <col className="w-[8%]" />
-                <col className="w-[8%]" />
-                <col className="w-[8%]" />
-                <col className="w-[9%]" />
-                <col className="w-[9%]" />
-                <col className="w-[11%]" />
+                <col className="w-[26%]" />
+                <col className="w-[10%]" />
+                <col className="w-[10%]" />
+                <col className="w-[10%]" />
                 <col className="w-[13%]" />
-                {canReceive && <col className="w-[14%]" />}
+                <col className="w-[15%]" />
+                {canReceive && <col className="w-[16%]" />}
               </colgroup>
               <thead>
                 <tr className="bg-primary text-white">
@@ -424,18 +449,6 @@ export function PurchaseDetailModal({
                   <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Ordered</th>
                   <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Received</th>
                   <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Remaining</th>
-                  <th
-                    className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider"
-                    title="The most recent receiving session's own numbers — see Receiving History below for every session individually"
-                  >
-                    Stock Before
-                  </th>
-                  <th
-                    className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider"
-                    title="The most recent receiving session's own numbers — see Receiving History below for every session individually"
-                  >
-                    Stock After
-                  </th>
                   <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Unit Cost</th>
                   <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Line Total</th>
                   {canReceive && (
@@ -447,49 +460,57 @@ export function PurchaseDetailModal({
               </thead>
               <tbody>
                 {purchase.items.map((item) => {
-                  const stockSpan = stockSpanByItem.get(item.id);
+                  const sessions = sessionsByItem.get(item.id) ?? [];
                   return (
-                  <tr key={item.id} className="border-t border-line odd:bg-white even:bg-soft/50">
-                    <td className="line-clamp-2 px-3 py-2 leading-snug font-bold text-ink" title={item.productName}>
-                      {item.productName}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-muted">{item.orderedQuantity}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-muted">{item.receivedQuantity}</td>
-                    <td className="px-3 py-2 text-right tabular-nums font-bold text-ink">{item.remainingQuantity}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-muted">{stockSpan ? stockSpan.before : "—"}</td>
-                    <td className="px-3 py-2 text-right tabular-nums font-bold text-success">
-                      {stockSpan ? stockSpan.after : "—"}
-                      {stockSpan && stockSpan.sessionCount > 1 && (
-                        <span
-                          className="ml-1 align-top text-[9px] font-bold text-muted"
-                          title={`Received across ${stockSpan.sessionCount} separate sessions — this is the most recent one. See Receiving History below for each session's own before/after.`}
-                        >
-                          ({stockSpan.sessionCount}×)
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-muted">{formatCents(item.unitCostCents)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums font-bold text-ink">
-                      {formatCents(item.lineTotalCents)}
-                    </td>
-                    {canReceive && (
-                      <td className="px-3 py-2 text-right">
-                        {item.remainingQuantity > 0 ? (
-                          <input
-                            type="number"
-                            min={0}
-                            max={item.remainingQuantity}
-                            value={receivingQuantities[item.id] ?? ""}
-                            onChange={(event) => updateReceivingQuantity(item.id, event.target.value)}
-                            placeholder="0"
-                            className="h-8 w-20 rounded-md border border-line px-1.5 text-right text-xs font-bold outline-none focus:border-accent"
-                          />
-                        ) : (
-                          <span className="text-xs font-bold text-success">Complete</span>
+                    <Fragment key={item.id}>
+                      <tr className="border-t border-line odd:bg-white even:bg-soft/50">
+                        <td className="line-clamp-2 px-3 py-2 leading-snug font-bold text-ink" title={item.productName}>
+                          {item.productName}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-muted">{item.orderedQuantity}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-muted">{item.receivedQuantity}</td>
+                        <td className="px-3 py-2 text-right tabular-nums font-bold text-ink">{item.remainingQuantity}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-muted">{formatCents(item.unitCostCents)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums font-bold text-ink">
+                          {formatCents(item.lineTotalCents)}
+                        </td>
+                        {canReceive && (
+                          <td className="px-3 py-2 text-right">
+                            {item.remainingQuantity > 0 ? (
+                              <input
+                                type="number"
+                                min={0}
+                                max={item.remainingQuantity}
+                                value={receivingQuantities[item.id] ?? ""}
+                                onChange={(event) => updateReceivingQuantity(item.id, event.target.value)}
+                                placeholder="0"
+                                className="h-8 w-20 rounded-md border border-line px-1.5 text-right text-xs font-bold outline-none focus:border-accent"
+                              />
+                            ) : (
+                              <span className="text-xs font-bold text-success">Complete</span>
+                            )}
+                          </td>
                         )}
-                      </td>
-                    )}
-                  </tr>
+                      </tr>
+                      {/* One row per receiving session that touched THIS product, oldest first — "the
+                          first time," "the second time," etc. exactly as it happened, each with its
+                          own real before/after. Replaces the old separate "Receiving History" section
+                          (see sessionsByItem's own doc comment for why grouping by product here beats
+                          grouping by date there). Nothing rendered for a line with zero sessions yet. */}
+                      {sessions.map((session, index) => (
+                        <tr key={`${item.id}-${index}`} className="border-t border-line/60 bg-soft/30">
+                          <td colSpan={canReceive ? 7 : 6} className="px-3 py-1.5 pl-8 text-[11px] font-semibold text-muted">
+                            <span className="font-extrabold text-ink">
+                              {index === 0 ? "1st" : index === 1 ? "2nd" : index === 2 ? "3rd" : `${index + 1}th`} receipt
+                            </span>{" "}
+                            · {formatDate(session.receivedAt)} · {session.receivedByName} · +{session.receivingQuantity} ·
+                            Stock Before ({purchase.locationName}): <span className="text-ink">{session.previousQuantity}</span> ·
+                            Stock After ({purchase.locationName}):{" "}
+                            <span className="font-extrabold text-success">{session.newQuantity}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -599,33 +620,6 @@ export function PurchaseDetailModal({
             </div>
           )}
         </div>
-
-        {purchase.receivingEvents.length > 0 && (
-          <div className="mt-4 rounded-lg border border-line bg-soft p-3">
-            <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Receiving History</p>
-            <div className="mt-2 space-y-2">
-              {purchase.receivingEvents.map((event) => (
-                <div key={event.id} className="rounded-lg border border-line bg-white px-3 py-2">
-                  <p className="text-[10px] font-semibold text-muted">
-                    {formatDate(event.receivedAt)} · {event.receivedByName}
-                  </p>
-                  <div className="mt-1.5 space-y-1">
-                    {event.items.map((item) => (
-                      <div key={item.purchaseItemId} className="flex items-center justify-between gap-2 text-xs">
-                        <span className="min-w-0 truncate font-bold text-ink">{item.productName}</span>
-                        <span className="flex-none whitespace-nowrap font-semibold text-muted">
-                          +{item.receivingQuantity} · Qty Before ({purchase.locationName}):{" "}
-                          <span className="text-ink">{item.previousQuantity}</span> · Qty After (
-                          {purchase.locationName}): <span className="font-extrabold text-success">{item.newQuantity}</span>
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {canEdit && (
           <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-4">
