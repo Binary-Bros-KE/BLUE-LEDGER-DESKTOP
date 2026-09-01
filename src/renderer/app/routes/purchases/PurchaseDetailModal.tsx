@@ -366,7 +366,7 @@ export function PurchaseDetailModal({
         onClose={onClose}
         title={purchase.purchaseNumber}
         description={`${purchase.supplierName} · ${purchase.locationName}`}
-        widthClassName="max-w-4xl"
+        widthClassName="max-w-5xl"
       >
         {actionError && (
           <div className="mb-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
@@ -445,14 +445,14 @@ export function PurchaseDetailModal({
               </colgroup>
               <thead>
                 <tr className="bg-primary text-white">
-                  <th className="px-3 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider">Product</th>
-                  <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Ordered</th>
-                  <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Received</th>
-                  <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Remaining</th>
-                  <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Unit Cost</th>
-                  <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Line Total</th>
+                  <th className="px-3 py-2 text-left text-xs font-extrabold uppercase tracking-wider">Product</th>
+                  <th className="px-3 py-2 text-right text-xs font-extrabold uppercase tracking-wider">Ordered</th>
+                  <th className="px-3 py-2 text-right text-xs font-extrabold uppercase tracking-wider">Received</th>
+                  <th className="px-3 py-2 text-right text-xs font-extrabold uppercase tracking-wider">Remaining</th>
+                  <th className="px-3 py-2 text-right text-xs font-extrabold uppercase tracking-wider">Unit Cost</th>
+                  <th className="px-3 py-2 text-right text-xs font-extrabold uppercase tracking-wider">Line Total</th>
                   {canReceive && (
-                    <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">
+                    <th className="px-3 py-2 text-right text-xs font-extrabold uppercase tracking-wider">
                       Receive Today
                     </th>
                   )}
@@ -499,7 +499,7 @@ export function PurchaseDetailModal({
                           grouping by date there). Nothing rendered for a line with zero sessions yet. */}
                       {sessions.map((session, index) => (
                         <tr key={`${item.id}-${index}`} className="border-t border-line/60 bg-soft/30">
-                          <td colSpan={canReceive ? 7 : 6} className="px-3 py-1.5 pl-8 text-[11px] font-semibold text-muted">
+                          <td colSpan={canReceive ? 7 : 6} className="px-3 py-2 pl-8 text-sm font-semibold text-muted">
                             <span className="font-extrabold text-ink">
                               {index === 0 ? "1st" : index === 1 ? "2nd" : index === 2 ? "3rd" : `${index + 1}th`} receipt
                             </span>{" "}
