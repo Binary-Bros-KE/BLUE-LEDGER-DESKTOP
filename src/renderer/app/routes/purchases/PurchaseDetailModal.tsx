@@ -98,25 +98,30 @@ export function PurchaseDetailModal({
   const canReceive = purchase.status === "ordered" || purchase.status === "partially_received";
 
   /** One line item can be received across several separate sessions — half today, the rest next
-   * week, say. Each session already freezes its own before/after at the moment it happened (see
-   * "Receiving History" below, which shows every one of them individually — nothing is ever lost).
-   * This is the SUMMARY table's own answer to the same question at the item-row level: "before" is
-   * the very FIRST session's own previousQuantity (stock right before anything on this line was ever
-   * received), "after" is the most RECENT session's own newQuantity (stock right after the latest
-   * receiving action touched it) — a single before-to-after span across the item's whole receiving
-   * history so far, however many sessions it took, rather than picking one arbitrary session's
-   * numbers or trying to force multiple sessions into one row. Genuinely correct even with other
-   * stock movements happening in between sessions (a sale, say) — each session's own before/after was
-   * captured against whatever was ACTUALLY true at that later moment, not derived by adding deltas. */
+   * week, say. Each session already freezes its own accurate before/after at the moment it happened
+   * (see "Receiving History" below, which lists every one of them individually — nothing is ever
+   * lost there). This is the SUMMARY table's own answer at the item-row level, and it deliberately
+   * does NOT span "first session's before" to "latest session's after" — tried that, and it actively
+   * lies: if other stock movements (a sale, say) happen BETWEEN two receiving sessions, that span's
+   * two numbers can show a net DROP even though the purchase itself only ever added stock both times
+   * (e.g. before=213 → after=15, when what actually happened was 213 →(+205 first session)→ 218
+   * →(sold down to 10 by unrelated sales)→ 10 →(+5 second session)→ 15 — the purchase never lost
+   * anything, but a naive before/after span makes it look like it did). "Before/after" is only ever a
+   * meaningful, truthful pair for ONE specific moment — so this shows the MOST RECENT session's own
+   * real before/after (always accurate, since it's exactly what Receiving History's own last entry
+   * for this item says), plus a session count so a multi-session item is visibly flagged rather than
+   * silently presented as if only one thing ever happened to it. */
   const stockSpanByItem = useMemo(() => {
-    const map = new Map<string, { before: number; after: number }>();
+    const map = new Map<string, { before: number; after: number; sessionCount: number }>();
     for (const event of purchase.receivingEvents) {
       for (const item of event.items) {
         const existing = map.get(item.purchaseItemId);
         if (!existing) {
-          map.set(item.purchaseItemId, { before: item.previousQuantity, after: item.newQuantity });
+          map.set(item.purchaseItemId, { before: item.previousQuantity, after: item.newQuantity, sessionCount: 1 });
         } else {
+          existing.before = item.previousQuantity;
           existing.after = item.newQuantity;
+          existing.sessionCount += 1;
         }
       }
     }
@@ -137,8 +142,13 @@ export function PurchaseDetailModal({
         { key: "sku", header: "SKU" },
         { key: "ordered", header: "Ordered Qty", align: "right" },
         { key: "received", header: "Received Qty", align: "right" },
-        { key: "stockBefore", header: "Stock Before", align: "right" },
-        { key: "stockAfter", header: "Stock After", align: "right" },
+        // Both describe the MOST RECENT receiving session only — see stockSpanByItem's own doc
+        // comment for why spanning "first session's before" to "latest session's after" actively
+        // lies when other stock movements happen in between. sessions flags when there's more than
+        // one, since a static export has no room for the table's own hover tooltip explaining that.
+        { key: "stockBefore", header: "Stock Before (Last Session)", align: "right" },
+        { key: "stockAfter", header: "Stock After (Last Session)", align: "right" },
+        { key: "sessions", header: "Receiving Sessions", align: "right" },
         { key: "unitCost", header: "Unit Cost", align: "right" },
         { key: "discount", header: "Discount", align: "right" },
         { key: "tax", header: "Tax", align: "right" },
@@ -153,6 +163,7 @@ export function PurchaseDetailModal({
           received: String(item.receivedQuantity),
           stockBefore: stockSpan ? String(stockSpan.before) : "—",
           stockAfter: stockSpan ? String(stockSpan.after) : "—",
+          sessions: stockSpan ? String(stockSpan.sessionCount) : "—",
           unitCost: formatCents(item.unitCostCents),
           discount: formatCents(item.discountAmountCents),
           tax: formatCents(item.taxAmountCents),
@@ -413,8 +424,18 @@ export function PurchaseDetailModal({
                   <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Ordered</th>
                   <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Received</th>
                   <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Remaining</th>
-                  <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Stock Before</th>
-                  <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Stock After</th>
+                  <th
+                    className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider"
+                    title="The most recent receiving session's own numbers — see Receiving History below for every session individually"
+                  >
+                    Stock Before
+                  </th>
+                  <th
+                    className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider"
+                    title="The most recent receiving session's own numbers — see Receiving History below for every session individually"
+                  >
+                    Stock After
+                  </th>
                   <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Unit Cost</th>
                   <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Line Total</th>
                   {canReceive && (
@@ -438,6 +459,14 @@ export function PurchaseDetailModal({
                     <td className="px-3 py-2 text-right tabular-nums text-muted">{stockSpan ? stockSpan.before : "—"}</td>
                     <td className="px-3 py-2 text-right tabular-nums font-bold text-success">
                       {stockSpan ? stockSpan.after : "—"}
+                      {stockSpan && stockSpan.sessionCount > 1 && (
+                        <span
+                          className="ml-1 align-top text-[9px] font-bold text-muted"
+                          title={`Received across ${stockSpan.sessionCount} separate sessions — this is the most recent one. See Receiving History below for each session's own before/after.`}
+                        >
+                          ({stockSpan.sessionCount}×)
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-muted">{formatCents(item.unitCostCents)}</td>
                     <td className="px-3 py-2 text-right tabular-nums font-bold text-ink">
