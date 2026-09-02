@@ -25,6 +25,11 @@ export type StockMovementRow = {
   // fallback path in applyValidatedStockMovement).
   allocation_storefront_id: string | null;
   allocation_explicit: number;
+  // See StockMovement["previousQuantity"]'s own doc comment (shared/types/stock-movement.ts) — this
+  // location's actual on-hand quantity immediately before/after this specific movement, frozen at
+  // write time. Null for a movement recorded before this existed.
+  previous_quantity: number | null;
+  new_quantity: number | null;
   created_at: string;
   sync_status: string;
   last_synced_at: string | null;
@@ -50,7 +55,15 @@ export function findStockMovementRowById(id: string): StockMovementListRow | und
 }
 
 export function insertStockMovementRow(
-  input: StockMovementInput & { id: string; tenantId: string; allocationStorefrontId?: string | null }
+  input: StockMovementInput & {
+    id: string;
+    tenantId: string;
+    allocationStorefrontId?: string | null;
+    /** See StockMovementRow["previous_quantity"]'s own doc comment — the caller (applyValidatedStockMovement)
+     * is the only place with the context to compute these, so this function just stores what it's given. */
+    previousQuantity: number | null;
+    newQuantity: number | null;
+  }
 ): StockMovementListRow {
   const now = new Date().toISOString();
 
@@ -60,9 +73,9 @@ export function insertStockMovementRow(
       INSERT INTO stock_movements (
         id, tenant_id, product_id, location_id, movement_type, quantity_change,
         reference_type, reference_id, performed_by, notes, allocation_storefront_id, allocation_explicit,
-        created_at, sync_status
+        previous_quantity, new_quantity, created_at, sync_status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
     `
     )
     .run(
@@ -78,6 +91,8 @@ export function insertStockMovementRow(
       input.notes,
       input.allocationStorefrontId ?? null,
       input.allocationStorefrontId !== undefined ? 1 : 0,
+      input.previousQuantity,
+      input.newQuantity,
       now
     );
 
@@ -176,6 +191,8 @@ export function mapStockMovementRow(row: StockMovementListRow): StockMovement {
     referenceId: row.reference_id,
     performedBy: row.performed_by,
     performedByName: row.performed_by_name,
+    previousQuantity: row.previous_quantity,
+    newQuantity: row.new_quantity,
     notes: row.notes,
     createdAt: row.created_at,
     syncStatus: row.sync_status as StockMovementSyncStatus,

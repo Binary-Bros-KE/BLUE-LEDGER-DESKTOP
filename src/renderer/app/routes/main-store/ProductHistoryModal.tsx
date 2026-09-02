@@ -85,6 +85,8 @@ export function ProductHistoryModal({
         { key: "location", header: "Location" },
         { key: "type", header: "Type" },
         { key: "change", header: "Change", align: "right" },
+        { key: "stockBefore", header: "Stock Before", align: "right" },
+        { key: "stockAfter", header: "Stock After", align: "right" },
         { key: "recordedBy", header: "Recorded By" }
       ],
       rows: movements.map((movement) => ({
@@ -92,6 +94,8 @@ export function ProductHistoryModal({
         location: movement.locationName,
         type: movementTypeLabel(movement.movementType),
         change: `${movement.quantityChange > 0 ? "+" : ""}${movement.quantityChange}`,
+        stockBefore: movement.previousQuantity === null ? "—" : String(movement.previousQuantity),
+        stockAfter: movement.newQuantity === null ? "—" : String(movement.newQuantity),
         recordedBy: movement.performedByName ?? "—"
       })),
       stats: [{ label: "Total Movements", value: String(movements.length) }],
@@ -105,7 +109,7 @@ export function ProductHistoryModal({
       onClose={onClose}
       title={productName}
       description="Every purchase, transfer, return, damage, and adjustment for this product."
-      widthClassName="max-w-2xl"
+      widthClassName="max-w-3xl"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-end gap-3">
@@ -156,14 +160,16 @@ export function ProductHistoryModal({
           {dateFrom || dateTo ? "No stock movements in this date range." : "No stock movements recorded yet."}
         </p>
       ) : (
-        <div className="mt-4 max-h-[60vh] overflow-y-auto rounded-lg border border-line">
-          <table className="w-full min-w-[560px] border-collapse text-sm">
+        <div className="mt-4 max-h-[60vh] overflow-x-auto overflow-y-auto rounded-lg border border-line">
+          <table className="w-full min-w-[700px] border-collapse text-sm">
             <thead className="sticky top-0">
               <tr className="bg-primary text-white">
                 <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Date</th>
                 <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Location</th>
                 <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Type</th>
                 <th className="px-4 py-2.5 text-right text-[10px] font-extrabold uppercase tracking-wider">Change</th>
+                <th className="px-4 py-2.5 text-right text-[10px] font-extrabold uppercase tracking-wider">Stock Before</th>
+                <th className="px-4 py-2.5 text-right text-[10px] font-extrabold uppercase tracking-wider">Stock After</th>
                 <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Recorded By</th>
               </tr>
             </thead>
@@ -187,6 +193,12 @@ export function ProductHistoryModal({
                   >
                     {movement.quantityChange > 0 ? "+" : ""}
                     {movement.quantityChange}
+                  </td>
+                  <td className="px-4 py-2.5 text-right text-xs font-semibold tabular-nums text-muted">
+                    {movement.previousQuantity ?? "—"}
+                  </td>
+                  <td className="px-4 py-2.5 text-right text-xs font-bold tabular-nums text-ink">
+                    {movement.newQuantity ?? "—"}
                   </td>
                   <td className="px-4 py-2.5 text-xs font-semibold text-muted">{movement.performedByName ?? "—"}</td>
                 </tr>

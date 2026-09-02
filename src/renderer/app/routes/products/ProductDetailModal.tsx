@@ -261,6 +261,8 @@ export function ProductDetailModal({
         { key: "location", header: "Location" },
         { key: "type", header: "Type" },
         { key: "change", header: "Change", align: "right" },
+        { key: "stockBefore", header: "Stock Before", align: "right" },
+        { key: "stockAfter", header: "Stock After", align: "right" },
         { key: "recordedBy", header: "Recorded By" }
       ],
       rows: movements.map((movement) => ({
@@ -268,6 +270,8 @@ export function ProductDetailModal({
         location: movement.locationName,
         type: movementTypeLabel(movement.movementType),
         change: `${movement.quantityChange > 0 ? "+" : ""}${movement.quantityChange}`,
+        stockBefore: movement.previousQuantity === null ? "—" : String(movement.previousQuantity),
+        stockAfter: movement.newQuantity === null ? "—" : String(movement.newQuantity),
         recordedBy: movement.performedByName ?? "—"
       })),
       stats: [{ label: "Total Movements", value: String(movements.length) }],
@@ -281,7 +285,7 @@ export function ProductDetailModal({
       onClose={onClose}
       title={product.name}
       description={`SKU ${product.sku}${product.categoryName ? ` · ${product.categoryName}` : ""}`}
-      widthClassName="max-w-3xl"
+      widthClassName="max-w-4xl"
     >
       {loadError ? (
         <div className="rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
@@ -526,7 +530,7 @@ export function ProductDetailModal({
               )}
             </div>
 
-            <div className="mt-3 max-h-72 overflow-y-auto rounded-lg border border-line">
+            <div className="mt-3 max-h-72 overflow-x-auto overflow-y-auto rounded-lg border border-line">
               {movements.length === 0 ? (
                 <p className="p-4 text-sm font-semibold text-muted">
                   {movementDateFrom || movementDateTo
@@ -534,13 +538,15 @@ export function ProductDetailModal({
                     : "No stock movements recorded yet."}
                 </p>
               ) : (
-                <table className="w-full min-w-[560px] border-collapse text-sm">
+                <table className="w-full min-w-[700px] border-collapse text-sm">
                   <thead className="sticky top-0">
                     <tr className="bg-primary text-white">
                       <Th>Date</Th>
                       <Th>Location</Th>
                       <Th>Type</Th>
                       <Th className="text-right">Change</Th>
+                      <Th className="text-right">Stock Before</Th>
+                      <Th className="text-right">Stock After</Th>
                       <Th>Recorded By</Th>
                     </tr>
                   </thead>
@@ -567,6 +573,12 @@ export function ProductDetailModal({
                         >
                           {movement.quantityChange > 0 ? "+" : ""}
                           {movement.quantityChange}
+                        </td>
+                        <td className="px-4 py-2.5 text-right text-xs font-semibold tabular-nums text-muted">
+                          {movement.previousQuantity ?? "—"}
+                        </td>
+                        <td className="px-4 py-2.5 text-right text-xs font-bold tabular-nums text-ink">
+                          {movement.newQuantity ?? "—"}
                         </td>
                         <td className="px-4 py-2.5 text-xs font-semibold text-muted">
                           {movement.performedByName ?? "—"}

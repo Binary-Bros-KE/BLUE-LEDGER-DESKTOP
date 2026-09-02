@@ -545,6 +545,8 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       notes: row.notes,
       allocationStorefrontId: resolveCloudRef("locations", row.allocation_storefront_id),
       allocationExplicit: Boolean(row.allocation_explicit),
+      previousQuantity: row.previous_quantity,
+      newQuantity: row.new_quantity,
       localCreatedAt: row.created_at,
       // Immutable — no separate updated_at column locally; its "last updated" IS its creation time.
       localUpdatedAt: row.created_at
@@ -2926,8 +2928,8 @@ function applyStockMovementPulledRow(row: Record<string, unknown>): void {
       `INSERT INTO stock_movements (
          id, tenant_id, product_id, location_id, movement_type, quantity_change,
          reference_type, reference_id, performed_by, notes, allocation_storefront_id, allocation_explicit,
-         created_at, sync_status, last_synced_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', ?)`
+         previous_quantity, new_quantity, created_at, sync_status, last_synced_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', ?)`
     ).run(
       id,
       localTenantId,
@@ -2941,6 +2943,12 @@ function applyStockMovementPulledRow(row: Record<string, unknown>): void {
       (row.notes as string | null) ?? null,
       allocationStorefrontId,
       allocationExplicit ? 1 : 0,
+      // Carried across AS-IS, not recomputed against this device's own current inventory — these
+      // are a frozen snapshot of what was true on the device where the movement actually happened,
+      // same "portable historical fact" treatment as every other frozen before/after pair in this
+      // app (PurchaseReceivingEventItem, BorrowReturnEventItem).
+      (row.previousQuantity as number | null | undefined) ?? null,
+      (row.newQuantity as number | null | undefined) ?? null,
       row.localCreatedAt as string,
       now
     );

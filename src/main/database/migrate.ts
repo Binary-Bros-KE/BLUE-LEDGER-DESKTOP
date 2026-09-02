@@ -2922,6 +2922,21 @@ const migrations = [
         FROM borrows b WHERE b.id = NEW.borrow_id;
       END;
     `
+  },
+  {
+    version: 83,
+    name: "stock_movements_before_after",
+    sql: `
+      -- The Stock Ledger only ever showed the CHANGE for a movement, never what stock actually was
+      -- right before/after it — a client explicitly asked for this. Frozen at the moment the movement
+      -- happened (applyValidatedStockMovement, inventory-service.ts — the single choke point every
+      -- stock-moving action in the app already goes through), never recomputed later, same "frozen at
+      -- write time, not derived at read time" principle as PurchaseReceivingEventItem/
+      -- BorrowReturnEventItem's own before/after pair. Nullable: every historical movement recorded
+      -- before this existed has neither.
+      ALTER TABLE stock_movements ADD COLUMN previous_quantity INTEGER;
+      ALTER TABLE stock_movements ADD COLUMN new_quantity INTEGER;
+    `
   }
 ] as const;
 

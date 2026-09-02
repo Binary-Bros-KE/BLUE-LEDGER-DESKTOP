@@ -139,10 +139,21 @@ export function applyValidatedStockMovement(
     );
   }
 
+  // The location's actual on-hand quantity, before/after — see StockMovement["previousQuantity"]'s
+  // own doc comment (shared/types/stock-movement.ts) for why this is the PLAIN location total (not
+  // the Main-Store-bucket-specific currentQuantity/nextQuantity above, which is only meaningful for
+  // this function's own validation): plainInventoryQuantity already IS that plain total for a
+  // Main Store bucket move, and currentQuantity already IS it for every other move (a bucket move is
+  // the only case where the two differ).
+  const previousQuantity = isMainStoreBucketMove ? plainInventoryQuantity : currentQuantity;
+  const newQuantity = previousQuantity + input.quantityChange;
+
   const movementRow = stockMovementRepository.insertStockMovementRow({
     ...input,
     id: `movement_${randomUUID()}`,
-    tenantId
+    tenantId,
+    previousQuantity,
+    newQuantity
   });
 
   if (isMainStoreBucketMove) {

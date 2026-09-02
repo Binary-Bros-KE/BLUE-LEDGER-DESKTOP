@@ -163,7 +163,10 @@ export function StockLedgerRoute(): React.JSX.Element {
         { key: "storefront", header: "Storefront" },
         { key: "type", header: "Type" },
         { key: "change", header: "Change", align: "right" },
+        { key: "stockBefore", header: "Stock Before", align: "right" },
+        { key: "stockAfter", header: "Stock After", align: "right" },
         { key: "value", header: "Value", align: "right" },
+        { key: "recordedBy", header: "Recorded By" },
         { key: "notes", header: "Notes" }
       ],
       rows: filteredMovements.map((movement) => ({
@@ -173,6 +176,9 @@ export function StockLedgerRoute(): React.JSX.Element {
         storefront: movement.locationName,
         type: movementTypeLabel(movement.movementType),
         change: `${movement.quantityChange > 0 ? "+" : ""}${movement.quantityChange}`,
+        stockBefore: movement.previousQuantity === null ? "—" : String(movement.previousQuantity),
+        stockAfter: movement.newQuantity === null ? "—" : String(movement.newQuantity),
+        recordedBy: movement.performedByName ?? "—",
         value: `${currency} ${formatCents(movement.valueCents)}`,
         notes: movement.notes ?? "—"
       })),
@@ -341,12 +347,15 @@ export function StockLedgerRoute(): React.JSX.Element {
             <div className="overflow-x-auto rounded-lg border border-line">
               <table className="w-full table-fixed border-collapse text-sm">
                 <colgroup>
-                  <col className="w-[12%]" />
-                  <col className="w-[20%]" />
-                  <col className="w-[10%]" /> 
+                  <col className="w-[9%]" />
+                  <col className="w-[15%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[6%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[9%]" />
                   <col className="w-[10%]" />
-                  <col className="w-[5%]" />
-                  <col className="w-[12%]" />
                 </colgroup>
                 <thead>
                   <tr className="bg-primary text-white">
@@ -355,7 +364,10 @@ export function StockLedgerRoute(): React.JSX.Element {
                     <Th>Storefront</Th>
                     <Th>Type</Th>
                     <Th className="text-right">Change</Th>
+                    <Th className="text-right">Stock Before</Th>
+                    <Th className="text-right">Stock After</Th>
                     <Th className="text-right">Value</Th>
+                    <Th>Recorded By</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -383,8 +395,17 @@ export function StockLedgerRoute(): React.JSX.Element {
                         {movement.quantityChange > 0 ? "+" : ""}
                         {movement.quantityChange}
                       </td>
+                      <td className="px-3 py-2.5 text-right text-xs font-semibold tabular-nums text-muted">
+                        {movement.previousQuantity ?? "—"}
+                      </td>
+                      <td className="px-3 py-2.5 text-right text-xs font-bold tabular-nums text-ink">
+                        {movement.newQuantity ?? "—"}
+                      </td>
                       <td className="px-3 py-2.5 text-right text-xs font-bold tabular-nums text-ink">
                         {currency} {formatCents(movement.valueCents)}
+                      </td>
+                      <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">
+                        {movement.performedByName ?? "—"}
                       </td>
                     </tr>
                   ))}

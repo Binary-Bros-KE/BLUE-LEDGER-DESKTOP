@@ -59,6 +59,13 @@ export type StockMovement = {
   /** Resolved display name, e.g. "Jane Wanjiru" — null for a historical movement recorded before
    * this existed, or one with no employee attached (e.g. a system/import action). */
   performedByName: string | null;
+  /** This location's actual on-hand quantity immediately before/after THIS specific movement —
+   * frozen at the moment it happened, never recomputed later (so it stays truthful even after other
+   * movements have since changed the current total). Null for a movement recorded before this field
+   * existed. See applyValidatedStockMovement in inventory-service.ts, the single choke point every
+   * stock-moving action in the app already goes through, for where these are captured. */
+  previousQuantity: number | null;
+  newQuantity: number | null;
   notes: string | null;
   createdAt: string;
   syncStatus: StockMovementSyncStatus;
