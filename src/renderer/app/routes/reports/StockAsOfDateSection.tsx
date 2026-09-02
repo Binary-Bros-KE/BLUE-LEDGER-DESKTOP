@@ -171,7 +171,9 @@ export function StockAsOfDateSection({
                   <tr className="bg-primary text-white">
                     <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Product</th>
                     <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">SKU</th>
-                    <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Category</th>
+                    <th className="w-[130px] max-w-[130px] px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">
+                      Category
+                    </th>
                     {(data?.locations ?? []).map((loc) => (
                       <th key={loc.id} className="px-4 py-2.5 text-right text-[10px] font-extrabold uppercase tracking-wider">
                         {loc.name}
@@ -187,7 +189,12 @@ export function StockAsOfDateSection({
                         {row.productName}
                       </td>
                       <td className="px-4 py-2.5 text-xs font-semibold text-muted">{row.sku}</td>
-                      <td className="truncate px-4 py-2.5 text-xs font-semibold text-muted">{row.categoryName ?? "—"}</td>
+                      <td
+                        className="w-[130px] max-w-[130px] truncate px-4 py-2.5 text-xs font-semibold text-muted"
+                        title={row.categoryName ?? undefined}
+                      >
+                        {row.categoryName ?? "—"}
+                      </td>
                       {(data?.locations ?? []).map((loc) => {
                         const qty = row.quantityByLocation[loc.id] ?? 0;
                         return (
