@@ -106,7 +106,12 @@ export type InventoryReportData = {
   sections: LocationInventorySection[];
 };
 
-/** One product's ending balance at one location, as of a chosen past (or today's) date — computed
+/** One product's ending balance as of a chosen past (or today's) date, one column per location —
+ * pivoted this way (rather than one row per product+location) because every real tenant so far has
+ * at most a handful of storefronts, so a wide row reads far easier than the same product repeated
+ * once per branch. `quantityByLocation` always has an entry for every location in
+ * StockAsOfDateData["locations"] (0 if this product never moved at that location), same "show every
+ * location even at zero" convention as the live report's own per-location sections. Computed
  * backward from the current, known-correct `inventory` total minus every movement that happened
  * AFTER that date (see inventory-report-service.ts's getStockAsOfDateReport), never a stored
  * snapshot. Deliberately a much simpler shape than LocationProductRow: value/allocation-bucket
@@ -117,14 +122,16 @@ export type StockAsOfDateRow = {
   productName: string;
   sku: string;
   categoryName: string | null;
-  locationId: string;
-  locationName: string;
-  quantity: number;
+  quantityByLocation: Record<string, number>;
+  totalQuantity: number;
 };
 
 export type StockAsOfDateData = {
   /** Echoes back the requested date (YYYY-MM-DD) so the UI/export can label itself without holding
    * separate state. */
   asOfDate: string;
+  /** Ordered column list — every active location in scope (just one if the caller filtered to a
+   * single storefront), even one with zero stock of everything. */
+  locations: { id: string; name: string }[];
   rows: StockAsOfDateRow[];
 };

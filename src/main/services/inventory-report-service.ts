@@ -276,20 +276,43 @@ export function getStockAsOfDateReport(input: unknown): StockAsOfDateData {
   // current total — that's precisely "undo every movement since the end of the requested day."
   const sinceIsoExclusive = startOfDayIso(addDaysIso(parsed.date, 1));
 
-  const rows = inventoryReportRepository.findStockAsOfDateRows(tenantId, locationId, sinceIsoExclusive);
+  const flatRows = inventoryReportRepository.findStockAsOfDateRows(tenantId, locationId, sinceIsoExclusive);
 
-  return {
-    asOfDate: parsed.date,
-    rows: rows
-      .map((row) => ({
+  // Every active location in scope becomes a column — seeded up front (same "show every location
+  // even at zero" convention as the live report's own sections) so a product that never moved at a
+  // given location still shows 0 there instead of the column silently being absent for that row.
+  const activeLocations = inventoryReportRepository.findActiveLocations(tenantId, locationId);
+  const locationOrder = activeLocations.map((loc) => ({ id: loc.id, name: loc.location_name }));
+
+  const productMap = new Map<
+    string,
+    { productId: string; productName: string; sku: string; categoryName: string | null; quantityByLocation: Record<string, number> }
+  >();
+  for (const row of flatRows) {
+    let product = productMap.get(row.product_id);
+    if (!product) {
+      product = {
         productId: row.product_id,
         productName: row.product_name,
         sku: row.sku,
         categoryName: row.category_name,
-        locationId: row.location_id,
-        locationName: row.location_name,
-        quantity: row.quantity,
-      }))
-      .sort((a, b) => a.productName.localeCompare(b.productName)),
+        quantityByLocation: Object.fromEntries(locationOrder.map((loc) => [loc.id, 0])),
+      };
+      productMap.set(row.product_id, product);
+    }
+    product.quantityByLocation[row.location_id] = row.quantity;
+  }
+
+  const rows = [...productMap.values()]
+    .map((product) => ({
+      ...product,
+      totalQuantity: Object.values(product.quantityByLocation).reduce((sum, qty) => sum + qty, 0),
+    }))
+    .sort((a, b) => a.productName.localeCompare(b.productName));
+
+  return {
+    asOfDate: parsed.date,
+    locations: locationOrder,
+    rows,
   };
 }

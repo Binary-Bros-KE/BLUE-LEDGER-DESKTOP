@@ -26,8 +26,10 @@ function formatDateLabel(dateStr: string): string {
 
 /** "What was on hand at close of business on [date]" — a much simpler sibling to the live report's
  * per-location sections: just quantity, since value/allocation-bucket breakdowns don't have a clean
- * historical meaning (see shared/types/inventory-report.ts's StockAsOfDateRow doc comment). Shares
- * the parent route's own storefront filter — only owns the date picker and its own data/table. */
+ * historical meaning (see shared/types/inventory-report.ts's StockAsOfDateRow doc comment). One row
+ * per product with one column per location (every real tenant so far tops out at 3 storefronts, so
+ * this reads far easier than repeating each product once per branch). Shares the parent route's own
+ * storefront filter — only owns the date picker and its own data/table. */
 export function StockAsOfDateSection({
   locationId,
   canExport
@@ -68,10 +70,10 @@ export function StockAsOfDateSection({
     if (!data) return [];
     const term = searchTerm.trim().toLowerCase();
     if (!term) return data.rows;
-    return data.rows.filter((row) => `${row.productName} ${row.sku} ${row.locationName}`.toLowerCase().includes(term));
+    return data.rows.filter((row) => `${row.productName} ${row.sku} ${row.categoryName ?? ""}`.toLowerCase().includes(term));
   }, [data, searchTerm]);
 
-  const totalUnits = useMemo(() => filteredRows.reduce((sum, row) => sum + row.quantity, 0), [filteredRows]);
+  const totalUnits = useMemo(() => filteredRows.reduce((sum, row) => sum + row.totalQuantity, 0), [filteredRows]);
 
   const exportRequest = useMemo<ReportExportRequest | null>(() => {
     if (!data) return null;
@@ -86,15 +88,15 @@ export function StockAsOfDateSection({
             { key: "product", header: "Product" },
             { key: "sku", header: "SKU" },
             { key: "category", header: "Category" },
-            { key: "location", header: "Location" },
-            { key: "quantity", header: "Quantity", align: "right" }
+            ...data.locations.map((loc) => ({ key: `loc_${loc.id}`, header: loc.name, align: "right" as const })),
+            { key: "total", header: "Total", align: "right" as const }
           ],
           rows: filteredRows.map((row) => ({
             product: row.productName,
             sku: row.sku,
             category: row.categoryName ?? "—",
-            location: row.locationName,
-            quantity: String(row.quantity)
+            ...Object.fromEntries(data.locations.map((loc) => [`loc_${loc.id}`, String(row.quantityByLocation[loc.id] ?? 0)])),
+            total: String(row.totalQuantity)
           }))
         }
       ],
@@ -128,7 +130,7 @@ export function StockAsOfDateSection({
                   type="text"
                   value={searchTerm}
                   onChange={(event) => setSearchTerm(event.target.value)}
-                  placeholder="Search product, SKU, location"
+                  placeholder="Search product, SKU, category"
                   className="h-10 w-64 rounded-lg border border-line bg-white pl-9 pr-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
                 />
               </div>
@@ -153,7 +155,7 @@ export function StockAsOfDateSection({
       ) : (
         <div className="rounded-lg border border-line bg-white shadow-soft">
           <div className="flex items-center justify-between border-b border-line px-5 py-3">
-            <p className="text-sm font-extrabold text-ink">{filteredRows.length} product rows</p>
+            <p className="text-sm font-extrabold text-ink">{filteredRows.length} products</p>
             <p className="text-sm font-extrabold tabular-nums text-ink">{totalUnits} units total</p>
           </div>
           {filteredRows.length === 0 ? (
@@ -164,44 +166,44 @@ export function StockAsOfDateSection({
             </p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full table-fixed border-collapse text-sm">
-                <colgroup>
-                  <col className="w-[34%]" />
-                  <col className="w-[18%]" />
-                  <col className="w-[18%]" />
-                  <col className="w-[18%]" />
-                  <col className="w-[12%]" />
-                </colgroup>
+              <table className="w-full min-w-[640px] border-collapse text-sm">
                 <thead>
                   <tr className="bg-primary text-white">
                     <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Product</th>
                     <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">SKU</th>
                     <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Category</th>
-                    <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Location</th>
-                    <th className="px-4 py-2.5 text-right text-[10px] font-extrabold uppercase tracking-wider">Quantity</th>
+                    {(data?.locations ?? []).map((loc) => (
+                      <th key={loc.id} className="px-4 py-2.5 text-right text-[10px] font-extrabold uppercase tracking-wider">
+                        {loc.name}
+                      </th>
+                    ))}
+                    <th className="px-4 py-2.5 text-right text-[10px] font-extrabold uppercase tracking-wider">Total</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredRows.map((row) => (
-                    <tr
-                      key={`${row.productId}:${row.locationId}`}
-                      className="border-t border-line odd:bg-white even:bg-soft/50"
-                    >
+                    <tr key={row.productId} className="border-t border-line odd:bg-white even:bg-soft/50">
                       <td className="line-clamp-2 px-4 py-2.5 font-bold leading-snug text-ink" title={row.productName}>
                         {row.productName}
                       </td>
                       <td className="px-4 py-2.5 text-xs font-semibold text-muted">{row.sku}</td>
                       <td className="truncate px-4 py-2.5 text-xs font-semibold text-muted">{row.categoryName ?? "—"}</td>
-                      <td className="truncate px-4 py-2.5 text-xs font-semibold text-muted">{row.locationName}</td>
-                      <td
-                        className={
-                          row.quantity <= 0
-                            ? "px-4 py-2.5 text-right font-extrabold tabular-nums text-danger"
-                            : "px-4 py-2.5 text-right font-extrabold tabular-nums text-ink"
-                        }
-                      >
-                        {row.quantity}
-                      </td>
+                      {(data?.locations ?? []).map((loc) => {
+                        const qty = row.quantityByLocation[loc.id] ?? 0;
+                        return (
+                          <td
+                            key={loc.id}
+                            className={
+                              qty <= 0
+                                ? "px-4 py-2.5 text-right text-xs font-semibold tabular-nums text-danger"
+                                : "px-4 py-2.5 text-right text-xs font-semibold tabular-nums text-muted"
+                            }
+                          >
+                            {qty}
+                          </td>
+                        );
+                      })}
+                      <td className="px-4 py-2.5 text-right font-extrabold tabular-nums text-ink">{row.totalQuantity}</td>
                     </tr>
                   ))}
                 </tbody>
