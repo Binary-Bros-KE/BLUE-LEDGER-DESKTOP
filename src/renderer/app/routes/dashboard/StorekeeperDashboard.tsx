@@ -21,7 +21,14 @@ function money(cents: number): string {
   return formatCents(cents);
 }
 
-const INCREASING_TYPES = new Set<StockMovementType>(["purchase", "transfer_in", "return", "opening_stock"]);
+const INCREASING_TYPES = new Set<StockMovementType>([
+  "purchase",
+  "transfer_in",
+  "return",
+  "opening_stock",
+  "borrow_in",
+  "loan_return_in"
+]);
 
 function movementTone(type: StockMovementType): "success" | "danger" | "neutral" {
   if (INCREASING_TYPES.has(type)) return "success";

@@ -8,6 +8,7 @@ import { ensureMainStoreLocation } from "@main/services/location-service";
 import { ensureCreditPaymentMethodDeactivated, ensureDefaultPaymentMethods } from "@main/services/payment-method-service";
 import {
   consolidateToFourCoreRoles,
+  ensureBorrowsPermission,
   ensureDataImportPermission,
   ensureDefaultRoles,
   ensureExpensesPermissions,
@@ -107,6 +108,7 @@ export async function bootstrap(): Promise<void> {
   ensureSalariesPermission(tenant.tenantId);
   ensureRidersPermission(tenant.tenantId);
   ensureLocalPurchasesPermission(tenant.tenantId);
+  ensureBorrowsPermission(tenant.tenantId);
   ensureStockRequestsPermission(tenant.tenantId);
   ensureMainStorePermission(tenant.tenantId);
   ensureManagerEmployeesPermission(tenant.tenantId);

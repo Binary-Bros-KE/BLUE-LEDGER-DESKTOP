@@ -79,6 +79,7 @@ const DEFAULT_SYSTEM_ROLES: Array<{
         "expenses",
         "expense_categories",
         "local_purchases",
+        "borrows",
         "salaries",
         "reports",
         "employees",
@@ -126,7 +127,10 @@ const DEFAULT_SYSTEM_ROLES: Array<{
       purchases: ["view", "create"],
       suppliers: ["view", "create"],
       salaries: ["view"],
-      stock_requests: ["view", "approve"]
+      stock_requests: ["view", "approve"],
+      // The Storekeeper is the role most directly responsible for physical stock leaving/entering a
+      // storefront — a natural fit for recording/returning borrowed or lent stock.
+      borrows: ["view", "create", "edit", "export"]
     }
   }
 ];
@@ -468,6 +472,32 @@ export function ensureLocalPurchasesPermission(tenantId: string): void {
       roleName: role.roleName,
       description: role.description,
       permissions: { ...role.permissions, local_purchases: grant },
+      updatedBy: null
+    });
+  }
+}
+
+/**
+ * Retroactively grants "borrows" permissions (Manager: full view/create/edit/export, Storekeeper:
+ * same) to system roles seeded before the Borrow & Lend feature existed — new installs get it for
+ * free via DEFAULT_SYSTEM_ROLES. Safe every boot: a no-op once a role's stored permissions already
+ * include borrows.
+ */
+export function ensureBorrowsPermission(tenantId: string): void {
+  const defaultsByName = new Map(DEFAULT_SYSTEM_ROLES.map((role) => [role.roleName, role.permissions.borrows]));
+
+  for (const row of roleRepository.findAllRoleRows(tenantId)) {
+    if (!row.is_system_role) continue;
+    const grant = defaultsByName.get(row.role_name);
+    if (!grant || grant.length === 0) continue;
+
+    const role = roleRepository.mapRoleRow(row);
+    if (role.permissions.borrows) continue;
+
+    roleRepository.updateRoleRow(row.id, {
+      roleName: role.roleName,
+      description: role.description,
+      permissions: { ...role.permissions, borrows: grant },
       updatedBy: null
     });
   }

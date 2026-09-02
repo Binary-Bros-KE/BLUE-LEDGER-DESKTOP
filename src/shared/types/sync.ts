@@ -30,7 +30,8 @@ export type SyncEntity =
   | "stock_movements"
   | "stock_requests"
   | "stock_receipts"
-  | "main_store_allocations";
+  | "main_store_allocations"
+  | "borrows";
 
 export type SyncQueueItem = {
   id: string;

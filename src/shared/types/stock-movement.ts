@@ -6,18 +6,33 @@ export const STOCK_MOVEMENT_TYPE_OPTIONS = [
   { value: "return", label: "Return" },
   { value: "damage", label: "Damage / Loss" },
   { value: "adjustment", label: "Adjustment" },
-  { value: "opening_stock", label: "Opening Stock" }
+  { value: "opening_stock", label: "Opening Stock" },
+  // The four Borrow & Lend movements — see shared/types/borrow.ts's own doc comment for the full
+  // "why", and borrow-service.ts for where each of these is actually created. Named around what
+  // happened to THIS shop's own stock, not the counterparty's, same convention as transfer_in/out.
+  { value: "borrow_in", label: "Borrowed In" },
+  { value: "borrow_return_out", label: "Returned Borrowed Stock" },
+  { value: "loan_out", label: "Lent Out" },
+  { value: "loan_return_in", label: "Loan Returned" }
 ] as const;
 
 export type StockMovementType = (typeof STOCK_MOVEMENT_TYPE_OPTIONS)[number]["value"];
 
 /**
  * Types a user can pick when manually recording a movement. "sale" is reserved for the checkout
- * flow, and "transfer_in"/"transfer_out" are never selected directly — they're always created as a
- * matched pair by the transfer action, never as a standalone entry.
+ * flow, "transfer_in"/"transfer_out" are never selected directly — they're always created as a
+ * matched pair by the transfer action — and the four borrow/lend types are likewise only ever
+ * created by the Borrow & Lend feature's own actions (borrow-service.ts), never standalone.
  */
 export const MANUAL_STOCK_MOVEMENT_TYPE_OPTIONS = STOCK_MOVEMENT_TYPE_OPTIONS.filter(
-  (option) => option.value !== "sale" && option.value !== "transfer_in" && option.value !== "transfer_out"
+  (option) =>
+    option.value !== "sale" &&
+    option.value !== "transfer_in" &&
+    option.value !== "transfer_out" &&
+    option.value !== "borrow_in" &&
+    option.value !== "borrow_return_out" &&
+    option.value !== "loan_out" &&
+    option.value !== "loan_return_in"
 );
 
 /** Movement types where the backend/UI infers the sign — the user only ever enters a magnitude. */

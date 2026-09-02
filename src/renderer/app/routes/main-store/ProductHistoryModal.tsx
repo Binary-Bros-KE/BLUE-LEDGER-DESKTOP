@@ -12,7 +12,14 @@ import { showErrorToast } from "@renderer/shared/lib/toast";
 import type { ExportListRequest } from "@shared/types/export";
 import { STOCK_MOVEMENT_TYPE_OPTIONS, type StockMovement, type StockMovementType } from "@shared/types/stock-movement";
 
-const INCREASING_TYPES = new Set<StockMovementType>(["purchase", "transfer_in", "return", "opening_stock"]);
+const INCREASING_TYPES = new Set<StockMovementType>([
+  "purchase",
+  "transfer_in",
+  "return",
+  "opening_stock",
+  "borrow_in",
+  "loan_return_in"
+]);
 
 function movementTone(type: StockMovementType): "success" | "danger" | "neutral" {
   if (INCREASING_TYPES.has(type)) return "success";

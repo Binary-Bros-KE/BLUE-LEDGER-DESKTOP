@@ -18,7 +18,14 @@ import type { ExportListRequest } from "@shared/types/export";
 import type { Location } from "@shared/types/location";
 import { STOCK_MOVEMENT_TYPE_OPTIONS, type StockMovementFeedItem, type StockMovementType } from "@shared/types/stock-movement";
 
-const INCREASING_TYPES = new Set<StockMovementType>(["purchase", "transfer_in", "return", "opening_stock"]);
+const INCREASING_TYPES = new Set<StockMovementType>([
+  "purchase",
+  "transfer_in",
+  "return",
+  "opening_stock",
+  "borrow_in",
+  "loan_return_in"
+]);
 const EARLIEST_DATE = "2000-01-01";
 const YEAR_LOOKBACK = 5;
 

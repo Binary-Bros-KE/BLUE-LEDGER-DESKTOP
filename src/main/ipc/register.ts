@@ -255,6 +255,7 @@ import {
   restoreLocalPurchase,
   updateLocalPurchase
 } from "@main/services/local-purchase-service";
+import { createBorrow, getBorrow, getBorrowSummary, listBorrows, recordBorrowReturn } from "@main/services/borrow-service";
 import {
   approveSaleReturn,
   getSaleReturn,
@@ -633,6 +634,11 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.localPurchaseOpenAttachment, (_event, relativePath: string) =>
     openManagedExpenseAttachment(relativePath).then(() => ({ success: true as const }))
   );
+  ipcMain.handle(ipcChannels.borrowList, () => listBorrows());
+  ipcMain.handle(ipcChannels.borrowSummary, () => getBorrowSummary());
+  ipcMain.handle(ipcChannels.borrowGet, (_event, id: string) => getBorrow(id));
+  ipcMain.handle(ipcChannels.borrowCreate, (_event, input: unknown) => createBorrow(input));
+  ipcMain.handle(ipcChannels.borrowRecordReturn, (_event, id: string, input: unknown) => recordBorrowReturn(id, input));
   ipcMain.handle(ipcChannels.salaryList, () => listSalaries());
   ipcMain.handle(ipcChannels.salaryGet, (_event, id: string) => getSalary(id));
   ipcMain.handle(ipcChannels.salaryCreate, (_event, input: unknown) => createSalary(input));

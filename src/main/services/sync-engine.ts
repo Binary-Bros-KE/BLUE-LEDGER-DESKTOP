@@ -14,6 +14,7 @@ import * as locationRepository from "@main/database/repositories/location-reposi
 import * as mainStoreAllocationRepository from "@main/database/repositories/main-store-allocation-repository";
 import * as paymentMethodRepository from "@main/database/repositories/payment-method-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
+import * as borrowRepository from "@main/database/repositories/borrow-repository";
 import * as purchaseRepository from "@main/database/repositories/purchase-repository";
 import * as quotationRepository from "@main/database/repositories/quotation-repository";
 import * as recurringBillRepository from "@main/database/repositories/recurring-bill-repository";
@@ -83,6 +84,8 @@ const SYNC_ENTITIES: SyncEntity[] = [
   "sales",
   "quotations",
   "purchases",
+  // Same dependency shape as purchases (suppliers + locations + products) — see borrow-service.ts.
+  "borrows",
   "sale_returns",
   "sale_voids",
   "invoice_cancellations",
@@ -99,6 +102,9 @@ const BESPOKE_APPLY_ENTITIES = new Set<SyncEntity>([
   "sales",
   "quotations",
   "purchases",
+  // Same header-plus-line-items shape as purchases (and, like purchases, a return_events/
+  // receiving_events append-only history column) — see applyBorrowPulledRow below.
+  "borrows",
   "sale_returns",
   // Not a document-with-line-items like the other four — an append-only ledger row that must be
   // applied as a quantity DELTA to local inventory/allocations, never a plain column-map upsert (see
@@ -142,6 +148,9 @@ const CONFLICT_AWARE_ENTITIES = new Set<SyncEntity>([
   "sales",
   "quotations",
   "purchases",
+  // Two devices can each record a borrow/return against the same record before either syncs — a
+  // real optimistic-lock case, same reasoning as purchases' own receiving sessions.
+  "borrows",
   "sale_returns",
   "stock_requests",
   "stock_receipts",
@@ -1217,6 +1226,49 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       localUpdatedAt: row.updated_at,
       baseUpdatedAt: row.synced_updated_at
     };
+  },
+  borrows: (id) => {
+    const row = borrowRepository.findBorrowRowById(id);
+    if (!row) return null;
+
+    const itemRows = getDatabase()
+      .prepare("SELECT * FROM borrow_items WHERE borrow_id = ? ORDER BY created_at ASC")
+      .all(id) as Array<{
+      id: string;
+      product_id: string;
+      quantity: number;
+      returned_quantity: number;
+      created_at: string;
+      updated_at: string;
+    }>;
+    const items = itemRows.map((i) => ({
+      id: i.id,
+      // Alias-translate before push — see resolveRef's pull-side counterpart in the apply
+      // functions below for the full reasoning (a natural-key merge on "products" can supersede
+      // this device's own local id with a different cloud id at any time).
+      productId: resolveCloudRef("products", i.product_id),
+      quantity: i.quantity,
+      returnedQuantity: i.returned_quantity,
+      createdAt: i.created_at,
+      updatedAt: i.updated_at
+    }));
+
+    return {
+      id: row.id,
+      borrowNumber: row.borrow_number,
+      direction: row.direction,
+      supplierId: row.supplier_id,
+      locationId: row.location_id,
+      status: row.status,
+      notes: row.notes,
+      returnEvents: JSON.parse(row.return_events) as unknown,
+      // createdBy/createdByName deliberately NOT sent — same choice purchases already made for its
+      // own created_by, local-only display info.
+      items,
+      localCreatedAt: row.created_at,
+      localUpdatedAt: row.updated_at,
+      baseUpdatedAt: row.synced_updated_at
+    };
   }
 };
 
@@ -2003,6 +2055,7 @@ export function resolveCloudRef(entity: SyncEntity, value: unknown): unknown {
 function refColumnsFor(entity: SyncEntity): Array<{ cloud: string; refEntity: SyncEntity }> {
   const bespokeColumns: Partial<Record<SyncEntity, Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }>>> = {
     purchases: PURCHASE_HEADER_COLUMNS,
+    borrows: BORROW_HEADER_COLUMNS,
     quotations: QUOTATION_HEADER_COLUMNS,
     sale_returns: SALE_RETURN_HEADER_COLUMNS,
     sales: SALE_HEADER_COLUMNS,
@@ -2043,6 +2096,7 @@ function applyPulledRow(entity: SyncEntity, row: Record<string, unknown>, force 
     if (entity === "sales") applySalePulledRow(row, force);
     if (entity === "quotations") applyQuotationPulledRow(row, force);
     if (entity === "purchases") applyPurchasePulledRow(row, force);
+    if (entity === "borrows") applyBorrowPulledRow(row, force);
     if (entity === "sale_returns") applySaleReturnPulledRow(row, force);
     // Never conflict-aware (see stock_movements' own PAYLOAD_BUILDER comment) — resolveConflict()
     // can only ever call applyPulledRow with force:true for a CONFLICT_AWARE_ENTITIES member, which
@@ -2739,6 +2793,51 @@ function applyPurchasePulledRow(row: Record<string, unknown>, force: boolean): v
   });
 }
 
+const BORROW_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }> = [
+  { local: "borrow_number", cloud: "borrowNumber" },
+  { local: "direction", cloud: "direction" },
+  { local: "supplier_id", cloud: "supplierId", refEntity: "suppliers", refNotNull: true },
+  { local: "location_id", cloud: "locationId", refEntity: "locations", refNotNull: true },
+  { local: "status", cloud: "status" },
+  { local: "notes", cloud: "notes" }
+];
+
+/** Same shape as applyPurchasePulledRow — a header plus a full-replace line-items table, both routed
+ * through upsertDocumentHeader/nested-insert exactly like purchases (see BORROW_HEADER_COLUMNS'
+ * own siblings for why refNotNull is set where it is). */
+function applyBorrowPulledRow(row: Record<string, unknown>, force: boolean): void {
+  runInTransaction(() => {
+    const id = row.id as string;
+    const localTenantId = upsertDocumentHeader(
+      "borrows",
+      BORROW_HEADER_COLUMNS,
+      [{ local: "return_events", cloud: "returnEvents" }],
+      row,
+      force
+    );
+    if (!localTenantId) return;
+
+    const db = getDatabase();
+    // remaining_quantity is a GENERATED ALWAYS column — never in the insert column list.
+    db.prepare("DELETE FROM borrow_items WHERE borrow_id = ?").run(id);
+    const items = (row.items as Array<Record<string, unknown>>) ?? [];
+    for (const item of items) {
+      db.prepare(
+        `INSERT INTO borrow_items (id, borrow_id, product_id, quantity, returned_quantity, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        item.id as string,
+        id,
+        resolveRef("products", item.productId) as string,
+        item.quantity as number,
+        (item.returnedQuantity as number | undefined) ?? 0,
+        item.createdAt as string,
+        item.updatedAt as string
+      );
+    }
+  });
+}
+
 const SALE_RETURN_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }> = [
   { local: "sale_id", cloud: "saleId", refEntity: "sales", refNotNull: true },
   { local: "status", cloud: "status" },
@@ -3071,6 +3170,7 @@ const ITEM_REFS: Partial<Record<SyncEntity, Array<{ itemsKey: string; idKey: str
   sales: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }],
   quotations: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }],
   purchases: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }],
+  borrows: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }],
   sale_returns: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }],
   stock_requests: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }],
   stock_receipts: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }]
@@ -3739,6 +3839,10 @@ const CONFLICT_LABEL_BUILDERS: Partial<Record<SyncEntity, (entityId: string) => 
   purchases: (id) => {
     const row = purchaseRepository.findPurchaseRowById(id);
     return row ? row.purchase_number : id;
+  },
+  borrows: (id) => {
+    const row = borrowRepository.findBorrowRowById(id);
+    return row ? row.borrow_number : id;
   },
   stock_requests: (id) => {
     const row = stockRequestRepository.findStockRequestRowById(id);

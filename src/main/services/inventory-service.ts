@@ -20,11 +20,19 @@ import type {
   StockTransferResult
 } from "@shared/types/stock-movement";
 
-const INCREASING_MOVEMENT_TYPES = new Set(["purchase", "transfer_in", "return", "opening_stock"]);
-const DECREASING_MOVEMENT_TYPES = new Set(["sale", "transfer_out", "damage"]);
+const INCREASING_MOVEMENT_TYPES = new Set(["purchase", "transfer_in", "return", "opening_stock", "borrow_in", "loan_return_in"]);
+const DECREASING_MOVEMENT_TYPES = new Set(["sale", "transfer_out", "damage", "borrow_return_out", "loan_out"]);
 
-/** transfer_in/transfer_out must only ever be created as a matched pair via recordStockTransfer. */
-const STANDALONE_BLOCKED_TYPES = new Set<StockMovementType>(["transfer_in", "transfer_out"]);
+/** transfer_in/transfer_out must only ever be created as a matched pair via recordStockTransfer;
+ * the four borrow/lend movements must only ever be created by borrow-service.ts's own actions. */
+const STANDALONE_BLOCKED_TYPES = new Set<StockMovementType>([
+  "transfer_in",
+  "transfer_out",
+  "borrow_in",
+  "borrow_return_out",
+  "loan_out",
+  "loan_return_in"
+]);
 
 function assertValidDirection(input: StockMovementInput): void {
   if (INCREASING_MOVEMENT_TYPES.has(input.movementType) && input.quantityChange < 0) {
@@ -174,7 +182,7 @@ export function recordStockMovement(input: unknown): StockMovement {
   const parsed = stockMovementInputSchema.parse(input);
 
   if (STANDALONE_BLOCKED_TYPES.has(parsed.movementType)) {
-    throw new Error("Transfers must move stock between two locations — use the transfer action instead");
+    throw new Error(`"${parsed.movementType}" can't be recorded as a standalone movement — use the matching action instead`);
   }
 
   const { tenantId } = getCurrentTenant();

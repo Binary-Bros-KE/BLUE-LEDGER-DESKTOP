@@ -210,6 +210,13 @@ const api: BlueLedgerApi = {
     pickAttachment: () => invoke("local-purchase:pick-attachment"),
     openAttachment: (relativePath) => invoke("local-purchase:open-attachment", relativePath)
   },
+  borrow: {
+    list: () => invoke("borrow:list"),
+    summary: () => invoke("borrow:summary"),
+    get: (id) => invoke("borrow:get", id),
+    create: (input) => invoke("borrow:create", input),
+    recordReturn: (id, input) => invoke("borrow:record-return", id, input)
+  },
   salary: {
     list: () => invoke("salary:list"),
     get: (id) => invoke("salary:get", id),

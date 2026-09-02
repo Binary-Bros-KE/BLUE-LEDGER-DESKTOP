@@ -5,6 +5,7 @@ import { navItemsByKey } from "@renderer/app/layouts/navigation";
 import { AccessDeniedRoute } from "@renderer/app/routes/AccessDeniedRoute";
 import { ActivationRoute } from "@renderer/app/routes/ActivationRoute";
 import { ApprovalsRoute } from "@renderer/app/routes/ApprovalsRoute";
+import { BorrowsRoute } from "@renderer/app/routes/BorrowsRoute";
 import { BusinessProfileRoute } from "@renderer/app/routes/BusinessProfileRoute";
 import { CategoriesRoute } from "@renderer/app/routes/CategoriesRoute";
 import { CheckoutRoute } from "@renderer/app/routes/CheckoutRoute";
@@ -179,6 +180,8 @@ export function App(): React.JSX.Element {
         <PurchasesRoute />
       ) : activeNavKey === "local-purchases" ? (
         <LocalPurchasesRoute />
+      ) : activeNavKey === "borrows" ? (
+        <BorrowsRoute />
       ) : activeNavKey === "expenses" ? (
         <ExpensesRoute />
       ) : activeNavKey === "checkout" ? (

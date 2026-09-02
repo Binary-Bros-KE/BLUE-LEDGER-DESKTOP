@@ -12,6 +12,7 @@ import {
   FileSpreadsheet,
   FileText,
   FolderTree,
+  Handshake,
   LayoutDashboard,
   Package,
   PackageCheck,
@@ -194,6 +195,13 @@ export const navGroups: NavGroup[] = [
         description: "Small day-to-day buys — tape, pens, delivery bags",
         icon: Banknote,
         permissionModule: "local_purchases"
+      },
+      {
+        key: "borrows",
+        label: "Borrow & Lend",
+        description: "Stock borrowed from or lent to other shops",
+        icon: Handshake,
+        permissionModule: "borrows"
       }
     ]
   },

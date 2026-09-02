@@ -15,6 +15,10 @@ const MOVEMENT_LABEL: Record<string, string> = {
   damage: "Damage",
   adjustment: "Adjustment",
   opening_stock: "Opening Stock",
+  borrow_in: "Borrowed In",
+  borrow_return_out: "Returned Borrowed Stock",
+  loan_out: "Lent Out",
+  loan_return_in: "Loan Returned",
 };
 
 const MOVEMENT_STYLE: Record<string, string> = {
@@ -26,6 +30,10 @@ const MOVEMENT_STYLE: Record<string, string> = {
   return: "bg-warning/10 text-warning",
   damage: "bg-danger/10 text-danger",
   adjustment: "bg-soft text-muted",
+  borrow_in: "bg-success/10 text-success",
+  loan_return_in: "bg-success/10 text-success",
+  borrow_return_out: "bg-warning/10 text-warning",
+  loan_out: "bg-warning/10 text-warning",
 };
 
 function formatCreatedAt(iso: string): string {

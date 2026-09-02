@@ -55,6 +55,11 @@ export const PERMISSION_MODULES = [
     label: "Local Purchases",
     actions: ["view", "create", "edit", "delete", "export"]
   },
+  {
+    key: "borrows",
+    label: "Borrow & Lend",
+    actions: ["view", "create", "edit", "export"]
+  },
   { key: "employees", label: "Employees", actions: ["view", "create", "edit", "delete", "export"] },
   {
     key: "salaries",

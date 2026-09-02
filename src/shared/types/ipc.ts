@@ -34,6 +34,7 @@ import type { ExportListRequest } from "./export";
 import type { ReportExportRequest } from "./report-export";
 import type { ExpenseCategory, ExpenseCategoryStatus } from "./expense-category";
 import type { Purchase, PurchaseListItem, PurchaseSummary } from "./purchase";
+import type { Borrow, BorrowListItem, BorrowSummary } from "./borrow";
 import type { Salary } from "./salary";
 import type {
   CancelledPurchasesReport,
@@ -672,6 +673,26 @@ export type IpcInvokeMap = {
   "local-purchase:pick-attachment": {
     args: [];
     result: string | null;
+  };
+  "borrow:list": {
+    args: [];
+    result: BorrowListItem[];
+  };
+  "borrow:summary": {
+    args: [];
+    result: BorrowSummary;
+  };
+  "borrow:get": {
+    args: [string];
+    result: Borrow;
+  };
+  "borrow:create": {
+    args: [Record<string, unknown>];
+    result: Borrow;
+  };
+  "borrow:record-return": {
+    args: [string, Record<string, unknown>];
+    result: Borrow;
   };
   "local-purchase:open-attachment": {
     args: [string];
@@ -1603,6 +1624,13 @@ export type BlueLedgerApi = {
     delete: (id: string) => Promise<IpcInvokeMap["local-purchase:delete"]["result"]>;
     pickAttachment: () => Promise<IpcInvokeMap["local-purchase:pick-attachment"]["result"]>;
     openAttachment: (relativePath: string) => Promise<IpcInvokeMap["local-purchase:open-attachment"]["result"]>;
+  };
+  borrow: {
+    list: () => Promise<IpcInvokeMap["borrow:list"]["result"]>;
+    summary: () => Promise<IpcInvokeMap["borrow:summary"]["result"]>;
+    get: (id: string) => Promise<IpcInvokeMap["borrow:get"]["result"]>;
+    create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["borrow:create"]["result"]>;
+    recordReturn: (id: string, input: Record<string, unknown>) => Promise<IpcInvokeMap["borrow:record-return"]["result"]>;
   };
   salary: {
     list: () => Promise<IpcInvokeMap["salary:list"]["result"]>;

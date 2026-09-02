@@ -2790,6 +2790,80 @@ const migrations = [
       -- already proven for main_store_allocations' sourceType.
       ALTER TABLE sales ADD COLUMN walk_in_name TEXT;
     `
+  },
+  {
+    version: 81,
+    name: "borrows",
+    sql: `
+      -- "Borrow & Lend" — track physical stock moving between this shop and another shop
+      -- (represented by the existing suppliers table, not a new "shops" concept) without it being a
+      -- purchase (no pricing at all) or a sale. See shared/types/borrow.ts's own doc comment for the
+      -- full feature reasoning and shared/types/stock-movement.ts for the four movement types
+      -- (borrow_in/borrow_return_out/loan_out/loan_return_in) this drives. Same header+items+
+      -- append-only-events shape as purchases/purchase_items/receiving_events — a borrow can be
+      -- returned across several separate partial sessions, each frozen at the moment it happened.
+      CREATE TABLE IF NOT EXISTS borrows (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        borrow_number TEXT NOT NULL,
+        direction TEXT NOT NULL CHECK (direction IN ('borrowed', 'lent')),
+        supplier_id TEXT NOT NULL,
+        location_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'partially_returned', 'returned')),
+        notes TEXT,
+        return_events TEXT NOT NULL DEFAULT '[]',
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        synced_updated_at TEXT,
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (supplier_id) REFERENCES suppliers(id),
+        FOREIGN KEY (location_id) REFERENCES locations(id),
+        FOREIGN KEY (created_by) REFERENCES employees(id)
+      );
+
+      CREATE UNIQUE INDEX idx_borrows_tenant_number ON borrows(tenant_id, borrow_number);
+      CREATE INDEX idx_borrows_tenant_status ON borrows(tenant_id, status);
+      CREATE INDEX idx_borrows_tenant_created ON borrows(tenant_id, created_at);
+      CREATE INDEX idx_borrows_supplier ON borrows(supplier_id);
+      CREATE INDEX idx_borrows_location ON borrows(location_id);
+
+      CREATE TABLE IF NOT EXISTS borrow_items (
+        id TEXT PRIMARY KEY,
+        borrow_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        quantity INTEGER NOT NULL,
+        returned_quantity INTEGER NOT NULL DEFAULT 0,
+        remaining_quantity INTEGER GENERATED ALWAYS AS (quantity - returned_quantity) STORED,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (borrow_id) REFERENCES borrows(id),
+        FOREIGN KEY (product_id) REFERENCES products(id)
+      );
+
+      CREATE INDEX idx_borrow_items_borrow ON borrow_items(borrow_id);
+      CREATE INDEX idx_borrow_items_product ON borrow_items(product_id);
+
+      CREATE TRIGGER trg_borrows_sync_ai AFTER INSERT ON borrows BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'borrows', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_borrows_sync_au AFTER UPDATE ON borrows WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'borrows', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_borrows_sync_ad AFTER DELETE ON borrows BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'borrows', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_borrow_items_reenqueue_ai AFTER INSERT ON borrow_items BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), b.tenant_id, (SELECT client_id FROM tenant WHERE id = b.tenant_id), 'borrows', b.id, 'upsert', 'push', 'queued', 0, '{}', b.id || ':' || b.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+        FROM borrows b WHERE b.id = NEW.borrow_id;
+      END;
+    `
   }
 ] as const;
 
