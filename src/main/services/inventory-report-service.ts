@@ -2,13 +2,14 @@ import * as inventoryReportRepository from "@main/database/repositories/inventor
 import type { CurrentStockRow, StockMovementReportRowRaw } from "@main/database/repositories/inventory-report-repository";
 import { requirePermissionAnyOf, resolveReportLocationScope } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
-import { locationScopeInputSchema } from "@shared/schemas/report";
+import { locationScopeInputSchema, stockAsOfDateInputSchema } from "@shared/schemas/report";
 import type {
   InventoryOverviewStats,
   InventoryReportData,
   LocationInventorySection,
   LocationProductRow,
   MainStoreAllocationInfo,
+  StockAsOfDateData,
   StockMovementReportRow,
   StockValueBreakdownEntry,
 } from "@shared/types/inventory-report";
@@ -235,5 +236,60 @@ export function getInventoryReportData(input: unknown): InventoryReportData {
     overview,
     categoryValueBreakdown: toBreakdownEntries([...categoryMap.values()], totalStockValueCents),
     sections,
+  };
+}
+
+// Same device-local-timezone-correct date math as inventory-service.ts's own startOfDayIso/
+// addDaysIso (that pair is itself ported from report-service.ts) — small enough, and used
+// differently enough here (one exclusive boundary, not a start/end pair), that a shared export
+// isn't worth the coupling; every date-range report in this app keeps its own private copy.
+function startOfDayIso(dateStr: string): string {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return new Date(year ?? 0, (month ?? 1) - 1, day ?? 1).toISOString();
+}
+
+function addDaysIso(dateStr: string, days: number): string {
+  const date = new Date(`${dateStr}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Every product's ending balance as of a chosen date (today or any day in the past) — "what was on
+ * hand at close of business that day." Computed backward from the CURRENT `inventory` total (see
+ * findStockAsOfDateRows) rather than replaying forward from zero: stock_movements is append-only
+ * and the current total is always correct, so subtracting only the movements between the requested
+ * date and now is both simpler and far cheaper than summing a product's entire history every time —
+ * usually a small slice of the ledger even for a "last month" query. No new tracking of any kind;
+ * this works retroactively for dates from before this report existed.
+ */
+export function getStockAsOfDateReport(input: unknown): StockAsOfDateData {
+  requirePermissionAnyOf([
+    ["reports", "view"],
+    ["inventory", "view"]
+  ]);
+  const parsed = stockAsOfDateInputSchema.parse(input);
+  const { tenantId } = getCurrentTenant();
+  const locationId = resolveReportLocationScope(parsed.locationId);
+
+  // Everything from the START of the day AFTER the requested date gets subtracted back out of the
+  // current total — that's precisely "undo every movement since the end of the requested day."
+  const sinceIsoExclusive = startOfDayIso(addDaysIso(parsed.date, 1));
+
+  const rows = inventoryReportRepository.findStockAsOfDateRows(tenantId, locationId, sinceIsoExclusive);
+
+  return {
+    asOfDate: parsed.date,
+    rows: rows
+      .map((row) => ({
+        productId: row.product_id,
+        productName: row.product_name,
+        sku: row.sku,
+        categoryName: row.category_name,
+        locationId: row.location_id,
+        locationName: row.location_name,
+        quantity: row.quantity,
+      }))
+      .sort((a, b) => a.productName.localeCompare(b.productName)),
   };
 }

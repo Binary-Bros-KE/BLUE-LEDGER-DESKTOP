@@ -14,6 +14,8 @@ import { OverviewCard } from "./reports/FinancialOverviewCards";
 import { InventoryStockValueSection } from "./reports/InventoryStockValueSection";
 import { LocationInventorySection } from "./reports/LocationInventorySection";
 import { ProductDetailModal } from "./reports/ProductDetailModal";
+import { StockAsOfDateSection } from "./reports/StockAsOfDateSection";
+import { cn } from "@renderer/shared/lib/cn";
 
 function money(cents: number): string {
   return formatCents(cents);
@@ -88,16 +90,20 @@ function buildLocationExportSections(section: LocationInventorySectionData): Rep
   return rawLocationSections.filter((entry): entry is ReportExportSection => Boolean(entry));
 }
 
+type InventoryReportTab = "live" | "as-of-date";
+
 export function InventoryReportRoute(): React.JSX.Element {
   const { can } = usePermissions();
   const canExport = can("reports", "export");
   const locationFilter = useReportLocationFilter();
+  const [activeTab, setActiveTab] = useState<InventoryReportTab>("live");
   const [data, setData] = useState<InventoryReportData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
 
   useEffect(() => {
+    if (activeTab !== "live") return undefined;
     let cancelled = false;
     void (async () => {
       setLoading(true);
@@ -118,7 +124,7 @@ export function InventoryReportRoute(): React.JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [locationFilter.locationId]);
+  }, [activeTab, locationFilter.locationId]);
 
   // One export request per location, scoped to just that section — powers the "Export" button on
   // each storefront's own card, distinct from the "export everything" button in the page header.
@@ -213,63 +219,90 @@ export function InventoryReportRoute(): React.JSX.Element {
         </div>
         <div className="flex items-center gap-3">
           <ReportStorefrontFilter filter={locationFilter} />
-          {canExport && reportExportRequest && <ReportExportMenu request={reportExportRequest} />}
+          {activeTab === "live" && canExport && reportExportRequest && <ReportExportMenu request={reportExportRequest} />}
         </div>
       </div>
 
-      {error && (
-        <div className="rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">{error}</div>
-      )}
+      <div className="flex gap-2 border-b border-line">
+        {(
+          [
+            { key: "live", label: "Live" },
+            { key: "as-of-date", label: "As Of Date" }
+          ] as const
+        ).map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => setActiveTab(tab.key)}
+            className={cn(
+              "border-b-2 px-1 pb-2.5 text-sm font-extrabold transition cursor-pointer",
+              activeTab === tab.key ? "border-primary text-primary" : "border-transparent text-muted hover:text-ink"
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-      {loading && !data && (
-        <div className="flex min-h-[240px] items-center justify-center text-muted">
-          <Loader2 className="size-6 animate-spin" aria-hidden="true" />
-        </div>
-      )}
-
-      {data && (
+      {activeTab === "as-of-date" ? (
+        <StockAsOfDateSection locationId={locationFilter.locationId} canExport={canExport} />
+      ) : (
         <>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <OverviewCard
-              tone="primary"
-              label="Total Products"
-              displayValue={String(data.overview.distinctProductCount)}
-              formula="Distinct products, across Main Store and every storefront"
-            />
-            <OverviewCard
-              tone="teal"
-              label="Total Units On Hand"
-              displayValue={String(data.overview.totalUnits)}
-              formula="Every unit, everywhere it's held"
-            />
-            <OverviewCard
-              tone="warning"
-              label="Low Stock"
-              displayValue={String(data.overview.lowStockProductCount)}
-              formula="Distinct products low anywhere — store or storefront"
-            />
-            <OverviewCard
-              tone="danger"
-              label="Out of Stock"
-              displayValue={String(data.overview.outOfStockProductCount)}
-              formula="Distinct products at zero anywhere — store or storefront"
-            />
-          </div>
+          {error && (
+            <div className="rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">{error}</div>
+          )}
 
-          <InventoryStockValueSection entries={data.categoryValueBreakdown} />
+          {loading && !data && (
+            <div className="flex min-h-[240px] items-center justify-center text-muted">
+              <Loader2 className="size-6 animate-spin" aria-hidden="true" />
+            </div>
+          )}
 
-          <div className="space-y-4">
-            {data.sections.map((section) => (
-              <LocationInventorySection
-                key={section.locationId}
-                section={section}
-                onSelectProduct={setSelectedProductId}
-                exportRequest={canExport ? (locationExportRequests.get(section.locationId) ?? null) : null}
-              />
-            ))}
-          </div>
+          {data && (
+            <>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <OverviewCard
+                  tone="primary"
+                  label="Total Products"
+                  displayValue={String(data.overview.distinctProductCount)}
+                  formula="Distinct products, across Main Store and every storefront"
+                />
+                <OverviewCard
+                  tone="teal"
+                  label="Total Units On Hand"
+                  displayValue={String(data.overview.totalUnits)}
+                  formula="Every unit, everywhere it's held"
+                />
+                <OverviewCard
+                  tone="warning"
+                  label="Low Stock"
+                  displayValue={String(data.overview.lowStockProductCount)}
+                  formula="Distinct products low anywhere — store or storefront"
+                />
+                <OverviewCard
+                  tone="danger"
+                  label="Out of Stock"
+                  displayValue={String(data.overview.outOfStockProductCount)}
+                  formula="Distinct products at zero anywhere — store or storefront"
+                />
+              </div>
 
-          <ProductDetailModal productId={selectedProductId} sections={data.sections} onClose={() => setSelectedProductId(null)} />
+              <InventoryStockValueSection entries={data.categoryValueBreakdown} />
+
+              <div className="space-y-4">
+                {data.sections.map((section) => (
+                  <LocationInventorySection
+                    key={section.locationId}
+                    section={section}
+                    onSelectProduct={setSelectedProductId}
+                    exportRequest={canExport ? (locationExportRequests.get(section.locationId) ?? null) : null}
+                  />
+                ))}
+              </div>
+
+              <ProductDetailModal productId={selectedProductId} sections={data.sections} onClose={() => setSelectedProductId(null)} />
+            </>
+          )}
         </>
       )}
     </motion.div>

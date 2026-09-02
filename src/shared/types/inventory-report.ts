@@ -105,3 +105,26 @@ export type InventoryReportData = {
   categoryValueBreakdown: StockValueBreakdownEntry[];
   sections: LocationInventorySection[];
 };
+
+/** One product's ending balance at one location, as of a chosen past (or today's) date — computed
+ * backward from the current, known-correct `inventory` total minus every movement that happened
+ * AFTER that date (see inventory-report-service.ts's getStockAsOfDateReport), never a stored
+ * snapshot. Deliberately a much simpler shape than LocationProductRow: value/allocation-bucket
+ * breakdowns don't have a clean historical meaning (Main Store allocation has no ledger of its own
+ * past state), so this stays to what a date-based query can answer precisely — quantity. */
+export type StockAsOfDateRow = {
+  productId: string;
+  productName: string;
+  sku: string;
+  categoryName: string | null;
+  locationId: string;
+  locationName: string;
+  quantity: number;
+};
+
+export type StockAsOfDateData = {
+  /** Echoes back the requested date (YYYY-MM-DD) so the UI/export can label itself without holding
+   * separate state. */
+  asOfDate: string;
+  rows: StockAsOfDateRow[];
+};

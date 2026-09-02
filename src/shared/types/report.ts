@@ -20,6 +20,8 @@ export type SalesTrendWindowInput =
  * (Inventory, Outstanding Invoices, Outstanding Purchases) — still filterable by storefront. */
 export type LocationScopeInput = { locationId: string | null };
 
+export type StockAsOfDateInput = { date: string; locationId: string | null };
+
 export type SalesTopProduct = {
   productId: string;
   productName: string;

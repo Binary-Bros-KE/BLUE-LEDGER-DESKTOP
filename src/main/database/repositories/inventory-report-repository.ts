@@ -42,6 +42,52 @@ export function findCurrentStockRows(tenantId: string, locationId: string | null
     .all(tenantId, locationId, locationId) as CurrentStockRow[];
 }
 
+export type StockAsOfDateRowRaw = {
+  product_id: string;
+  product_name: string;
+  sku: string;
+  category_name: string | null;
+  location_id: string;
+  location_name: string;
+  quantity: number;
+};
+
+/** Every product's balance at one (or every) location, as of a chosen moment — computed backward
+ * from the CURRENT `inventory` total (always correct, since stock_movements is append-only) minus
+ * every movement that happened at or after `sinceIsoExclusive`. Pass the START of the day AFTER the
+ * date being asked about (see getStockAsOfDateReport's own doc comment) — everything from that
+ * point forward gets subtracted back out, leaving exactly what was on hand at the end of the
+ * requested day. One indexed query, no per-product round trips. */
+export function findStockAsOfDateRows(
+  tenantId: string,
+  locationId: string | null,
+  sinceIsoExclusive: string
+): StockAsOfDateRowRaw[] {
+  return getDatabase()
+    .prepare(
+      `
+      SELECT
+        i.product_id, p.name AS product_name, p.sku, c.name AS category_name,
+        i.location_id, l.location_name,
+        i.quantity - COALESCE(later.sum_change, 0) AS quantity
+      FROM inventory i
+      JOIN products p ON p.id = i.product_id
+      JOIN locations l ON l.id = i.location_id
+      LEFT JOIN categories c ON c.id = p.category_id
+      LEFT JOIN (
+        SELECT product_id, location_id, SUM(quantity_change) AS sum_change
+        FROM stock_movements
+        WHERE tenant_id = ? AND created_at >= ?
+        GROUP BY product_id, location_id
+      ) later ON later.product_id = i.product_id AND later.location_id = i.location_id
+      WHERE i.tenant_id = ? AND p.track_stock = 1 AND p.status = 'active' AND l.status = 'active'
+        AND (? IS NULL OR i.location_id = ?)
+      ORDER BY p.name, l.location_name
+    `
+    )
+    .all(tenantId, sinceIsoExclusive, tenantId, locationId, locationId) as StockAsOfDateRowRaw[];
+}
+
 export type LocationRow = { id: string; location_name: string; location_type: string };
 
 /** Every active location in scope — including one that has never had a

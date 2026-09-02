@@ -46,3 +46,10 @@ export type SalesTrendWindowInput = z.infer<typeof salesTrendWindowInputSchema>;
 /** Shared param shape for the handful of report calls with no date range at all (Inventory,
  * Outstanding Invoices, Outstanding Purchases) — still filterable by storefront. */
 export const locationScopeInputSchema = z.object({ locationId: locationIdField });
+
+export const stockAsOfDateInputSchema = z.object({
+  date: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format"),
+  locationId: locationIdField,
+});
+
+export type StockAsOfDateInput = z.infer<typeof stockAsOfDateInputSchema>;

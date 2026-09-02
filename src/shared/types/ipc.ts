@@ -9,7 +9,7 @@ import type { Category, CategoryStatus } from "./category";
 import type { Customer, CustomerStatus } from "./customer";
 import type { Employee, EmployeeListItem, EmployeeStatus } from "./employee";
 import type { InventoryBalance, LocationStockLevel } from "./inventory";
-import type { InventoryReportData } from "./inventory-report";
+import type { InventoryReportData, StockAsOfDateData } from "./inventory-report";
 import type { InvoiceListItem, InvoiceSummary } from "./invoice";
 import type { Location, LocationStatus } from "./location";
 import type { MpesaStatusResult, MpesaStkPushResult, MpesaTillSettings } from "./mpesa";
@@ -49,6 +49,7 @@ import type {
   SalesTransactionRow,
   SalesTrendWindowInput,
   SalesTrendWindowResult,
+  StockAsOfDateInput,
 } from "./report";
 import type { Quotation, QuotationListItem, QuotationStatus, QuotationStockCheckItem, QuotationSummary } from "./quotation";
 import type { Role, RoleListItem, RolePickerItem } from "./role";
@@ -65,6 +66,7 @@ import type { StockMovement, StockMovementFeedItem, StockTransferResult } from "
 import type { StockReceipt, StockReceiptListItem } from "./stock-receipt";
 import type { StockRequest, StockRequestListItem } from "./stock-request";
 import type {
+  BlockedSyncRecord,
   ConflictResolution,
   EntitySyncOverviewRow,
   SyncConflictItem,
@@ -1186,6 +1188,10 @@ export type IpcInvokeMap = {
     args: [];
     result: SyncDiagnostics;
   };
+  "sync:list-blocked": {
+    args: [];
+    result: BlockedSyncRecord[];
+  };
   "sync:list-conflicts": {
     args: [];
     result: SyncConflictItem[];
@@ -1265,6 +1271,10 @@ export type IpcInvokeMap = {
   "report:inventory-data": {
     args: [LocationScopeInput];
     result: InventoryReportData;
+  };
+  "report:stock-as-of-date": {
+    args: [StockAsOfDateInput];
+    result: StockAsOfDateData;
   };
   "report:products-performance": {
     args: [DateRangeInput & { slowMovingLimit?: number }];
@@ -1904,6 +1914,7 @@ export type BlueLedgerApi = {
     retryOrphans: () => Promise<IpcInvokeMap["sync:retry-orphans"]["result"]>;
     repair: () => Promise<IpcInvokeMap["sync:repair"]["result"]>;
     getDiagnostics: () => Promise<IpcInvokeMap["sync:get-diagnostics"]["result"]>;
+    listBlocked: () => Promise<IpcInvokeMap["sync:list-blocked"]["result"]>;
     listConflicts: () => Promise<IpcInvokeMap["sync:list-conflicts"]["result"]>;
     resolveConflict: (
       id: string,
@@ -1943,6 +1954,7 @@ export type BlueLedgerApi = {
     salesByEmployee: (range: DateRangeInput) => Promise<SalesByEmployeeRow[]>;
     salesByPaymentMethod: (range: DateRangeInput) => Promise<SalesByPaymentMethodRow[]>;
     inventoryData: (input: LocationScopeInput) => Promise<InventoryReportData>;
+    stockAsOfDate: (input: StockAsOfDateInput) => Promise<StockAsOfDateData>;
     productsPerformance: (
       range: DateRangeInput & { slowMovingLimit?: number }
     ) => Promise<ProductsPerformanceReport>;
