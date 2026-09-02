@@ -3480,6 +3480,180 @@ export function getDanglingRefCount(): number {
   return row.count;
 }
 
+// ---------------------------------------------------------------------------------------------
+// AUTO-REPAIR — when a pull orphan looks like a "parent hasn't landed / cursor is mispositioned"
+// problem, silently do what the "Repair Sync" button does but scoped to that one entity, so a
+// client never has to be phoned and told to click anything. Genuine data conflicts (two devices
+// entered the same phone, a CHECK/NOT-NULL violation) are the ONLY things left that need a human —
+// those are classified out here and surfaced as "needs attention" instead of being retried forever.
+// ---------------------------------------------------------------------------------------------
+
+/** Give the normal per-cycle retry (retryPullOrphans + on-demand parent fetch) this long to clear a
+ * fresh orphan on its own before auto-repair steps in with a cursor rewind. */
+const AUTO_REPAIR_MIN_ORPHAN_AGE_MS = 3 * 60 * 1000;
+/** Don't auto-rewind the same entity more often than this — a rewind re-pulls the whole entity, so
+ * it must never become a tight loop. */
+const AUTO_REPAIR_COOLDOWN_MS = 30 * 60 * 1000;
+/** After this many auto-rewinds that didn't stick, stop auto-repairing that entity and treat its
+ * remaining orphans as "needs a human" — a rewind clearly isn't the answer. */
+const MAX_AUTO_REPAIRS_PER_ENTITY = 3;
+
+/** A foreign-key failure means "the thing this row points at isn't here" — a targeted re-pull of
+ * the entity fixes it. Any other constraint (UNIQUE — e.g. the same customer phone recorded on two
+ * devices; CHECK; NOT NULL) is a genuine data conflict a re-pull can't touch. */
+function isRecoverableOrphanError(message: string | null): boolean {
+  return message !== null && /FOREIGN KEY constraint failed/i.test(message);
+}
+
+/** Turns a raw SQLite constraint error into something a shop owner can act on. */
+function describeBlockedReason(message: string | null): string {
+  if (!message) return "This record couldn't be applied and the reason wasn't recorded.";
+  const unique = message.match(/UNIQUE constraint failed:\s*(.+)/i);
+  if (unique) {
+    const parts = (unique[1] ?? "").split(",").map((s) => s.trim());
+    const lastCol = parts[parts.length - 1]?.split(".").pop() ?? "value";
+    const field = lastCol.replace(/_/g, " ");
+    return `Another record already uses this ${field}. It was entered separately on two devices — merge or remove the duplicate on the device that still has it, then it will sync.`;
+  }
+  if (/NOT NULL constraint failed/i.test(message)) {
+    const col = message.match(/NOT NULL constraint failed:\s*\S+\.(\S+)/i)?.[1]?.replace(/_/g, " ");
+    return `The cloud copy is missing a required field${col ? ` (${col})` : ""}. It likely needs to be re-saved on the device that created it.`;
+  }
+  if (/CHECK constraint failed/i.test(message)) {
+    return "A value on this record is outside what the app allows — it needs correcting on the device that created it.";
+  }
+  if (/FOREIGN KEY constraint failed/i.test(message)) {
+    return "Waiting on a linked record (a product, customer, storefront…) that may have been deleted in the cloud. Retrying automatically.";
+  }
+  return message;
+}
+
+function autoRepairCount(entity: SyncEntity): number {
+  return readSetting<number>(`sync_auto_repair_count:${entity}`) ?? 0;
+}
+
+/** True if this entity's per-entity repair budget still has room and it's outside the cooldown. */
+function autoRepairAllowed(entity: SyncEntity): boolean {
+  if (autoRepairCount(entity) >= MAX_AUTO_REPAIRS_PER_ENTITY) return false;
+  const lastRepairAt = readSetting<string>(`sync_auto_repair_at:${entity}`);
+  return !lastRepairAt || Date.now() - new Date(lastRepairAt).getTime() >= AUTO_REPAIR_COOLDOWN_MS;
+}
+
+/** The automated equivalent of a scoped "Repair Sync": rewind ONE entity's pull cursor and drop its
+ * FK-shaped bookkeeping so the next cycle re-pulls it from scratch. Cheap — the real work is the
+ * next cycle's normal pull. */
+function rewindEntityForAutoRepair(entity: SyncEntity, why: string): void {
+  const db = getDatabase();
+  console.warn(`[sync] auto-repair "${entity}": ${why} — rewinding its cursor for a clean re-pull`);
+  writeCursor(entity, new Date(0).toISOString());
+  db.prepare("DELETE FROM sync_pull_orphans WHERE entity = ? AND last_error LIKE '%FOREIGN KEY constraint failed%'").run(entity);
+  db.prepare("DELETE FROM sync_dangling_refs WHERE entity = ?").run(entity);
+  writeSetting(`sync_auto_repair_at:${entity}`, new Date().toISOString());
+  writeSetting(`sync_auto_repair_count:${entity}`, autoRepairCount(entity) + 1);
+  db.prepare("DELETE FROM app_settings WHERE key = ?").run(`sync_drift_streak:${entity}`);
+}
+
+/** An entity with nothing wrong (no orphans, not behind the cloud) gets its repair budget wiped, so
+ * a future unrelated hiccup starts fresh with a full set of attempts. */
+function resetAutoRepairBudget(entity: SyncEntity): void {
+  getDatabase()
+    .prepare("DELETE FROM app_settings WHERE key IN (?, ?, ?)")
+    .run(
+      `sync_auto_repair_count:${entity}`,
+      `sync_auto_repair_at:${entity}`,
+      `sync_drift_streak:${entity}`
+    );
+}
+
+/** Runs at the end of every sync cycle. For each entity whose oldest FK-type orphan has outlived
+ * AUTO_REPAIR_MIN_ORPHAN_AGE_MS without the normal retry clearing it, do a scoped auto-repair —
+ * throttled per entity and capped, so a rewind that never sticks eventually gives up and lets the
+ * row surface as needs-attention instead. */
+function autoRepairStuckEntities(): void {
+  const orphans = getDatabase()
+    .prepare("SELECT entity, last_error, first_seen_at FROM sync_pull_orphans")
+    .all() as Array<{ entity: SyncEntity; last_error: string | null; first_seen_at: string }>;
+
+  const entitiesWithOrphans = new Set(orphans.map((o) => o.entity));
+  for (const entity of SYNC_ENTITIES) {
+    if (!entitiesWithOrphans.has(entity) && !(readSetting<DriftReport>("sync_drift_report") ?? {})[entity]) {
+      if (autoRepairCount(entity) > 0 || readSetting<number>(`sync_drift_streak:${entity}`)) resetAutoRepairBudget(entity);
+    }
+  }
+
+  const now = Date.now();
+  const recoverableOldestByEntity = new Map<SyncEntity, number>();
+  for (const o of orphans) {
+    if (!isRecoverableOrphanError(o.last_error)) continue;
+    recoverableOldestByEntity.set(
+      o.entity,
+      Math.min(recoverableOldestByEntity.get(o.entity) ?? Infinity, new Date(o.first_seen_at).getTime())
+    );
+  }
+  for (const [entity, oldestSeenAt] of recoverableOldestByEntity) {
+    if (now - oldestSeenAt < AUTO_REPAIR_MIN_ORPHAN_AGE_MS) continue;
+    if (!autoRepairAllowed(entity)) continue;
+    rewindEntityForAutoRepair(entity, "a foreign-key orphan hasn't cleared on its own");
+  }
+}
+
+/** Runs after every drift check (every 30 min, plus at boot and after each manual Sync Now). If an
+ * entity has fewer rows locally than the cloud says it should for two checks running — i.e. this
+ * device is genuinely missing rows, not just mid-sync — scoped-auto-repair it. This is the trigger
+ * that most directly replaces the "client calls, I tell them to open Cloud Sync and hit the button"
+ * loop: a real gap gets a re-pull on its own, and only a gap that SURVIVES that is worth a call. */
+function autoRepairFromDrift(drift: DriftReport): void {
+  if (inFlightCycle) return; // a cycle is running — let it settle, re-evaluate on the next drift pass
+  const db = getDatabase();
+  for (const entity of SYNC_ENTITIES) {
+    const entry = drift[entity];
+    const behind = entry !== undefined && entry.local < entry.remote;
+    const streakKey = `sync_drift_streak:${entity}`;
+    if (!behind) {
+      if (readSetting<number>(streakKey)) db.prepare("DELETE FROM app_settings WHERE key = ?").run(streakKey);
+      continue;
+    }
+    const streak = (readSetting<number>(streakKey) ?? 0) + 1;
+    writeSetting(streakKey, streak);
+    if (streak < 2 || !autoRepairAllowed(entity)) continue;
+    rewindEntityForAutoRepair(entity, `behind the cloud (${entry.local} < ${entry.remote}) across ${streak} drift checks`);
+  }
+}
+
+/** One row per record this device genuinely can't apply — after auto-repair has had its shot. Split
+ * into `autoRecovering` (an FK link still catching up — nothing to do) vs the rest (a real data
+ * conflict a human must resolve). Backs the Cloud Sync page's "needs your attention" list so the
+ * only reason left to phone a client is a row that's actually in this second bucket. */
+export function listBlockedRecords(): Array<{
+  entity: SyncEntity;
+  rowId: string;
+  label: string;
+  reason: string;
+  autoRecovering: boolean;
+}> {
+  const rows = getDatabase()
+    .prepare("SELECT entity, row_id, last_error, attempts FROM sync_pull_orphans ORDER BY first_seen_at ASC")
+    .all() as Array<{ entity: SyncEntity; row_id: string; last_error: string | null; attempts: number }>;
+
+  return rows.map((r) => {
+    const recoverable = isRecoverableOrphanError(r.last_error);
+    const autoRepairExhausted = autoRepairCount(r.entity) >= MAX_AUTO_REPAIRS_PER_ENTITY;
+    return {
+      entity: r.entity,
+      rowId: r.row_id,
+      label: labelFor(r.entity, r.row_id),
+      reason: describeBlockedReason(r.last_error),
+      autoRecovering: recoverable && !autoRepairExhausted
+    };
+  });
+}
+
+/** Count of blocked records that actually need a person — the number the UI turns red over, and the
+ * only thing left worth a phone call. Everything else is either self-healing or being auto-repaired. */
+export function getNeedsAttentionCount(): number {
+  return listBlockedRecords().filter((r) => !r.autoRecovering).length;
+}
+
 /**
  * Rewinds the pull cursor to the start for every entity that currently has an orphan or a dangling
  * link, wipes that bookkeeping, so the next pull re-fetches those pages from scratch. Blunt on
@@ -3596,6 +3770,13 @@ export async function checkDrift(): Promise<DriftReport | null> {
 
   writeSetting("sync_last_drift_check_at", new Date().toISOString());
   writeSetting("sync_drift_report", drift);
+
+  try {
+    autoRepairFromDrift(drift);
+  } catch (err) {
+    console.error("[sync] autoRepairFromDrift failed:", err);
+  }
+
   return drift;
 }
 
@@ -3693,6 +3874,14 @@ export function getSyncDiagnostics(): SyncDiagnostics {
     )
     .all() as SyncDiagnostics["danglingRefs"];
 
+  const autoRepairs: SyncDiagnostics["autoRepairs"] = [];
+  for (const entity of SYNC_ENTITIES) {
+    const attempts = autoRepairCount(entity);
+    if (attempts > 0) {
+      autoRepairs.push({ entity, attempts, lastAt: readSetting<string>(`sync_auto_repair_at:${entity}`) ?? "" });
+    }
+  }
+
   return {
     generatedAt: new Date().toISOString(),
     appVersion: app.getVersion(),
@@ -3714,6 +3903,7 @@ export function getSyncDiagnostics(): SyncDiagnostics {
     outboxProblems,
     pullOrphans,
     danglingRefs,
+    autoRepairs,
     drift: readSetting<DriftReport>("sync_drift_report") ?? {}
   };
 }
@@ -3770,6 +3960,14 @@ async function runSyncCycle(): Promise<void> {
     clearStalePhantomConflicts();
   } catch (err) {
     console.error("[sync] clearStalePhantomConflicts failed:", err);
+  }
+  // Silently do what "Repair Sync" does, scoped to any entity a foreign-key orphan is stuck on, so
+  // a client is never phoned just to click a button. Only rewrites a cursor + clears a few rows —
+  // the next cycle does the actual re-pull.
+  try {
+    autoRepairStuckEntities();
+  } catch (err) {
+    console.error("[sync] autoRepairStuckEntities failed:", err);
   }
 
   finalizeRunReport();

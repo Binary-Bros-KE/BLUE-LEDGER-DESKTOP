@@ -300,6 +300,7 @@ import {
   getEntitySyncOverview,
   getSyncDiagnostics,
   getSyncSnapshot,
+  listBlockedRecords,
   listConflicts,
   listRecentReconciliations,
   listSyncQueue,
@@ -322,7 +323,7 @@ import {
   getSalesTransactions,
   getSalesTrendWindow,
 } from "@main/services/report-service";
-import { getInventoryReportData } from "@main/services/inventory-report-service";
+import { getInventoryReportData, getStockAsOfDateReport } from "@main/services/inventory-report-service";
 import { getProductSalesHistory, getProductsPerformanceReport } from "@main/services/product-report-service";
 import { getTaxReport } from "@main/services/tax-report-service";
 import { getLocalSourcingReport } from "@main/services/local-sourcing-report-service";
@@ -858,6 +859,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.syncRetryOrphans, () => retryOrphanedRecords());
   ipcMain.handle(ipcChannels.syncRepair, () => runRepairSync());
   ipcMain.handle(ipcChannels.syncGetDiagnostics, () => getSyncDiagnostics());
+  ipcMain.handle(ipcChannels.syncListBlocked, () => listBlockedRecords());
   ipcMain.handle(ipcChannels.syncListQueue, (_event, input?: { limit?: number }) =>
     listSyncQueue(input?.limit)
   );
@@ -897,6 +899,7 @@ export function registerIpcHandlers(): void {
     getSalesByPaymentMethod(range)
   );
   ipcMain.handle(ipcChannels.reportInventoryData, (_event, input: unknown) => getInventoryReportData(input));
+  ipcMain.handle(ipcChannels.reportStockAsOfDate, (_event, input: unknown) => getStockAsOfDateReport(input));
   ipcMain.handle(ipcChannels.reportProductsPerformance, (_event, range: unknown) => getProductsPerformanceReport(range));
   ipcMain.handle(ipcChannels.reportProductSalesHistory, (_event, input: unknown) => getProductSalesHistory(input));
   ipcMain.handle(ipcChannels.reportTopCustomers, (_event, range: unknown) => getTopCustomers(range));

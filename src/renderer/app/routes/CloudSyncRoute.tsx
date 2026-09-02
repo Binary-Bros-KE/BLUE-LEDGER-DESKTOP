@@ -10,6 +10,7 @@ import { formatCents } from "@renderer/shared/lib/money";
 import { SYNC_STATUS_COPY } from "@renderer/shared/lib/sync-status";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type {
+  BlockedSyncRecord,
   EntitySyncOverviewRow,
   SyncConflictItem,
   SyncQueueItem,
@@ -108,6 +109,7 @@ export function CloudSyncRoute(): React.JSX.Element {
   const [conflicts, setConflicts] = useState<SyncConflictItem[] | null>(null);
   const [reconciliations, setReconciliations] = useState<SyncReconciliationItem[] | null>(null);
   const [entityOverview, setEntityOverview] = useState<EntitySyncOverviewRow[] | null>(null);
+  const [blocked, setBlocked] = useState<BlockedSyncRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [retryingOrphans, setRetryingOrphans] = useState(false);
@@ -118,19 +120,21 @@ export function CloudSyncRoute(): React.JSX.Element {
 
   const load = useCallback(async () => {
     try {
-      const [snapshotResult, queueResult, conflictsResult, reconciliationsResult, entityOverviewResult] =
+      const [snapshotResult, queueResult, conflictsResult, reconciliationsResult, entityOverviewResult, blockedResult] =
         await Promise.all([
           window.blueLedger.sync.getSnapshot(),
           window.blueLedger.sync.listQueue({ limit: 25 }),
           window.blueLedger.sync.listConflicts(),
           window.blueLedger.sync.listReconciliations(),
-          window.blueLedger.sync.getEntityOverview()
+          window.blueLedger.sync.getEntityOverview(),
+          window.blueLedger.sync.listBlocked()
         ]);
       setSnapshot(snapshotResult);
       setQueue(queueResult);
       setConflicts(conflictsResult);
       setReconciliations(reconciliationsResult);
       setEntityOverview(entityOverviewResult);
+      setBlocked(blockedResult);
     } catch (err) {
       const message = getErrorMessage(err, "Failed to load sync status");
       setError(message);
@@ -150,14 +154,16 @@ export function CloudSyncRoute(): React.JSX.Element {
     try {
       const result = await window.blueLedger.sync.runNow();
       setSnapshot(result);
-      const [queueResult, conflictsResult, entityOverviewResult] = await Promise.all([
+      const [queueResult, conflictsResult, entityOverviewResult, blockedResult] = await Promise.all([
         window.blueLedger.sync.listQueue({ limit: 25 }),
         window.blueLedger.sync.listConflicts(),
-        window.blueLedger.sync.getEntityOverview()
+        window.blueLedger.sync.getEntityOverview(),
+        window.blueLedger.sync.listBlocked()
       ]);
       setQueue(queueResult);
       setConflicts(conflictsResult);
       setEntityOverview(entityOverviewResult);
+      setBlocked(blockedResult);
       showSuccessToast("Sync complete");
     } catch (err) {
       const message = getErrorMessage(err, "Sync failed");
@@ -177,14 +183,16 @@ export function CloudSyncRoute(): React.JSX.Element {
     try {
       const result = await window.blueLedger.sync.retryOrphans();
       setSnapshot(result);
-      const [queueResult, conflictsResult, entityOverviewResult] = await Promise.all([
+      const [queueResult, conflictsResult, entityOverviewResult, blockedResult] = await Promise.all([
         window.blueLedger.sync.listQueue({ limit: 25 }),
         window.blueLedger.sync.listConflicts(),
-        window.blueLedger.sync.getEntityOverview()
+        window.blueLedger.sync.getEntityOverview(),
+        window.blueLedger.sync.listBlocked()
       ]);
       setQueue(queueResult);
       setConflicts(conflictsResult);
       setEntityOverview(entityOverviewResult);
+      setBlocked(blockedResult);
       showSuccessToast("Retrying orphaned records — this may take a few sync cycles to fully clear");
     } catch (err) {
       const message = getErrorMessage(err, "Failed to retry orphaned records");
@@ -210,14 +218,16 @@ export function CloudSyncRoute(): React.JSX.Element {
     try {
       const result = await window.blueLedger.sync.repair();
       setSnapshot(result);
-      const [queueResult, conflictsResult, entityOverviewResult] = await Promise.all([
+      const [queueResult, conflictsResult, entityOverviewResult, blockedResult] = await Promise.all([
         window.blueLedger.sync.listQueue({ limit: 25 }),
         window.blueLedger.sync.listConflicts(),
-        window.blueLedger.sync.getEntityOverview()
+        window.blueLedger.sync.getEntityOverview(),
+        window.blueLedger.sync.listBlocked()
       ]);
       setQueue(queueResult);
       setConflicts(conflictsResult);
       setEntityOverview(entityOverviewResult);
+      setBlocked(blockedResult);
       showSuccessToast("Repair complete — anything still catching up will finish over the next few sync cycles");
     } catch (err) {
       const message = getErrorMessage(err, "Repair Sync failed");
@@ -373,9 +383,11 @@ export function CloudSyncRoute(): React.JSX.Element {
                 snapshot.lastRunReport.recovered === 1 ? "reference" : "references"
               }`}
             {snapshot.lastRunReport.pushed > 0 && `, sent ${snapshot.lastRunReport.pushed.toLocaleString()} up`}
-            {snapshot.lastRunReport.orphaned > 0
-              ? ` — ${snapshot.lastRunReport.orphaned} still need attention (see below)`
-              : " — nothing blocked"}
+            {snapshot.needsAttentionCount > 0
+              ? ` — ${snapshot.needsAttentionCount} need a manual fix (see below)`
+              : snapshot.orphanedPullCount > 0
+                ? " — the rest is catching up automatically"
+                : " — nothing blocked"}
             .
           </p>
         )}
@@ -456,36 +468,82 @@ export function CloudSyncRoute(): React.JSX.Element {
         </div>
       )}
 
-      {snapshot.orphanedPullCount > 0 && (
-        <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm font-bold text-warning">
-          <AlertTriangle className="mt-0.5 size-4 flex-none" aria-hidden="true" />
+      {snapshot.orphanedPullCount - snapshot.needsAttentionCount > 0 && (
+        <div className="flex items-start gap-2 rounded-lg border border-line bg-soft px-4 py-3 text-sm font-semibold text-muted">
+          <RefreshCw className="mt-0.5 size-4 flex-none" aria-hidden="true" />
           <div className="flex-1">
-            <p>
-              {snapshot.orphanedPullCount} {snapshot.orphanedPullCount === 1 ? "record" : "records"} still need
-              attention.
+            <p className="text-ink">
+              {snapshot.orphanedPullCount - snapshot.needsAttentionCount}{" "}
+              {snapshot.orphanedPullCount - snapshot.needsAttentionCount === 1 ? "record is" : "records are"} still
+              catching up.
             </p>
-            <p className="mt-1 text-xs font-semibold">
-              These couldn't be applied to this device even after fetching everything they reference — usually a
-              genuine data problem worth a closer look, not just a slow first sync. They're retried automatically
-              every cycle and never permanently skipped. Use "Copy Diagnostics" above and send it to support, or
-              try "Retry" / "Repair Sync" first.
+            <p className="mt-1 text-xs">
+              They reference something that hasn't reached this device yet. Blue Ledger fetches what's missing and
+              re-pulls the affected data automatically — this clears on its own, usually within a few minutes. No
+              call needed. If it lingers, "Repair Sync" above forces a full re-check.
             </p>
-            {canRunSync && (
+          </div>
+        </div>
+      )}
+
+      {snapshot.needsAttentionCount > 0 && (
+        <div className="rounded-lg border border-danger/30 bg-white p-5 shadow-soft">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="size-5 flex-none text-danger" aria-hidden="true" />
+            <div>
+              <h2 className="text-lg font-extrabold">
+                Needs your attention <span className="text-danger">({snapshot.needsAttentionCount})</span>
+              </h2>
+              <p className="mt-0.5 text-xs font-semibold text-muted">
+                Blue Ledger already tried everything automatically — fetching what these records reference and
+                re-pulling from scratch. What's left is a real data conflict a person has to fix on the device that
+                holds the record.
+              </p>
+            </div>
+          </div>
+
+          <ul className="mt-4 space-y-2">
+            {blocked
+              .filter((record) => !record.autoRecovering)
+              .map((record) => (
+                <li
+                  key={`${record.entity}-${record.rowId}`}
+                  className="rounded-lg border border-line bg-soft px-4 py-3"
+                >
+                  <p className="text-sm font-extrabold text-ink">
+                    {humanizeEntityName(record.entity)} — {record.label}
+                  </p>
+                  <p className="mt-0.5 text-xs font-semibold text-muted">{record.reason}</p>
+                </li>
+              ))}
+          </ul>
+
+          {canRunSync && (
+            <div className="mt-3 flex flex-wrap gap-2">
               <Button
                 type="button"
                 onClick={() => void handleRetryOrphans()}
                 disabled={retryingOrphans || syncing || repairing || snapshot.status === "not_activated"}
-                className="mt-2.5 h-8 border border-warning/40 bg-white text-xs text-warning shadow-none hover:bg-warning/10 disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-8 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {retryingOrphans ? (
                   <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
                 ) : (
                   <RefreshCw className="mr-1.5 size-3.5" aria-hidden="true" />
                 )}
-                {retryingOrphans ? "Retrying..." : "Retry Orphaned Records"}
+                {retryingOrphans ? "Retrying..." : "Try Again"}
               </Button>
-            )}
-          </div>
+              <Button
+                type="button"
+                onClick={() => void handleCopyDiagnostics()}
+                disabled={copyingDiagnostics}
+                className="h-8 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <ClipboardCopy className="mr-1.5 size-3.5" aria-hidden="true" />
+                Copy Diagnostics
+              </Button>
+            </div>
+          )}
         </div>
       )}
 

@@ -94,7 +94,22 @@ export type SyncSnapshot = {
   /** Rows that ARE fully on this device but have one link pointing at something not here yet — a
    * benign, self-healing state, shown only so it's explainable rather than mysterious. */
   danglingRefCount: number;
+  /** Of the orphaned rows, how many actually need a person — a real data conflict (same phone on two
+   * devices, a CHECK/NOT-NULL problem) that auto-repair can't fix. This is the only count worth a
+   * phone call; everything else is self-healing or being auto-repaired. */
+  needsAttentionCount: number;
   lastRunReport: SyncRunReport | null;
+};
+
+/** One record this device can't apply, after auto-repair has had its shot — for the Cloud Sync
+ * page's "needs your attention" list. `autoRecovering` true means a linked record is still catching
+ * up (nothing to do); false means a human must resolve it on the device that has the row. */
+export type BlockedSyncRecord = {
+  entity: SyncEntity;
+  rowId: string;
+  label: string;
+  reason: string;
+  autoRecovering: boolean;
 };
 
 /** Everything needed to diagnose a stuck sync from a field report — copied to the clipboard as JSON
@@ -137,6 +152,10 @@ export type SyncDiagnostics = {
     attempts: number;
     firstSeenAt: string;
   }>;
+  /** Entities the app has scoped-auto-repaired (rewound + re-pulled) without anyone asking — shows
+   * the recovery machinery is actually running so a "stuck" report can be judged against what it's
+   * already tried. */
+  autoRepairs: Array<{ entity: SyncEntity; attempts: number; lastAt: string }>;
   drift: Partial<Record<SyncEntity, DriftEntry>>;
 };
 

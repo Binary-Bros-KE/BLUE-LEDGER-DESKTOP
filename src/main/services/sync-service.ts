@@ -3,8 +3,10 @@ import {
   getCloudIdentity,
   getDanglingRefCount,
   getEntitySyncOverview as getEntitySyncOverviewFromEngine,
+  getNeedsAttentionCount,
   getPullOrphanCount,
   getSyncDiagnostics as getSyncDiagnosticsFromEngine,
+  listBlockedRecords as listBlockedRecordsFromEngine,
   listConflicts as listConflictsFromEngine,
   listRecentReconciliations as listRecentReconciliationsFromEngine,
   readSetting,
@@ -16,6 +18,7 @@ import {
 } from "@main/services/sync-engine";
 import { API_BASE_URL } from "@main/services/license-service";
 import type {
+  BlockedSyncRecord,
   ConflictResolution,
   EntitySyncOverviewRow,
   SyncConflictItem,
@@ -87,8 +90,15 @@ export function getSyncSnapshot(): SyncSnapshot {
     drift,
     orphanedPullCount: getPullOrphanCount(),
     danglingRefCount: getDanglingRefCount(),
+    needsAttentionCount: getNeedsAttentionCount(),
     lastRunReport: readSetting<SyncRunReport>("sync_last_run_report")
   };
+}
+
+/** Renderer-invokable — the records this device genuinely can't apply, for the Cloud Sync page's
+ * "needs your attention" list. */
+export function listBlockedRecords(): BlockedSyncRecord[] {
+  return listBlockedRecordsFromEngine();
 }
 
 /** Renderer-invokable "Sync Now" button — runs a full push+pull+drift-check cycle immediately
