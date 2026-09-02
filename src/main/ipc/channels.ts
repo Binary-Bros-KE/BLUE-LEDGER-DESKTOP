@@ -269,6 +269,8 @@ export const ipcChannels = {
   syncListQueue: "sync:list-queue",
   syncRunNow: "sync:run-now",
   syncRetryOrphans: "sync:retry-orphans",
+  syncRepair: "sync:repair",
+  syncGetDiagnostics: "sync:get-diagnostics",
   syncListConflicts: "sync:list-conflicts",
   syncResolveConflict: "sync:resolve-conflict",
   syncListReconciliations: "sync:list-reconciliations",

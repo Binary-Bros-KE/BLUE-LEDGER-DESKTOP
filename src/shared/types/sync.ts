@@ -58,6 +58,26 @@ export type SyncQueueItem = {
  * sync-engine.ts's checkDrift()), never something this app auto-resolves. */
 export type DriftEntry = { local: number; remote: number };
 
+/** One-line-per-run summary of what the last full sync cycle actually moved — surfaced on the Cloud
+ * Sync page so "Sync Now" reports a concrete result ("pulled 1,204 changes, reconnected 3 late
+ * references, 0 blocked") instead of a spinner that returns an identical-looking snapshot. `recovered`
+ * = rows that failed their first apply because a referenced row hadn't arrived, then succeeded once
+ * this device fetched that parent from the cloud on demand. `dangling` = rows applied with a link
+ * left unconnected (the cloud had no copy of the parent either); they reconnect on their own when it
+ * turns up. `orphaned` = rows that couldn't be applied even then (a genuine structural problem worth
+ * the diagnostics export) — retried every cycle, never permanently skipped. */
+export type SyncRunReport = {
+  startedAt: string;
+  finishedAt: string | null;
+  pulled: number;
+  recovered: number;
+  dangling: number;
+  orphaned: number;
+  pushed: number;
+  pushFailed: number;
+  pushDeferred: number;
+};
+
 export type SyncSnapshot = {
   status: "not_activated" | "online" | "offline" | "error";
   lastPushAt: string | null;
@@ -67,7 +87,56 @@ export type SyncSnapshot = {
   failedCount: number;
   serverUrl: string | null;
   drift: Partial<Record<SyncEntity, DriftEntry>>;
+  /** Rows that couldn't be applied to this device at all yet (post-2026 pipeline: a genuine
+   * structural problem, not a late dependency — those now self-recover). Retried every cycle. */
   orphanedPullCount: number;
+  /** Rows that ARE fully on this device but have one link pointing at something not here yet — a
+   * benign, self-healing state, shown only so it's explainable rather than mysterious. */
+  danglingRefCount: number;
+  lastRunReport: SyncRunReport | null;
+};
+
+/** Everything needed to diagnose a stuck sync from a field report — copied to the clipboard as JSON
+ * by the "Copy Diagnostics" button so a client can paste it into a chat instead of anyone needing
+ * to open a dev console on their machine. Deliberately plain data, no PII beyond row ids. */
+export type SyncDiagnostics = {
+  generatedAt: string;
+  appVersion: string;
+  serverUrl: string | null;
+  activated: boolean;
+  tenantId: string | null;
+  deviceId: string | null;
+  lastPushAt: string | null;
+  lastPullAt: string | null;
+  lastDriftCheckAt: string | null;
+  lastRunReport: SyncRunReport | null;
+  cursors: Partial<Record<SyncEntity, string>>;
+  outboxCounts: { queued: number; failed: number; conflict: number; synced: number };
+  outboxProblems: Array<{
+    entity: SyncEntity;
+    entityId: string;
+    status: string;
+    attemptCount: number;
+    lastError: string | null;
+    updatedAt: string;
+  }>;
+  pullOrphans: Array<{
+    entity: SyncEntity;
+    rowId: string;
+    attempts: number;
+    lastError: string | null;
+    firstSeenAt: string;
+    lastSeenAt: string;
+  }>;
+  danglingRefs: Array<{
+    entity: SyncEntity;
+    rowId: string;
+    refEntity: SyncEntity;
+    refId: string;
+    attempts: number;
+    firstSeenAt: string;
+  }>;
+  drift: Partial<Record<SyncEntity, DriftEntry>>;
 };
 
 /** Phase 2 — a push that lost the optimistic-lock check (see sync-service.ts's pushRows on the

@@ -2736,6 +2736,41 @@ const migrations = [
       -- feature existed — a clean, deliberate 0 plus one manual entry per supplier is safer than a
       -- guessed backfill.
     `
+  },
+  {
+    version: 79,
+    name: "sync_dangling_refs_and_orphan_no_block",
+    sql: `
+      -- Records a pulled row that WAS applied locally but with one foreign key left pointing at a row
+      -- that isn't here yet. Before this, such a row threw an FK violation on pull and — because the
+      -- pull cursor only advanced once EVERY row on a page applied — froze that entire entity's cursor
+      -- (every later row, however unrelated, silently stopped arriving), surfaced to the user as the
+      -- dreaded "N records could not sync to this device". Now the pull pipeline (sync-engine.ts):
+      --   1. fetches the missing parent from the cloud on demand, right then, and applies it first;
+      --   2. if the cloud has no copy either (genuinely deleted, or a huge first sync still catching
+      --      up), applies the row ANYWAY with FK enforcement briefly suspended, and logs the dangling
+      --      link here. The row's own data is all present and correct — only the link is unconnected.
+      --   3. the cursor ALWAYS advances regardless, so one bad row can never block the other good ones.
+      -- When the missing parent finally lands (same id — sync ids are stable), the link becomes valid
+      -- on its own; the periodic sweep then clears the row from here. Purely diagnostic + a worklist
+      -- for the on-demand re-fetch — never synced, no FK constraints of its own (same reasoning as
+      -- sync_pull_orphans, migration 62).
+      CREATE TABLE sync_dangling_refs (
+        entity TEXT NOT NULL,
+        row_id TEXT NOT NULL,
+        ref_entity TEXT NOT NULL,
+        ref_id TEXT NOT NULL,
+        first_seen_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY (entity, row_id, ref_entity, ref_id)
+      );
+
+      -- Old quarantine rows recorded under the pre-79 "wait 20 minutes then permanently skip" rule.
+      -- The new pipeline never permanently skips anything, so a clean slate here just means every one
+      -- of them gets re-attempted (and now actually applied, dangling-link-and-all) on the next pull.
+      DELETE FROM sync_pull_orphans;
+    `
   }
 ] as const;
 

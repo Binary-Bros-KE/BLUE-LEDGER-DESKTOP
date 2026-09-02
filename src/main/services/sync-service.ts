@@ -1,11 +1,14 @@
 import { getDatabase } from "@main/database/connection";
 import {
   getCloudIdentity,
+  getDanglingRefCount,
   getEntitySyncOverview as getEntitySyncOverviewFromEngine,
   getPullOrphanCount,
+  getSyncDiagnostics as getSyncDiagnosticsFromEngine,
   listConflicts as listConflictsFromEngine,
   listRecentReconciliations as listRecentReconciliationsFromEngine,
   readSetting,
+  repairSync,
   resolveConflict as resolveConflictInEngine,
   resyncOrphanedEntities,
   syncNow,
@@ -16,8 +19,10 @@ import type {
   ConflictResolution,
   EntitySyncOverviewRow,
   SyncConflictItem,
+  SyncDiagnostics,
   SyncQueueItem,
   SyncReconciliationItem,
+  SyncRunReport,
   SyncSnapshot
 } from "@shared/types/sync";
 
@@ -80,7 +85,9 @@ export function getSyncSnapshot(): SyncSnapshot {
     failedCount,
     serverUrl: API_BASE_URL,
     drift,
-    orphanedPullCount: getPullOrphanCount()
+    orphanedPullCount: getPullOrphanCount(),
+    danglingRefCount: getDanglingRefCount(),
+    lastRunReport: readSetting<SyncRunReport>("sync_last_run_report")
   };
 }
 
@@ -92,14 +99,26 @@ export async function runSyncNow(): Promise<SyncSnapshot> {
   return getSyncSnapshot();
 }
 
-/** Renderer-invokable "Retry Orphaned Records" button — see resyncOrphanedEntities' own doc comment
- * for why a plain "Sync Now" can never recover a quarantined row on its own. Resets every entity
- * currently represented in sync_pull_orphans, then runs a full sync cycle immediately so the reset
- * takes effect right away instead of waiting for the next timer tick. */
+/** Renderer-invokable "Retry Orphaned Records" button — rewinds every entity that has a stuck row or
+ * a dangling link back to a full re-pull, then syncs immediately. */
 export async function retryOrphanedRecords(): Promise<SyncSnapshot> {
   resyncOrphanedEntities();
   await syncNow();
   return getSyncSnapshot();
+}
+
+/** Renderer-invokable "Repair Sync" button — the force-everything path. Rewinds EVERY entity's pull
+ * cursor to the beginning, clears all orphan/dangling bookkeeping, and runs a full cycle. Safe
+ * because every apply path is idempotent. */
+export async function runRepairSync(): Promise<SyncSnapshot> {
+  await repairSync();
+  return getSyncSnapshot();
+}
+
+/** Renderer-invokable "Copy Diagnostics" button — returns the full local sync state as plain data
+ * for the user to paste into a support chat. */
+export function getSyncDiagnostics(): SyncDiagnostics {
+  return getSyncDiagnosticsFromEngine();
 }
 
 export function listSyncQueue(limit = 20): SyncQueueItem[] {

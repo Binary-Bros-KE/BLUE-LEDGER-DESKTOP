@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { SQLInputValue } from "node:sqlite";
+import electron from "electron";
 import { getDatabase, runInTransaction } from "@main/database/connection";
 import * as categoryRepository from "@main/database/repositories/category-repository";
 import * as customerRepository from "@main/database/repositories/customer-repository";
@@ -38,9 +39,13 @@ import type {
   DriftEntry,
   EntitySyncOverviewRow,
   SyncConflictItem,
+  SyncDiagnostics,
   SyncEntity,
-  SyncReconciliationItem
+  SyncReconciliationItem,
+  SyncRunReport
 } from "@shared/types/sync";
+
+const { app } = electron;
 
 /** Every synced entity, in an order that respects the local SQLite schema's own foreign keys on
  * PULL (roles before employees — employees.role_id references roles; products after categories —
@@ -176,6 +181,56 @@ function readCursor(entity: SyncEntity): string | null {
 
 function writeCursor(entity: SyncEntity, cursor: string): void {
   writeSetting(`sync_cursor:${entity}`, cursor);
+}
+
+// ---------------------------------------------------------------------------------------------
+// RUN REPORT — a concrete "here's what the last cycle actually moved" summary for the UI. Purely
+// additive bookkeeping; accumulated live during a cycle and flushed to app_settings at the end.
+// ---------------------------------------------------------------------------------------------
+
+let runReport: SyncRunReport | null = null;
+
+/** Serializes the cycle. The 20s timer (bootstrap.ts) and the "Sync Now" button both call syncCycle();
+ * without this, a first full sync of a large tenant (minutes long) would have timer ticks stacking N
+ * overlapping pulls on top of it, all contending for the same SQLite file — SQLITE_BUSY after the 5s
+ * busy_timeout, caught and swallowed, so nothing actually progressed and the button "did nothing".
+ * A caller arriving while a cycle runs now just joins the in-flight one. */
+let inFlightCycle: Promise<void> | null = null;
+
+function beginRunReport(): void {
+  runReport = {
+    startedAt: new Date().toISOString(),
+    finishedAt: null,
+    pulled: 0,
+    recovered: 0,
+    dangling: 0,
+    orphaned: 0,
+    pushed: 0,
+    pushFailed: 0,
+    pushDeferred: 0
+  };
+}
+
+function recordPullStat(delta: { pulled?: number; recovered?: number; dangling?: number; orphaned?: number }): void {
+  if (!runReport) return;
+  runReport.pulled += delta.pulled ?? 0;
+  runReport.recovered += delta.recovered ?? 0;
+  runReport.dangling += delta.dangling ?? 0;
+  runReport.orphaned += delta.orphaned ?? 0;
+}
+
+function recordPushStat(delta: { pushed?: number; pushFailed?: number; pushDeferred?: number }): void {
+  if (!runReport) return;
+  runReport.pushed += delta.pushed ?? 0;
+  runReport.pushFailed += delta.pushFailed ?? 0;
+  runReport.pushDeferred += delta.pushDeferred ?? 0;
+}
+
+function finalizeRunReport(): void {
+  if (!runReport) return;
+  runReport.finishedAt = new Date().toISOString();
+  writeSetting("sync_last_run_report", runReport);
+  runReport = null;
 }
 
 /** Resolves the {tenantId, deviceId} the cloud actually knows this install as — null if this
@@ -1242,6 +1297,35 @@ function markOutboxFailed(entity: SyncEntity, entityId: string, error: string): 
     .run(error, now, entity, entityId);
 }
 
+/** A row past this many "deferred" push attempts (the server keeps rejecting it because something it
+ * references still isn't on the cloud) stops being treated as "just wait" and is marked failed so it
+ * surfaces in the Cloud Sync UI and the diagnostics export — a genuinely stuck reference, not a
+ * transient ordering gap, needs a human to look. */
+const DEFER_TO_FAIL_THRESHOLD = 15;
+
+/** The server rejected this push because a field references a row the cloud doesn't have (yet, or at
+ * all) — see SERVER pushRows' REQUIRED_REF_FIELDS check, which now returns status "deferred" instead
+ * of the old silent "ok" that quietly dropped the row forever. Keep it queued and retry next cycle
+ * (the referenced row may sync from another device any moment); only escalate to a visible failure
+ * after DEFER_TO_FAIL_THRESHOLD attempts of the same rejection. */
+function markOutboxDeferred(entity: SyncEntity, entityId: string, error: string): void {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE sync_outbox SET attempt_count = attempt_count + 1, last_error = ?, updated_at = ?
+     WHERE entity = ? AND entity_id = ? AND status IN ('queued', 'failed')`
+  ).run(error, now, entity, entityId);
+  const worst = db
+    .prepare(
+      "SELECT MAX(attempt_count) AS n FROM sync_outbox WHERE entity = ? AND entity_id = ? AND status IN ('queued', 'failed')"
+    )
+    .get(entity, entityId) as { n: number | null };
+  const newStatus = (worst.n ?? 0) >= DEFER_TO_FAIL_THRESHOLD ? "failed" : "queued";
+  db.prepare(
+    `UPDATE sync_outbox SET status = ?, updated_at = ? WHERE entity = ? AND entity_id = ? AND status IN ('queued', 'failed')`
+  ).run(newStatus, now, entity, entityId);
+}
+
 /** The losing device's own push attempt is rejected — see sync-service.ts's pushRows (SERVER) for
  * the optimistic-lock check that produces this. Only the server's current row (the other half of
  * the diff) needs storing here — the local side is deliberately left untouched (the user's edit
@@ -1359,8 +1443,14 @@ async function pushOneBatch(
         markSourceRowSynced(entity, result.id);
         const payload = byId.get(result.id);
         if (payload) markSyncedBaseline(entity, result.id, payload.localUpdatedAt as string);
+        recordPushStat({ pushed: 1 });
       } else if (result.status === "conflict") {
         markOutboxConflict(entity, result.id, result.serverRow);
+      } else if (result.status === "deferred") {
+        // Server rejected it because a referenced row isn't on the cloud yet — keep it queued and
+        // retry, don't drop it (the old behavior was a silent "ok" that lost the row permanently).
+        markOutboxDeferred(entity, result.id, result.error ?? "waiting on a referenced record to sync");
+        recordPushStat({ pushDeferred: 1 });
       } else if (result.status === "aliased" && result.canonicalId) {
         // The server already had a row for this same natural key (roles/employees/payment_methods/
         // expense_categories/locations — see SERVER's own NATURAL_KEY_FIELDS) under a different id,
@@ -1377,8 +1467,10 @@ async function pushOneBatch(
         recordIdAlias(entity, result.canonicalId, result.id);
         markOutboxSynced(entity, result.id);
         markSourceRowSynced(entity, result.id);
+        recordPushStat({ pushed: 1 });
       } else {
         markOutboxFailed(entity, result.id, result.error ?? "Unknown error");
+        recordPushStat({ pushFailed: 1 });
       }
     } catch (err) {
       console.error(`[sync] Failed to apply push result for ${entity}/${result.id}:`, err);
@@ -2920,46 +3012,18 @@ async function fetchPull(
   }
 }
 
-/** A row still failing after this many separate PULL CYCLES (not the 2 in-page passes below) is no
- * longer treated as "just hasn't arrived yet". Combined with ORPHAN_MIN_AGE_MS below — see that
- * constant's own comment for why attempt count ALONE turned out not to be a reliable signal. */
-const ORPHAN_QUARANTINE_THRESHOLD = 3;
-
-/** A row isn't quarantined until it's ALSO been failing for at least this long in wall-clock time,
- * not just this many attempts — found live on a brand-new device's first-ever full historical sync:
- * `main_store_allocations` (product_id is a refNotNull field — see resolveRef, which unlike
- * resolveRefOrNull never verifies the referenced row actually exists locally before using it) hit
- * ORPHAN_QUARANTINE_THRESHOLD attempts in under 30 seconds — several sync cycles fired in rapid
- * succession right at cold-start, well before "products" (which syncs first and genuinely did have
- * the referenced rows, confirmed by direct inspection) had realistic time to land relative to a
- * dependent entity synced right after it. A device with months of history across ~20 entities can
- * legitimately take several minutes to fully catch up on its very first sync; 3 rapid-fire attempts
- * inside that window is not the same signal as 3 attempts spread over a device's normal, already-
- * caught-up operation (the case this quarantine mechanism was actually built for — a genuinely
- * deleted cloud reference). Both conditions must hold before giving up on a row.
- *
- * Was 5 minutes — raised after this exact failure mode recurred on a real client's first full sync
- * (hundreds of stock_movements + several small entities), just at larger scale: rows failed their
- * first 3 attempts within the first ~5-6 minutes of a cold start (before "products"/"locations" had
- * fully landed), crossed BOTH thresholds right at that boundary, and were quarantined — permanently
- * excluded from ever pulling again — even though the data they referenced was completely valid and
- * landed locally minutes later. 5 minutes is not a generous enough buffer for a large, established
- * tenant's very first sync; a longer window only delays how fast a GENUINELY dead reference gets
- * flagged, which is a far better trade-off than silently losing real data. See resyncOrphanedEntities
- * below for the recovery path once a row is wrongly quarantined despite this. */
-const ORPHAN_MIN_AGE_MS = 20 * 60 * 1000;
-
-/** Records (or bumps the attempt count on) a row that's still failing after the in-page retry below.
- * Table is local-only, diagnostic, and deliberately has no FK constraints of its own — it must be
- * able to hold any orphaned payload without itself becoming a second thing that can fail to insert.
- * Returns the new attempt count and how long ago this row first started failing, so the caller can
- * decide whether to quarantine yet. */
+/** Records (or bumps the attempt count on) a row that could NOT be applied even after the full
+ * recovery pipeline below (on-demand parent fetch, then an FK-suspended apply). Post-2026 that means
+ * a genuine structural problem — a UNIQUE/CHECK violation, malformed payload — not just a dependency
+ * running late, which now self-recovers. Local-only, diagnostic, no FK constraints of its own so it
+ * can hold any payload. retryPullOrphans() re-attempts every row here on every cycle; nothing is
+ * ever permanently skipped. */
 function recordPullOrphanAttempt(
   entity: SyncEntity,
   rowId: string,
   error: unknown,
   payload: Record<string, unknown>
-): { attempts: number; ageMs: number } {
+): void {
   const db = getDatabase();
   const now = new Date().toISOString();
   const existing = db
@@ -2974,14 +3038,246 @@ function recordPullOrphanAttempt(
      ON CONFLICT(entity, row_id) DO UPDATE SET
        attempts = excluded.attempts, last_error = excluded.last_error,
        payload_json = excluded.payload_json, last_seen_at = excluded.last_seen_at`
-  ).run(entity, rowId, attempts, errorMessage, JSON.stringify(payload), now, now);
-  return { attempts, ageMs: new Date(now).getTime() - new Date(firstSeenAt).getTime() };
+  ).run(entity, rowId, attempts, errorMessage, JSON.stringify(payload), firstSeenAt, now);
 }
 
-/** Clears any quarantine record for a row that just applied successfully — covers the case where a
- * row had accumulated a few failed cycles (below the threshold) and then its dependency arrived. */
+/** Clears the orphan record for a row that just applied successfully. */
 function clearPullOrphan(entity: SyncEntity, rowId: string): void {
   getDatabase().prepare("DELETE FROM sync_pull_orphans WHERE entity = ? AND row_id = ?").run(entity, rowId);
+}
+
+// ---------------------------------------------------------------------------------------------
+// REFERENCE RECOVERY — never let a missing parent row block a pull again.
+// ---------------------------------------------------------------------------------------------
+
+/** Header-level refEntity columns that refColumnsFor() doesn't know about — the two append-only
+ * ledger entities have no column array anywhere. Everything else (generic APPLY_CONFIG entities +
+ * the 6 bespoke document entities) is already covered by refColumnsFor(). */
+const EXTRA_HEADER_REFS: Partial<Record<SyncEntity, Array<{ cloud: string; refEntity: SyncEntity }>>> = {
+  stock_movements: [
+    { cloud: "productId", refEntity: "products" },
+    { cloud: "locationId", refEntity: "locations" }
+  ],
+  supplier_balance_entries: [{ cloud: "supplierId", refEntity: "suppliers" }]
+};
+
+/** Line-item refEntity fields — every bespoke document's items reference products by `productId`
+ * (see each apply function's item INSERT). */
+const ITEM_REFS: Partial<Record<SyncEntity, Array<{ itemsKey: string; idKey: string; refEntity: SyncEntity }>>> = {
+  sales: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }],
+  quotations: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }],
+  purchases: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }],
+  sale_returns: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }],
+  stock_requests: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }],
+  stock_receipts: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }]
+};
+
+/** table name === entity name for every synced entity. */
+function rowExistsLocally(entity: SyncEntity, id: string): boolean {
+  return Boolean(getDatabase().prepare(`SELECT 1 FROM ${entity} WHERE id = ?`).get(id));
+}
+
+/** Every (refEntity, id) this pulled row points at that isn't present in this device's local DB yet —
+ * alias-resolved first, deduped. Drives both the on-demand parent fetch and the sync_dangling_refs
+ * log. */
+function missingRefsFor(entity: SyncEntity, row: Record<string, unknown>): Array<{ refEntity: SyncEntity; id: string }> {
+  const out = new Map<string, { refEntity: SyncEntity; id: string }>();
+  const consider = (refEntity: SyncEntity, rawId: unknown): void => {
+    if (rawId === null || rawId === undefined || rawId === "") return;
+    const resolved = resolveRef(refEntity, rawId) as string;
+    if (typeof resolved !== "string") return;
+    if (!rowExistsLocally(refEntity, resolved)) out.set(`${refEntity}:${resolved}`, { refEntity, id: resolved });
+  };
+  for (const col of [...refColumnsFor(entity), ...(EXTRA_HEADER_REFS[entity] ?? [])]) {
+    consider(col.refEntity, row[col.cloud]);
+  }
+  for (const spec of ITEM_REFS[entity] ?? []) {
+    const items = (row[spec.itemsKey] as Array<Record<string, unknown>> | undefined) ?? [];
+    for (const item of items) consider(spec.refEntity, item[spec.idKey]);
+  }
+  return [...out.values()];
+}
+
+const FETCH_BY_ID_BATCH = 200;
+const MAX_PARENT_FETCH_DEPTH = 4;
+
+/** Pull specific rows by id straight from the cloud — the "just go get the parent now" primitive.
+ * Returns null on any failure (offline, or the endpoint not deployed yet on an older server) so the
+ * caller falls back to the FK-suspended apply instead of hanging. */
+async function fetchRowsById(
+  tenantId: string,
+  deviceId: string,
+  entity: SyncEntity,
+  ids: string[]
+): Promise<Array<Record<string, unknown>> | null> {
+  if (ids.length === 0) return [];
+  const all: Array<Record<string, unknown>> = [];
+  for (const batch of chunk(ids, FETCH_BY_ID_BATCH)) {
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE_URL}/sync/fetch-by-id`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tenantId, deviceId, entity, ids: batch }),
+        signal: AbortSignal.timeout(15_000)
+      });
+    } catch {
+      return null;
+    }
+    if (!response.ok) return null;
+    const body = (await response.json().catch(() => null)) as { rows: Array<Record<string, unknown>> } | null;
+    if (!body || !Array.isArray(body.rows)) return null;
+    all.push(...body.rows);
+  }
+  return all;
+}
+
+/** Fetch the parent rows a just-failed child needs, apply them now — recursively, since a fetched
+ * parent may itself reference a grandparent this device also lacks. Best-effort: a parent the cloud
+ * doesn't return (genuinely deleted), or one that still won't apply, is left for the caller's
+ * FK-suspended fallback + sync_dangling_refs. `seen` guards against cycles and repeat work. */
+async function fetchMissingParents(
+  tenantId: string,
+  deviceId: string,
+  missing: Array<{ refEntity: SyncEntity; id: string }>,
+  depth: number,
+  seen: Set<string>
+): Promise<void> {
+  if (depth > MAX_PARENT_FETCH_DEPTH || missing.length === 0) return;
+
+  const byEntity = new Map<SyncEntity, string[]>();
+  for (const ref of missing) {
+    const key = `${ref.refEntity}:${ref.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (rowExistsLocally(ref.refEntity, ref.id)) continue;
+    byEntity.set(ref.refEntity, [...(byEntity.get(ref.refEntity) ?? []), ref.id]);
+  }
+
+  for (const [refEntity, ids] of byEntity) {
+    const fetched = await fetchRowsById(tenantId, deviceId, refEntity, ids);
+    if (!fetched || fetched.length === 0) continue;
+    for (const parentRow of fetched) {
+      const grandparents = missingRefsFor(refEntity, parentRow);
+      if (grandparents.length > 0) {
+        await fetchMissingParents(tenantId, deviceId, grandparents, depth + 1, seen);
+      }
+      try {
+        applyPulledRow(refEntity, parentRow);
+        clearDanglingRefs(refEntity, parentRow.id as string);
+      } catch {
+        try {
+          applyPulledRowSuspendingFk(refEntity, parentRow);
+          recordDanglingRefs(refEntity, parentRow);
+        } catch {
+          /* leave this parent for the orphan path; the child below still gets its own recovery */
+        }
+      }
+    }
+  }
+}
+
+/** Applies one pulled row with FOREIGN KEY enforcement briefly suspended, so a row whose parent the
+ * cloud genuinely doesn't have (deleted, or a first sync still catching up) still LANDS — fully
+ * materialized, only the one link left unconnected — instead of blocking the whole entity's cursor.
+ *
+ * node:sqlite's DatabaseSync is synchronous and single-threaded: there is no await, no yield, no
+ * event-loop turn between the OFF and the ON, so no other DB code can possibly run with FK checks
+ * off. The pragma is a no-op inside a transaction, so it's set here BEFORE applyPulledRow opens its
+ * own (bespoke entities) — SQLite reads the setting at BEGIN and honors it for that transaction. */
+function applyPulledRowSuspendingFk(entity: SyncEntity, row: Record<string, unknown>): void {
+  const db = getDatabase();
+  db.exec("PRAGMA foreign_keys = OFF");
+  try {
+    applyPulledRow(entity, row);
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON");
+  }
+}
+
+function recordDanglingRefs(entity: SyncEntity, row: Record<string, unknown>): void {
+  const missing = missingRefsFor(entity, row);
+  if (missing.length === 0) return;
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  const rowId = row.id as string;
+  for (const ref of missing) {
+    db.prepare(
+      `INSERT INTO sync_dangling_refs (entity, row_id, ref_entity, ref_id, first_seen_at, last_seen_at, attempts)
+       VALUES (?, ?, ?, ?, ?, ?, 1)
+       ON CONFLICT(entity, row_id, ref_entity, ref_id) DO UPDATE SET
+         last_seen_at = excluded.last_seen_at, attempts = attempts + 1`
+    ).run(entity, rowId, ref.refEntity, ref.id, now, now);
+  }
+}
+
+function clearDanglingRefs(entity: SyncEntity, rowId: string): void {
+  getDatabase().prepare("DELETE FROM sync_dangling_refs WHERE entity = ? AND row_id = ?").run(entity, rowId);
+}
+
+/** Any dangling link whose parent has since arrived is no longer dangling — drop the record. The
+ * child row's FK is already satisfied (sync ids are stable), so nothing needs re-applying. Cheap;
+ * runs once per cycle. */
+function sweepResolvedDanglingRefs(): void {
+  const db = getDatabase();
+  const rows = db
+    .prepare("SELECT entity, row_id, ref_entity, ref_id FROM sync_dangling_refs")
+    .all() as Array<{ entity: SyncEntity; row_id: string; ref_entity: SyncEntity; ref_id: string }>;
+  for (const r of rows) {
+    if (rowExistsLocally(r.ref_entity, resolveRef(r.ref_entity, r.ref_id) as string)) {
+      db.prepare(
+        "DELETE FROM sync_dangling_refs WHERE entity = ? AND row_id = ? AND ref_entity = ? AND ref_id = ?"
+      ).run(r.entity, r.row_id, r.ref_entity, r.ref_id);
+    }
+  }
+}
+
+type ApplyOutcome = "applied" | "recovered" | "dangling" | "failed";
+
+/** Apply one pulled row, escalating through recovery steps only as far as needed:
+ *   1. clean apply (FK on)
+ *   2. fetch every missing parent from the cloud right now, then retry
+ *   3. apply with FK enforcement suspended, logging the still-missing links to sync_dangling_refs
+ *   4. give up for this cycle — record a pull orphan (retried every cycle by retryPullOrphans)
+ * Never throws. */
+async function applyPulledRowWithRecovery(
+  tenantId: string,
+  deviceId: string,
+  entity: SyncEntity,
+  row: Record<string, unknown>
+): Promise<ApplyOutcome> {
+  const rowId = row.id as string;
+
+  try {
+    applyPulledRow(entity, row);
+    clearDanglingRefs(entity, rowId);
+    return "applied";
+  } catch {
+    /* fall through */
+  }
+
+  const missing = missingRefsFor(entity, row);
+  if (missing.length > 0) {
+    await fetchMissingParents(tenantId, deviceId, missing, 0, new Set());
+    try {
+      applyPulledRow(entity, row);
+      clearDanglingRefs(entity, rowId);
+      clearPullOrphan(entity, rowId);
+      return "recovered";
+    } catch {
+      /* still failing — fall through */
+    }
+  }
+
+  try {
+    applyPulledRowSuspendingFk(entity, row);
+    recordDanglingRefs(entity, row);
+    clearPullOrphan(entity, rowId);
+    return "dangling";
+  } catch (err) {
+    recordPullOrphanAttempt(entity, rowId, err, row);
+    return "failed";
+  }
 }
 
 async function pullEntity(tenantId: string, deviceId: string, entity: SyncEntity): Promise<void> {
@@ -2992,107 +3288,132 @@ async function pullEntity(tenantId: string, deviceId: string, entity: SyncEntity
     const response = await fetchPull(tenantId, deviceId, entity, since);
     if (!response) return; // offline/unreachable — resume from the same cursor next cycle.
 
-    // Two passes so same-page dependency ordering resolves itself (e.g. a role that appears after
-    // an employee referencing it, or a child category before its parent). A row still failing after
-    // both passes is logged and retried again on a LATER pull cycle — see below for why the cursor
-    // deliberately does not advance past it (until ORPHAN_QUARANTINE_THRESHOLD is hit).
+    // Passes 1 & 2: cheap synchronous retries that resolve same-page dependency ordering (a parent
+    // row appearing later on the same page than its child).
     let remaining = response.rows;
-    const lastErrors = new Map<string, unknown>();
     for (let pass = 0; pass < 2 && remaining.length > 0; pass++) {
       const stillFailing: Array<Record<string, unknown>> = [];
       for (const row of remaining) {
         try {
           applyPulledRow(entity, row);
-          clearPullOrphan(entity, row.id as string);
-        } catch (err) {
-          lastErrors.set(row.id as string, err);
+          clearDanglingRefs(entity, row.id as string);
+        } catch {
           stillFailing.push(row);
-          if (pass === 1) {
-            console.warn(`[sync] ${entity} row ${row.id as string} still failing after 2 passes, will retry next cycle:`, err);
-          }
         }
       }
       remaining = stillFailing;
     }
 
-    // Only advance past this page if EVERY row in it actually applied (or has since been quarantined
-    // below). Advancing unconditionally (the original behavior) turned a transient failure into a
-    // PERMANENT one: since the cursor is `syncedAt`-based, not per-row, a page containing even one
-    // still-failing row would have that row skipped forever the moment the cursor moved past its
-    // syncedAt — found live via two-device testing, where a role-name collision (see APPLY_CONFIG's
-    // naturalKey reconciliation above) silently and permanently blocked that role, and every employee
-    // referencing it, from ever pulling again. Re-fetching the same page next cycle is safe — applying
-    // an already-succeeded row again is a harmless no-op update — and correct: once whatever was
-    // blocking it resolves (a dependency lands, a reconciliation fix applies), the retry on a later
-    // cycle succeeds.
-    //
-    // But that same "never advance past a bad row" rule, applied to a row that will NEVER resolve
-    // (its FK target is permanently gone from the cloud, not just running behind), instead freezes
-    // this entity's cursor forever — every future row behind it, however unrelated, silently never
-    // arrives either. That's the failure mode this quarantine step exists to break: past
-    // ORPHAN_QUARANTINE_THRESHOLD cycles of the identical failure, give up on that one row specifically
-    // (it's excluded from the local table it belongs to, so its effect on inventory/totals is simply
-    // never applied — the same outcome as if it never existed, matching the reality that its target
-    // doesn't exist either) and let every other row keep syncing.
-    if (remaining.length > 0) {
-      const stillBlocking: Array<Record<string, unknown>> = [];
-      for (const row of remaining) {
-        const rowId = row.id as string;
-        const { attempts, ageMs } = recordPullOrphanAttempt(entity, rowId, lastErrors.get(rowId), row);
-        if (attempts >= ORPHAN_QUARANTINE_THRESHOLD && ageMs >= ORPHAN_MIN_AGE_MS) {
-          console.error(
-            `[sync] ${entity} row ${rowId} permanently quarantined after ${attempts} pull cycles over ` +
-              `${Math.round(ageMs / 1000)}s of the same failure — it references data that no longer exists in ` +
-              `the cloud. Skipping it so the rest of ${entity} can keep syncing; see sync_pull_orphans for details.`
-          );
-        } else {
-          stillBlocking.push(row);
-        }
-      }
-      if (stillBlocking.length > 0) {
-        return;
-      }
+    // Pass 3: async recovery for whatever's left — fetch the missing parents from the cloud on
+    // demand and apply them first; failing that, apply the row anyway with FK enforcement suspended
+    // and note the unconnected link. Only a genuine structural problem (not a missing parent) ends
+    // up an orphan, and even that is retried every cycle — never permanently skipped.
+    let recovered = 0;
+    let dangling = 0;
+    let orphaned = 0;
+    for (const row of remaining) {
+      const outcome = await applyPulledRowWithRecovery(tenantId, deviceId, entity, row);
+      if (outcome === "recovered") recovered++;
+      else if (outcome === "dangling") dangling++;
+      else if (outcome === "failed") orphaned++;
     }
+    recordPullStat({ pulled: response.rows.length, recovered, dangling, orphaned });
 
+    // The cursor ALWAYS advances now. A dangling-link row is fully materialized; a genuine orphan is
+    // safe in sync_pull_orphans and retried by retryPullOrphans() next cycle. Either way it can
+    // never again freeze the rows behind it — the bug behind every "N records could not sync to this
+    // device" report.
     since = response.cursor;
     writeCursor(entity, since);
     hasMore = response.hasMore;
   }
 }
 
-/** Count of rows currently quarantined by the ORPHAN_QUARANTINE_THRESHOLD path in pullEntity above —
- * surfaced in the Cloud Sync tab so a permanent, unresolvable gap (e.g. a movement referencing a
- * deleted storefront) is visible to a human instead of only ever appearing in main-process logs. */
+/** Re-attempts every row still sitting in sync_pull_orphans (couldn't apply even with FK suspended —
+ * a real structural problem, not a late dependency). Runs once per pull cycle. With the recovery
+ * pipeline above this table is normally empty; a row that lingers here is a genuine signal worth the
+ * diagnostics export. */
+async function retryPullOrphans(): Promise<void> {
+  const identity = getCloudIdentity();
+  if (!identity) return;
+  const rows = getDatabase()
+    .prepare("SELECT entity, row_id, payload_json FROM sync_pull_orphans")
+    .all() as Array<{ entity: SyncEntity; row_id: string; payload_json: string }>;
+  for (const r of rows) {
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(r.payload_json) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const outcome = await applyPulledRowWithRecovery(identity.tenantId, identity.deviceId, r.entity, payload);
+    if (outcome !== "failed") clearPullOrphan(r.entity, r.row_id);
+  }
+}
+
+/** Count of rows that still couldn't be applied to this device at all — post-2026 a genuine
+ * structural problem, retried every cycle, never permanently skipped. Surfaced in the Cloud Sync
+ * tab. */
 export function getPullOrphanCount(): number {
   const row = getDatabase().prepare("SELECT COUNT(*) as count FROM sync_pull_orphans").get() as { count: number };
   return row.count;
 }
 
+/** Count of rows that ARE on this device but have one link pointing at a row not here yet — benign,
+ * self-healing when that row arrives. Shown so it's explainable, not alarming. */
+export function getDanglingRefCount(): number {
+  const row = getDatabase()
+    .prepare("SELECT COUNT(DISTINCT entity || '|' || row_id) as count FROM sync_dangling_refs")
+    .get() as { count: number };
+  return row.count;
+}
+
 /**
- * Recovery path for rows quarantined by pullEntity's ORPHAN_QUARANTINE_THRESHOLD path above — there
- * was previously no way back from that state short of manual SQL surgery. Once a row is quarantined,
- * the entity's cursor has already advanced past its cloud `syncedAt` (see pullEntity: quarantining a
- * row is what LETS the cursor advance past an otherwise-blocked page), so the server's delta-pull
- * query (`syncedAt > cursor`) will never return it again — clicking "Sync Now" a hundred times does
- * nothing, by design, for a row in this state. This is intentionally a blunt full reset, not a precise
- * rewind to just before the earliest orphan: rewinding to the exact right instant per entity is easy
- * to get subtly wrong (an off-by-one leaves the same row excluded again), whereas re-pulling an
- * entity from scratch is always safe — every apply path here is idempotent (stock_movements' own
- * `alreadyApplied` check, every other entity's plain upsert-by-id) and cheap for the entity sizes this
- * has actually been needed for. Clears sync_pull_orphans for exactly the entities being reset so their
- * attempt/age counters start clean, not fresh reattempts warp against stale history.
+ * Rewinds the pull cursor to the start for every entity that currently has an orphan or a dangling
+ * link, wipes that bookkeeping, so the next pull re-fetches those pages from scratch. Blunt on
+ * purpose — a precise per-entity rewind is easy to get subtly wrong (an off-by-one re-excludes the
+ * same row), while a full re-pull is always safe (every apply path is idempotent: stock_movements'
+ * own `alreadyApplied` guard, every other entity's upsert-by-id) and cheap at these sizes. This
+ * backs the "Retry Orphaned Records" button; repairSync() below is the whole-database version.
  */
 export function resyncOrphanedEntities(): { entities: SyncEntity[] } {
   const db = getDatabase();
-  const rows = db.prepare("SELECT DISTINCT entity FROM sync_pull_orphans").all() as Array<{ entity: SyncEntity }>;
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT entity FROM sync_pull_orphans
+       UNION SELECT DISTINCT entity FROM sync_dangling_refs`
+    )
+    .all() as Array<{ entity: SyncEntity }>;
   const entities = rows.map((row) => row.entity);
 
   for (const entity of entities) {
     writeCursor(entity, new Date(0).toISOString());
     db.prepare("DELETE FROM sync_pull_orphans WHERE entity = ?").run(entity);
+    db.prepare("DELETE FROM sync_dangling_refs WHERE entity = ?").run(entity);
   }
 
   return { entities };
+}
+
+/** The "force everything" recovery. Rewinds EVERY entity's pull cursor to the beginning, clears all
+ * orphan/dangling bookkeeping, and runs a full cycle immediately. Safe for the same idempotency
+ * reason as resyncOrphanedEntities. This is what a user reaches for when sync looks stuck and a
+ * plain Sync Now hasn't cleared it — it can no longer be true that "Sync Now does nothing", because
+ * this genuinely re-checks every record against the cloud from scratch. */
+export async function repairSync(): Promise<void> {
+  if (inFlightCycle) {
+    try {
+      await inFlightCycle;
+    } catch {
+      /* ignore — we're about to run a fresh cycle anyway */
+    }
+  }
+  const db = getDatabase();
+  for (const entity of SYNC_ENTITIES) writeCursor(entity, new Date(0).toISOString());
+  db.exec("DELETE FROM sync_pull_orphans");
+  db.exec("DELETE FROM sync_dangling_refs");
+  await syncCycle();
+  await checkDrift();
 }
 
 export async function pullDeltas(): Promise<void> {
@@ -3102,6 +3423,10 @@ export async function pullDeltas(): Promise<void> {
   for (const entity of SYNC_ENTITIES) {
     await pullEntity(identity.tenantId, identity.deviceId, entity);
   }
+
+  // Re-attempt anything genuinely stuck, then drop dangling-link records whose parent has landed.
+  await retryPullOrphans();
+  sweepResolvedDanglingRefs();
 
   writeSetting("sync_last_pull_at", new Date().toISOString());
 }
@@ -3218,6 +3543,69 @@ export async function getEntitySyncOverview(): Promise<EntitySyncOverviewRow[]> 
   return rows.map((row) => ({ ...row, remoteCount: body.counts[row.entity] ?? 0 }));
 }
 
+/** Everything a support conversation needs to see why one device's sync is stuck, as plain data the
+ * user copies to the clipboard and pastes into a chat — no dev console, no VS Code, no remote access
+ * required. Local reads only; never hits the network. */
+export function getSyncDiagnostics(): SyncDiagnostics {
+  const db = getDatabase();
+  const identity = getCloudIdentity();
+
+  const cursors: Partial<Record<SyncEntity, string>> = {};
+  for (const entity of SYNC_ENTITIES) {
+    const cursor = readCursor(entity);
+    if (cursor) cursors[entity] = cursor;
+  }
+
+  const countRow = (status: string): number =>
+    (db.prepare("SELECT COUNT(*) as c FROM sync_outbox WHERE status = ?").get(status) as { c: number }).c;
+
+  const outboxProblems = db
+    .prepare(
+      `SELECT entity, entity_id AS entityId, status, attempt_count AS attemptCount, last_error AS lastError, updated_at AS updatedAt
+       FROM sync_outbox WHERE status IN ('failed', 'conflict')
+       ORDER BY updated_at DESC LIMIT 100`
+    )
+    .all() as SyncDiagnostics["outboxProblems"];
+
+  const pullOrphans = db
+    .prepare(
+      `SELECT entity, row_id AS rowId, attempts, last_error AS lastError, first_seen_at AS firstSeenAt, last_seen_at AS lastSeenAt
+       FROM sync_pull_orphans ORDER BY last_seen_at DESC LIMIT 200`
+    )
+    .all() as SyncDiagnostics["pullOrphans"];
+
+  const danglingRefs = db
+    .prepare(
+      `SELECT entity, row_id AS rowId, ref_entity AS refEntity, ref_id AS refId, attempts, first_seen_at AS firstSeenAt
+       FROM sync_dangling_refs ORDER BY last_seen_at DESC LIMIT 500`
+    )
+    .all() as SyncDiagnostics["danglingRefs"];
+
+  return {
+    generatedAt: new Date().toISOString(),
+    appVersion: app.getVersion(),
+    serverUrl: API_BASE_URL,
+    activated: identity !== null,
+    tenantId: identity?.tenantId ?? null,
+    deviceId: identity?.deviceId ?? null,
+    lastPushAt: readSetting<string>("sync_last_push_at"),
+    lastPullAt: readSetting<string>("sync_last_pull_at"),
+    lastDriftCheckAt: readSetting<string>("sync_last_drift_check_at"),
+    lastRunReport: readSetting<SyncRunReport>("sync_last_run_report"),
+    cursors,
+    outboxCounts: {
+      queued: countRow("queued"),
+      failed: countRow("failed"),
+      conflict: countRow("conflict"),
+      synced: countRow("synced")
+    },
+    outboxProblems,
+    pullOrphans,
+    danglingRefs,
+    drift: readSetting<DriftReport>("sync_drift_report") ?? {}
+  };
+}
+
 // ---------------------------------------------------------------------------------------------
 // Entry point — used by both the interval timer (bootstrap.ts) and the manual "Sync Now" button.
 // ---------------------------------------------------------------------------------------------
@@ -3232,6 +3620,16 @@ export async function getEntitySyncOverview(): Promise<EntitySyncOverviewRow[]> 
  * collision is at stake. Both push and pull are already fast no-ops the moment there's nothing to
  * do, so running them back-to-back on one 20-second timer costs nothing when idle. */
 export async function syncCycle(): Promise<void> {
+  if (inFlightCycle) return inFlightCycle;
+  inFlightCycle = runSyncCycle();
+  try {
+    await inFlightCycle;
+  } finally {
+    inFlightCycle = null;
+  }
+}
+
+async function runSyncCycle(): Promise<void> {
   // Covers BOTH the automatic timer (bootstrap.ts) and the manual "Sync Now" button (syncNow()
   // below calls this directly) uniformly — a lapsed tenant can't just repeatedly click Sync Now to
   // route around the intended pressure to pay. checkInWithServer() (the license heartbeat) is
@@ -3239,7 +3637,9 @@ export async function syncCycle(): Promise<void> {
   // re-enable itself, not just from a fresh app restart.
   if (isSyncDisabledByGracePeriod()) return;
 
-  // Each half runs independently and never lets the other's failure vanish silently — bootstrap.ts
+  beginRunReport();
+
+  // Each step runs independently and never lets another's failure vanish silently — bootstrap.ts
   // calls this via `void syncCycle()` with no .catch, so an uncaught throw here would previously
   // become an unhandled promise rejection: invisible, and it would also skip pushOutbox() entirely
   // whenever pullDeltas() failed first. Caught live: a failure partway through applying one push
@@ -3259,6 +3659,8 @@ export async function syncCycle(): Promise<void> {
   } catch (err) {
     console.error("[sync] clearStalePhantomConflicts failed:", err);
   }
+
+  finalizeRunReport();
 }
 
 export async function syncNow(): Promise<void> {

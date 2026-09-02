@@ -67,6 +67,7 @@ import type {
   ConflictResolution,
   EntitySyncOverviewRow,
   SyncConflictItem,
+  SyncDiagnostics,
   SyncQueueItem,
   SyncReconciliationItem,
   SyncSnapshot
@@ -1156,6 +1157,14 @@ export type IpcInvokeMap = {
     args: [];
     result: SyncSnapshot;
   };
+  "sync:repair": {
+    args: [];
+    result: SyncSnapshot;
+  };
+  "sync:get-diagnostics": {
+    args: [];
+    result: SyncDiagnostics;
+  };
   "sync:list-conflicts": {
     args: [];
     result: SyncConflictItem[];
@@ -1865,6 +1874,8 @@ export type BlueLedgerApi = {
     listQueue: (input?: { limit?: number }) => Promise<IpcInvokeMap["sync:list-queue"]["result"]>;
     runNow: () => Promise<IpcInvokeMap["sync:run-now"]["result"]>;
     retryOrphans: () => Promise<IpcInvokeMap["sync:retry-orphans"]["result"]>;
+    repair: () => Promise<IpcInvokeMap["sync:repair"]["result"]>;
+    getDiagnostics: () => Promise<IpcInvokeMap["sync:get-diagnostics"]["result"]>;
     listConflicts: () => Promise<IpcInvokeMap["sync:list-conflicts"]["result"]>;
     resolveConflict: (
       id: string,

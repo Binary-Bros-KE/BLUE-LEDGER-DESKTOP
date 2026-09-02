@@ -297,12 +297,14 @@ import {
 import { checkForUpdates, getUpdateStatus, installUpdateNow } from "@main/services/update-service";
 import {
   getEntitySyncOverview,
+  getSyncDiagnostics,
   getSyncSnapshot,
   listConflicts,
   listRecentReconciliations,
   listSyncQueue,
   resolveConflict,
   retryOrphanedRecords,
+  runRepairSync,
   runSyncNow
 } from "@main/services/sync-service";
 import { commitImport, pickImportFile, previewImport } from "@main/services/import-service";
@@ -848,6 +850,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.syncGetSnapshot, () => getSyncSnapshot());
   ipcMain.handle(ipcChannels.syncRunNow, () => runSyncNow());
   ipcMain.handle(ipcChannels.syncRetryOrphans, () => retryOrphanedRecords());
+  ipcMain.handle(ipcChannels.syncRepair, () => runRepairSync());
+  ipcMain.handle(ipcChannels.syncGetDiagnostics, () => getSyncDiagnostics());
   ipcMain.handle(ipcChannels.syncListQueue, (_event, input?: { limit?: number }) =>
     listSyncQueue(input?.limit)
   );

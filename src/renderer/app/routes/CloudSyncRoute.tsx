@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { format } from "date-fns";
 import { motion } from "framer-motion";
-import { AlertTriangle, GitBranch, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, ClipboardCopy, GitBranch, Info, Loader2, RefreshCw, Wrench } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
@@ -111,6 +111,8 @@ export function CloudSyncRoute(): React.JSX.Element {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [retryingOrphans, setRetryingOrphans] = useState(false);
+  const [repairing, setRepairing] = useState(false);
+  const [copyingDiagnostics, setCopyingDiagnostics] = useState(false);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -193,6 +195,54 @@ export function CloudSyncRoute(): React.JSX.Element {
     }
   }
 
+  /** "Repair Sync" — the force-everything path. Rewinds every entity's pull cursor to the start,
+   * clears all stuck/dangling bookkeeping, and re-checks every record against the cloud from
+   * scratch. Safe (every apply is idempotent) but can take a few minutes on a large business, so
+   * it's confirmed first and kept separate from the everyday Sync Now button. */
+  async function handleRepair(): Promise<void> {
+    const ok = window.confirm(
+      "Repair Sync re-checks every record on this device against the cloud from scratch. It's safe to run, " +
+        "but on a large business it can take a few minutes to finish. Continue?"
+    );
+    if (!ok) return;
+    setRepairing(true);
+    setError(null);
+    try {
+      const result = await window.blueLedger.sync.repair();
+      setSnapshot(result);
+      const [queueResult, conflictsResult, entityOverviewResult] = await Promise.all([
+        window.blueLedger.sync.listQueue({ limit: 25 }),
+        window.blueLedger.sync.listConflicts(),
+        window.blueLedger.sync.getEntityOverview()
+      ]);
+      setQueue(queueResult);
+      setConflicts(conflictsResult);
+      setEntityOverview(entityOverviewResult);
+      showSuccessToast("Repair complete — anything still catching up will finish over the next few sync cycles");
+    } catch (err) {
+      const message = getErrorMessage(err, "Repair Sync failed");
+      setError(message);
+      showErrorToast(message);
+    } finally {
+      setRepairing(false);
+    }
+  }
+
+  /** "Copy Diagnostics" — dumps this device's full local sync state to the clipboard as JSON so it
+   * can be pasted straight into a support chat, no dev tools needed. */
+  async function handleCopyDiagnostics(): Promise<void> {
+    setCopyingDiagnostics(true);
+    try {
+      const diagnostics = await window.blueLedger.sync.getDiagnostics();
+      await navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2));
+      showSuccessToast("Sync diagnostics copied — paste them into your support chat");
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Couldn't copy diagnostics"));
+    } finally {
+      setCopyingDiagnostics(false);
+    }
+  }
+
   async function handleResolve(id: string, resolution: "mine" | "theirs"): Promise<void> {
     setResolvingId(id);
     setError(null);
@@ -248,21 +298,51 @@ export function CloudSyncRoute(): React.JSX.Element {
               happened and lets you force a sync right now.
             </p>
           </div>
-          {canRunSync && (
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
-              onClick={() => void handleSyncNow()}
-              disabled={syncing || snapshot.status === "not_activated"}
-              className="cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => void handleCopyDiagnostics()}
+              disabled={copyingDiagnostics}
+              className="h-9 cursor-pointer border border-line bg-white text-xs text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {syncing ? (
-                <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
+              {copyingDiagnostics ? (
+                <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
               ) : (
-                <RefreshCw className="mr-2 size-4" aria-hidden="true" />
+                <ClipboardCopy className="mr-1.5 size-3.5" aria-hidden="true" />
               )}
-              {syncing ? "Syncing..." : "Sync Now"}
+              Copy Diagnostics
             </Button>
-          )}
+            {canRunSync && (
+              <>
+                <Button
+                  type="button"
+                  onClick={() => void handleRepair()}
+                  disabled={repairing || syncing || snapshot.status === "not_activated"}
+                  className="h-9 cursor-pointer border border-line bg-white text-xs text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {repairing ? (
+                    <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Wrench className="mr-1.5 size-3.5" aria-hidden="true" />
+                  )}
+                  {repairing ? "Repairing..." : "Repair Sync"}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void handleSyncNow()}
+                  disabled={syncing || repairing || snapshot.status === "not_activated"}
+                  className="cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {syncing ? (
+                    <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <RefreshCw className="mr-2 size-4" aria-hidden="true" />
+                  )}
+                  {syncing ? "Syncing..." : "Sync Now"}
+                </Button>
+              </>
+            )}
+          </div>
         </div>
 
         {error && (
@@ -283,6 +363,22 @@ export function CloudSyncRoute(): React.JSX.Element {
           <StatTile label="Queued" value={String(snapshot.queuedCount)} mono />
           <StatTile label="Failed" value={String(snapshot.failedCount)} mono />
         </div>
+
+        {snapshot.lastRunReport && (
+          <p className="mt-3 text-xs font-semibold text-muted">
+            Last sync pulled {snapshot.lastRunReport.pulled.toLocaleString()}{" "}
+            {snapshot.lastRunReport.pulled === 1 ? "change" : "changes"}
+            {snapshot.lastRunReport.recovered > 0 &&
+              `, reconnected ${snapshot.lastRunReport.recovered} late ${
+                snapshot.lastRunReport.recovered === 1 ? "reference" : "references"
+              }`}
+            {snapshot.lastRunReport.pushed > 0 && `, sent ${snapshot.lastRunReport.pushed.toLocaleString()} up`}
+            {snapshot.lastRunReport.orphaned > 0
+              ? ` — ${snapshot.lastRunReport.orphaned} still need attention (see below)`
+              : " — nothing blocked"}
+            .
+          </p>
+        )}
       </div>
 
       <div className="rounded-lg border border-line bg-white p-5 shadow-soft">
@@ -337,8 +433,24 @@ export function CloudSyncRoute(): React.JSX.Element {
               ))}
             </ul>
             <p className="mt-1 text-xs font-semibold">
-              This is a signal to investigate, not something Blue Ledger fixes automatically — contact support if
-              it doesn't resolve itself after a manual Sync Now.
+              A count gap is a signal to investigate. Try "Repair Sync" above — it re-checks every record against
+              the cloud. If the gap survives that, use "Copy Diagnostics" and send it to support.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {snapshot.danglingRefCount > 0 && (
+        <div className="flex items-start gap-2 rounded-lg border border-line bg-soft px-4 py-3 text-sm font-semibold text-muted">
+          <Info className="mt-0.5 size-4 flex-none" aria-hidden="true" />
+          <div className="flex-1">
+            <p className="text-ink">
+              {snapshot.danglingRefCount} {snapshot.danglingRefCount === 1 ? "record is" : "records are"} linked to
+              something that's still syncing.
+            </p>
+            <p className="mt-1 text-xs">
+              The records themselves are here and correct — only the link (to a product, customer, storefront…) is
+              waiting on that other record to arrive. It reconnects on its own once it does. Nothing to do.
             </p>
           </div>
         </div>
@@ -349,20 +461,20 @@ export function CloudSyncRoute(): React.JSX.Element {
           <AlertTriangle className="mt-0.5 size-4 flex-none" aria-hidden="true" />
           <div className="flex-1">
             <p>
-              {snapshot.orphanedPullCount} {snapshot.orphanedPullCount === 1 ? "record" : "records"} could not sync
-              to this device.
+              {snapshot.orphanedPullCount} {snapshot.orphanedPullCount === 1 ? "record" : "records"} still need
+              attention.
             </p>
             <p className="mt-1 text-xs font-semibold">
-              Each one kept failing to reference something else it needs for several minutes straight — usually
-              because that something (a product, a storefront) hadn't landed locally yet on a device's first full
-              sync of a large tenant, not because it was actually deleted. A plain Sync Now can't recover these on
-              its own once this device has given up on them — use Retry below to force a full re-check.
+              These couldn't be applied to this device even after fetching everything they reference — usually a
+              genuine data problem worth a closer look, not just a slow first sync. They're retried automatically
+              every cycle and never permanently skipped. Use "Copy Diagnostics" above and send it to support, or
+              try "Retry" / "Repair Sync" first.
             </p>
             {canRunSync && (
               <Button
                 type="button"
                 onClick={() => void handleRetryOrphans()}
-                disabled={retryingOrphans || syncing || snapshot.status === "not_activated"}
+                disabled={retryingOrphans || syncing || repairing || snapshot.status === "not_activated"}
                 className="mt-2.5 h-8 border border-warning/40 bg-white text-xs text-warning shadow-none hover:bg-warning/10 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {retryingOrphans ? (
