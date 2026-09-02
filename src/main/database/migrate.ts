@@ -2792,7 +2792,7 @@ const migrations = [
     `
   },
   {
-    version: 81,
+    version: 82,
     name: "stock_movements_borrow_lend_types",
     sql: `
       -- stock_movements.movement_type has a hard CHECK constraint listing every allowed value —
@@ -2850,7 +2850,7 @@ const migrations = [
     `
   },
   {
-    version: 82,
+    version: 81,
     name: "borrows",
     sql: `
       -- "Borrow & Lend" — track physical stock moving between this shop and another shop
@@ -2882,11 +2882,11 @@ const migrations = [
         FOREIGN KEY (created_by) REFERENCES employees(id)
       );
 
-      CREATE UNIQUE INDEX idx_borrows_tenant_number ON borrows(tenant_id, borrow_number);
-      CREATE INDEX idx_borrows_tenant_status ON borrows(tenant_id, status);
-      CREATE INDEX idx_borrows_tenant_created ON borrows(tenant_id, created_at);
-      CREATE INDEX idx_borrows_supplier ON borrows(supplier_id);
-      CREATE INDEX idx_borrows_location ON borrows(location_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_borrows_tenant_number ON borrows(tenant_id, borrow_number);
+      CREATE INDEX IF NOT EXISTS idx_borrows_tenant_status ON borrows(tenant_id, status);
+      CREATE INDEX IF NOT EXISTS idx_borrows_tenant_created ON borrows(tenant_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_borrows_supplier ON borrows(supplier_id);
+      CREATE INDEX IF NOT EXISTS idx_borrows_location ON borrows(location_id);
 
       CREATE TABLE IF NOT EXISTS borrow_items (
         id TEXT PRIMARY KEY,
@@ -2901,22 +2901,22 @@ const migrations = [
         FOREIGN KEY (product_id) REFERENCES products(id)
       );
 
-      CREATE INDEX idx_borrow_items_borrow ON borrow_items(borrow_id);
-      CREATE INDEX idx_borrow_items_product ON borrow_items(product_id);
+      CREATE INDEX IF NOT EXISTS idx_borrow_items_borrow ON borrow_items(borrow_id);
+      CREATE INDEX IF NOT EXISTS idx_borrow_items_product ON borrow_items(product_id);
 
-      CREATE TRIGGER trg_borrows_sync_ai AFTER INSERT ON borrows BEGIN
+      CREATE TRIGGER IF NOT EXISTS trg_borrows_sync_ai AFTER INSERT ON borrows BEGIN
         INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
         VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'borrows', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
       END;
-      CREATE TRIGGER trg_borrows_sync_au AFTER UPDATE ON borrows WHEN NEW.updated_at != OLD.updated_at BEGIN
+      CREATE TRIGGER IF NOT EXISTS trg_borrows_sync_au AFTER UPDATE ON borrows WHEN NEW.updated_at != OLD.updated_at BEGIN
         INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
         VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'borrows', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
       END;
-      CREATE TRIGGER trg_borrows_sync_ad AFTER DELETE ON borrows BEGIN
+      CREATE TRIGGER IF NOT EXISTS trg_borrows_sync_ad AFTER DELETE ON borrows BEGIN
         INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
         VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'borrows', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
       END;
-      CREATE TRIGGER trg_borrow_items_reenqueue_ai AFTER INSERT ON borrow_items BEGIN
+      CREATE TRIGGER IF NOT EXISTS trg_borrow_items_reenqueue_ai AFTER INSERT ON borrow_items BEGIN
         INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
         SELECT lower(hex(randomblob(16))), b.tenant_id, (SELECT client_id FROM tenant WHERE id = b.tenant_id), 'borrows', b.id, 'upsert', 'push', 'queued', 0, '{}', b.id || ':' || b.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
         FROM borrows b WHERE b.id = NEW.borrow_id;
@@ -2925,7 +2925,32 @@ const migrations = [
   }
 ] as const;
 
-export function migrateDatabase(): void {
+/** One migration's own identity + what went wrong — see migrateDatabase's own doc comment. */
+export type MigrationFailure = { version: number; name: string; error: string };
+
+/**
+ * Applies every not-yet-applied migration, in order. A single migration failing here used to abort
+ * the whole function (rethrown, caught by index.ts's handleFatalStartupError, which shows a dialog
+ * and calls app.exit(1)) — meaning ONE bad migration, out of 80+, could make the entire app refuse
+ * to open for every tenant on that device, for every feature, until a fixed build shipped. Confirmed
+ * live twice: a stray FK violation in an old migration, and a version-renumbering collision in a
+ * brand-new one — both took down an otherwise-fully-working install over something touching a single
+ * unrelated table.
+ *
+ * Each migration now gets its own try/catch: on failure, it's logged and left UNMARKED (never
+ * inserted into `migrations`), so it retries — identically, from scratch — on every future launch
+ * until whatever's tripping it is actually fixed (a corrected migration in a later build, a schema
+ * condition that resolves itself, etc.), same "always retry, never permanently give up" principle
+ * the sync outbox already uses. Crucially, the loop CONTINUES to the next migration instead of
+ * aborting — a later migration that depends on the failed one's table/column will itself fail and
+ * get skipped the same way (an expected, harmless cascade, not a bug), but every OTHER unrelated
+ * migration still applies, and the app still boots. The caller (bootstrap.ts) treats the returned
+ * failures as non-fatal: logged, never shown as a blocking dialog. Whatever feature depends on a
+ * still-failing migration may not work correctly until it's fixed, but that's a contained, in-app
+ * failure the next time that feature is actually used — not a reason to lock every other feature (and
+ * every other tenant on a shared device) out of the app entirely.
+ */
+export function migrateDatabase(): MigrationFailure[] {
   const db = getDatabase();
   db.exec(`
     CREATE TABLE IF NOT EXISTS migrations (
@@ -2940,6 +2965,7 @@ export function migrateDatabase(): void {
     .all()
     .map((row) => (row as { version: number }).version);
   const appliedSet = new Set(applied);
+  const failures: MigrationFailure[] = [];
 
   for (const migration of migrations) {
     if (appliedSet.has(migration.version)) {
@@ -2955,14 +2981,15 @@ export function migrateDatabase(): void {
         );
       });
     } catch (error) {
-      // Rolled back by runInTransaction — this migration is NOT marked applied, so it retries
-      // identically on every future launch until whatever's tripping it is fixed. Re-thrown with the
-      // migration's own identity attached: index.ts's handleFatalStartupError surfaces this message
-      // verbatim (dialog + startup-crash.log), and a bare SQLite error alone doesn't say WHICH of 60+
-      // migrations actually failed — this is what makes that diagnosable from a field report instead
-      // of guessed at.
+      // Rolled back by runInTransaction (BEGIN IMMEDIATE/COMMIT/ROLLBACK — SQLite DDL is fully
+      // transactional here), so a failure partway through a multi-statement migration (like a
+      // table-rebuild) never leaves an orphaned intermediate table behind. Deliberately does NOT
+      // rethrow — see this function's own doc comment above.
       const cause = error instanceof Error ? error.message : String(error);
-      throw new Error(`Migration ${migration.version} (${migration.name}) failed: ${cause}`, { cause: error });
+      console.error(`[migrate] Migration ${migration.version} (${migration.name}) failed — skipping, will retry next launch: ${cause}`);
+      failures.push({ version: migration.version, name: migration.name, error: cause });
     }
   }
+
+  return failures;
 }

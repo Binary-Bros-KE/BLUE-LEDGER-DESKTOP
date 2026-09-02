@@ -24,9 +24,11 @@ function logStartupCrash(error: unknown): void {
 }
 
 /** bootstrap() runs migrateDatabase() and a long chain of ensure*() setup calls SYNCHRONOUSLY,
- * before any window ever opens — a failing migration (rolled back, so it never gets marked applied
- * and retries identically on every future launch — see runInTransaction) or any other startup
- * exception used to just die here with zero visible feedback: `void bootstrap()` had no `.catch()`,
+ * before any window ever opens. A failing migration no longer reaches this handler at all — see
+ * migrateDatabase's own doc comment for why one bad migration is now logged and skipped, never
+ * fatal. This handler is what's left for everything ELSE that can still go wrong during bootstrap
+ * (a genuinely broken DB connection, an ensure*() call throwing, etc.), which used to just die here
+ * with zero visible feedback: `void bootstrap()` had no `.catch()`,
  * so a thrown error became an unhandled promise rejection and Electron's main process exited
  * silently. To someone double-clicking the desktop icon this was indistinguishable from "the app
  * just doesn't open" — no error, no window, nothing — and the only "fix" was deleting the entire

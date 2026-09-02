@@ -1,5 +1,7 @@
+import { appendFileSync } from "node:fs";
+import { join } from "node:path";
 import electron from "electron";
-import { migrateDatabase } from "@main/database/migrate";
+import { migrateDatabase, type MigrationFailure } from "@main/database/migrate";
 import { ensureDefaultExpenseCategories } from "@main/services/expense-category-service";
 import { ensureExpensesHaveStorefront } from "@main/services/expense-service";
 import { registerIpcHandlers } from "@main/ipc/register";
@@ -73,6 +75,24 @@ const SYNC_DRIFT_CHECK_INTERVAL_MS = 30 * 60 * 1000;
 // (a release feed, not billing/data state) and don't need to run every 20 seconds.
 const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
+/** Non-fatal counterpart to index.ts's logStartupCrash — migrateDatabase() no longer throws on a
+ * failed migration (see its own doc comment), so there's nothing to catch here and no dialog to
+ * show; this just leaves a record so a degraded feature is diagnosable from a field report instead
+ * of silently "just not working" with zero trace anywhere. A no-op when nothing failed. Best-effort,
+ * same as logStartupCrash — if even this fails (unwritable userData), there's nothing more to do. */
+function logMigrationFailures(failures: MigrationFailure[]): void {
+  if (failures.length === 0) return;
+  try {
+    const lines = failures.map((f) => `  - Migration ${f.version} (${f.name}): ${f.error}`).join("\n");
+    appendFileSync(
+      join(app.getPath("userData"), "migration-warnings.log"),
+      `[${new Date().toISOString()}] ${failures.length} migration(s) failed and were skipped (app booted normally; these retry on next launch):\n${lines}\n\n`
+    );
+  } catch {
+    // Nothing more we can do.
+  }
+}
+
 export async function bootstrap(): Promise<void> {
   await app.whenReady();
 
@@ -95,7 +115,7 @@ export async function bootstrap(): Promise<void> {
 
   app.setAppUserModelId("com.blueledger.desktop");
 
-  migrateDatabase();
+  logMigrationFailures(migrateDatabase());
   const tenant = ensureTenantContext();
   ensureDefaultRoles(tenant.tenantId);
   ensureSuperAdminRole(tenant.tenantId);
