@@ -24,6 +24,10 @@ const saleCartItemSchema = z.object({
 export const saleCartInputSchema = z.object({
   resumeSaleId: optionalText(64),
   customerId: optionalText(64),
+  /** A free-text label for a walk-in sale ("Scott") — see SaleRow["walk_in_name"]'s own doc comment
+   * in sale-repository.ts. Only meaningful when customerId is empty; sale-service.ts clears it
+   * server-side the moment a real customer is selected, so the two are never stored together. */
+  walkInName: optionalText(120),
   notes: optionalText(500),
   /** Whether the "Tax Breakdown" section prints/downloads/shares on this sale — see
    * Sale["includeTaxBreakdown"]'s own doc comment. Round-trips through suspend/resume the same way

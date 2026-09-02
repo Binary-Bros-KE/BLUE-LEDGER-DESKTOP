@@ -418,6 +418,7 @@ export async function seedDemoData(): Promise<void> {
           employeeId: employee.id,
           locationId: storefront.id,
           customerId,
+          walkInName: null,
           cart,
           paymentMethodId,
           paymentReference: null,

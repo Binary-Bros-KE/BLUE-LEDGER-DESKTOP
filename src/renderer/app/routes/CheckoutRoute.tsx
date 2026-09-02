@@ -81,6 +81,10 @@ type OpenSaleDraft = {
   displayNumber: number;
   status: DraftStatus;
   customerId: string | null;
+  /** Free-text label for a walk-in sale ("Scott") — only meaningful while customerId is null; the
+   * customer picker clears this the moment a real customer is picked (see selectCustomerForActiveDraft),
+   * mirroring how sale-service.ts clears it server-side. See Sale["walkInName"]'s own doc comment. */
+  walkInName: string;
   notes: string;
   items: CartLine[];
   serviceCharges: ServiceChargeDraft[];
@@ -218,6 +222,7 @@ export function CheckoutRoute(): React.JSX.Element {
               displayNumber: ticketCounterRef.current++,
               status: "suspended",
               customerId: full.customerId,
+              walkInName: full.walkInName ?? "",
               notes: full.notes ?? "",
               items: full.items.map((item) => {
                 // Restored whenever the sale's frozen price differs from what the product would
@@ -527,8 +532,8 @@ export function CheckoutRoute(): React.JSX.Element {
       .slice(0, 30);
   }, [customers, customerSearch]);
 
-  function customerLabel(customerId: string | null): string {
-    if (!customerId) return "Walk-in Customer";
+  function customerLabel(customerId: string | null, walkInName?: string): string {
+    if (!customerId) return walkInName ? `Walk-in - ${walkInName}` : "Walk-in Customer";
     return customers.find((customer) => customer.id === customerId)?.name ?? "Walk-in Customer";
   }
 
@@ -541,6 +546,7 @@ export function CheckoutRoute(): React.JSX.Element {
       displayNumber,
       status: "draft",
       customerId: null,
+      walkInName: "",
       notes: "",
       items: [],
       serviceCharges: [],
@@ -727,9 +733,19 @@ export function CheckoutRoute(): React.JSX.Element {
 
   function selectCustomerForActiveDraft(customerId: string | null): void {
     if (!activeKey) return;
-    setOpenSales((prev) => prev.map((draft) => (draft.key === activeKey ? { ...draft, customerId } : draft)));
+    setOpenSales((prev) =>
+      // Picking a real customer always wins over any walk-in label already typed — sale-service.ts
+      // enforces the same rule server-side (customerId present clears walkInName), so this keeps the
+      // draft consistent with what would actually be saved rather than silently carrying a stale name.
+      prev.map((draft) => (draft.key === activeKey ? { ...draft, customerId, walkInName: customerId ? "" : draft.walkInName } : draft))
+    );
     setCustomerPickerOpen(false);
     setCustomerSearch("");
+  }
+
+  function updateActiveWalkInName(walkInName: string): void {
+    if (!activeKey) return;
+    setOpenSales((prev) => prev.map((draft) => (draft.key === activeKey ? { ...draft, walkInName } : draft)));
   }
 
   function buildExtrasPayload(draft: OpenSaleDraft): {
@@ -809,6 +825,7 @@ export function CheckoutRoute(): React.JSX.Element {
       const result = await window.blueLedger.sale.suspend({
         resumeSaleId: activeDraft.dbSaleId,
         customerId: activeDraft.customerId,
+        walkInName: activeDraft.customerId ? undefined : activeDraft.walkInName.trim() || undefined,
         notes: activeDraft.notes,
         items: activeDraft.items.map((line) => ({
           productId: line.productId,
@@ -863,6 +880,7 @@ export function CheckoutRoute(): React.JSX.Element {
       const sale = await window.blueLedger.sale.complete({
         resumeSaleId: activeDraft.dbSaleId,
         customerId: activeDraft.customerId,
+        walkInName: activeDraft.customerId ? undefined : activeDraft.walkInName.trim() || undefined,
         notes: activeDraft.notes,
         items: activeDraft.items.map((line) => ({
           productId: line.productId,
@@ -1044,7 +1062,7 @@ export function CheckoutRoute(): React.JSX.Element {
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0">
                         <p className="truncate text-xs font-extrabold text-ink">
-                          #{draft.displayNumber} · {customerLabel(draft.customerId)}
+                          #{draft.displayNumber} · {customerLabel(draft.customerId, draft.walkInName)}
                         </p>
                         <p className="text-[11px] font-semibold text-muted">
                           {draft.items.length} item{draft.items.length === 1 ? "" : "s"}
@@ -1091,7 +1109,7 @@ export function CheckoutRoute(): React.JSX.Element {
                         className="mt-1 flex items-center gap-1.5 text-sm font-extrabold text-ink transition hover:text-primary cursor-pointer"
                       >
                         <UserRound className="size-4 text-primary" aria-hidden="true" />
-                        {customerLabel(draft.customerId)}
+                        {customerLabel(draft.customerId, draft.walkInName)}
                         <ChevronDown className="size-3.5 text-muted" aria-hidden="true" />
                       </button>
                     </div>
@@ -1287,7 +1305,7 @@ export function CheckoutRoute(): React.JSX.Element {
                       onServiceChargesChange={updateActiveServiceCharges}
                       delivery={draft.delivery}
                       onDeliveryChange={updateActiveDelivery}
-                      customerName={draft.customerId ? customerLabel(draft.customerId) : ""}
+                      customerName={draft.customerId ? customerLabel(draft.customerId) : draft.walkInName}
                     />
                   )}
 
@@ -1561,6 +1579,16 @@ export function CheckoutRoute(): React.JSX.Element {
             <span className="text-sm font-extrabold text-ink">Walk-in Customer</span>
             <DashedPill tone="neutral">Default</DashedPill>
           </button>
+          {!activeDraft?.customerId && (
+            <input
+              type="text"
+              value={activeDraft?.walkInName ?? ""}
+              onChange={(event) => updateActiveWalkInName(event.target.value)}
+              placeholder="Optional: attach a name (e.g. Scott) — not saved as a customer"
+              maxLength={120}
+              className="h-9 w-full rounded-lg border border-dashed border-line bg-soft px-3 text-xs font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+            />
+          )}
           {filteredCustomerResults.map((customer) => (
             <button
               key={customer.id}

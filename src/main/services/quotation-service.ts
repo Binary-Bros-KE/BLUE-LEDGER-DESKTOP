@@ -482,6 +482,8 @@ export function convertQuotationToSale(id: string, input: unknown): Sale {
     employeeId,
     locationId,
     customerId: quotation.customerId,
+    // A quotation always has a real customer (required at creation) — never a walk-in.
+    walkInName: null,
     cart,
     paymentMethodId: parsed.paymentMethodId,
     paymentReference: parsed.paymentReference,

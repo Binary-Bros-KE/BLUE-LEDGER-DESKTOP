@@ -23,6 +23,15 @@ export type SaleRow = {
   location_id: string;
   employee_id: string;
   customer_id: string | null;
+  /** Only ever meaningful when customer_id IS NULL — a free-text label a cashier can attach to a
+   * walk-in sale ("Scott") WITHOUT creating a real Customer record, so a later search can still find
+   * "the Scott sale" instead of every walk-in looking identical. Cleared server-side the moment a
+   * real customer is actually selected (see completeSale/suspendSale's own assertion) — never stored
+   * alongside a customer_id, so there's exactly one source of truth for "who this sale is for." Baked
+   * into the read-side customer_name as "Walk-in - Scott" (see mapSaleSummaryRow and friends) so every
+   * existing "customerName ?? 'Walk-in Customer'" fallback across the app picks this up for free,
+   * with zero changes needed at each of those call sites. */
+  walk_in_name: string | null;
   sale_status: string;
   transaction_type: string;
   payment_status: string;
@@ -53,6 +62,14 @@ export type SaleRow = {
   last_synced_at: string | null;
   synced_updated_at: string | null;
 };
+
+/** See SaleRow["walk_in_name"]'s own doc comment — the one place this formatting rule lives, reused
+ * by every mapXxxRow function below that surfaces a customer_name. rawCustomerName is whatever the
+ * customers-table JOIN produced (null for a walk-in, since customer_id is null there too). */
+function walkInAwareCustomerName(rawCustomerName: string | null, walkInName: string | null): string | null {
+  if (rawCustomerName) return rawCustomerName;
+  return walkInName ? `Walk-in - ${walkInName}` : null;
+}
 
 export type SaleDetailRow = SaleRow & {
   location_name: string;
@@ -93,6 +110,7 @@ export type PendingSaleListRow = {
   id: string;
   customer_id: string | null;
   customer_name: string | null;
+  walk_in_name: string | null;
   item_count: number;
   grand_total_cents: number;
   notes: string | null;
@@ -104,6 +122,7 @@ export type SaleSummaryRow = {
   id: string;
   receipt_number: string | null;
   customer_name: string | null;
+  walk_in_name: string | null;
   employee_name: string;
   location_name: string;
   payment_method_name: string | null;
@@ -126,6 +145,7 @@ export function findAllSaleSummaryRows(tenantId: string, locationId: string | nu
         s.id,
         s.receipt_number,
         c.name AS customer_name,
+        s.walk_in_name,
         (e.first_name || ' ' || e.last_name) AS employee_name,
         l.location_name AS location_name,
         pm.name AS payment_method_name,
@@ -153,7 +173,7 @@ export function mapSaleSummaryRow(row: SaleSummaryRow): SaleListItem {
   return {
     id: row.id,
     receiptNumber: row.receipt_number,
-    customerName: row.customer_name,
+    customerName: walkInAwareCustomerName(row.customer_name, row.walk_in_name),
     employeeName: row.employee_name,
     locationName: row.location_name,
     paymentMethodName: row.payment_method_name,
@@ -389,6 +409,7 @@ export function findPendingSaleListRows(tenantId: string, locationId: string | n
         s.id,
         s.customer_id,
         c.name AS customer_name,
+        s.walk_in_name,
         s.notes,
         s.grand_total_cents,
         s.created_at,
@@ -410,6 +431,9 @@ export function insertSaleRow(input: {
   locationId: string;
   employeeId: string;
   customerId: string | null;
+  /** See SaleRow["walk_in_name"]'s own doc comment. Caller (sale-service.ts) is responsible for
+   * never passing both a customerId and a walkInName — this function trusts what it's given. */
+  walkInName: string | null;
   saleStatus: SaleStatus;
   subtotalCents: number;
   discountAmountCents: number;
@@ -442,13 +466,13 @@ export function insertSaleRow(input: {
     .prepare(
       `
       INSERT INTO sales (
-        id, tenant_id, receipt_number, location_id, employee_id, customer_id, sale_status,
+        id, tenant_id, receipt_number, location_id, employee_id, customer_id, walk_in_name, sale_status,
         subtotal_cents, discount_amount_cents, tax_amount_cents, grand_total_cents,
         payment_method_id, payment_reference, amount_received_cents, change_given_cents,
         notes, completed_at, created_at, updated_at, sync_status, amount_paid_cents, balance_due_cents,
         delivery_draft_json, include_tax_breakdown, include_business_info
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
     `
     )
     .run(
@@ -458,6 +482,7 @@ export function insertSaleRow(input: {
       input.locationId,
       input.employeeId,
       input.customerId,
+      input.walkInName,
       input.saleStatus,
       input.subtotalCents,
       input.discountAmountCents,
@@ -815,7 +840,8 @@ export function mapSaleDetailRow(
     employeeId: row.employee_id,
     employeeName: row.employee_name,
     customerId: row.customer_id,
-    customerName: row.customer_name,
+    customerName: walkInAwareCustomerName(row.customer_name, row.walk_in_name),
+    walkInName: row.walk_in_name,
     customerKraPin: row.customer_kra_pin,
     saleStatus: row.sale_status as Sale["saleStatus"],
     transactionType: row.transaction_type as TransactionType,
@@ -860,7 +886,8 @@ export function mapPendingSaleListRow(row: PendingSaleListRow): PendingSaleListI
   return {
     id: row.id,
     customerId: row.customer_id,
-    customerName: row.customer_name,
+    customerName: walkInAwareCustomerName(row.customer_name, row.walk_in_name),
+    walkInName: row.walk_in_name,
     itemCount: row.item_count,
     grandTotalCents: row.grand_total_cents,
     notes: row.notes,

@@ -2771,6 +2771,25 @@ const migrations = [
       -- of them gets re-attempted (and now actually applied, dangling-link-and-all) on the next pull.
       DELETE FROM sync_pull_orphans;
     `
+  },
+  {
+    version: 80,
+    name: "sales_walk_in_name",
+    sql: `
+      -- A free-text label a cashier can attach to a walk-in sale ("Scott") at Checkout, WITHOUT
+      -- creating a real Customer record — the actual field request: "we don't want to save a guy
+      -- called Scott... but we want to attach just a single name to walk-in so later we'd know
+      -- exactly which walk-in customer we're talking about". Only ever meaningful when customer_id
+      -- IS NULL — sale-service.ts (completeSale/suspendSale) clears it server-side the instant a real
+      -- customer is selected, so the two are never stored together. Read-side, it's baked straight
+      -- into the existing customer_name a query already returns ("Walk-in - Scott" — see
+      -- sale-repository.ts's walkInAwareCustomerName), so every existing
+      -- "customerName ?? 'Walk-in Customer'" fallback across the app (Receipts list, receipt/invoice
+      -- print, search, the Resume Sale picker) picks this up automatically, with zero changes needed
+      -- at any of those call sites — same "derive the label, don't touch every consumer" approach
+      -- already proven for main_store_allocations' sourceType.
+      ALTER TABLE sales ADD COLUMN walk_in_name TEXT;
+    `
   }
 ] as const;
 

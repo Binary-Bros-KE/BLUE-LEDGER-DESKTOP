@@ -869,6 +869,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       locationId: row.location_id,
       employeeId: row.employee_id,
       customerId: row.customer_id,
+      walkInName: row.walk_in_name,
       saleStatus: row.sale_status,
       subtotalCents: row.subtotal_cents,
       discountAmountCents: row.discount_amount_cents,
@@ -2166,6 +2167,9 @@ const SALE_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: Syn
   // permanently FK-failing sales for a customer id that no longer exists anywhere in the cloud
   // (deleted, or never actually synced). Every other refEntity column here was already safe.
   { local: "customer_id", cloud: "customerId", refEntity: "customers" },
+  // See sale-repository.ts's SaleRow["walk_in_name"] doc comment — only ever set alongside a null
+  // customer_id, plain data with no ref semantics, so no refEntity tag needed here.
+  { local: "walk_in_name", cloud: "walkInName" },
   { local: "sale_status", cloud: "saleStatus" },
   { local: "subtotal_cents", cloud: "subtotalCents" },
   { local: "discount_amount_cents", cloud: "discountAmountCents" },

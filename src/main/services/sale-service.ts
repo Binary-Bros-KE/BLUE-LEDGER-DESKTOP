@@ -374,6 +374,8 @@ export function suspendSale(input: unknown): { id: string } {
       locationId,
       employeeId,
       customerId: parsed.customerId,
+      // A real customer always wins — never store both, see SaleRow["walk_in_name"]'s own comment.
+      walkInName: parsed.customerId ? null : parsed.walkInName,
       saleStatus: "pending",
       subtotalCents: cart.subtotalCents,
       discountAmountCents: cart.discountAmountCents,
@@ -478,6 +480,9 @@ export function insertCompletedSaleFromCart(input: {
   employeeId: string;
   locationId: string;
   customerId: string | null;
+  /** See SaleRow["walk_in_name"]'s own doc comment. Caller is responsible for never passing both a
+   * customerId and a walkInName (completeSale below enforces this). */
+  walkInName: string | null;
   cart: PreparedCart;
   paymentMethodId: string;
   paymentReference: string | null;
@@ -514,6 +519,7 @@ export function insertCompletedSaleFromCart(input: {
       locationId,
       employeeId,
       customerId: input.customerId,
+      walkInName: input.walkInName,
       saleStatus: "completed",
       subtotalCents: cart.subtotalCents,
       discountAmountCents: cart.discountAmountCents,
@@ -617,6 +623,8 @@ export function completeSale(input: unknown): Sale {
     employeeId,
     locationId,
     customerId: parsed.customerId,
+    // A real customer always wins — never store both, see SaleRow["walk_in_name"]'s own comment.
+    walkInName: parsed.customerId ? null : parsed.walkInName,
     cart,
     paymentMethodId: parsed.paymentMethodId,
     paymentReference: parsed.paymentReference,

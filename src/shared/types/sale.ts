@@ -117,7 +117,16 @@ export type Sale = {
   employeeId: string;
   employeeName: string;
   customerId: string | null;
+  /** Already formatted for display — "Walk-in - Scott" when customerId is null but a walkInName was
+   * given, the real customer's own name otherwise, or null for a plain unnamed walk-in (every
+   * existing "customerName ?? 'Walk-in Customer'" fallback picks this up automatically). See
+   * walkInName below for the raw, editable value. */
   customerName: string | null;
+  /** The raw free-text label, unformatted — only ever set when customerId is null. Exists
+   * specifically so Checkout can restore it into its own input field on resume (a "Walk-in - Scott"
+   * formatted customerName would double the prefix if re-saved as-is). See
+   * sale-repository.ts's SaleRow["walk_in_name"] for the full reasoning. */
+  walkInName: string | null;
   /** The customer's own KRA PIN, if they have one on file — shown as "Your VAT No." on the invoice
    * PDF only (see printer-service.ts's buildInvoiceHtml); receipts/quotations don't show it. */
   customerKraPin: string | null;
@@ -171,6 +180,7 @@ export type PendingSaleListItem = {
   id: string;
   customerId: string | null;
   customerName: string | null;
+  walkInName: string | null;
   itemCount: number;
   grandTotalCents: number;
   notes: string | null;
