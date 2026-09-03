@@ -93,7 +93,16 @@ const MINIMUM_PRICE_REFINEMENT_OPTS = {
 };
 
 export const productCreateSchema = productFieldsSchema
-  .extend({ openingStock: z.array(productOpeningStockEntrySchema).optional().default([]) })
+  .extend({
+    openingStock: z.array(productOpeningStockEntrySchema).optional().default([]),
+    // Set only by QuickCreateProductModal (the mini "New Product" form opened mid-purchase/
+    // mid-invoice/mid-quotation/mid-Borrow-and-Lend/mid-Goods-Received) — see
+    // assertProductStorefrontCreateAllowed's own doc comment in product-service.ts for exactly what
+    // this bypasses and why a product created that way is deliberately for every storefront by
+    // default, even for a branch-scoped caller who could never pick "All Storefronts" from the full
+    // Products-tab form.
+    isQuickCreate: z.boolean().optional().default(false)
+  })
   .refine(minimumPriceNotAboveSelling, MINIMUM_PRICE_REFINEMENT_OPTS);
 
 export const productUpdateSchema = productFieldsSchema.refine(minimumPriceNotAboveSelling, MINIMUM_PRICE_REFINEMENT_OPTS);

@@ -79,7 +79,12 @@ export function QuickCreateProductModal({
         wholesaleMinQuantity: 0,
         trackStock: true,
         allowNegativeStock: false,
-        openingStock
+        openingStock,
+        // See productCreateSchema's own doc comment — lets a branch-scoped cashier/manager create a
+        // product on the fly at all (the storefront-restriction that applies to the full Products-tab
+        // form would otherwise reject this outright) and makes the new product visible/sellable from
+        // every storefront by default, not just the one it happened to be created from.
+        isQuickCreate: true
       });
       showSuccessToast(`Product "${product.name}" created`);
       reset();

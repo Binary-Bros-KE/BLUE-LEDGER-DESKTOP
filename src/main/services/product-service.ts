@@ -32,7 +32,15 @@ function assertStorefrontBelongsToTenant(storefrontId: string | null, tenantId: 
 
 /** A branch-scoped caller (a Manager) can only ever create a product for THEIR OWN storefront —
  * never "All Storefronts" (null, which shows it to every other branch too) and never a different
- * one. Only Super Admin (no branch assigned) can pick freely. */
+ * one. Only Super Admin (no branch assigned) can pick freely.
+ *
+ * NOT applied for a quick-create (see productCreateSchema's own isQuickCreate doc comment) — a
+ * branch-scoped cashier/manager routinely needs to add a product Products has never seen before
+ * right in the middle of building a Purchase/Invoice/Quotation/Borrow/Goods-Received, and this
+ * check used to reject that outright (storefrontId comes back null from that mini form, which
+ * never matches a real branchScope), the exact bug several real clients hit. A product created that
+ * way is for every storefront by default instead — the deliberate, requested behavior, not just an
+ * exemption from the restriction above. */
 function assertProductStorefrontCreateAllowed(storefrontId: string | null, branchScope: string | null): void {
   if (!branchScope) return;
   if (storefrontId !== branchScope) {
@@ -198,9 +206,17 @@ export function createProduct(input: unknown): Product {
   const performedBy = getCurrentEmployeeId();
   const branchScope = getCurrentBranchScope();
 
+  // See productCreateSchema's own isQuickCreate doc comment and assertProductStorefrontCreateAllowed's
+  // — a quick-created product is for every storefront by default, so storefrontId is forced to null
+  // (defensive: the quick-create form never actually sends one) and the branch-scoped restriction
+  // that would otherwise reject that null outright never runs.
+  if (parsed.isQuickCreate) {
+    parsed.storefrontId = null;
+  } else {
+    assertProductStorefrontCreateAllowed(parsed.storefrontId, branchScope);
+  }
   assertCategoryBelongsToTenant(parsed.categoryId, tenantId);
   assertStorefrontBelongsToTenant(parsed.storefrontId, tenantId);
-  assertProductStorefrontCreateAllowed(parsed.storefrontId, branchScope);
   assertUniqueFields(tenantId, parsed);
   assertOpeningStockLocationsAllowed(parsed.openingStock, tenantId, branchScope);
 
