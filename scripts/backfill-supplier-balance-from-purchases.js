@@ -61,6 +61,15 @@ const DB_PATH =
   dbArgIndex !== -1 && process.argv[dbArgIndex + 1]
     ? process.argv[dbArgIndex + 1]
     : path.join(os.homedir(), "AppData", "Roaming", "blue-ledger-desktop", "data", "blue-ledger.sqlite");
+// Overrides the "skip if on/before the supplier's carry-over" rule for specific purchase numbers only
+// — for the confirmed case where the client has actually checked and the carry-over figure does NOT
+// include a particular purchase after all, so it genuinely needs backfilling despite the date overlap.
+// Every other safety check (not draft/cancelled, not already tracked, not already fully paid) still
+// applies in full — this only lifts the date-heuristic, and only for purchase numbers named here.
+const forceArgIndex = process.argv.indexOf("--force");
+const FORCE_PURCHASE_NUMBERS = new Set(
+  forceArgIndex !== -1 && process.argv[forceArgIndex + 1] ? process.argv[forceArgIndex + 1].split(",").map((s) => s.trim()) : []
+);
 
 function money(cents) {
   return (cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -123,15 +132,20 @@ function main() {
 
   const toBackfill = [];
   const skipped = [];
+  const forced = [];
 
   for (const p of candidates) {
     const outstandingCents = p.grand_total_cents - p.amount_paid_cents;
     const purchaseDate = p.ordered_at || p.created_at;
     const carryoverAt = carryoverBySupplier.get(p.supplier_id) ?? null;
+    const isForced = FORCE_PURCHASE_NUMBERS.has(p.purchase_number);
 
-    if (carryoverAt !== null && purchaseDate <= carryoverAt) {
+    if (carryoverAt !== null && purchaseDate <= carryoverAt && !isForced) {
       skipped.push({ p, reason: `predates ${p.supplier_name}'s carry-over (${carryoverAt}) — assumed already included` });
       continue;
+    }
+    if (isForced && carryoverAt !== null && purchaseDate <= carryoverAt) {
+      forced.push(p);
     }
     if (outstandingCents <= 0) {
       skipped.push({ p, reason: "already fully paid — nothing owed, nothing to backfill" });
@@ -155,6 +169,14 @@ function main() {
   console.log(`  -> to backfill: ${toBackfill.length}`);
   console.log(`  -> skipped: ${skipped.length}`);
   console.log("");
+
+  if (forced.length > 0) {
+    console.log(`FORCED (--force overrode the carry-over-date rule for these, per explicit confirmation they're NOT already in the carry-over):`);
+    for (const p of forced) {
+      console.log(`  ${p.purchase_number} | ${p.supplier_name}`);
+    }
+    console.log("");
+  }
 
   if (skipped.length > 0) {
     console.log("SKIPPED:");
@@ -205,7 +227,9 @@ function main() {
 
     for (const { p, outstandingCents } of toBackfill) {
       const id = `supplier_balance_${randomUUID()}`;
-      const notes = `Backfilled ${now.slice(0, 10)}: purchase ${p.purchase_number} recorded before supplier balance tracking began for this supplier.`;
+      const notes = FORCE_PURCHASE_NUMBERS.has(p.purchase_number)
+        ? `Backfilled ${now.slice(0, 10)}: purchase ${p.purchase_number}, confirmed with the client NOT already included in the carry-over balance despite predating it.`
+        : `Backfilled ${now.slice(0, 10)}: purchase ${p.purchase_number} recorded before supplier balance tracking began for this supplier.`;
       insertEntry.run(id, tenant.id, p.supplier_id, outstandingCents, p.id, notes, now);
       adjustBalance.run(outstandingCents, p.supplier_id);
     }
