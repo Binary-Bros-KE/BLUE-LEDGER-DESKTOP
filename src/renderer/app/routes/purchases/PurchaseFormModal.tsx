@@ -155,6 +155,11 @@ export function PurchaseFormModal({
     setError(null);
   }, [open, editingPurchase]);
 
+  // Mirrors PurchaseDetailModal's own canEditPurchase / purchase-service.ts's requireEditablePurchase
+  // — only reachable when true anyway (that's the only way this modal opens for a non-draft
+  // purchase), but the form still needs to know it to switch its own save buttons.
+  const editingOrderedPurchase = editingPurchase !== null && editingPurchase.status === "ordered";
+
   const activeSuppliers = useMemo(() => suppliers.filter((supplier) => supplier.status === "active"), [suppliers]);
   const selectedSupplier = activeSuppliers.find((supplier) => supplier.id === supplierId) ?? null;
 
@@ -638,24 +643,41 @@ export function PurchaseFormModal({
             >
               Cancel
             </Button>
-            <Button
-              type="button"
-              onClick={() => void handleSubmit("draft")}
-              disabled={saving !== null}
-              className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {saving === "draft" ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
-              Save as Draft
-            </Button>
-            <Button
-              type="button"
-              onClick={() => void handleSubmit("ordered")}
-              disabled={saving !== null}
-              className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {saving === "ordered" ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
-              Save as Ordered
-            </Button>
+            {editingOrderedPurchase ? (
+              // Already a real order (see purchase-service.ts's requireEditablePurchase) — stays one.
+              // No "Save as Draft" here: demoting it back isn't what this screen is for (Cancel
+              // Purchase, on the detail view, already covers "undo the order" cleanly).
+              <Button
+                type="button"
+                onClick={() => void handleSubmit("ordered")}
+                disabled={saving !== null}
+                className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {saving === "ordered" ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
+                Save Changes
+              </Button>
+            ) : (
+              <>
+                <Button
+                  type="button"
+                  onClick={() => void handleSubmit("draft")}
+                  disabled={saving !== null}
+                  className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {saving === "draft" ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
+                  Save as Draft
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void handleSubmit("ordered")}
+                  disabled={saving !== null}
+                  className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {saving === "ordered" ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
+                  Save as Ordered
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </Modal>

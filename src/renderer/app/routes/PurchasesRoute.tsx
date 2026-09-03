@@ -587,7 +587,7 @@ export function PurchasesRoute(): React.JSX.Element {
                           >
                             <Eye className="size-3.5" aria-hidden="true" />
                           </button>
-                          {canEdit && purchase.status === "draft" && (
+                          {canEdit && (purchase.status === "draft" || (purchase.status === "ordered" && purchase.amountPaidCents === 0)) && (
                             <button
                               type="button"
                               onClick={(event) => {

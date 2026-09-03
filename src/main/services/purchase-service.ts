@@ -277,23 +277,42 @@ export function createPurchase(input: unknown): Purchase {
   });
 }
 
-function requireEditableDraft(id: string, tenantId: string): PurchaseRow {
+/** A draft is always fair game. An "ordered" purchase can still be edited too — but only up to the
+ * moment it becomes a real, hands-touched-it commitment: the client explicitly asked for this once
+ * nothing has been received (status would already be partially_received/received otherwise — those
+ * are derived purely from receiving progress, never set by hand) AND nothing has been paid yet
+ * (amount_paid_cents === 0). Once either of those is true, the order is a real fact on the ground
+ * and editing it out from under a receipt or a payment already on record would be wrong. */
+function requireEditablePurchase(id: string, tenantId: string): PurchaseRow {
   const row = purchaseRepository.findPurchaseRowById(id);
   if (!row || row.tenant_id !== tenantId) {
     throw new Error("Purchase not found");
   }
-  if (row.status !== "draft") {
-    throw new Error("Only draft purchases can be edited");
+  const editable = row.status === "draft" || (row.status === "ordered" && row.amount_paid_cents === 0);
+  if (!editable) {
+    throw new Error(
+      row.status === "ordered"
+        ? "This purchase already has a payment recorded and can no longer be edited"
+        : "Only a draft, or an ordered purchase with nothing received or paid yet, can be edited"
+    );
   }
   return row;
 }
 
-/** A draft can be freely re-priced/re-itemized — nothing has been ordered or received yet. */
+/** A draft can be freely re-priced/re-itemized — nothing has been ordered or received yet. An
+ * already-"ordered" purchase can be edited too (see requireEditablePurchase) but stays "ordered" —
+ * this function never demotes one back to draft (Cancel Purchase already covers "undo the order"
+ * cleanly); parsed.intent is only consulted for a purchase that was still a draft going in. Editing
+ * an ordered purchase's totals or supplier needs its already-recorded balance impact corrected to
+ * match, since createPurchase/markPurchaseOrdered's own "purchase_ordered" hook already fired once
+ * for the OLD numbers. */
 export function updatePurchase(id: string, input: unknown): Purchase {
   requirePermission("purchases", "edit");
   const parsed: PurchaseUpdateInput = purchaseUpdateSchema.parse(input);
   const { tenantId } = getCurrentTenant();
-  const existing = requireEditableDraft(id, tenantId);
+  const existing = requireEditablePurchase(id, tenantId);
+  const wasOrdered = existing.status === "ordered";
+  const employeeId = getCurrentEmployeeId();
 
   assertSupplierExists(tenantId, parsed.supplierId);
   assertLocationBelongsToTenant(tenantId, parsed.locationId);
@@ -337,12 +356,58 @@ export function updatePurchase(id: string, input: unknown): Purchase {
       });
     }
 
-    if (parsed.intent === "ordered") {
+    if (wasOrdered) {
+      // Already a real order — stays one, just with corrected numbers. Re-sync pricing off the
+      // fresh items, same as the draft→ordered transition below does.
+      syncProductPricingFromOrder(cart.items);
+
+      if (existing.supplier_id !== parsed.supplierId) {
+        // Reassigned to a different supplier — reverse the full original order off the old one
+        // (safe: requireEditablePurchase already guarantees nothing's been paid toward it yet, so
+        // there's no payment entry left stranded the way cancelPurchase has to work around) and
+        // record a fresh order on the new supplier for the current total.
+        recordSupplierBalanceEntry({
+          tenantId,
+          supplierId: existing.supplier_id,
+          entryType: "purchase_cancelled",
+          amountCents: -existing.grand_total_cents,
+          referenceType: "purchase",
+          referenceId: id,
+          notes: `Reassigned to a different supplier while editing ${existing.purchase_number}.`,
+          performedBy: employeeId
+        });
+        recordSupplierBalanceEntry({
+          tenantId,
+          supplierId: parsed.supplierId,
+          entryType: "purchase_ordered",
+          amountCents: cart.grandTotalCents,
+          referenceType: "purchase",
+          referenceId: id,
+          notes: null,
+          performedBy: employeeId
+        });
+      } else {
+        // Same supplier — just correct the balance by whatever the total actually changed by.
+        // recordSupplierBalanceEntry itself no-ops when the delta is 0 (items reordered/repriced
+        // to the same grand total), so no empty entry gets left behind.
+        const deltaCents = cart.grandTotalCents - existing.grand_total_cents;
+        recordSupplierBalanceEntry({
+          tenantId,
+          supplierId: parsed.supplierId,
+          entryType: "manual_adjustment",
+          amountCents: deltaCents,
+          referenceType: "purchase",
+          referenceId: id,
+          notes: `Purchase ${existing.purchase_number} edited — total changed from ${(existing.grand_total_cents / 100).toFixed(2)} to ${(cart.grandTotalCents / 100).toFixed(2)}.`,
+          performedBy: employeeId
+        });
+      }
+    } else if (parsed.intent === "ordered") {
       purchaseRepository.updatePurchaseStatusRow(id, "ordered", { orderedAt: now });
       syncProductPricingFromOrder(cart.items);
-      // Same draft→ordered transition as createPurchase's own hook — this is the ONLY way a draft
-      // can reach "ordered" through this function (requireEditableDraft above already guarantees the
-      // purchase was still a draft, so this fires at most once per purchase, never a double-count).
+      // Same draft→ordered transition as createPurchase's own hook — requireEditablePurchase above
+      // guarantees this branch only runs for a purchase that was still a draft, so this fires at
+      // most once per purchase, never a double-count.
       recordSupplierBalanceEntry({
         tenantId,
         supplierId: parsed.supplierId,
@@ -351,7 +416,7 @@ export function updatePurchase(id: string, input: unknown): Purchase {
         referenceType: "purchase",
         referenceId: id,
         notes: null,
-        performedBy: getCurrentEmployeeId()
+        performedBy: employeeId
       });
     }
 

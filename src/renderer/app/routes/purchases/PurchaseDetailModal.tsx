@@ -96,6 +96,10 @@ export function PurchaseDetailModal({
 
   const balanceDueCents = purchase.grandTotalCents - purchase.amountPaidCents;
   const canReceive = purchase.status === "ordered" || purchase.status === "partially_received";
+  // Mirrors purchase-service.ts's own requireEditablePurchase exactly: a draft is always editable;
+  // an "ordered" purchase stays editable right up until either goods start arriving (it would
+  // already be partially_received/received by then) or a payment lands against it.
+  const canEditPurchase = purchase.status === "draft" || (purchase.status === "ordered" && purchase.amountPaidCents === 0);
 
   /** One line item can be received across several separate sessions — half today, the rest next
    * week, say — and "before/after" is only ever a truthful pair for ONE specific moment (tried
@@ -623,20 +627,20 @@ export function PurchaseDetailModal({
 
         {canEdit && (
           <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-4">
+            {canEditPurchase && (
+              <Button type="button" onClick={onEdit} className="h-9 flex-1 text-xs">
+                Edit Purchase
+              </Button>
+            )}
             {purchase.status === "draft" && (
-              <>
-                <Button type="button" onClick={onEdit} className="h-9 flex-1 text-xs">
-                  Edit Purchase
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => void handleMarkOrdered()}
-                  className="h-9 flex-1 border border-primary/40 bg-white text-xs text-primary shadow-none hover:bg-primary/10"
-                >
-                  <Send className="mr-1.5 size-3.5" aria-hidden="true" />
-                  Mark as Ordered
-                </Button>
-              </>
+              <Button
+                type="button"
+                onClick={() => void handleMarkOrdered()}
+                className="h-9 flex-1 border border-primary/40 bg-white text-xs text-primary shadow-none hover:bg-primary/10"
+              >
+                <Send className="mr-1.5 size-3.5" aria-hidden="true" />
+                Mark as Ordered
+              </Button>
             )}
             {(purchase.status === "draft" || purchase.status === "ordered") && (
               <div className="flex-1">
