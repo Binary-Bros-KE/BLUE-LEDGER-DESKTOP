@@ -1004,6 +1004,18 @@ export function InvoicesRoute(): React.JSX.Element {
       setCreateSaving(false);
       return;
     }
+    // Checking this box with no cost is exactly how a real client's cashier accidentally skipped a
+    // whole line's worth of stock tracking with zero margin recorded either — see
+    // createInvoiceSchema's own refine (shared/schemas/invoice.ts) for the server-side backstop this
+    // mirrors. Caught here first so the user sees it instantly instead of after a round trip.
+    const missingLocalCost = createItems.find((line) => line.isLocallySourced && !line.localCost.trim());
+    if (missingLocalCost) {
+      const message = `Enter the buying price for "${missingLocalCost.name}" (sourced from another shop) before saving this invoice.`;
+      setCreateError(message);
+      showErrorToast(message);
+      setCreateSaving(false);
+      return;
+    }
 
     const payload = {
       customerId: createCustomerId,

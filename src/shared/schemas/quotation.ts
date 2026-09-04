@@ -1,21 +1,25 @@
 import { z } from "zod";
 import { deliveryFieldSchema, serviceChargesFieldSchema } from "@shared/schemas/charges";
-import { optionalText } from "@shared/schemas/common";
+import { LOCAL_SOURCING_REFINEMENT_OPTS, localSourcingRequiresCost, optionalText } from "@shared/schemas/common";
 
-const quotationCartItemSchema = z.object({
-  productId: z.string().trim().min(1),
-  quantity: z.coerce.number().int().positive("Quantity must be greater than 0"),
-  discountAmountCents: z.coerce.number().int().min(0).max(100_000_000_000).optional().default(0),
-  /** Cashier-entered price override for this line only — never written back to the product's own
-   * sellingPriceCents. Omitted (not just 0) means "use the product's normal/wholesale price", so
-   * this can't be used to accidentally zero out a price. See prepareCart in sale-service.ts. */
-  unitPriceCents: z.coerce.number().int().positive().max(100_000_000_000).optional(),
-  // Same locally-sourced fields as saleCartItemSchema/invoiceCartItemSchema — a quoted product this
-  // shop doesn't stock is just as likely to have been sourced from another shop as one already sold.
-  isLocallySourced: z.coerce.boolean().optional().default(false),
-  localCostCents: z.coerce.number().int().min(0).max(100_000_000_000).optional(),
-  localSupplierId: optionalText(64)
-});
+const quotationCartItemSchema = z
+  .object({
+    productId: z.string().trim().min(1),
+    quantity: z.coerce.number().int().positive("Quantity must be greater than 0"),
+    discountAmountCents: z.coerce.number().int().min(0).max(100_000_000_000).optional().default(0),
+    /** Cashier-entered price override for this line only — never written back to the product's own
+     * sellingPriceCents. Omitted (not just 0) means "use the product's normal/wholesale price", so
+     * this can't be used to accidentally zero out a price. See prepareCart in sale-service.ts. */
+    unitPriceCents: z.coerce.number().int().positive().max(100_000_000_000).optional(),
+    // Same locally-sourced fields as saleCartItemSchema/invoiceCartItemSchema — a quoted product this
+    // shop doesn't stock is just as likely to have been sourced from another shop as one already sold.
+    // A checked box requires a real cost — see localSourcingRequiresCost's own doc comment; enforcing
+    // it here too means a quotation can never carry the gap forward into a converted sale/invoice.
+    isLocallySourced: z.coerce.boolean().optional().default(false),
+    localCostCents: z.coerce.number().int().min(0).max(100_000_000_000).optional(),
+    localSupplierId: optionalText(64)
+  })
+  .refine(localSourcingRequiresCost, LOCAL_SOURCING_REFINEMENT_OPTS);
 
 export const quotationCreateSchema = z
   .object({

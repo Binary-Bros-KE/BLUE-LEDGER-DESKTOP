@@ -874,6 +874,17 @@ export function CheckoutRoute(): React.JSX.Element {
       showErrorToast(message);
       return;
     }
+    // Checking this box with no cost is exactly how a real client's cashier accidentally skipped a
+    // whole line's worth of stock tracking with zero margin recorded either — see
+    // checkoutInputSchema's own refine (shared/schemas/sale.ts) for the server-side backstop this
+    // mirrors. Caught here first so the cashier sees it instantly instead of after a round trip.
+    const missingLocalCost = activeDraft.items.find((line) => line.isLocallySourced && !line.localCost.trim());
+    if (missingLocalCost) {
+      const message = `Enter the buying price for "${missingLocalCost.name}" (sourced from another shop) before completing this sale.`;
+      setActionError(message);
+      showErrorToast(message);
+      return;
+    }
     setCompleting(true);
     setActionError(null);
     try {

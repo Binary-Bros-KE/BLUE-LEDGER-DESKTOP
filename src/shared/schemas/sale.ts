@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { deliveryFieldSchema, serviceChargesFieldSchema } from "@shared/schemas/charges";
-import { optionalText } from "@shared/schemas/common";
+import { LOCAL_SOURCING_REFINEMENT_OPTS, localSourcingRequiresCost, optionalText } from "@shared/schemas/common";
 
 const saleCartItemSchema = z.object({
   productId: z.string().trim().min(1),
@@ -12,7 +12,12 @@ const saleCartItemSchema = z.object({
   unitPriceCents: z.coerce.number().int().positive().max(100_000_000_000).optional(),
   /** See SaleItem's own doc comment (shared/types/sale.ts) — bought from another shop on the spot
    * rather than pulled from this shop's stock. localCostCents/localSupplierId are only meaningful
-   * when this is true; prepareCart in sale-service.ts ignores them otherwise. */
+   * when this is true; prepareCart in sale-service.ts ignores them otherwise. A checked box requires
+   * a real cost before the sale can be COMPLETED — see localSourcingRequiresCost's own doc comment —
+   * but this schema is also shared by suspend (hold the cart), where it deliberately stays optional:
+   * a cashier holding a part-finished sale shouldn't be blocked from saving it, only from charging
+   * the customer with the cost still missing. See checkoutInputSchema's own refine below for where
+   * that's actually enforced. */
   isLocallySourced: z.coerce.boolean().optional().default(false),
   localCostCents: z.coerce.number().int().min(0).max(100_000_000_000).optional(),
   localSupplierId: optionalText(64)
@@ -62,17 +67,24 @@ export const saleCartInputSchema = z.object({
 
 export type SaleCartInput = z.infer<typeof saleCartInputSchema>;
 
-export const checkoutInputSchema = saleCartInputSchema.extend({
-  paymentMethodId: z.string().trim().min(1, "Select a payment method"),
-  paymentReference: optionalText(120),
-  amountReceivedCents: z.coerce
-    .number()
-    .int()
-    .min(0)
-    .max(100_000_000_000)
-    .nullable()
-    .optional()
-    .transform((value) => (value === undefined ? null : value))
-});
+export const checkoutInputSchema = saleCartInputSchema
+  .extend({
+    paymentMethodId: z.string().trim().min(1, "Select a payment method"),
+    paymentReference: optionalText(120),
+    amountReceivedCents: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(100_000_000_000)
+      .nullable()
+      .optional()
+      .transform((value) => (value === undefined ? null : value))
+  })
+  // Only enforced here, not on saleCartItemSchema itself — see that field's own doc comment for why
+  // holding a sale must stay exempt.
+  .refine((value) => value.items.every((item) => localSourcingRequiresCost(item)), {
+    message: "Enter the buying price for every item sourced from another shop before completing the sale",
+    path: ["items"]
+  });
 
 export type CheckoutInput = z.infer<typeof checkoutInputSchema>;
