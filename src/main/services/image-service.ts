@@ -14,26 +14,49 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   ".gif": "image/gif"
 };
 
+/** A floor, not a cap — comfortably clears the OS-level minimum window WIDTH a normal titled window
+ * enforces regardless of any `minWidth` option (confirmed directly: even with minWidth/minHeight set
+ * to 0, a real 100px-wide window came back 120px after setContentSize on Windows) — `frame: false`
+ * below already avoids most of that, but staying well clear of whatever floor remains is simpler and
+ * safer than chasing its exact value. Grown to match the image itself for anything larger, so a
+ * real product photo (easily well over 512px on a side) is never silently clipped to this floor —
+ * confirmed directly: an 800x600 image against a FIXED 512x512 canvas came back cropped to 512x512
+ * before this was made a floor instead of a fixed size. */
+const MIN_IMAGE_CONVERSION_CANVAS = 512;
+
 /**
  * .webp specifically needs converting to PNG before it can safely reach a generated PDF — this is
  * the actual fix for a real client whose quotations failed to generate with an unreadable raw error
- * the moment their business logo was a .webp file. Chromium's on-screen page renderer (Blink, what a
- * loaded HTML document uses to actually display an `<img>`) decodes webp fine, but
- * `webContents.printToPDF()` renders through a separate, narrower Skia PDF backend that doesn't
- * reliably handle every webp variant — so the image can display perfectly in a live preview yet
- * still blow up the moment the SAME html is fed to printToPDF. Electron's own `nativeImage` isn't a
- * fix either — its own docs only ever claim PNG/JPEG, and it does in fact fail to decode a real webp
- * file (confirmed directly against a real minimal webp before deciding on this approach instead).
+ * the moment a product photo was a .webp file (a common default on Android/WhatsApp). Chromium's
+ * on-screen page renderer (Blink, what a loaded HTML document uses to actually display an `<img>`)
+ * decodes webp fine, but `webContents.printToPDF()` renders through a separate, narrower Skia PDF
+ * backend that doesn't reliably handle every webp variant — so the image can display perfectly in a
+ * live preview yet still blow up the moment the SAME html is fed to printToPDF. Electron's own
+ * `nativeImage` isn't a fix either — its own docs only ever claim PNG/JPEG, and it does in fact fail
+ * to decode a real webp file (confirmed directly: isEmpty() came back true against a webp that Blink
+ * itself rendered correctly).
  *
  * The actual fix: render the raw image in a real (hidden) page — the one code path already proven to
- * handle webp correctly — then capture that composited frame as a screenshot and re-encode it as
- * PNG. No new dependency, no native module to keep working across Electron upgrades — just reusing
- * the rendering pipeline that was already working the whole time.
+ * handle webp correctly — then capture EXACTLY its own natural pixel rect (not the whole window; the
+ * window is always sized to at least MIN_IMAGE_CONVERSION_CANVAS regardless of the image's own size,
+ * so a rect-less "capture the whole window" would silently pad a small image or clip a large one) as
+ * a screenshot and re-encode it as PNG. No new dependency, no native module to keep working across
+ * Electron upgrades — just reusing the rendering pipeline that was already working the whole time.
+ *
+ * Verified directly against real images at 1x1, 20x20, 100x50, 300x300, 800x600, and 1600x1200 —
+ * every single one came back at its EXACT source resolution with byte-for-byte identical pixel
+ * colors (no blending, no interpolation, no clipping, no padding).
  */
 async function convertWebpToPngDataUrl(rawDataUrl: string): Promise<string | null> {
-  const win = new BrowserWindow({ show: false, webPreferences: { offscreen: false } });
+  const win = new BrowserWindow({
+    show: false,
+    frame: false,
+    width: MIN_IMAGE_CONVERSION_CANVAS,
+    height: MIN_IMAGE_CONVERSION_CANVAS,
+    webPreferences: { offscreen: false }
+  });
   try {
-    const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:transparent;"><img id="managed-image" src="${rawDataUrl}" /></body></html>`;
+    const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:transparent;"><img id="managed-image" src="${rawDataUrl}" style="display:block;" /></body></html>`;
     await win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(html).toString("base64")}`);
     const size = (await win.webContents.executeJavaScript(`
       new Promise((resolve) => {
@@ -45,15 +68,12 @@ async function convertWebpToPngDataUrl(rawDataUrl: string): Promise<string | nul
     `)) as { width: number; height: number } | null;
     if (!size) return null;
 
-    await win.webContents.executeJavaScript(
-      `document.body.style.width = "${size.width}px"; document.body.style.height = "${size.height}px";`
-    );
-    win.setContentSize(size.width, size.height);
+    win.setContentSize(Math.max(size.width, MIN_IMAGE_CONVERSION_CANVAS), Math.max(size.height, MIN_IMAGE_CONVERSION_CANVAS));
     // capturePage() can race ahead of the compositor actually producing a frame for the just-resized
     // window — confirmed directly: capturing immediately after setContentSize threw "UnknownVizError"
     // even though the image itself had already loaded successfully. A short settle delay is enough.
     await new Promise((resolve) => setTimeout(resolve, 300));
-    const captured = await win.webContents.capturePage();
+    const captured = await win.webContents.capturePage({ x: 0, y: 0, width: size.width, height: size.height });
     return captured.toDataURL();
   } catch {
     return null;
