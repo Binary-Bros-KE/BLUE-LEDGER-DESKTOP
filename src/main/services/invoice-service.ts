@@ -527,7 +527,13 @@ export function duplicateInvoice(saleId: string): Sale {
       unitPriceCents: item.unitPriceCents,
       isLocallySourced: item.isLocallySourced,
       localCostCents: item.localCostCents ?? undefined,
-      localSupplierId: item.localSupplierId
+      localSupplierId: item.localSupplierId,
+      // Same reasoning as unitPriceCents above — without this, prepareCart would silently re-derive
+      // this line's VAT mode from the product's CURRENT default instead of keeping whatever mode the
+      // original invoice actually used. Derived the same way computeTaxBreakdown does
+      // (tax-calculation.ts): compare the frozen gross against the frozen taxable amount.
+      taxInclusiveOverride:
+        item.taxType === "vat" ? item.lineTotalCents <= item.unitPriceCents * item.quantity - item.discountAmountCents : null
     })),
     { serviceCharges: original.serviceCharges, delivery: original.delivery }
   );

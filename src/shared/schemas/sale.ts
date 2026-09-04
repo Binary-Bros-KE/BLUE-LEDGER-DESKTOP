@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { deliveryFieldSchema, serviceChargesFieldSchema } from "@shared/schemas/charges";
-import { LOCAL_SOURCING_REFINEMENT_OPTS, localSourcingRequiresCost, optionalText } from "@shared/schemas/common";
+import { LOCAL_SOURCING_REFINEMENT_OPTS, localSourcingRequiresCost, optionalBoolean, optionalText } from "@shared/schemas/common";
 
 const saleCartItemSchema = z.object({
   productId: z.string().trim().min(1),
@@ -20,7 +20,12 @@ const saleCartItemSchema = z.object({
    * that's actually enforced. */
   isLocallySourced: z.coerce.boolean().optional().default(false),
   localCostCents: z.coerce.number().int().min(0).max(100_000_000_000).optional(),
-  localSupplierId: optionalText(64)
+  localSupplierId: optionalText(64),
+  /** Client request: switch THIS line between VAT-inclusive and VAT-exclusive pricing for this sale
+   * only — the product's own setting is never touched. null (the default) means "use this product's
+   * own effective setting" exactly as before; see prepareCart's own taxInclusiveOverride doc comment
+   * in sale-service.ts. Meaningless for a non-"vat" product. */
+  taxInclusiveOverride: optionalBoolean()
 });
 
 /** Shared by suspend (hold the cart) and checkout (hold + pay) — a resumed sale carries its id along.

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { deliveryFieldSchema, serviceChargesFieldSchema } from "@shared/schemas/charges";
-import { LOCAL_SOURCING_REFINEMENT_OPTS, localSourcingRequiresCost, optionalText } from "@shared/schemas/common";
+import { LOCAL_SOURCING_REFINEMENT_OPTS, localSourcingRequiresCost, optionalBoolean, optionalText } from "@shared/schemas/common";
 
 const quotationCartItemSchema = z
   .object({
@@ -17,7 +17,10 @@ const quotationCartItemSchema = z
     // it here too means a quotation can never carry the gap forward into a converted sale/invoice.
     isLocallySourced: z.coerce.boolean().optional().default(false),
     localCostCents: z.coerce.number().int().min(0).max(100_000_000_000).optional(),
-    localSupplierId: optionalText(64)
+    localSupplierId: optionalText(64),
+    // Same per-line VAT-mode override as saleCartItemSchema/invoiceCartItemSchema — see prepareCart's
+    // taxInclusiveOverride doc comment in sale-service.ts (shared by all three).
+    taxInclusiveOverride: optionalBoolean()
   })
   .refine(localSourcingRequiresCost, LOCAL_SOURCING_REFINEMENT_OPTS);
 

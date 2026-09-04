@@ -123,6 +123,15 @@ export function prepareCart(
     isLocallySourced?: boolean | undefined;
     localCostCents?: number | undefined;
     localSupplierId?: string | null | undefined;
+    /** Client request: let a cashier/clerk switch a specific line between VAT-inclusive and
+     * VAT-exclusive pricing for THIS document only, without touching the product's own setting —
+     * a 16%-inclusive product can be sold as exclusive on one particular sale, adding tax on top of
+     * the price instead of extracting it, and vice versa. null/undefined means "use this product's
+     * own effective setting" (its own override if it has one, else the tenant default) exactly as
+     * before; true/false wins over both. Meaningless for a non-"vat" product (computeLineTax already
+     * ignores pricesTaxInclusive entirely for exempted/zero_rated), so it's simply never consulted
+     * for those. */
+    taxInclusiveOverride?: boolean | null | undefined;
   }>,
   extras?: PreparedCartExtras
 ): PreparedCart {
@@ -182,10 +191,16 @@ export function prepareCart(
       { pricesTaxInclusive: product.prices_tax_inclusive === null ? null : Boolean(product.prices_tax_inclusive) },
       tenantTaxConfig
     );
+    // A per-line override wins over both the product's own setting and the tenant default — see
+    // this function's own taxInclusiveOverride doc comment above.
+    const effectiveTaxConfig =
+      item.taxInclusiveOverride === undefined || item.taxInclusiveOverride === null
+        ? productTaxConfig
+        : { ...productTaxConfig, pricesTaxInclusive: item.taxInclusiveOverride };
     const { grossCents: lineGrossCents, taxCents: lineTaxCents } = computeLineTax(
       taxableCents,
       product.tax_type as ProductTaxType,
-      productTaxConfig
+      effectiveTaxConfig
     );
     const lineTotalCents = lineGrossCents;
 

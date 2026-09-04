@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { deliveryFieldSchema, serviceChargesFieldSchema } from "@shared/schemas/charges";
-import { LOCAL_SOURCING_REFINEMENT_OPTS, localSourcingRequiresCost, optionalText } from "@shared/schemas/common";
+import { LOCAL_SOURCING_REFINEMENT_OPTS, localSourcingRequiresCost, optionalBoolean, optionalText } from "@shared/schemas/common";
 
 const invoiceCartItemSchema = z
   .object({
@@ -20,7 +20,10 @@ const invoiceCartItemSchema = z
     // cost — see localSourcingRequiresCost's own doc comment.
     isLocallySourced: z.coerce.boolean().optional().default(false),
     localCostCents: z.coerce.number().int().min(0).max(100_000_000_000).optional(),
-    localSupplierId: optionalText(64)
+    localSupplierId: optionalText(64),
+    // Same per-line VAT-mode override as saleCartItemSchema's own field — see prepareCart's
+    // taxInclusiveOverride doc comment in sale-service.ts (shared by both).
+    taxInclusiveOverride: optionalBoolean()
   })
   .refine(localSourcingRequiresCost, LOCAL_SOURCING_REFINEMENT_OPTS);
 

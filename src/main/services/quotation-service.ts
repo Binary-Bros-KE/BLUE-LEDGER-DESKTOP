@@ -348,7 +348,16 @@ function repriceLineForQuantity(item: QuotationItemDetailRow, product: ProductRo
     { pricesTaxInclusive: product.prices_tax_inclusive === null ? null : Boolean(product.prices_tax_inclusive) },
     getCurrentTenant()
   );
-  const { grossCents, taxCents: taxAmountCents } = computeLineTax(taxableCents, taxType, productTaxConfig);
+  // A stock-check quantity trim shouldn't silently discard a per-line VAT-mode override the
+  // quotation was created with — derive whether the ORIGINAL frozen line was inclusive/exclusive
+  // (same technique as computeTaxBreakdown, tax-calculation.ts) and carry that mode forward rather
+  // than falling back to the product's current default, mirroring every other field this function
+  // already carries over unchanged (isLocallySourced/localCostCents/localSupplierId below).
+  const originalTaxableCents = item.unit_price_cents * item.quantity - item.discount_amount_cents;
+  const originalWasInclusive = item.tax_type === "vat" ? item.line_total_cents <= originalTaxableCents : null;
+  const effectiveTaxConfig =
+    originalWasInclusive === null ? productTaxConfig : { ...productTaxConfig, pricesTaxInclusive: originalWasInclusive };
+  const { grossCents, taxCents: taxAmountCents } = computeLineTax(taxableCents, taxType, effectiveTaxConfig);
 
   return {
     product,

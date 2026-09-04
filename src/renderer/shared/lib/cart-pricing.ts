@@ -31,7 +31,12 @@ export function computeLinePricing(
   quantity: number,
   discountAmountCents: number,
   tenantTaxConfig: TenantTaxConfig,
-  priceOverrideCents?: number | null
+  priceOverrideCents?: number | null,
+  /** Client request: lets a specific cart line be switched between VAT-inclusive and VAT-exclusive
+   * pricing for this document only — null (the default) means "use this product's own effective
+   * setting" exactly as before; see prepareCart's own taxInclusiveOverride doc comment in
+   * sale-service.ts (the server-side twin of this same override, applied identically). */
+  taxInclusiveOverride?: boolean | null
 ): LinePricing {
   const useWholesale =
     product.wholesalePriceCents !== null &&
@@ -47,7 +52,11 @@ export function computeLinePricing(
   const clampedDiscountCents = Math.max(0, Math.min(discountAmountCents, lineSubtotalCents, maxDiscountCents));
   const taxableCents = lineSubtotalCents - clampedDiscountCents;
   const productTaxConfig = resolveProductTaxConfig(product, tenantTaxConfig);
-  const { grossCents, taxCents } = computeLineTax(taxableCents, product.taxType, productTaxConfig);
+  const effectiveTaxConfig =
+    taxInclusiveOverride === undefined || taxInclusiveOverride === null
+      ? productTaxConfig
+      : { ...productTaxConfig, pricesTaxInclusive: taxInclusiveOverride };
+  const { grossCents, taxCents } = computeLineTax(taxableCents, product.taxType, effectiveTaxConfig);
   return {
     unitPriceCents,
     lineSubtotalCents,

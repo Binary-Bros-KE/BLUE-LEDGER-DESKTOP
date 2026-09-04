@@ -43,7 +43,7 @@ import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents, totalCentsToUnitCostText, unitCostToTotalCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useAppStore } from "@renderer/shared/stores/app-store";
-import { computeAddedTaxCents, computeTaxBreakdown, taxModeBadgeLabel } from "@shared/lib/tax-calculation";
+import { computeAddedTaxCents, computeTaxBreakdown, resolveProductTaxConfig, taxModeBadgeLabel } from "@shared/lib/tax-calculation";
 import type { Customer } from "@shared/types/customer";
 import type { LocationStockLevel } from "@shared/types/inventory";
 import type { MpesaTransactionStatus } from "@shared/types/mpesa";
@@ -71,6 +71,11 @@ type CartLine = {
   isLocallySourced: boolean;
   localCost: string;
   localSupplierId: string | null;
+  /** Client request: switch THIS line between VAT-inclusive and VAT-exclusive pricing for this sale
+   * only — the product's own setting is never touched. null (the default) means "use this product's
+   * own effective setting". See computeLinePricing's own doc comment (cart-pricing.ts) and
+   * prepareCart's (sale-service.ts) for the shared renderer/server implementation. */
+  taxInclusiveOverride: boolean | null;
 };
 
 type DraftStatus = "draft" | "suspended";
@@ -234,6 +239,15 @@ export function CheckoutRoute(): React.JSX.Element {
                 const naturalUnitPriceCents = product
                   ? computeLinePricing(product, item.quantity, 0, taxConfig, null).unitPriceCents
                   : item.unitPriceCents;
+                // Same "restore only if it actually diverges from today's natural default" treatment
+                // as priceOverride above — derive the frozen line's inclusive/exclusive mode the same
+                // way computeTaxBreakdown does (tax-calculation.ts), then compare against what the
+                // product's CURRENT effective config would produce. Only vat products have a mode at
+                // all; other tax types never get a sticky override.
+                const taxableCents = item.unitPriceCents * item.quantity - item.discountAmountCents;
+                const frozenInclusive = item.taxType === "vat" ? item.lineTotalCents <= taxableCents : null;
+                const currentDefaultInclusive =
+                  item.taxType === "vat" && product ? resolveProductTaxConfig(product, taxConfig).pricesTaxInclusive : null;
                 return {
                   productId: item.productId,
                   name: item.productName,
@@ -247,7 +261,9 @@ export function CheckoutRoute(): React.JSX.Element {
                   // item.localCostCents is stored as the TOTAL for this line (see money.ts's own doc
                   // comment on the pair below) — back it out to the per-unit figure this field shows.
                   localCost: totalCentsToUnitCostText(item.localCostCents, item.quantity),
-                  localSupplierId: item.localSupplierId
+                  localSupplierId: item.localSupplierId,
+                  taxInclusiveOverride:
+                    frozenInclusive !== null && frozenInclusive !== currentDefaultInclusive ? frozenInclusive : null
                 };
               }),
               serviceCharges: full.serviceCharges.map((charge) => ({
@@ -373,7 +389,8 @@ export function CheckoutRoute(): React.JSX.Element {
         line.quantity,
         toCents(line.discount),
         tenantTaxConfig,
-        line.priceOverride.trim() ? toCents(line.priceOverride) : null
+        line.priceOverride.trim() ? toCents(line.priceOverride) : null,
+        line.taxInclusiveOverride
       );
       subtotalCents += pricing.lineSubtotalCents;
       discountAmountCents += pricing.discountAmountCents;
@@ -577,7 +594,8 @@ export function CheckoutRoute(): React.JSX.Element {
           priceOverride: "",
           isLocallySourced: false,
           localCost: "",
-          localSupplierId: null
+          localSupplierId: null,
+          taxInclusiveOverride: null
         }
       ];
     return { ...draft, items };
@@ -682,6 +700,16 @@ export function CheckoutRoute(): React.JSX.Element {
   function updateLocalSupplier(productId: string, supplierId: string | null): void {
     updateActiveItems((items) =>
       items.map((line) => (line.productId === productId ? { ...line, localSupplierId: supplierId } : line))
+    );
+  }
+
+  /** Client request: let a cashier flip THIS line between VAT-inclusive/exclusive pricing without
+   * touching the product's own setting. `currentlyInclusive` is the badge's own effective value (line
+   * override if set, else the product/tenant default) — clicking always sets the override to the
+   * OPPOSITE of whatever is currently showing, so the badge always reflects what happens next. */
+  function toggleTaxInclusiveOverride(productId: string, currentlyInclusive: boolean): void {
+    updateActiveItems((items) =>
+      items.map((line) => (line.productId === productId ? { ...line, taxInclusiveOverride: !currentlyInclusive } : line))
     );
   }
 
@@ -838,7 +866,8 @@ export function CheckoutRoute(): React.JSX.Element {
           // here rather than changing anything downstream.
           localCostCents:
             line.isLocallySourced && line.localCost.trim() ? unitCostToTotalCents(line.localCost, line.quantity) : undefined,
-          localSupplierId: line.localSupplierId
+          localSupplierId: line.localSupplierId,
+          taxInclusiveOverride: line.taxInclusiveOverride
         })),
         ...buildExtrasPayload(activeDraft),
         paymentMethodId: activeDraft.paymentMethodId || undefined,
@@ -904,7 +933,8 @@ export function CheckoutRoute(): React.JSX.Element {
           // here rather than changing anything downstream.
           localCostCents:
             line.isLocallySourced && line.localCost.trim() ? unitCostToTotalCents(line.localCost, line.quantity) : undefined,
-          localSupplierId: line.localSupplierId
+          localSupplierId: line.localSupplierId,
+          taxInclusiveOverride: line.taxInclusiveOverride
         })),
         ...buildExtrasPayload(activeDraft),
         paymentMethodId: activeDraft.paymentMethodId,
@@ -1172,11 +1202,31 @@ export function CheckoutRoute(): React.JSX.Element {
                                   {pricing.unitPriceCents === product.sellingPriceCents ? "Unit Rate" : "Bulk Rate"}
                                 </DashedPill>
                                 {(() => {
-                                  const badge = taxModeBadgeLabel(product, {
+                                  const config = {
                                     vatRatePercent: tenantContext?.vatRatePercent ?? 16,
                                     pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true
-                                  });
-                                  return <DashedPill tone={badge.tone}>{badge.label}</DashedPill>;
+                                  };
+                                  // Client request: let a cashier switch this ONE line between
+                                  // inclusive/exclusive VAT for this sale only — see
+                                  // toggleTaxInclusiveOverride's own doc comment. Non-vat products keep
+                                  // the plain static badge, same as before, since there's no mode to flip.
+                                  if (product.taxType !== "vat") {
+                                    const badge = taxModeBadgeLabel(product, config);
+                                    return <DashedPill tone={badge.tone}>{badge.label}</DashedPill>;
+                                  }
+                                  const effectiveInclusive =
+                                    line.taxInclusiveOverride ?? resolveProductTaxConfig(product, config).pricesTaxInclusive;
+                                  const badge = taxModeBadgeLabel({ ...product, pricesTaxInclusive: effectiveInclusive }, config);
+                                  return (
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleTaxInclusiveOverride(line.productId, effectiveInclusive)}
+                                      title="Switch this line's VAT pricing for this sale only"
+                                      className="cursor-pointer"
+                                    >
+                                      <DashedPill tone={badge.tone}>{badge.label}</DashedPill>
+                                    </button>
+                                  );
                                 })()}
                               </div>
                             </div>
