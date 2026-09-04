@@ -283,6 +283,14 @@ export function InvoicesRoute(): React.JSX.Element {
   // of finishing one area's products before moving to the next; "" means new lines stay ungrouped.
   const [activeSectionLabel, setActiveSectionLabel] = useState("");
   const [newSectionNameDraft, setNewSectionNameDraft] = useState("");
+  // Whether the "add to section" dropdown is showing its inline "type a new name" composer — a real
+  // <select> (not a free-text+datalist input) fixes two real bugs: picking an EXISTING section from
+  // a datalist required a separate "Start Section" click to actually take effect (so re-selecting a
+  // section you'd already used silently did nothing until you remembered that extra click), and
+  // Chromium's datalist filters its suggestions against whatever the input already contains — so a
+  // line already tagged "Speakers" showed no OTHER options at all when you tried to change it. A
+  // <select> has neither problem: choosing any option takes effect immediately, every time.
+  const [isAddingNewSection, setIsAddingNewSection] = useState(false);
   // Client request: any number of additional titled note blocks below the plain Notes field (e.g.
   // "Installation Instructions") — see NotesSection's own doc comment (shared/lib/document-sections.ts).
   // `key` is a stable React list key only, never sent to the backend.
@@ -785,6 +793,15 @@ export function InvoicesRoute(): React.JSX.Element {
     [createItems]
   );
 
+  // The "add to section" <select>'s own option list — includes a brand-new section the user just
+  // named (via startNewSection) even before any product has actually been tagged with it yet, so
+  // the dropdown can show it as the selected value right away instead of falling back to blank.
+  const sectionLabelOptions = useMemo(() => {
+    const labels = new Set(existingSectionLabels);
+    if (activeSectionLabel) labels.add(activeSectionLabel);
+    return Array.from(labels);
+  }, [existingSectionLabels, activeSectionLabel]);
+
   const createTotals = useMemo(() => {
     let subtotalCents = 0;
     let discountAmountCents = 0;
@@ -882,6 +899,7 @@ export function InvoicesRoute(): React.JSX.Element {
     setProductSearch("");
     setActiveSectionLabel("");
     setNewSectionNameDraft("");
+    setIsAddingNewSection(false);
     setCreateNotesSections([]);
     setIncludeInitialPayment(false);
     setInitialPaymentMethodId("");
@@ -934,6 +952,7 @@ export function InvoicesRoute(): React.JSX.Element {
     );
     setActiveSectionLabel("");
     setNewSectionNameDraft("");
+    setIsAddingNewSection(false);
     setCreateNotesSections(
       sale.notesSections.map((section) => ({ key: crypto.randomUUID(), title: section.title, body: section.body }))
     );
@@ -1068,13 +1087,29 @@ export function InvoicesRoute(): React.JSX.Element {
     setCreateItems((prev) => prev.map((line) => (line.key === key ? { ...line, sectionLabel } : line)));
   }
 
-  /** Sets the section every subsequently-added product tags itself with — see
-   * activeSectionLabel's own doc comment. Does not touch any line already in the cart. */
+  /** Confirms the inline "new section" composer — sets the section every subsequently-added
+   * product tags itself with (see activeSectionLabel's own doc comment) and closes the composer.
+   * Does not touch any line already in the cart. */
   function startNewSection(): void {
     const name = newSectionNameDraft.trim();
     if (!name) return;
     setActiveSectionLabel(name);
     setNewSectionNameDraft("");
+    setIsAddingNewSection(false);
+  }
+
+  /** The "add to section" <select>'s own onChange — "__new__" opens the inline name composer
+   * (startNewSection confirms it); any other value (including "" for "No section") takes effect
+   * immediately, no separate confirm step, fixing the client-reported bug where re-selecting an
+   * already-used section from the old datalist input silently did nothing. */
+  function handleSectionSelectChange(value: string): void {
+    if (value === "__new__") {
+      setIsAddingNewSection(true);
+      setActiveSectionLabel("");
+    } else {
+      setIsAddingNewSection(false);
+      setActiveSectionLabel(value);
+    }
   }
 
   function addCreateNotesSection(): void {
@@ -2264,25 +2299,31 @@ export function InvoicesRoute(): React.JSX.Element {
 
             {/* Client request: organize items into named sections (e.g. "Lighting", "Sound"), each
                 with its own subtotal — see activeSectionLabel's own doc comment. Products added below
-                tag themselves with whichever section is active here. */}
-            <div className="mt-1.5 flex items-center gap-1.5">
-              {activeSectionLabel ? (
-                <DashedPill tone="accent">
-                  Adding to: {activeSectionLabel}
-                  <button
-                    type="button"
-                    onClick={() => setActiveSectionLabel("")}
-                    className="ml-1 cursor-pointer text-accent hover:text-danger"
-                    title="Stop adding to this section"
-                  >
-                    <X className="size-3" aria-hidden="true" />
-                  </button>
-                </DashedPill>
-              ) : (
-                <>
+                tag themselves with whichever section is selected here. A real <select> (not a
+                free-text+datalist input) so picking any option — including one you'd already used —
+                always takes effect immediately; see isAddingNewSection's own doc comment. */}
+            <div className="mt-1.5 space-y-1.5">
+              <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted">
+                Add to section
+                <select
+                  value={isAddingNewSection ? "__new__" : activeSectionLabel}
+                  onChange={(event) => handleSectionSelectChange(event.target.value)}
+                  className="h-8 flex-1 rounded-md border border-line bg-white px-2 text-xs font-semibold text-ink outline-none transition focus:border-accent"
+                >
+                  <option value="">No section</option>
+                  {sectionLabelOptions.map((label) => (
+                    <option key={label} value={label}>
+                      {label}
+                    </option>
+                  ))}
+                  <option value="__new__">+ New section…</option>
+                </select>
+              </label>
+              {isAddingNewSection && (
+                <div className="flex items-center gap-1.5">
                   <input
                     type="text"
-                    list="invoice-section-names"
+                    autoFocus
                     value={newSectionNameDraft}
                     onChange={(event) => setNewSectionNameDraft(event.target.value)}
                     onKeyDown={(event) => {
@@ -2291,23 +2332,18 @@ export function InvoicesRoute(): React.JSX.Element {
                         startNewSection();
                       }
                     }}
-                    placeholder="Section name (optional) — e.g. Lighting"
+                    placeholder="New section name — e.g. Lighting"
                     className="h-8 flex-1 rounded-md border border-line bg-white px-2.5 text-xs font-semibold text-ink outline-none transition focus:border-accent"
                   />
-                  <datalist id="invoice-section-names">
-                    {existingSectionLabels.map((label) => (
-                      <option key={label} value={label} />
-                    ))}
-                  </datalist>
                   <button
                     type="button"
                     onClick={startNewSection}
                     disabled={!newSectionNameDraft.trim()}
                     className="text-[11px] font-extrabold uppercase text-accent hover:underline disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
                   >
-                    Start Section
+                    Add
                   </button>
-                </>
+                </div>
               )}
             </div>
 
@@ -2488,14 +2524,18 @@ export function InvoicesRoute(): React.JSX.Element {
 
                     <label className="mt-2 flex items-center gap-1.5 text-[10px] font-bold text-muted">
                       Section
-                      <input
-                        type="text"
-                        list="invoice-section-names"
+                      <select
                         value={line.sectionLabel ?? ""}
                         onChange={(event) => updateCreateSectionLabel(line.key, event.target.value || null)}
-                        placeholder="None"
                         className="h-7 flex-1 rounded-md border border-line px-2 text-xs font-semibold outline-none focus:border-accent"
-                      />
+                      >
+                        <option value="">No section</option>
+                        {existingSectionLabels.map((label) => (
+                          <option key={label} value={label}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
                     </label>
                   </div>
                       ))}
