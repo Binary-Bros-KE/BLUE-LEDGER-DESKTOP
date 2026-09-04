@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { extname, isAbsolute, join } from "node:path";
 import electron from "electron";
 
-const { app, dialog, shell } = electron;
+const { app, dialog, shell, BrowserWindow } = electron;
 
 const MIME_BY_EXTENSION: Record<string, string> = {
   ".png": "image/png",
@@ -14,16 +14,74 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   ".gif": "image/gif"
 };
 
-/** Reads a local image file and returns it as a data URL for renderer preview. Never persisted. */
+/**
+ * .webp specifically needs converting to PNG before it can safely reach a generated PDF — this is
+ * the actual fix for a real client whose quotations failed to generate with an unreadable raw error
+ * the moment their business logo was a .webp file. Chromium's on-screen page renderer (Blink, what a
+ * loaded HTML document uses to actually display an `<img>`) decodes webp fine, but
+ * `webContents.printToPDF()` renders through a separate, narrower Skia PDF backend that doesn't
+ * reliably handle every webp variant — so the image can display perfectly in a live preview yet
+ * still blow up the moment the SAME html is fed to printToPDF. Electron's own `nativeImage` isn't a
+ * fix either — its own docs only ever claim PNG/JPEG, and it does in fact fail to decode a real webp
+ * file (confirmed directly against a real minimal webp before deciding on this approach instead).
+ *
+ * The actual fix: render the raw image in a real (hidden) page — the one code path already proven to
+ * handle webp correctly — then capture that composited frame as a screenshot and re-encode it as
+ * PNG. No new dependency, no native module to keep working across Electron upgrades — just reusing
+ * the rendering pipeline that was already working the whole time.
+ */
+async function convertWebpToPngDataUrl(rawDataUrl: string): Promise<string | null> {
+  const win = new BrowserWindow({ show: false, webPreferences: { offscreen: false } });
+  try {
+    const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:transparent;"><img id="managed-image" src="${rawDataUrl}" /></body></html>`;
+    await win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(html).toString("base64")}`);
+    const size = (await win.webContents.executeJavaScript(`
+      new Promise((resolve) => {
+        const img = document.getElementById("managed-image");
+        function done() { resolve(img.naturalWidth > 0 ? { width: img.naturalWidth, height: img.naturalHeight } : null); }
+        if (img.complete) done();
+        else { img.addEventListener("load", done); img.addEventListener("error", () => resolve(null)); }
+      });
+    `)) as { width: number; height: number } | null;
+    if (!size) return null;
+
+    await win.webContents.executeJavaScript(
+      `document.body.style.width = "${size.width}px"; document.body.style.height = "${size.height}px";`
+    );
+    win.setContentSize(size.width, size.height);
+    // capturePage() can race ahead of the compositor actually producing a frame for the just-resized
+    // window — confirmed directly: capturing immediately after setContentSize threw "UnknownVizError"
+    // even though the image itself had already loaded successfully. A short settle delay is enough.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const captured = await win.webContents.capturePage();
+    return captured.toDataURL();
+  } catch {
+    return null;
+  } finally {
+    win.destroy();
+  }
+}
+
+/** Reads a local image file and returns it as a data URL for renderer preview / embedding in a
+ * generated PDF. A .webp file is additionally converted to PNG first (see convertWebpToPngDataUrl's
+ * own doc comment) — every other supported format is returned as-is, unchanged from before.
+ * Never persisted; never throws (a missing file, an unsupported extension, or a conversion failure
+ * all return null the same way — every caller already treats null as "no image"). */
 export async function readLocalImagePreview(filePath: string): Promise<string | null> {
-  const mime = MIME_BY_EXTENSION[extname(filePath).toLowerCase()];
+  const extension = extname(filePath).toLowerCase();
+  const mime = MIME_BY_EXTENSION[extension];
   if (!mime) {
     return null;
   }
 
   try {
     const buffer = await readFile(filePath);
-    return `data:${mime};base64,${buffer.toString("base64")}`;
+    const rawDataUrl = `data:${mime};base64,${buffer.toString("base64")}`;
+    if (extension !== ".webp") return rawDataUrl;
+    // Deliberately does NOT fall back to the raw webp data URL on conversion failure — that would
+    // just reintroduce the exact risk this function exists to remove. Null degrades to "no
+    // logo/photo shown" instead, same as any other unreadable/corrupt image.
+    return await convertWebpToPngDataUrl(rawDataUrl);
   } catch {
     return null;
   }
