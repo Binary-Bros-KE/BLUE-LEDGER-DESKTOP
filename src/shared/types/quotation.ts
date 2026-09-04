@@ -1,3 +1,4 @@
+import type { NotesSection } from "@shared/lib/document-sections";
 import type { ProductTaxType } from "./product";
 import type { SaleDelivery, SaleServiceCharge } from "./sale";
 
@@ -35,6 +36,9 @@ export type QuotationItem = {
   localCostCents: number | null;
   localSupplierId: string | null;
   localSupplierName: string | null;
+  /** Same per-line section grouping as SaleItem's own field (shared/types/sale.ts) — see that
+   * doc comment and groupItemsBySections (shared/lib/document-sections.ts). */
+  sectionLabel: string | null;
   createdAt: string;
 };
 
@@ -60,6 +64,9 @@ export type Quotation = {
   grandTotalCents: number;
   validUntil: string;
   notes: string | null;
+  /** Same additional titled note blocks as Sale["notesSections"]'s own doc comment
+   * (shared/types/sale.ts) — the identical concept, defaults to []. */
+  notesSections: NotesSection[];
   /** Whether the "Tax Breakdown" section prints/downloads/shares on this specific quotation — see
    * Sale["includeTaxBreakdown"]'s own doc comment (shared/types/sale.ts), the identical concept. */
   includeTaxBreakdown: boolean;

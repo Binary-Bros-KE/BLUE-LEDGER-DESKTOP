@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { deliveryFieldSchema, serviceChargesFieldSchema } from "@shared/schemas/charges";
+import { deliveryFieldSchema, notesSectionsFieldSchema, serviceChargesFieldSchema } from "@shared/schemas/charges";
 import { LOCAL_SOURCING_REFINEMENT_OPTS, localSourcingRequiresCost, optionalBoolean, optionalText } from "@shared/schemas/common";
 
 const quotationCartItemSchema = z
@@ -20,7 +20,10 @@ const quotationCartItemSchema = z
     localSupplierId: optionalText(64),
     // Same per-line VAT-mode override as saleCartItemSchema/invoiceCartItemSchema — see prepareCart's
     // taxInclusiveOverride doc comment in sale-service.ts (shared by all three).
-    taxInclusiveOverride: optionalBoolean()
+    taxInclusiveOverride: optionalBoolean(),
+    // Same per-line section grouping as invoiceCartItemSchema's own field — see SaleItem's own
+    // sectionLabel doc comment (shared/types/sale.ts).
+    sectionLabel: optionalText(120)
   })
   .refine(localSourcingRequiresCost, LOCAL_SOURCING_REFINEMENT_OPTS);
 
@@ -48,6 +51,7 @@ export const quotationCreateSchema = z
     items: z.array(quotationCartItemSchema),
     serviceCharges: serviceChargesFieldSchema,
     delivery: deliveryFieldSchema,
+    notesSections: notesSectionsFieldSchema,
     /** Only ever read (on CREATE) when the signed-in session has no assigned branch (see
      * sale-service.ts's requireActiveSession) — ignored otherwise, and unused on update (a
      * quotation's storefront is fixed at creation). */

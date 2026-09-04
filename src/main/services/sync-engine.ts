@@ -826,6 +826,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       is_locally_sourced: number;
       local_cost_cents: number | null;
       local_supplier_id: string | null;
+      section_label: string | null;
       created_at: string;
     }>;
     const items = itemRows.map((i) => ({
@@ -843,6 +844,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       isLocallySourced: Boolean(i.is_locally_sourced),
       localCostCents: i.local_cost_cents,
       localSupplierId: resolveCloudRef("suppliers", i.local_supplier_id),
+      sectionLabel: i.section_label,
       createdAt: i.created_at
     }));
 
@@ -900,6 +902,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       amountPaidCents: row.amount_paid_cents,
       balanceDueCents: row.balance_due_cents,
       invoiceNotes: row.invoice_notes,
+      notesSections: JSON.parse(row.notes_sections) as unknown,
       includeTaxBreakdown: Boolean(row.include_tax_breakdown),
       includeBusinessInfo: Boolean(row.include_business_info),
       payments: JSON.parse(row.payments) as unknown,
@@ -1089,6 +1092,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       is_locally_sourced: number;
       local_cost_cents: number | null;
       local_supplier_id: string | null;
+      section_label: string | null;
       created_at: string;
     }>;
     const items = itemRows.map((i) => ({
@@ -1106,6 +1110,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       isLocallySourced: Boolean(i.is_locally_sourced),
       localCostCents: i.local_cost_cents,
       localSupplierId: resolveCloudRef("suppliers", i.local_supplier_id),
+      sectionLabel: i.section_label,
       createdAt: i.created_at
     }));
 
@@ -1150,6 +1155,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       grandTotalCents: row.grand_total_cents,
       validUntil: row.valid_until,
       notes: row.notes,
+      notesSections: JSON.parse(row.notes_sections) as unknown,
       includeTaxBreakdown: Boolean(row.include_tax_breakdown),
       includeBusinessInfo: Boolean(row.include_business_info),
       convertedSaleId: row.converted_sale_id,
@@ -2295,6 +2301,7 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         "tenant_id",
         ...SALE_HEADER_COLUMNS.map((c) => c.local),
         "payments",
+        "notes_sections",
         "include_tax_breakdown",
         "include_business_info",
         "created_at",
@@ -2313,6 +2320,9 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
             : (row[c.cloud] as SQLInputValue)
         ),
         JSON.stringify(row.payments ?? []),
+        // Same "bound separately, older payload predates this field entirely" treatment as payments
+        // above — defaults to [], matching the column's own DEFAULT '[]'.
+        JSON.stringify(row.notesSections ?? []),
         // Bound separately from SALE_HEADER_COLUMNS (like "payments" above) rather than folded into
         // that array — it has no "bool" type concept (unlike the generic ColumnMap/toLocalValue path
         // other entities use), so a raw JS true/false would otherwise get bound straight to node:sqlite
@@ -2331,6 +2341,7 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
       const setClauses = [
         ...SALE_HEADER_COLUMNS.map((c) => `${c.local} = ?`),
         "payments = ?",
+        "notes_sections = ?",
         "include_tax_breakdown = ?",
         "include_business_info = ?",
         "updated_at = ?",
@@ -2345,6 +2356,7 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
             : (row[c.cloud] as SQLInputValue)
         ),
         JSON.stringify(row.payments ?? []),
+        JSON.stringify(row.notesSections ?? []),
         row.includeTaxBreakdown === false ? 0 : 1,
         row.includeBusinessInfo === false ? 0 : 1,
         localUpdatedAt,
@@ -2359,8 +2371,8 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
     const items = (row.items as Array<Record<string, unknown>>) ?? [];
     for (const item of items) {
       db.prepare(
-        `INSERT INTO sale_items (id, sale_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, is_locally_sourced, local_cost_cents, local_supplier_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO sale_items (id, sale_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, is_locally_sourced, local_cost_cents, local_supplier_id, section_label, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         item.id as string,
         id,
@@ -2387,6 +2399,9 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         // crashed the WHOLE row — every sale from a pre-feature device, not just ones that actually
         // used local sourcing.
         resolveRefOrNull("suppliers", (item.localSupplierId as string | null | undefined) ?? null) as string | null,
+        // Older device's payload predates this field entirely too — same fallback reasoning as
+        // localCostCents above.
+        (item.sectionLabel as string | null | undefined) ?? null,
         item.createdAt as string
       );
     }
@@ -2662,13 +2677,22 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
       row.includeBusinessInfo === false ? 0 : 1,
       id
     );
+    // Same follow-up-UPDATE treatment as includeTaxBreakdown/includeBusinessInfo above, not
+    // upsertDocumentHeader's generic jsonColumns mechanism — that path defaults a missing field to
+    // JSON "null" (right for a genuinely nullable json column like delivery), but notes_sections is
+    // NOT NULL DEFAULT '[]' and must always default to an empty array, same as payments does on the
+    // sales side.
+    db.prepare("UPDATE quotations SET notes_sections = ? WHERE id = ?").run(
+      JSON.stringify(row.notesSections ?? []),
+      id
+    );
 
     db.prepare("DELETE FROM quotation_items WHERE quotation_id = ?").run(id);
     const items = (row.items as Array<Record<string, unknown>>) ?? [];
     for (const item of items) {
       db.prepare(
-        `INSERT INTO quotation_items (id, quotation_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, is_locally_sourced, local_cost_cents, local_supplier_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO quotation_items (id, quotation_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, is_locally_sourced, local_cost_cents, local_supplier_id, section_label, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         item.id as string,
         id,
@@ -2684,6 +2708,7 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
         item.isLocallySourced ? 1 : 0,
         (item.localCostCents as number | null | undefined) ?? null,
         resolveRefOrNull("suppliers", (item.localSupplierId as string | null | undefined) ?? null) as string | null,
+        (item.sectionLabel as string | null | undefined) ?? null,
         item.createdAt as string
       );
     }

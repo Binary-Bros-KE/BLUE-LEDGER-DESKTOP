@@ -38,6 +38,7 @@ export type PreparedItem = {
   isLocallySourced: boolean;
   localCostCents: number | null;
   localSupplierId: string | null;
+  sectionLabel: string | null;
 };
 
 export type PreparedCartExtras = {
@@ -132,6 +133,12 @@ export function prepareCart(
      * ignores pricesTaxInclusive entirely for exempted/zero_rated), so it's simply never consulted
      * for those. */
     taxInclusiveOverride?: boolean | null | undefined;
+    /** Client request: groups this line under a named section (e.g. "Lighting", "Sound") on the
+     * printed invoice/quotation, each with its own subtotal — see SaleItem["sectionLabel"]'s own
+     * doc comment (shared/types/sale.ts). Pure passthrough here, same as isLocallySourced/
+     * localSupplierId — never affects pricing/tax math, only how items are grouped at render time
+     * (groupItemsBySections, shared/lib/document-sections.ts). */
+    sectionLabel?: string | null | undefined;
   }>,
   extras?: PreparedCartExtras
 ): PreparedCart {
@@ -230,7 +237,8 @@ export function prepareCart(
       // The customer is still charged unitPriceCents like any other line — this is purely a cost
       // figure for Reports, never folded into any total (see this file's own doc comment above).
       localCostCents: isLocallySourced ? (item.localCostCents ?? null) : null,
-      localSupplierId: isLocallySourced ? localSupplierId : null
+      localSupplierId: isLocallySourced ? localSupplierId : null,
+      sectionLabel: item.sectionLabel ?? null
     };
   });
 
@@ -426,7 +434,10 @@ export function suspendSale(input: unknown): { id: string } {
         lineTotalCents: item.lineTotalCents,
         isLocallySourced: item.isLocallySourced,
         localCostCents: item.localCostCents,
-        localSupplierId: item.localSupplierId
+        localSupplierId: item.localSupplierId,
+        // Always null on the retail Checkout path — sections are Invoices/Quotations-only, see
+        // SaleItem["sectionLabel"]'s own doc comment (shared/types/sale.ts).
+        sectionLabel: item.sectionLabel
       });
     }
 
@@ -563,7 +574,10 @@ export function insertCompletedSaleFromCart(input: {
         lineTotalCents: item.lineTotalCents,
         isLocallySourced: item.isLocallySourced,
         localCostCents: item.localCostCents,
-        localSupplierId: item.localSupplierId
+        localSupplierId: item.localSupplierId,
+        // Always null on the retail Checkout path — sections are Invoices/Quotations-only, see
+        // SaleItem["sectionLabel"]'s own doc comment (shared/types/sale.ts).
+        sectionLabel: item.sectionLabel
       });
 
       // A locally-sourced line never touched this shop's own shelf — it went straight from the

@@ -1,4 +1,5 @@
 import type { DeliveryInput } from "@shared/schemas/charges";
+import type { NotesSection } from "@shared/lib/document-sections";
 import type { ProductTaxType } from "@shared/types/product";
 
 export type SaleId = string;
@@ -104,6 +105,13 @@ export type SaleItem = {
   localCostCents: number | null;
   localSupplierId: string | null;
   localSupplierName: string | null;
+  /** Client request: groups this line under a named section (e.g. "Lighting", "Sound") on the
+   * invoice/quotation, each with its own printed subtotal — null (every line before this existed,
+   * and every line that never opts in) means "no section", grouped as one implicit leading bucket
+   * with no header. See groupItemsBySections (shared/lib/document-sections.ts) — sections are
+   * derived at render time from this field, never stored pre-grouped. Retail Checkout sales never
+   * set this (always null); only Invoices/Quotations expose the UI for it. */
+  sectionLabel: string | null;
   createdAt: string;
 };
 
@@ -158,6 +166,11 @@ export type Sale = {
   amountPaidCents: number;
   balanceDueCents: number;
   invoiceNotes: string | null;
+  /** Client request: any number of additional titled note blocks below the plain notes/invoiceNotes
+   * above (e.g. "Installation Instructions") — see NotesSection's own doc comment
+   * (shared/lib/document-sections.ts). Defaults to [] and is purely additive; the plain
+   * notes/invoiceNotes field is unchanged and still the simple default case. */
+  notesSections: NotesSection[];
   payments: SalePayment[];
   completedAt: string | null;
   createdAt: string;

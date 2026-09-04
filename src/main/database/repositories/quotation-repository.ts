@@ -1,4 +1,5 @@
 import { getDatabase } from "@main/database/connection";
+import type { NotesSection } from "@shared/lib/document-sections";
 import { computeQuotationStatus } from "@shared/lib/quotation";
 import type {
   Quotation,
@@ -23,6 +24,8 @@ export type QuotationRow = {
   grand_total_cents: number;
   valid_until: string;
   notes: string | null;
+  /** JSON-serialized NotesSection[] — see Quotation["notesSections"]'s own doc comment. */
+  notes_sections: string;
   include_tax_breakdown: number;
   include_business_info: number;
   converted_sale_id: string | null;
@@ -56,6 +59,7 @@ export type QuotationItemRow = {
   is_locally_sourced: number;
   local_cost_cents: number | null;
   local_supplier_id: string | null;
+  section_label: string | null;
   created_at: string;
 };
 
@@ -157,6 +161,7 @@ export function insertQuotationRow(input: {
   grandTotalCents: number;
   validUntil: string;
   notes: string | null;
+  notesSections: NotesSection[];
   /** Defaults to true (today's behavior) when omitted — see the include_tax_breakdown migration's
    * own doc comment. */
   includeTaxBreakdown?: boolean;
@@ -171,9 +176,9 @@ export function insertQuotationRow(input: {
       INSERT INTO quotations (
         id, tenant_id, quotation_number, customer_id, location_id, employee_id, status,
         subtotal_cents, discount_amount_cents, tax_amount_cents, grand_total_cents,
-        valid_until, notes, created_at, updated_at, sync_status, include_tax_breakdown, include_business_info
+        valid_until, notes, notes_sections, created_at, updated_at, sync_status, include_tax_breakdown, include_business_info
       )
-      VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
     `
     )
     .run(
@@ -189,6 +194,7 @@ export function insertQuotationRow(input: {
       input.grandTotalCents,
       input.validUntil,
       input.notes,
+      JSON.stringify(input.notesSections),
       now,
       now,
       input.includeTaxBreakdown === false ? 0 : 1,
@@ -215,6 +221,7 @@ export function insertQuotationItemRow(input: {
   isLocallySourced: boolean;
   localCostCents: number | null;
   localSupplierId: string | null;
+  sectionLabel: string | null;
 }): QuotationItemRow {
   const now = new Date().toISOString();
 
@@ -224,9 +231,9 @@ export function insertQuotationItemRow(input: {
       INSERT INTO quotation_items (
         id, quotation_id, product_id, quantity, unit_price_cents,
         discount_amount_cents, tax_type, tax_amount_cents, line_total_cents,
-        is_locally_sourced, local_cost_cents, local_supplier_id, created_at
+        is_locally_sourced, local_cost_cents, local_supplier_id, section_label, created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
     )
     .run(
@@ -242,6 +249,7 @@ export function insertQuotationItemRow(input: {
       input.isLocallySourced ? 1 : 0,
       input.localCostCents,
       input.localSupplierId,
+      input.sectionLabel,
       now
     );
 
@@ -268,6 +276,7 @@ export function updateQuotationRow(
     grandTotalCents: number;
     validUntil: string;
     notes: string | null;
+    notesSections: NotesSection[];
     /** Defaults to true (today's behavior) when omitted — see the include_tax_breakdown migration's
      * own doc comment. */
     includeTaxBreakdown?: boolean;
@@ -288,6 +297,7 @@ export function updateQuotationRow(
         grand_total_cents = ?,
         valid_until = ?,
         notes = ?,
+        notes_sections = ?,
         include_tax_breakdown = ?,
         include_business_info = ?,
         sync_status = 'pending',
@@ -303,6 +313,7 @@ export function updateQuotationRow(
       input.grandTotalCents,
       input.validUntil,
       input.notes,
+      JSON.stringify(input.notesSections),
       input.includeTaxBreakdown === false ? 0 : 1,
       input.includeBusinessInfo === false ? 0 : 1,
       now,
@@ -388,6 +399,17 @@ export function deleteQuotationRow(id: string): void {
   getDatabase().prepare("DELETE FROM quotations WHERE id = ?").run(id);
 }
 
+/** The column is NOT NULL DEFAULT '[]' (migration 84), so every row always has a value — this just
+ * parses defensively, same treatment as sale-repository.ts's own parseNotesSections. */
+function parseNotesSections(raw: string): NotesSection[] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as NotesSection[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 export function mapQuotationItemDetailRow(row: QuotationItemDetailRow): QuotationItem {
   return {
     id: row.id,
@@ -405,6 +427,7 @@ export function mapQuotationItemDetailRow(row: QuotationItemDetailRow): Quotatio
     localCostCents: row.local_cost_cents,
     localSupplierId: row.local_supplier_id,
     localSupplierName: row.local_supplier_name,
+    sectionLabel: row.section_label,
     createdAt: row.created_at
   };
 }
@@ -436,6 +459,7 @@ export function mapQuotationDetailRow(
     grandTotalCents: row.grand_total_cents,
     validUntil: row.valid_until,
     notes: row.notes,
+    notesSections: parseNotesSections(row.notes_sections),
     includeTaxBreakdown: row.include_tax_breakdown === 1,
     includeBusinessInfo: row.include_business_info === 1,
     convertedSaleId: row.converted_sale_id,

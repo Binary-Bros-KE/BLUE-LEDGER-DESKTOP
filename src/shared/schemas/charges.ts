@@ -32,3 +32,13 @@ export const deliveryFieldSchema = deliveryInputSchema
   .nullable()
   .optional()
   .transform((value) => (value === undefined ? null : value));
+
+/** One titled free-text block below an invoice/quotation's items (e.g. "Installation
+ * Instructions") — see NotesSection's own doc comment (shared/lib/document-sections.ts). body is
+ * optional (a section can exist with just a title while the user is still typing), title is not. */
+export const notesSectionInputSchema = z.object({
+  title: z.string().trim().min(1, "Section title is required").max(120),
+  body: optionalText(4000).transform((value) => value ?? "")
+});
+
+export const notesSectionsFieldSchema = z.array(notesSectionInputSchema).max(50).optional().default([]);

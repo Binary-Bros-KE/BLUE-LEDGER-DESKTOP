@@ -24,6 +24,7 @@ import {
   type PreparedCart
 } from "@main/services/sale-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
+import type { NotesSection } from "@shared/lib/document-sections";
 import { computePaymentStatus } from "@shared/lib/invoice";
 import { optionalText } from "@shared/schemas/common";
 import {
@@ -162,6 +163,7 @@ export function insertInvoiceFromCart(input: {
   transactionType: TransactionType;
   dueDate: string;
   invoiceNotes: string | null;
+  notesSections: NotesSection[];
   cart: PreparedCart;
   initialPayment: { paymentMethodId: string; amountCents: number; reference: string | null } | null;
   /** Defaults to true (today's behavior) when omitted — see the include_tax_breakdown migration's
@@ -236,6 +238,7 @@ export function insertInvoiceFromCart(input: {
       balanceDueCents,
       paymentStatus,
       invoiceNotes: input.invoiceNotes,
+      notesSections: input.notesSections,
       payments,
       includeTaxBreakdown: input.includeTaxBreakdown,
       includeBusinessInfo: input.includeBusinessInfo
@@ -254,7 +257,8 @@ export function insertInvoiceFromCart(input: {
         lineTotalCents: item.lineTotalCents,
         isLocallySourced: item.isLocallySourced,
         localCostCents: item.localCostCents,
-        localSupplierId: item.localSupplierId
+        localSupplierId: item.localSupplierId,
+        sectionLabel: item.sectionLabel
       });
 
       if (item.product.track_stock && !item.isLocallySourced) {
@@ -332,6 +336,7 @@ export function createInvoice(input: unknown): Sale {
     transactionType: parsed.transactionType,
     dueDate: parsed.dueDate,
     invoiceNotes: parsed.invoiceNotes,
+    notesSections: parsed.notesSections,
     cart,
     initialPayment: parsed.initialPayment,
     includeTaxBreakdown: parsed.includeTaxBreakdown,
@@ -421,6 +426,7 @@ export function updateInvoice(id: string, input: unknown): Sale {
       balanceDueCents: cart.grandTotalCents,
       paymentStatus,
       invoiceNotes: parsed.invoiceNotes,
+      notesSections: parsed.notesSections,
       includeTaxBreakdown: parsed.includeTaxBreakdown,
       includeBusinessInfo: parsed.includeBusinessInfo
     });
@@ -439,7 +445,8 @@ export function updateInvoice(id: string, input: unknown): Sale {
         lineTotalCents: item.lineTotalCents,
         isLocallySourced: item.isLocallySourced,
         localCostCents: item.localCostCents,
-        localSupplierId: item.localSupplierId
+        localSupplierId: item.localSupplierId,
+        sectionLabel: item.sectionLabel
       });
 
       if (item.product.track_stock && !item.isLocallySourced) {
@@ -533,7 +540,10 @@ export function duplicateInvoice(saleId: string): Sale {
       // original invoice actually used. Derived the same way computeTaxBreakdown does
       // (tax-calculation.ts): compare the frozen gross against the frozen taxable amount.
       taxInclusiveOverride:
-        item.taxType === "vat" ? item.lineTotalCents <= item.unitPriceCents * item.quantity - item.discountAmountCents : null
+        item.taxType === "vat" ? item.lineTotalCents <= item.unitPriceCents * item.quantity - item.discountAmountCents : null,
+      // Carried over, not re-decided — same "duplicate is a faithful copy" reasoning as
+      // taxInclusiveOverride above.
+      sectionLabel: item.sectionLabel
     })),
     { serviceCharges: original.serviceCharges, delivery: original.delivery }
   );
@@ -546,6 +556,7 @@ export function duplicateInvoice(saleId: string): Sale {
     transactionType: original.transactionType,
     dueDate: newDueDate,
     invoiceNotes: original.invoiceNotes,
+    notesSections: original.notesSections,
     cart,
     initialPayment: null,
     // Carried over, not re-decided — same "duplicate is a faithful copy" reasoning as unitPriceCents

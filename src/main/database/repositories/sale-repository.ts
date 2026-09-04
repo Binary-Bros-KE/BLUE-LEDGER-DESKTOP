@@ -1,4 +1,5 @@
 import { getDatabase } from "@main/database/connection";
+import type { NotesSection } from "@shared/lib/document-sections";
 import { computePaymentStatus } from "@shared/lib/invoice";
 import type { DeliveryInput } from "@shared/schemas/charges";
 import type { InvoiceListItem, InvoiceSummary } from "@shared/types/invoice";
@@ -52,6 +53,8 @@ export type SaleRow = {
   amount_paid_cents: number;
   balance_due_cents: number;
   invoice_notes: string | null;
+  /** JSON-serialized NotesSection[] — see Sale["notesSections"]'s own doc comment. */
+  notes_sections: string;
   payments: string;
   /** JSON-serialized DeliveryInput, or null — see Sale["deliveryDraft"]'s own doc comment. */
   delivery_draft_json: string | null;
@@ -92,6 +95,7 @@ export type SaleItemRow = {
   is_locally_sourced: number;
   local_cost_cents: number | null;
   local_supplier_id: string | null;
+  section_label: string | null;
   created_at: string;
 };
 
@@ -523,6 +527,7 @@ export function insertSaleItemRow(input: {
   isLocallySourced: boolean;
   localCostCents: number | null;
   localSupplierId: string | null;
+  sectionLabel: string | null;
 }): SaleItemRow {
   const now = new Date().toISOString();
 
@@ -532,9 +537,9 @@ export function insertSaleItemRow(input: {
       INSERT INTO sale_items (
         id, sale_id, product_id, quantity, unit_price_cents,
         discount_amount_cents, tax_type, tax_amount_cents, line_total_cents,
-        is_locally_sourced, local_cost_cents, local_supplier_id, created_at
+        is_locally_sourced, local_cost_cents, local_supplier_id, section_label, created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
     )
     .run(
@@ -550,6 +555,7 @@ export function insertSaleItemRow(input: {
       input.isLocallySourced ? 1 : 0,
       input.localCostCents,
       input.localSupplierId,
+      input.sectionLabel,
       now
     );
 
@@ -582,6 +588,7 @@ export function insertInvoiceRow(input: {
   balanceDueCents: number;
   paymentStatus: PaymentStatus;
   invoiceNotes: string | null;
+  notesSections: NotesSection[];
   payments: SalePayment[];
   /** Defaults to true (today's behavior) when omitted/undefined — see the include_tax_breakdown
    * migration's own doc comment. */
@@ -598,10 +605,10 @@ export function insertInvoiceRow(input: {
         id, tenant_id, location_id, employee_id, customer_id, sale_status, transaction_type,
         subtotal_cents, discount_amount_cents, tax_amount_cents, grand_total_cents,
         invoice_number, invoice_date, due_date, amount_paid_cents, balance_due_cents,
-        payment_status, invoice_notes, payments, completed_at, created_at, updated_at, sync_status,
+        payment_status, invoice_notes, notes_sections, payments, completed_at, created_at, updated_at, sync_status,
         include_tax_breakdown, include_business_info
       )
-      VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+      VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
     `
     )
     .run(
@@ -622,6 +629,7 @@ export function insertInvoiceRow(input: {
       input.balanceDueCents,
       input.paymentStatus,
       input.invoiceNotes,
+      JSON.stringify(input.notesSections),
       JSON.stringify(input.payments),
       now,
       now,
@@ -733,6 +741,7 @@ export function updateInvoiceContentRow(input: {
   balanceDueCents: number;
   paymentStatus: PaymentStatus;
   invoiceNotes: string | null;
+  notesSections: NotesSection[];
   includeTaxBreakdown?: boolean | undefined;
   /** See Sale["includeBusinessInfo"]'s own doc comment — same defaulting rule as includeTaxBreakdown. */
   includeBusinessInfo?: boolean | undefined;
@@ -753,6 +762,7 @@ export function updateInvoiceContentRow(input: {
         balance_due_cents = ?,
         payment_status = ?,
         invoice_notes = ?,
+        notes_sections = ?,
         include_tax_breakdown = ?,
         include_business_info = ?,
         sync_status = 'pending',
@@ -771,6 +781,7 @@ export function updateInvoiceContentRow(input: {
       input.balanceDueCents,
       input.paymentStatus,
       input.invoiceNotes,
+      JSON.stringify(input.notesSections),
       input.includeTaxBreakdown === false ? 0 : 1,
       input.includeBusinessInfo === false ? 0 : 1,
       now,
@@ -809,6 +820,7 @@ export function mapSaleItemDetailRow(row: SaleItemDetailRow): SaleItem {
     localCostCents: row.local_cost_cents,
     localSupplierId: row.local_supplier_id,
     localSupplierName: row.local_supplier_name,
+    sectionLabel: row.section_label,
     createdAt: row.created_at
   };
 }
@@ -820,6 +832,17 @@ export function parseSalePayments(raw: string): SalePayment[] {
   try {
     const parsed: unknown = JSON.parse(raw);
     return Array.isArray(parsed) ? (parsed as SalePayment[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** The column is NOT NULL DEFAULT '[]' (migration 84), so every row always has a value — this just
+ * parses defensively, same belt-and-suspenders treatment as parseSalePayments above. */
+function parseNotesSections(raw: string): NotesSection[] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as NotesSection[]) : [];
   } catch {
     return [];
   }
@@ -869,6 +892,7 @@ export function mapSaleDetailRow(
     amountPaidCents: row.amount_paid_cents,
     balanceDueCents: row.balance_due_cents,
     invoiceNotes: row.invoice_notes,
+    notesSections: parseNotesSections(row.notes_sections),
     payments: parseSalePayments(row.payments),
     completedAt: row.completed_at,
     createdAt: row.created_at,

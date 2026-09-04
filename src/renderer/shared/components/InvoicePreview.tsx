@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Eye, Loader2, Printer, Share2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { CheckboxField } from "@renderer/shared/components/form-fields";
@@ -7,6 +7,7 @@ import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
+import { groupItemsBySections } from "@shared/lib/document-sections";
 import { computeAddedTaxCents } from "@shared/lib/tax-calculation";
 import type { Sale } from "@shared/types/sale";
 import type { TenantContext } from "@shared/types/tenant";
@@ -144,13 +145,32 @@ export function InvoicePreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
             </tr>
           </thead>
           <tbody>
-            {sale.items.map((item) => (
-              <tr key={item.id}>
-                <td className="border border-ink px-1.5 py-1 font-bold">{item.productName}</td>
-                <td className="border border-ink px-1.5 py-1 text-center">{item.quantity}</td>
-                <td className="border border-ink px-1.5 py-1 text-right">{money(item.unitPriceCents)}</td>
-                <td className="border border-ink px-1.5 py-1 text-right font-bold">{money(item.lineTotalCents)}</td>
-              </tr>
+            {groupItemsBySections(sale.items).map((group) => (
+              <Fragment key={group.label ?? "__ungrouped"}>
+                {group.label && (
+                  <tr>
+                    <td colSpan={4} className="border border-ink bg-soft px-1.5 py-1 font-extrabold uppercase">
+                      {group.label}
+                    </td>
+                  </tr>
+                )}
+                {group.items.map((item) => (
+                  <tr key={item.id}>
+                    <td className="border border-ink px-1.5 py-1 font-bold">{item.productName}</td>
+                    <td className="border border-ink px-1.5 py-1 text-center">{item.quantity}</td>
+                    <td className="border border-ink px-1.5 py-1 text-right">{money(item.unitPriceCents)}</td>
+                    <td className="border border-ink px-1.5 py-1 text-right font-bold">{money(item.lineTotalCents)}</td>
+                  </tr>
+                ))}
+                {group.label && (
+                  <tr>
+                    <td colSpan={3} className="border border-ink px-1.5 py-1 text-right font-bold">
+                      {group.label} Subtotal
+                    </td>
+                    <td className="border border-ink px-1.5 py-1 text-right font-bold">{money(group.subtotalCents)}</td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>

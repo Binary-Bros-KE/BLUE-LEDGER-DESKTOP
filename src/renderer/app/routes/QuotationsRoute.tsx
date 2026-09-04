@@ -17,6 +17,7 @@ import {
   Share2,
   ShoppingCart,
   Trash2,
+  X,
   XCircle
 } from "lucide-react";
 import { AttachDeliveryModal } from "@renderer/shared/components/AttachDeliveryModal";
@@ -47,6 +48,7 @@ import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents, totalCentsToUnitCostText, unitCostToTotalCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
+import { groupItemsBySections } from "@shared/lib/document-sections";
 import { computeAddedTaxCents, computeTaxBreakdown, resolveProductTaxConfig, taxModeBadgeLabel } from "@shared/lib/tax-calculation";
 import {
   ALL_YEARS_VALUE,
@@ -106,6 +108,11 @@ type CartLine = {
    * product's own effective setting". See computeLinePricing's own doc comment (cart-pricing.ts) and
    * prepareCart's (sale-service.ts) for the shared renderer/server implementation. */
   taxInclusiveOverride: boolean | null;
+  /** Client request: groups this line under a named section (e.g. "Lighting", "Sound") on the
+   * printed quotation, each with its own subtotal — null means "no section", grouped as one
+   * implicit leading bucket with no header. See groupItemsBySections's own doc comment
+   * (shared/lib/document-sections.ts). */
+  sectionLabel: string | null;
 };
 
 function statusTone(status: QuotationStatus): "success" | "warning" | "danger" | "neutral" | "accent" {
@@ -212,6 +219,17 @@ export function QuotationsRoute(): React.JSX.Element {
   const [createServiceCharges, setCreateServiceCharges] = useState<ServiceChargeDraft[]>([]);
   const [createDelivery, setCreateDelivery] = useState<DeliveryDraft | null>(null);
   const [productSearch, setProductSearch] = useState("");
+  // Client request: organize this quotation's items into named sections (e.g. "Lighting", "Sound"),
+  // each with its own subtotal — see CartLine["sectionLabel"]'s own doc comment. Setting this tags
+  // every subsequently-ADDED product with the section automatically; "" means new lines stay ungrouped.
+  const [activeSectionLabel, setActiveSectionLabel] = useState("");
+  const [newSectionNameDraft, setNewSectionNameDraft] = useState("");
+  // Client request: any number of additional titled note blocks below the plain Notes field (e.g.
+  // "Installation Instructions") — see NotesSection's own doc comment (shared/lib/document-sections.ts).
+  // `key` is a stable React list key only, never sent to the backend.
+  const [createNotesSections, setCreateNotesSections] = useState<Array<{ key: string; title: string; body: string }>>(
+    []
+  );
   const [createSaving, setCreateSaving] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -642,6 +660,22 @@ export function QuotationsRoute(): React.JSX.Element {
 
   const createLineStock = useProductStockOverview(createLinePricing.map((entry) => entry.line.productId));
 
+  // Client request: group the cart preview by CartLine["sectionLabel"] the same way the printed
+  // quotation will — see groupItemsBySections's own doc comment. A cart with no sections used at
+  // all produces exactly one (label: null) group, so this renders identically to the old flat list.
+  const groupedCreateLines = useMemo(
+    () =>
+      groupItemsBySections(
+        createLinePricing.map((entry) => ({ ...entry, sectionLabel: entry.line.sectionLabel, lineTotalCents: entry.pricing.lineTotalCents }))
+      ),
+    [createLinePricing]
+  );
+
+  const existingSectionLabels = useMemo(
+    () => Array.from(new Set(createItems.map((line) => line.sectionLabel).filter((label): label is string => Boolean(label)))),
+    [createItems]
+  );
+
   const createTotals = useMemo(() => {
     let subtotalCents = 0;
     let discountAmountCents = 0;
@@ -729,6 +763,9 @@ export function QuotationsRoute(): React.JSX.Element {
     setCreateServiceCharges([]);
     setCreateDelivery(null);
     setProductSearch("");
+    setActiveSectionLabel("");
+    setNewSectionNameDraft("");
+    setCreateNotesSections([]);
     setCreateError(null);
     setCreateOpen(true);
   }
@@ -766,8 +803,14 @@ export function QuotationsRoute(): React.JSX.Element {
         taxInclusiveOverride:
           item.taxType === "vat"
             ? item.lineTotalCents <= item.unitPriceCents * item.quantity - item.discountAmountCents
-            : null
+            : null,
+        sectionLabel: item.sectionLabel
       }))
+    );
+    setActiveSectionLabel("");
+    setNewSectionNameDraft("");
+    setCreateNotesSections(
+      quotation.notesSections.map((section) => ({ key: crypto.randomUUID(), title: section.title, body: section.body }))
     );
     setCreateServiceCharges(
       quotation.serviceCharges.map((charge) => ({
@@ -814,7 +857,8 @@ export function QuotationsRoute(): React.JSX.Element {
           isLocallySourced: false,
           localCost: "",
           localSupplierId: null,
-          taxInclusiveOverride: null
+          taxInclusiveOverride: null,
+          sectionLabel: activeSectionLabel || null
         }
       ];
     });
@@ -883,6 +927,37 @@ export function QuotationsRoute(): React.JSX.Element {
     setCreateItems((prev) => prev.filter((line) => line.productId !== productId));
   }
 
+  /** Lets an already-added line be re-assigned to a different section (or cleared back to none)
+   * without having to remove and re-add it. */
+  function updateCreateSectionLabel(productId: string, sectionLabel: string | null): void {
+    setCreateItems((prev) => prev.map((line) => (line.productId === productId ? { ...line, sectionLabel } : line)));
+  }
+
+  /** Sets the section every subsequently-added product tags itself with — see
+   * activeSectionLabel's own doc comment. Does not touch any line already in the cart. */
+  function startNewSection(): void {
+    const name = newSectionNameDraft.trim();
+    if (!name) return;
+    setActiveSectionLabel(name);
+    setNewSectionNameDraft("");
+  }
+
+  function addCreateNotesSection(): void {
+    setCreateNotesSections((prev) => [...prev, { key: crypto.randomUUID(), title: "", body: "" }]);
+  }
+
+  function updateCreateNotesSectionTitle(key: string, title: string): void {
+    setCreateNotesSections((prev) => prev.map((section) => (section.key === key ? { ...section, title } : section)));
+  }
+
+  function updateCreateNotesSectionBody(key: string, body: string): void {
+    setCreateNotesSections((prev) => prev.map((section) => (section.key === key ? { ...section, body } : section)));
+  }
+
+  function removeCreateNotesSection(key: string): void {
+    setCreateNotesSections((prev) => prev.filter((section) => section.key !== key));
+  }
+
   async function submitCreateQuotation(event: React.FormEvent): Promise<void> {
     event.preventDefault();
     setCreateSaving(true);
@@ -934,13 +1009,17 @@ export function QuotationsRoute(): React.JSX.Element {
         localCostCents:
           line.isLocallySourced && line.localCost.trim() ? unitCostToTotalCents(line.localCost, line.quantity) : undefined,
         localSupplierId: line.localSupplierId,
-        taxInclusiveOverride: line.taxInclusiveOverride
+        taxInclusiveOverride: line.taxInclusiveOverride,
+        sectionLabel: line.sectionLabel
       })),
       serviceCharges: createServiceCharges.map((charge) => ({
         name: charge.name,
         feeCents: toCents(charge.fee),
         costCents: toCents(charge.cost)
       })),
+      notesSections: createNotesSections
+        .filter((section) => section.title.trim())
+        .map((section) => ({ title: section.title.trim(), body: section.body })),
       delivery: createDelivery
         ? {
           riderId: createDelivery.riderId,
@@ -1313,18 +1392,32 @@ export function QuotationsRoute(): React.JSX.Element {
 
             <div className="mt-4">
               <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Products</p>
-              <div className="mt-2 space-y-1.5">
-                {viewingQuotation.items.map((item) => (
-                  <div key={item.id} className="flex items-start justify-between gap-2 rounded-lg border border-line px-3 py-2">
-                    <div className="min-w-0">
-                      <p className="line-clamp-2 text-sm font-bold leading-snug text-ink" title={item.productName}>
-                        {item.productName}
-                      </p>
-                      <p className="text-[11px] font-semibold text-muted">
-                        {item.quantity} x {currency} {formatCents(item.unitPriceCents)}
-                      </p>
+              <div className="mt-2 space-y-3">
+                {groupItemsBySections(viewingQuotation.items).map((group) => (
+                  <div key={group.label ?? "__ungrouped"}>
+                    {group.label && (
+                      <p className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wide text-muted">{group.label}</p>
+                    )}
+                    <div className="space-y-1.5">
+                      {group.items.map((item) => (
+                        <div key={item.id} className="flex items-start justify-between gap-2 rounded-lg border border-line px-3 py-2">
+                          <div className="min-w-0">
+                            <p className="line-clamp-2 text-sm font-bold leading-snug text-ink" title={item.productName}>
+                              {item.productName}
+                            </p>
+                            <p className="text-[11px] font-semibold text-muted">
+                              {item.quantity} x {currency} {formatCents(item.unitPriceCents)}
+                            </p>
+                          </div>
+                          <p className="mt-0.5 flex-none text-sm font-extrabold text-ink">{formatCents(item.lineTotalCents)}</p>
+                        </div>
+                      ))}
                     </div>
-                    <p className="mt-0.5 flex-none text-sm font-extrabold text-ink">{formatCents(item.lineTotalCents)}</p>
+                    {group.label && (
+                      <p className="mt-1.5 text-right text-xs font-extrabold text-ink">
+                        {group.label} Subtotal: {formatCents(group.subtotalCents)}
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1435,6 +1528,13 @@ export function QuotationsRoute(): React.JSX.Element {
                 <p className="mt-1 whitespace-pre-line text-sm font-semibold text-ink">{viewingQuotation.notes}</p>
               </div>
             )}
+
+            {viewingQuotation.notesSections.map((section, index) => (
+              <div key={index} className="mt-4 rounded-lg border border-line bg-soft px-3.5 py-2.5">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">{section.title}</p>
+                <p className="mt-1 whitespace-pre-line text-sm font-semibold text-ink">{section.body}</p>
+              </div>
+            ))}
 
             <div className="mt-4 space-y-1 border-t border-line pt-3 text-sm">
               <div className="flex justify-between text-muted">
@@ -1956,6 +2056,56 @@ export function QuotationsRoute(): React.JSX.Element {
                 New Product
               </button>
             </div>
+
+            {/* Client request: organize items into named sections (e.g. "Lighting", "Sound"), each
+                with its own subtotal — see activeSectionLabel's own doc comment. Products added below
+                tag themselves with whichever section is active here. */}
+            <div className="mt-1.5 flex items-center gap-1.5">
+              {activeSectionLabel ? (
+                <DashedPill tone="accent">
+                  Adding to: {activeSectionLabel}
+                  <button
+                    type="button"
+                    onClick={() => setActiveSectionLabel("")}
+                    className="ml-1 cursor-pointer text-accent hover:text-danger"
+                    title="Stop adding to this section"
+                  >
+                    <X className="size-3" aria-hidden="true" />
+                  </button>
+                </DashedPill>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    list="quotation-section-names"
+                    value={newSectionNameDraft}
+                    onChange={(event) => setNewSectionNameDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        startNewSection();
+                      }
+                    }}
+                    placeholder="Section name (optional) — e.g. Lighting"
+                    className="h-8 flex-1 rounded-md border border-line bg-white px-2.5 text-xs font-semibold text-ink outline-none transition focus:border-accent"
+                  />
+                  <datalist id="quotation-section-names">
+                    {existingSectionLabels.map((label) => (
+                      <option key={label} value={label} />
+                    ))}
+                  </datalist>
+                  <button
+                    type="button"
+                    onClick={startNewSection}
+                    disabled={!newSectionNameDraft.trim()}
+                    className="text-[11px] font-extrabold uppercase text-accent hover:underline disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+                  >
+                    Start Section
+                  </button>
+                </>
+              )}
+            </div>
+
             <div className="relative mt-1.5">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden="true" />
               <input
@@ -1982,11 +2132,17 @@ export function QuotationsRoute(): React.JSX.Element {
               )}
             </div>
 
-            <div className="mt-3 space-y-2">
+            <div className="mt-3 space-y-3">
               {createLinePricing.length === 0 ? (
                 <p className="text-xs font-semibold text-muted">No products added yet.</p>
               ) : (
-                createLinePricing.map(({ line, product, pricing }) => (
+                groupedCreateLines.map((group) => (
+                  <div key={group.label ?? "__ungrouped"}>
+                    {group.label && (
+                      <p className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wide text-muted">{group.label}</p>
+                    )}
+                    <div className="space-y-2">
+                      {group.items.map(({ line, product, pricing }) => (
                   <div key={line.productId} className="rounded-lg border border-line p-2.5">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -2125,6 +2281,26 @@ export function QuotationsRoute(): React.JSX.Element {
                         </div>
                       </div>
                     )}
+
+                    <label className="mt-2 flex items-center gap-1.5 text-[10px] font-bold text-muted">
+                      Section
+                      <input
+                        type="text"
+                        list="quotation-section-names"
+                        value={line.sectionLabel ?? ""}
+                        onChange={(event) => updateCreateSectionLabel(line.productId, event.target.value || null)}
+                        placeholder="None"
+                        className="h-7 flex-1 rounded-md border border-line px-2 text-xs font-semibold outline-none focus:border-accent"
+                      />
+                    </label>
+                  </div>
+                      ))}
+                    </div>
+                    {group.label && (
+                      <p className="mt-1.5 text-right text-xs font-extrabold text-ink">
+                        {group.label} Subtotal: {formatCents(group.subtotalCents)}
+                      </p>
+                    )}
                   </div>
                 ))
               )}
@@ -2132,6 +2308,47 @@ export function QuotationsRoute(): React.JSX.Element {
           </div>
 
           <TextAreaField label="Notes" value={createNotes} onChange={setCreateNotes} className="mt-4" rows={2} />
+
+          <div className="mt-4 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Additional Notes Sections</span>
+              <button
+                type="button"
+                onClick={addCreateNotesSection}
+                className="flex items-center gap-1 text-[11px] font-extrabold uppercase text-accent hover:underline cursor-pointer"
+              >
+                <Plus className="size-3" aria-hidden="true" />
+                Add Section
+              </button>
+            </div>
+            {createNotesSections.map((section) => (
+              <div key={section.key} className="rounded-lg border border-line p-2.5">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={section.title}
+                    onChange={(event) => updateCreateNotesSectionTitle(section.key, event.target.value)}
+                    placeholder="Section title — e.g. Installation Instructions"
+                    className="h-8 flex-1 rounded-md border border-line px-2.5 text-xs font-bold outline-none focus:border-accent"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeCreateNotesSection(section.key)}
+                    className="text-[11px] font-extrabold uppercase text-danger hover:underline cursor-pointer"
+                  >
+                    Remove
+                  </button>
+                </div>
+                <textarea
+                  value={section.body}
+                  onChange={(event) => updateCreateNotesSectionBody(section.key, event.target.value)}
+                  rows={2}
+                  placeholder="One point per line"
+                  className="mt-2 w-full rounded-md border border-line px-2.5 py-2 text-xs font-semibold outline-none focus:border-accent"
+                />
+              </div>
+            ))}
+          </div>
 
           <div className="mt-4">
             <CheckboxField

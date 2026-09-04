@@ -2937,6 +2937,23 @@ const migrations = [
       ALTER TABLE stock_movements ADD COLUMN previous_quantity INTEGER;
       ALTER TABLE stock_movements ADD COLUMN new_quantity INTEGER;
     `
+  },
+  {
+    version: 84,
+    name: "invoice_quotation_sections",
+    sql: `
+      -- A client builds multi-area installation quotes (Lighting, Sound, Gazebo, ...) and wants each
+      -- area as its own named group with its own subtotal, plus several titled note blocks below the
+      -- items (Installation Instructions, ...) instead of one plain notes field. Both are purely
+      -- additive/opt-in: null section_label (every existing row) groups as one implicit "ungrouped"
+      -- bucket with no header, and notes_sections defaults to '[]' — a document that never uses either
+      -- renders byte-identical to before this migration. See groupItemsBySections (shared/lib/
+      -- document-sections.ts) for how these are grouped at render time, never stored pre-grouped.
+      ALTER TABLE sale_items ADD COLUMN section_label TEXT;
+      ALTER TABLE quotation_items ADD COLUMN section_label TEXT;
+      ALTER TABLE sales ADD COLUMN notes_sections TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE quotations ADD COLUMN notes_sections TEXT NOT NULL DEFAULT '[]';
+    `
   }
 ] as const;
 

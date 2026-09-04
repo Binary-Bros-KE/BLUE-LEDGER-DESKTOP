@@ -145,6 +145,7 @@ export function createQuotation(input: unknown): Quotation {
       grandTotalCents: cart.grandTotalCents,
       validUntil: parsed.validUntil,
       notes: parsed.notes,
+      notesSections: parsed.notesSections,
       includeTaxBreakdown: parsed.includeTaxBreakdown,
       includeBusinessInfo: parsed.includeBusinessInfo
     });
@@ -162,7 +163,8 @@ export function createQuotation(input: unknown): Quotation {
         lineTotalCents: item.lineTotalCents,
         isLocallySourced: item.isLocallySourced,
         localCostCents: item.localCostCents,
-        localSupplierId: item.localSupplierId
+        localSupplierId: item.localSupplierId,
+        sectionLabel: item.sectionLabel
       });
     }
 
@@ -204,6 +206,7 @@ export function updateQuotation(id: string, input: unknown): Quotation {
       grandTotalCents: cart.grandTotalCents,
       validUntil: parsed.validUntil,
       notes: parsed.notes,
+      notesSections: parsed.notesSections,
       includeTaxBreakdown: parsed.includeTaxBreakdown,
       includeBusinessInfo: parsed.includeBusinessInfo
     });
@@ -222,7 +225,8 @@ export function updateQuotation(id: string, input: unknown): Quotation {
         lineTotalCents: item.lineTotalCents,
         isLocallySourced: item.isLocallySourced,
         localCostCents: item.localCostCents,
-        localSupplierId: item.localSupplierId
+        localSupplierId: item.localSupplierId,
+        sectionLabel: item.sectionLabel
       });
     }
 
@@ -372,7 +376,9 @@ function repriceLineForQuantity(item: QuotationItemDetailRow, product: ProductRo
     // no proportional amount to recompute here.
     isLocallySourced: Boolean(item.is_locally_sourced),
     localCostCents: item.local_cost_cents,
-    localSupplierId: item.local_supplier_id
+    localSupplierId: item.local_supplier_id,
+    // Carried over unchanged, same reasoning as originalWasInclusive above.
+    sectionLabel: item.section_label
   };
 }
 
@@ -410,7 +416,8 @@ function buildConversionCart(
       lineTotalCents: item.line_total_cents,
       isLocallySourced: Boolean(item.is_locally_sourced),
       localCostCents: item.local_cost_cents,
-      localSupplierId: item.local_supplier_id
+      localSupplierId: item.local_supplier_id,
+      sectionLabel: item.section_label
     };
   });
 
@@ -536,6 +543,9 @@ export function convertQuotationToInvoice(id: string, input: unknown): Sale {
     transactionType: "invoice",
     dueDate: parsed.dueDate,
     invoiceNotes: quotation.notes,
+    // Carried over, not dropped — same "converting shouldn't silently reset what the customer
+    // already saw" reasoning as includeTaxBreakdown/includeBusinessInfo below.
+    notesSections: quotation.notesSections,
     cart,
     initialPayment: null,
     includeTaxBreakdown: quotation.includeTaxBreakdown,

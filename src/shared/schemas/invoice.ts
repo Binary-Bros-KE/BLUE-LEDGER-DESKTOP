@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { deliveryFieldSchema, serviceChargesFieldSchema } from "@shared/schemas/charges";
+import { deliveryFieldSchema, notesSectionsFieldSchema, serviceChargesFieldSchema } from "@shared/schemas/charges";
 import { LOCAL_SOURCING_REFINEMENT_OPTS, localSourcingRequiresCost, optionalBoolean, optionalText } from "@shared/schemas/common";
 
 const invoiceCartItemSchema = z
@@ -23,7 +23,10 @@ const invoiceCartItemSchema = z
     localSupplierId: optionalText(64),
     // Same per-line VAT-mode override as saleCartItemSchema's own field — see prepareCart's
     // taxInclusiveOverride doc comment in sale-service.ts (shared by both).
-    taxInclusiveOverride: optionalBoolean()
+    taxInclusiveOverride: optionalBoolean(),
+    // Client request: groups this line under a named section on the invoice — see SaleItem's own
+    // sectionLabel doc comment (shared/types/sale.ts). null/omitted means "no section".
+    sectionLabel: optionalText(120)
   })
   .refine(localSourcingRequiresCost, LOCAL_SOURCING_REFINEMENT_OPTS);
 
@@ -54,6 +57,7 @@ export const createInvoiceSchema = z
       .transform((value) => (value === undefined ? null : value)),
     serviceCharges: serviceChargesFieldSchema,
     delivery: deliveryFieldSchema,
+    notesSections: notesSectionsFieldSchema,
     /** Only ever read when the signed-in session has no assigned branch (see
      * sale-service.ts's requireActiveSession) — ignored otherwise. */
     locationId: optionalText(64)

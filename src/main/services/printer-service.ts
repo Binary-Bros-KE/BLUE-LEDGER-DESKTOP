@@ -29,6 +29,7 @@ import { getSupplierStatement } from "@main/services/supplier-statement-service"
 import { PRINTER_SETTINGS_STORAGE_KEY } from "@shared/constants/app";
 import { formatDocumentDate } from "@shared/lib/date";
 import { buildDeliveryNoteViewModel, type DeliveryNoteViewModel } from "@shared/lib/delivery-note";
+import { groupItemsBySections } from "@shared/lib/document-sections";
 import { buildReceiptViewModel, formatReceiptCents, type ReceiptViewModel } from "@shared/lib/receipt";
 import { computeAddedTaxCents, computeTaxBreakdown, taxBreakdownLabel, type TaxBreakdownEntry } from "@shared/lib/tax-calculation";
 import { printerSettingsSchema } from "@shared/schemas/printer";
@@ -578,6 +579,13 @@ const LETTERHEAD_STYLES = `
   table.items-table th { text-align: left; font-size: 10px; text-transform: uppercase; font-weight: bold; padding: 7px 8px; border-bottom: 1.5px solid #4b5563; background: #f0f0f0; }
   table.items-table th + th, table.items-table td + td { border-left: 1.5px solid #4b5563; }
   table.items-table td { padding: 7px 8px; vertical-align: top; font-size: 11px; border-bottom: 1.5px solid #4b5563; }
+  /* Client request: named item sections (e.g. "Lighting", "Sound") — a header row spanning every
+     column, styled like the table's own <th> row, then that section's own subtotal row right-
+     aligned beneath its items. Only ever rendered when at least one item actually uses a section
+     (see buildGroupedItemRows) — a document with none renders with neither, byte-identical to
+     before this feature. */
+  table.items-table td.section-header { text-transform: uppercase; font-size: 10px; font-weight: bold; background: #f0f0f0; }
+  table.items-table tr.section-subtotal td { font-weight: bold; background: #f8f7f4; }
   .items-spacer { flex: 1 1 auto; }
   .center { text-align: center; }
   .right { text-align: right; white-space: nowrap; }
@@ -1105,6 +1113,41 @@ async function resolveItemProductImages(items: Array<{ productId: string }>): Pr
   return images;
 }
 
+/** Client request: renders sale.items/quotation.items grouped by sectionLabel (e.g. "Lighting",
+ * "Sound") instead of one flat run — a header row spanning every column before each named group,
+ * that group's own rows (numbered continuously across the WHOLE table, matching how
+ * buildExtraChargeRows continues numbering from items.length regardless), then a right-aligned
+ * subtotal row. The (label: null) group — every item with no section, which is ALL of them on a
+ * document that never uses this feature — renders with neither header nor subtotal, so the common
+ * case is byte-identical to the old flat output. Shared by buildInvoiceHtml/buildQuotationHtml
+ * (and their thermal counterparts) — only the per-row/per-column HTML differs between them. */
+function buildGroupedItemRows<T extends { sectionLabel: string | null; lineTotalCents: number }>(
+  items: T[],
+  columnCount: number,
+  renderRow: (item: T, index: number) => string,
+  money: (cents: number | null) => string
+): string {
+  const rows: string[] = [];
+  let index = 0;
+  for (const group of groupItemsBySections(items)) {
+    if (group.label) {
+      rows.push(`<tr><td colspan="${columnCount}" class="section-header">${escapeHtml(group.label)}</td></tr>`);
+    }
+    for (const item of group.items) {
+      index += 1;
+      rows.push(renderRow(item, index));
+    }
+    if (group.label) {
+      rows.push(`
+      <tr class="section-subtotal">
+        <td colspan="${columnCount - 1}" class="right">${escapeHtml(group.label)} Subtotal</td>
+        <td class="right">${money(group.subtotalCents)}</td>
+      </tr>`);
+    }
+  }
+  return rows.join("");
+}
+
 /** Renders service charges + delivery fee as ordinary rows appended to an invoice/quotation's item
  * table — Discount shows as "-" since these aren't product lines, and the hidden cost never
  * appears here (only the customer-facing fee). Shared by buildInvoiceHtml and buildQuotationHtml. */
@@ -1159,12 +1202,15 @@ function buildInvoiceHtml(
   const money = (cents: number | null): string =>
     `${business.currency} ${formatReceiptCents(cents)}`;
 
-  const itemRows = sale.items
-    .map((item, index) => {
-      const imageUrl = productImages.get(item.productId);
-      return `
+  const itemRows =
+    buildGroupedItemRows(
+      sale.items,
+      6,
+      (item, index) => {
+        const imageUrl = productImages.get(item.productId);
+        return `
       <tr>
-        <td>${index + 1}</td>
+        <td>${index}</td>
         <td>
           <div class="item-cell">
             ${imageUrl ? `<img src="${imageUrl}" class="item-thumb" alt="" />` : ""}
@@ -1176,8 +1222,9 @@ function buildInvoiceHtml(
         <td class="right">${item.discountAmountCents > 0 ? `-${money(item.discountAmountCents)}` : "-"}</td>
         <td class="right">${money(item.lineTotalCents)}</td>
       </tr>`;
-    })
-    .join("") + buildExtraChargeRows(sale.items.length, sale.serviceCharges, sale.delivery, money);
+      },
+      money
+    ) + buildExtraChargeRows(sale.items.length, sale.serviceCharges, sale.delivery, money);
 
   const paymentRows = sale.payments
     .map(
@@ -1285,6 +1332,8 @@ function buildInvoiceHtml(
 
     ${sale.invoiceNotes ? `<div class="notes"><strong>Notes</strong><p>${escapeHtml(sale.invoiceNotes)}</p></div>` : ""}
 
+    ${sale.notesSections.map((section) => `<div class="notes"><strong>${escapeHtml(section.title)}</strong><p>${escapeHtml(section.body)}</p></div>`).join("")}
+
     <div class="footer">${escapeHtml(business.invoiceFooter ?? "Thank you for your business!")}</div>
   </div>
 </body>
@@ -1376,17 +1425,18 @@ export async function printInvoiceDocument(saleId: string): Promise<PrinterActio
 function buildInvoiceThermalHtml(sale: Sale, business: DocumentBusinessInfo): string {
   const money = (cents: number | null): string => `${business.currency} ${formatReceiptCents(cents)}`;
 
-  const itemRows = sale.items
-    .map(
-      (item) => `
+  const itemRows = buildGroupedItemRows(
+    sale.items,
+    4,
+    (item) => `
       <tr>
         <td>${escapeHtml(item.productName)}</td>
         <td class="center">${item.quantity}</td>
         <td class="right">${money(item.unitPriceCents)}</td>
         <td class="right">${money(item.lineTotalCents)}</td>
-      </tr>`
-    )
-    .join("");
+      </tr>`,
+    money
+  );
 
   const extraRows = [
     ...sale.serviceCharges.map(
@@ -1428,6 +1478,9 @@ function buildInvoiceThermalHtml(sale: Sale, business: DocumentBusinessInfo): st
   table.items th, table.items td { border: 1px solid #000; padding: 3px 4px; vertical-align: top; }
   table.items th { background: #d9d9d9; text-transform: uppercase; font-size: 9px; text-align: left; }
   .right { text-align: right; white-space: nowrap; }
+  /* Client request: named item sections — see buildGroupedItemRows' own doc comment. */
+  table.items td.section-header { text-transform: uppercase; font-size: 9px; font-weight: bold; background: #d9d9d9; }
+  table.items tr.section-subtotal td { font-weight: bold; }
   table.totals { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 4px; }
   table.totals td { border: 1px solid #000; padding: 3px 6px; }
   table.totals td.label { background: #d9d9d9; font-weight: bold; }
@@ -1471,6 +1524,7 @@ function buildInvoiceThermalHtml(sale: Sale, business: DocumentBusinessInfo): st
     </table>
     ${sale.includeTaxBreakdown ? buildTaxBreakdownHtml(computeTaxBreakdown(sale.items), business.vatRatePercent, (cents) => money(cents), "items") : ""}
     ${sale.invoiceNotes ? `<hr/><p class="muted">Notes: ${escapeHtml(sale.invoiceNotes)}</p>` : ""}
+    ${sale.notesSections.map((section) => `<hr/><p class="muted">${escapeHtml(section.title)}: ${escapeHtml(section.body)}</p>`).join("")}
     <hr/>
     <p class="center muted">${escapeHtml(business.invoiceFooter ?? "Thank you for your business!")}</p>
   </div>
@@ -1555,12 +1609,15 @@ function buildQuotationHtml(
 ): string {
   const money = (cents: number | null): string => `${business.currency} ${formatReceiptCents(cents)}`;
 
-  const itemRows = quotation.items
-    .map((item, index) => {
-      const imageUrl = productImages.get(item.productId);
-      return `
+  const itemRows =
+    buildGroupedItemRows(
+      quotation.items,
+      6,
+      (item, index) => {
+        const imageUrl = productImages.get(item.productId);
+        return `
       <tr>
-        <td>${index + 1}</td>
+        <td>${index}</td>
         <td>
           <div class="item-cell">
             ${imageUrl ? `<img src="${imageUrl}" class="item-thumb" alt="" />` : ""}
@@ -1572,8 +1629,9 @@ function buildQuotationHtml(
         <td class="right">${item.discountAmountCents > 0 ? `-${money(item.discountAmountCents)}` : "-"}</td>
         <td class="right">${money(item.lineTotalCents)}</td>
       </tr>`;
-    })
-    .join("") + buildExtraChargeRows(quotation.items.length, quotation.serviceCharges, quotation.delivery, money);
+      },
+      money
+    ) + buildExtraChargeRows(quotation.items.length, quotation.serviceCharges, quotation.delivery, money);
 
   return `<!doctype html>
 <html>
@@ -1651,6 +1709,8 @@ function buildQuotationHtml(
     ${quotation.includeTaxBreakdown ? buildTaxBreakdownHtml(computeTaxBreakdown(quotation.items), business.vatRatePercent, (cents) => money(cents), "tax-breakdown") : ""}
 
     ${quotation.notes ? `<div class="notes"><strong>Notes</strong><p>${escapeHtml(quotation.notes)}</p></div>` : ""}
+
+    ${quotation.notesSections.map((section) => `<div class="notes"><strong>${escapeHtml(section.title)}</strong><p>${escapeHtml(section.body)}</p></div>`).join("")}
 
     <div class="terms">
       This quotation is valid until ${formatInvoiceDate(quotation.validUntil)}. Prices, discounts, and availability
@@ -1745,17 +1805,18 @@ export async function printQuotationDocument(quotationId: string): Promise<Print
 function buildQuotationThermalHtml(quotation: Quotation, business: DocumentBusinessInfo): string {
   const money = (cents: number | null): string => `${business.currency} ${formatReceiptCents(cents)}`;
 
-  const itemRows = quotation.items
-    .map(
-      (item) => `
+  const itemRows = buildGroupedItemRows(
+    quotation.items,
+    4,
+    (item) => `
       <tr>
         <td>${escapeHtml(item.productName)}</td>
         <td class="center">${item.quantity}</td>
         <td class="right">${money(item.unitPriceCents)}</td>
         <td class="right">${money(item.lineTotalCents)}</td>
-      </tr>`
-    )
-    .join("");
+      </tr>`,
+    money
+  );
 
   const extraRows = [
     ...quotation.serviceCharges.map(
@@ -1797,6 +1858,9 @@ function buildQuotationThermalHtml(quotation: Quotation, business: DocumentBusin
   table.items th, table.items td { border: 1px solid #000; padding: 3px 4px; vertical-align: top; }
   table.items th { background: #d9d9d9; text-transform: uppercase; font-size: 9px; text-align: left; }
   .right { text-align: right; white-space: nowrap; }
+  /* Client request: named item sections — see buildGroupedItemRows' own doc comment. */
+  table.items td.section-header { text-transform: uppercase; font-size: 9px; font-weight: bold; background: #d9d9d9; }
+  table.items tr.section-subtotal td { font-weight: bold; }
   table.totals { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 4px; }
   table.totals td { border: 1px solid #000; padding: 3px 6px; }
   table.totals td.label { background: #d9d9d9; font-weight: bold; }
@@ -1837,6 +1901,7 @@ function buildQuotationThermalHtml(quotation: Quotation, business: DocumentBusin
     </table>
     ${quotation.includeTaxBreakdown ? buildTaxBreakdownHtml(computeTaxBreakdown(quotation.items), business.vatRatePercent, (cents) => money(cents), "items") : ""}
     ${quotation.notes ? `<hr/><p class="muted">Notes: ${escapeHtml(quotation.notes)}</p>` : ""}
+    ${quotation.notesSections.map((section) => `<hr/><p class="muted">${escapeHtml(section.title)}: ${escapeHtml(section.body)}</p>`).join("")}
     <hr/>
     <p class="center muted">${escapeHtml(business.quotationFooter ?? "Thank you for considering us!")}</p>
   </div>

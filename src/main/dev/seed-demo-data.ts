@@ -612,6 +612,7 @@ export async function seedDemoData(): Promise<void> {
         transactionType: "invoice",
         dueDate: isoDateOffset(dueOffset),
         invoiceNotes: null,
+        notesSections: [],
         cart,
         initialPayment
       });
