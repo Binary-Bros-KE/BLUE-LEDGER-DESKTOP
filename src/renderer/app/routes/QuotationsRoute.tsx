@@ -88,6 +88,12 @@ const FILTER_TABS: Array<{ value: FilterTab; label: string }> = [
 ];
 
 type CartLine = {
+  /** Stable UI-only identity for this line, never sent to the backend — needed because the same
+   * product can now appear as more than one line at once (once in each section it's added to), so
+   * productId alone can no longer identify a line uniquely. Generated fresh whenever a line is
+   * created or restored (addCreateLine/openEditQuotation); every per-line update handler matches on
+   * this instead of productId. */
+  key: string;
   productId: string;
   name: string;
   sku: string;
@@ -785,6 +791,7 @@ export function QuotationsRoute(): React.JSX.Element {
     setCreateIncludeBusinessInfo(quotation.includeBusinessInfo);
     setCreateItems(
       quotation.items.map((item) => ({
+        key: crypto.randomUUID(),
         productId: item.productId,
         name: item.productName,
         sku: item.sku,
@@ -840,14 +847,20 @@ export function QuotationsRoute(): React.JSX.Element {
   }
 
   function addCreateLine(product: ProductListItem): void {
+    // Client correction: a product already in the cart under a DIFFERENT section must become its
+    // own new line, not silently bump the quantity of the other section's line — the two are
+    // meant to end up as separate rows with their own quantities (e.g. "TV" x2 in Bar Area AND
+    // "TV" x1 in Gazebo). Only merge when both productId AND the currently-active section match.
+    const targetSectionLabel = activeSectionLabel || null;
     setCreateItems((prev) => {
-      const existing = prev.find((line) => line.productId === product.id);
+      const existing = prev.find((line) => line.productId === product.id && line.sectionLabel === targetSectionLabel);
       if (existing) {
-        return prev.map((line) => (line.productId === product.id ? { ...line, quantity: line.quantity + 1 } : line));
+        return prev.map((line) => (line.key === existing.key ? { ...line, quantity: line.quantity + 1 } : line));
       }
       return [
         ...prev,
         {
+          key: crypto.randomUUID(),
           productId: product.id,
           name: product.name,
           sku: product.sku,
@@ -858,42 +871,42 @@ export function QuotationsRoute(): React.JSX.Element {
           localCost: "",
           localSupplierId: null,
           taxInclusiveOverride: null,
-          sectionLabel: activeSectionLabel || null
+          sectionLabel: targetSectionLabel
         }
       ];
     });
     setProductSearch("");
   }
 
-  function updateCreateQuantity(productId: string, quantity: number): void {
+  function updateCreateQuantity(key: string, quantity: number): void {
     const next = Number.isFinite(quantity) && quantity > 0 ? Math.floor(quantity) : 1;
-    setCreateItems((prev) => prev.map((line) => (line.productId === productId ? { ...line, quantity: next } : line)));
+    setCreateItems((prev) => prev.map((line) => (line.key === key ? { ...line, quantity: next } : line)));
   }
 
   /** Permissive counterpart used only by the free-typing quantity input's onChange — allows 0
    * mid-edit (see the input's own value prop, which renders "" for 0) so clearing "1" to type "80"
    * isn't fought by an immediate re-clamp on every keystroke. updateCreateQuantity's own clamp still
    * applies on blur. */
-  function updateCreateQuantityDraft(productId: string, raw: string): void {
+  function updateCreateQuantityDraft(key: string, raw: string): void {
     const parsed = raw === "" ? 0 : Math.floor(Number(raw));
     const next = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-    setCreateItems((prev) => prev.map((line) => (line.productId === productId ? { ...line, quantity: next } : line)));
+    setCreateItems((prev) => prev.map((line) => (line.key === key ? { ...line, quantity: next } : line)));
   }
 
-  function updateCreateDiscount(productId: string, value: string): void {
-    setCreateItems((prev) => prev.map((line) => (line.productId === productId ? { ...line, discount: value } : line)));
+  function updateCreateDiscount(key: string, value: string): void {
+    setCreateItems((prev) => prev.map((line) => (line.key === key ? { ...line, discount: value } : line)));
   }
 
-  function updateCreatePriceOverride(productId: string, value: string): void {
+  function updateCreatePriceOverride(key: string, value: string): void {
     setCreateItems((prev) =>
-      prev.map((line) => (line.productId === productId ? { ...line, priceOverride: value } : line))
+      prev.map((line) => (line.key === key ? { ...line, priceOverride: value } : line))
     );
   }
 
-  function toggleCreateLocallySourced(productId: string): void {
+  function toggleCreateLocallySourced(key: string): void {
     setCreateItems((prev) =>
       prev.map((line) =>
-        line.productId === productId
+        line.key === key
           ? {
             ...line,
             isLocallySourced: !line.isLocallySourced,
@@ -904,33 +917,33 @@ export function QuotationsRoute(): React.JSX.Element {
     );
   }
 
-  function updateCreateLocalCost(productId: string, value: string): void {
-    setCreateItems((prev) => prev.map((line) => (line.productId === productId ? { ...line, localCost: value } : line)));
+  function updateCreateLocalCost(key: string, value: string): void {
+    setCreateItems((prev) => prev.map((line) => (line.key === key ? { ...line, localCost: value } : line)));
   }
 
-  function updateCreateLocalSupplier(productId: string, supplierId: string | null): void {
+  function updateCreateLocalSupplier(key: string, supplierId: string | null): void {
     setCreateItems((prev) =>
-      prev.map((line) => (line.productId === productId ? { ...line, localSupplierId: supplierId } : line))
+      prev.map((line) => (line.key === key ? { ...line, localSupplierId: supplierId } : line))
     );
   }
 
   /** Same reasoning as CheckoutRoute's own toggleTaxInclusiveOverride — clicking always sets the
    * override to the OPPOSITE of whatever's currently showing (line override if set, else the product/
    * tenant default), so the badge always reflects what happens next. */
-  function toggleCreateTaxInclusiveOverride(productId: string, currentlyInclusive: boolean): void {
+  function toggleCreateTaxInclusiveOverride(key: string, currentlyInclusive: boolean): void {
     setCreateItems((prev) =>
-      prev.map((line) => (line.productId === productId ? { ...line, taxInclusiveOverride: !currentlyInclusive } : line))
+      prev.map((line) => (line.key === key ? { ...line, taxInclusiveOverride: !currentlyInclusive } : line))
     );
   }
 
-  function removeCreateLine(productId: string): void {
-    setCreateItems((prev) => prev.filter((line) => line.productId !== productId));
+  function removeCreateLine(key: string): void {
+    setCreateItems((prev) => prev.filter((line) => line.key !== key));
   }
 
   /** Lets an already-added line be re-assigned to a different section (or cleared back to none)
    * without having to remove and re-add it. */
-  function updateCreateSectionLabel(productId: string, sectionLabel: string | null): void {
-    setCreateItems((prev) => prev.map((line) => (line.productId === productId ? { ...line, sectionLabel } : line)));
+  function updateCreateSectionLabel(key: string, sectionLabel: string | null): void {
+    setCreateItems((prev) => prev.map((line) => (line.key === key ? { ...line, sectionLabel } : line)));
   }
 
   /** Sets the section every subsequently-added product tags itself with — see
@@ -2143,7 +2156,7 @@ export function QuotationsRoute(): React.JSX.Element {
                     )}
                     <div className="space-y-2">
                       {group.items.map(({ line, product, pricing }) => (
-                  <div key={line.productId} className="rounded-lg border border-line p-2.5">
+                  <div key={line.key} className="rounded-lg border border-line p-2.5">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="line-clamp-2 text-sm font-extrabold leading-snug text-ink" title={line.name}>
@@ -2172,7 +2185,7 @@ export function QuotationsRoute(): React.JSX.Element {
                           return (
                             <button
                               type="button"
-                              onClick={() => toggleCreateTaxInclusiveOverride(line.productId, effectiveInclusive)}
+                              onClick={() => toggleCreateTaxInclusiveOverride(line.key, effectiveInclusive)}
                               title="Switch this line's VAT pricing for this quotation only"
                               className="cursor-pointer"
                             >
@@ -2182,7 +2195,7 @@ export function QuotationsRoute(): React.JSX.Element {
                         })()}
                         <button
                           type="button"
-                          onClick={() => removeCreateLine(line.productId)}
+                          onClick={() => removeCreateLine(line.key)}
                           className="text-[11px] font-extrabold uppercase text-danger hover:underline cursor-pointer"
                         >
                           Remove
@@ -2196,8 +2209,8 @@ export function QuotationsRoute(): React.JSX.Element {
                           type="number"
                           min={1}
                           value={line.quantity === 0 ? "" : line.quantity}
-                          onChange={(event) => updateCreateQuantityDraft(line.productId, event.target.value)}
-                          onBlur={() => updateCreateQuantity(line.productId, line.quantity)}
+                          onChange={(event) => updateCreateQuantityDraft(line.key, event.target.value)}
+                          onBlur={() => updateCreateQuantity(line.key, line.quantity)}
                           className="h-8 w-16 rounded-md border border-line text-center text-xs font-bold outline-none focus:border-accent"
                         />
                       </label>
@@ -2211,7 +2224,7 @@ export function QuotationsRoute(): React.JSX.Element {
                           min={0}
                           step="0.01"
                           value={line.priceOverride}
-                          onChange={(event) => updateCreatePriceOverride(line.productId, event.target.value)}
+                          onChange={(event) => updateCreatePriceOverride(line.key, event.target.value)}
                           placeholder={fromCents(pricing.unitPriceCents)}
                           className={cn(
                             "h-8 w-20 rounded-md border px-1.5 text-right text-xs font-semibold outline-none focus:border-accent",
@@ -2228,7 +2241,7 @@ export function QuotationsRoute(): React.JSX.Element {
                           min={0}
                           step="0.01"
                           value={line.discount}
-                          onChange={(event) => updateCreateDiscount(line.productId, event.target.value)}
+                          onChange={(event) => updateCreateDiscount(line.key, event.target.value)}
                           className="h-8 w-20 rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
                         />
                       </label>
@@ -2245,7 +2258,7 @@ export function QuotationsRoute(): React.JSX.Element {
                       <input
                         type="checkbox"
                         checked={line.isLocallySourced}
-                        onChange={() => toggleCreateLocallySourced(line.productId)}
+                        onChange={() => toggleCreateLocallySourced(line.key)}
                         className="size-3.5 accent-accent"
                       />
                       Sourced from another shop
@@ -2260,7 +2273,7 @@ export function QuotationsRoute(): React.JSX.Element {
                             min={0}
                             step="0.01"
                             value={line.localCost}
-                            onChange={(event) => updateCreateLocalCost(line.productId, event.target.value)}
+                            onChange={(event) => updateCreateLocalCost(line.key, event.target.value)}
                             placeholder="0.00"
                             className="mt-1 h-10 w-full rounded-md border border-line px-3 text-sm font-semibold outline-none focus:border-accent"
                           />
@@ -2275,7 +2288,7 @@ export function QuotationsRoute(): React.JSX.Element {
                           <SupplierPicker
                             suppliers={suppliers}
                             value={line.localSupplierId}
-                            onChange={(supplierId) => updateCreateLocalSupplier(line.productId, supplierId)}
+                            onChange={(supplierId) => updateCreateLocalSupplier(line.key, supplierId)}
                             onSupplierCreated={(supplier) => setSuppliers((prev) => [...prev, supplier])}
                           />
                         </div>
@@ -2288,7 +2301,7 @@ export function QuotationsRoute(): React.JSX.Element {
                         type="text"
                         list="quotation-section-names"
                         value={line.sectionLabel ?? ""}
-                        onChange={(event) => updateCreateSectionLabel(line.productId, event.target.value || null)}
+                        onChange={(event) => updateCreateSectionLabel(line.key, event.target.value || null)}
                         placeholder="None"
                         className="h-7 flex-1 rounded-md border border-line px-2 text-xs font-semibold outline-none focus:border-accent"
                       />
