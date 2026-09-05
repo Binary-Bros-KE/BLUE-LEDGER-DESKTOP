@@ -6,7 +6,7 @@ import * as locationRepository from "@main/database/repositories/location-reposi
 import * as productRepository from "@main/database/repositories/product-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
-import { deleteManagedProductImage } from "@main/services/image-service";
+import { deleteManagedProductImage, finalizeProductImagePath } from "@main/services/image-service";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
 import { deriveUnallocatedQuantity } from "@main/services/main-store-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
@@ -221,10 +221,16 @@ export function createProduct(input: unknown): Product {
   assertOpeningStockLocationsAllowed(parsed.openingStock, tenantId, branchScope);
 
   const productId = `product_${randomUUID()}`;
+  // Client request: rename the picked image (still under its random pickAndStore filename — the
+  // picker runs before this product has an id yet) to be named after this product's own id — see
+  // finalizeProductImagePath's own doc comment for why (makes "copy the images folder to another
+  // device" work without any synced path already pointing at the right file).
+  const finalizedImagePath = finalizeProductImagePath(parsed.imagePath, productId);
 
   return runInTransaction(() => {
     const row = productRepository.insertProductRow({
       ...parsed,
+      imagePath: finalizedImagePath,
       id: productId,
       tenantId,
       createdBy: performedBy
@@ -266,9 +272,12 @@ export function updateProduct(id: string, input: unknown): Product {
   assertProductStorefrontUpdateAllowed(parsed.storefrontId, existing.storefront_id, getCurrentBranchScope());
   assertUniqueFields(tenantId, parsed, id);
 
-  const row = productRepository.updateProductRow(id, { ...parsed, updatedBy: getCurrentEmployeeId() });
+  // Same rename-to-id treatment as createProduct — see finalizeProductImagePath's own doc comment.
+  const finalizedImagePath = finalizeProductImagePath(parsed.imagePath, id);
 
-  if (existing.image_path && existing.image_path !== parsed.imagePath) {
+  const row = productRepository.updateProductRow(id, { ...parsed, imagePath: finalizedImagePath, updatedBy: getCurrentEmployeeId() });
+
+  if (existing.image_path && existing.image_path !== finalizedImagePath) {
     deleteManagedProductImage(existing.image_path);
   }
 

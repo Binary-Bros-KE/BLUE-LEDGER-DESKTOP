@@ -513,8 +513,12 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       trackStock: p.trackStock,
       allowNegativeStock: p.allowNegativeStock,
       status: p.status,
-      // imagePath deliberately NOT sent — a local file path, no shared cloud image storage yet
-      // (same precedent as Employee.photoPath).
+      // Client request: now sent — the FILE itself still never leaves the device it was created
+      // on (no shared cloud image storage), but the path is now named after the product's own id
+      // (see finalizeProductImagePath, image-service.ts), so once it syncs, manually copying the
+      // images folder to a second device makes that device's copy resolve correctly too. Before
+      // this, neither the path nor the file ever left the originating device.
+      imagePath: p.imagePath,
       localCreatedAt: p.createdAt,
       localUpdatedAt: p.updatedAt,
       // The optimistic-lock baseline — see CONFLICT_AWARE_ENTITIES's own comment. Null on a
@@ -731,8 +735,12 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       // why this is an acceptable risk to accept for that goal.
       pinHash: row.pin_hash,
       passwordHash: row.password_hash,
-      // Still deliberately NOT sent: failedLoginAttempts/lockedUntil (live local security state,
-      // meaningless off-device), photoPath (no shared cloud image storage yet).
+      // Client request: photoPath now sent too — same reasoning as Product.imagePath's own
+      // updated comment (sync-engine.ts's products builder): now named after the employee's own
+      // id (finalizeEmployeePhotoPath, image-service.ts), so it's useful once synced even though
+      // the file itself still stays device-local. Still deliberately NOT sent:
+      // failedLoginAttempts/lockedUntil (live local security state, meaningless off-device).
+      photoPath: row.photo_path,
       localCreatedAt: e.createdAt,
       localUpdatedAt: e.updatedAt,
       baseUpdatedAt: row.synced_updated_at
@@ -763,8 +771,12 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       locationName: row.location_name,
       displayName: row.display_name,
       locationType: row.location_type,
-      // logo_path/logo_ratio deliberately NOT sent — local file path, no shared cloud image
-      // storage yet (same precedent as Employee.photoPath/Product.imagePath).
+      // Client request: logo_path/logo_ratio now sent too — same reasoning as Product.imagePath's
+      // own updated comment (sync-engine.ts's products builder): now named after the storefront's
+      // own id (finalizeLocationLogoPath, image-service.ts), so it's useful once synced even
+      // though the file itself still stays device-local.
+      logoPath: row.logo_path,
+      logoRatio: row.logo_ratio,
       phone: row.phone,
       alternativePhone: row.alternative_phone,
       email: row.email,
@@ -1735,16 +1747,21 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       { local: "reorder_level", cloud: "reorderLevel" },
       { local: "track_stock", cloud: "trackStock", type: "bool" },
       { local: "allow_negative_stock", cloud: "allowNegativeStock", type: "bool" },
-      { local: "status", cloud: "status" }
+      { local: "status", cloud: "status" },
+      // Client request — see PAYLOAD_BUILDERS.products' own updated comment on this same field.
+      // Older device's payload predates this field entirely (undefined, not null) — no `default`
+      // set, so toLocalValue's undefined-fallback resolves to plain null, same as a product that
+      // genuinely has no image.
+      { local: "image_path", cloud: "imagePath" }
     ]
   },
   employees: {
     // pin_hash/password_hash now included (were deliberately excluded through Phase 1-5 — see
     // PAYLOAD_BUILDERS.employees' own comment for the reasoning on why that changed): a device
     // restored from a disaster-recovery pull must let an employee log in with their EXISTING PIN,
-    // not force everyone to be re-onboarded. Still deliberately excludes failed_login_attempts/
-    // locked_until/photo_path — none of those exist in the cloud payload at all (live local
-    // security state or a local file path, neither meaningful off-device).
+    // not force everyone to be re-onboarded. photo_path now included too — see
+    // PAYLOAD_BUILDERS.employees' own updated comment. Still deliberately excludes
+    // failed_login_attempts/locked_until — live local security state, meaningless off-device.
     table: "employees",
     naturalKey: { local: "employee_code", cloud: "employeeCode" },
     columns: [
@@ -1774,7 +1791,8 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       // trying to bind undefined into a NOT NULL column — same bug class as
       // [[project_syncedat_update_propagation_bug]]'s sibling issues this session.
       { local: "default_allowances_json", cloud: "defaultAllowancesJson", type: "json", default: "[]" },
-      { local: "default_deductions_json", cloud: "defaultDeductionsJson", type: "json", default: "[]" }
+      { local: "default_deductions_json", cloud: "defaultDeductionsJson", type: "json", default: "[]" },
+      { local: "photo_path", cloud: "photoPath" }
     ]
   },
   roles: {
@@ -1796,6 +1814,9 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       { local: "location_name", cloud: "locationName" },
       { local: "display_name", cloud: "displayName" },
       { local: "location_type", cloud: "locationType" },
+      // Client request — see PAYLOAD_BUILDERS.locations' own updated comment on these two fields.
+      { local: "logo_path", cloud: "logoPath" },
+      { local: "logo_ratio", cloud: "logoRatio" },
       { local: "phone", cloud: "phone" },
       { local: "alternative_phone", cloud: "alternativePhone" },
       { local: "email", cloud: "email" },

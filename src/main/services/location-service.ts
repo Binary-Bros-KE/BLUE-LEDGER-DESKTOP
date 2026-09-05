@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import * as locationRepository from "@main/database/repositories/location-repository";
 import { getCurrentEmployeeId, requirePermission, requireSignedIn } from "@main/services/auth-service";
-import { deleteManagedLocationLogo } from "@main/services/image-service";
+import { deleteManagedLocationLogo, finalizeLocationLogoPath } from "@main/services/image-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { locationInputSchema } from "@shared/schemas/location";
 import type { Location, LocationStatus } from "@shared/types/location";
@@ -28,9 +28,15 @@ export function createLocation(input: unknown): Location {
   requirePermission("locations", "create");
   const parsed = locationInputSchema.parse(input);
   const { tenantId } = getCurrentTenant();
+  const locationId = `location_${randomUUID()}`;
+  // Client request: rename the picked logo (still under its random pickAndStore filename — the
+  // picker runs before this storefront has an id yet) to be named after this storefront's own id
+  // — see finalizeLocationLogoPath's own doc comment for why.
+  const finalizedLogoPath = finalizeLocationLogoPath(parsed.logoPath, locationId);
   const row = locationRepository.insertLocationRow({
     ...parsed,
-    id: `location_${randomUUID()}`,
+    logoPath: finalizedLogoPath,
+    id: locationId,
     tenantId,
     createdBy: getCurrentEmployeeId()
   });
@@ -42,9 +48,12 @@ export function updateLocation(id: string, input: unknown): Location {
   const parsed = locationInputSchema.parse(input);
   const existing = locationRepository.findLocationRowById(id);
 
-  const row = locationRepository.updateLocationRow(id, { ...parsed, updatedBy: getCurrentEmployeeId() });
+  // Same rename-to-id treatment as createLocation — see finalizeLocationLogoPath's own doc comment.
+  const finalizedLogoPath = finalizeLocationLogoPath(parsed.logoPath, id);
 
-  if (existing?.logo_path && existing.logo_path !== parsed.logoPath) {
+  const row = locationRepository.updateLocationRow(id, { ...parsed, logoPath: finalizedLogoPath, updatedBy: getCurrentEmployeeId() });
+
+  if (existing?.logo_path && existing.logo_path !== finalizedLogoPath) {
     deleteManagedLocationLogo(existing.logo_path);
   }
 

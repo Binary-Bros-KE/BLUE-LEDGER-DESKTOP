@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { copyFileSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { extname, isAbsolute, join } from "node:path";
 import electron from "electron";
@@ -193,7 +193,38 @@ function createManagedImageStore(options: {
     }
   }
 
-  return { pickAndStore, readPreview, remove };
+  /** Client request: renames a just-picked image (still under its random pickAndStore filename —
+   * picking happens before a brand-new entity has a real id yet, e.g. while filling out "Create
+   * Product") to be named after the entity's own id instead, once that id is actually known (right
+   * before the create/update write). This is the actual fix for "copy the images folder to a
+   * second device and it just works": an entity's own id already syncs (it's the row's real
+   * identity), so once every image is named after its owning id by convention, a copied images
+   * folder resolves correctly on any device with no synced image path needed to already point at
+   * the right file — see sync-engine.ts's own updated comment on this same field for the other
+   * half of this fix (the path itself now syncing too). A no-op for a legacy absolute path (pre-
+   * migration installs), for no image at all, or for an image already named after this id (every
+   * save after the first one). Deletes any stale file already sitting under the target name first
+   * (a prior image for this exact id, e.g. after delete-then-re-add) so replacing an image can
+   * never leave two files claiming the same id under different extensions. */
+  function finalize(currentRelativePath: string | null, entityId: string): string | null {
+    if (!currentRelativePath || isAbsolute(currentRelativePath)) return currentRelativePath;
+    const desiredRelativePath = toManagedRelativePath(`${entityId}${extname(currentRelativePath)}`);
+    if (currentRelativePath === desiredRelativePath) return currentRelativePath;
+
+    const currentAbsolute = resolveManagedPath(currentRelativePath);
+    const desiredAbsolute = resolveManagedPath(desiredRelativePath);
+    try {
+      if (!existsSync(currentAbsolute)) return currentRelativePath;
+      rmSync(desiredAbsolute, { force: true });
+      renameSync(currentAbsolute, desiredAbsolute);
+      return desiredRelativePath;
+    } catch {
+      // Best-effort — keep whatever path already works rather than losing the image reference.
+      return currentRelativePath;
+    }
+  }
+
+  return { pickAndStore, readPreview, remove, finalize };
 }
 
 const productImageStore = createManagedImageStore({
@@ -207,6 +238,8 @@ export const pickAndStoreProductImage = productImageStore.pickAndStore;
 export const readManagedProductImagePreview = productImageStore.readPreview;
 /** Removes a managed product image from disk. Safe to call even if the file no longer exists. */
 export const deleteManagedProductImage = productImageStore.remove;
+/** Renames a just-picked product image to be named after the product's own id — see finalize's own doc comment. */
+export const finalizeProductImagePath = productImageStore.finalize;
 
 const employeePhotoStore = createManagedImageStore({
   relativeDir: join("images", "employees"),
@@ -219,6 +252,8 @@ export const pickAndStoreEmployeePhoto = employeePhotoStore.pickAndStore;
 export const readManagedEmployeePhotoPreview = employeePhotoStore.readPreview;
 /** Removes a managed employee photo from disk. Safe to call even if the file no longer exists. */
 export const deleteManagedEmployeePhoto = employeePhotoStore.remove;
+/** Renames a just-picked employee photo to be named after the employee's own id — see finalize's own doc comment. */
+export const finalizeEmployeePhotoPath = employeePhotoStore.finalize;
 
 const businessLogoStore = createManagedImageStore({
   relativeDir: join("images", "business"),
@@ -243,6 +278,8 @@ export const pickAndStoreLocationLogo = locationLogoStore.pickAndStore;
 export const readManagedLocationLogoPreview = locationLogoStore.readPreview;
 /** Removes a managed storefront logo from disk. Safe to call even if the file no longer exists. */
 export const deleteManagedLocationLogo = locationLogoStore.remove;
+/** Renames a just-picked storefront logo to be named after the location's own id — see finalize's own doc comment. */
+export const finalizeLocationLogoPath = locationLogoStore.finalize;
 
 const ATTACHMENT_EXTENSIONS = new Set([".pdf", ".jpg", ".jpeg", ".png", ".webp"]);
 const ATTACHMENT_MAX_BYTES = 15 * 1024 * 1024;

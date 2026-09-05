@@ -4,7 +4,7 @@ import * as locationRepository from "@main/database/repositories/location-reposi
 import * as roleRepository from "@main/database/repositories/role-repository";
 import { hashSecret } from "@main/lib/password-hash";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
-import { deleteManagedEmployeePhoto } from "@main/services/image-service";
+import { deleteManagedEmployeePhoto, finalizeEmployeePhotoPath } from "@main/services/image-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { employeeCreateSchema, employeeUpdateSchema, type EmployeeCreateInput } from "@shared/schemas/employee";
 import type { Employee, EmployeeListItem, EmployeeStatus } from "@shared/types/employee";
@@ -66,10 +66,16 @@ function createEmployeeInternal(
 
   const pinHash = hashSecret(parsed.pin);
   const passwordHash = parsed.password ? hashSecret(parsed.password) : null;
+  const employeeId = `employee_${randomUUID()}`;
+  // Client request: rename the picked photo (still under its random pickAndStore filename — the
+  // picker runs before this employee has an id yet) to be named after this employee's own id — see
+  // finalizeEmployeePhotoPath's own doc comment for why.
+  const finalizedPhotoPath = finalizeEmployeePhotoPath(parsed.photoPath, employeeId);
 
   const row = employeeRepository.insertEmployeeRow({
     ...parsed,
-    id: `employee_${randomUUID()}`,
+    photoPath: finalizedPhotoPath,
+    id: employeeId,
     tenantId,
     pinHash,
     passwordHash,
@@ -176,13 +182,18 @@ export function updateEmployee(id: string, input: unknown): Employee {
   const pinHash = parsed.pin ? hashSecret(parsed.pin) : existing.pin_hash;
   const passwordHash = parsed.password ? hashSecret(parsed.password) : existing.password_hash;
 
+  // Same rename-to-id treatment as createEmployeeInternal — see finalizeEmployeePhotoPath's own
+  // doc comment.
+  const finalizedPhotoPath = finalizeEmployeePhotoPath(parsed.photoPath, id);
+
   const row = employeeRepository.updateEmployeeRow(id, {
     ...parsed,
+    photoPath: finalizedPhotoPath,
     pinHash,
     passwordHash
   });
 
-  if (existing.photo_path && existing.photo_path !== parsed.photoPath) {
+  if (existing.photo_path && existing.photo_path !== finalizedPhotoPath) {
     deleteManagedEmployeePhoto(existing.photo_path);
   }
 
