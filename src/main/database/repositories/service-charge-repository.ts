@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getDatabase } from "@main/database/connection";
+import type { ServiceChargeTaxType } from "@shared/schemas/charges";
 import type { SaleServiceCharge } from "@shared/types/sale";
 
 export type ServiceChargeRow = {
@@ -10,6 +11,10 @@ export type ServiceChargeRow = {
   name: string;
   fee_cents: number;
   cost_cents: number;
+  tax_type: string;
+  tax_inclusive: number | null;
+  tax_amount_cents: number;
+  line_total_cents: number;
   created_at: string;
   sync_status: string;
 };
@@ -33,6 +38,10 @@ export function insertServiceChargeRow(input: {
   name: string;
   feeCents: number;
   costCents: number;
+  taxType: ServiceChargeTaxType;
+  taxInclusive: boolean | null;
+  taxAmountCents: number;
+  lineTotalCents: number;
 }): ServiceChargeRow {
   const id = `svc_chg_${randomUUID()}`;
   const now = new Date().toISOString();
@@ -41,12 +50,26 @@ export function insertServiceChargeRow(input: {
     .prepare(
       `
       INSERT INTO sale_service_charges (
-        id, tenant_id, sale_id, quotation_id, name, fee_cents, cost_cents, created_at, sync_status
+        id, tenant_id, sale_id, quotation_id, name, fee_cents, cost_cents,
+        tax_type, tax_inclusive, tax_amount_cents, line_total_cents, created_at, sync_status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
     `
     )
-    .run(id, input.tenantId, input.saleId, input.quotationId, input.name, input.feeCents, input.costCents, now);
+    .run(
+      id,
+      input.tenantId,
+      input.saleId,
+      input.quotationId,
+      input.name,
+      input.feeCents,
+      input.costCents,
+      input.taxType,
+      input.taxInclusive === null ? null : input.taxInclusive ? 1 : 0,
+      input.taxAmountCents,
+      input.lineTotalCents,
+      now
+    );
 
   return getDatabase().prepare("SELECT * FROM sale_service_charges WHERE id = ?").get(id) as ServiceChargeRow;
 }
@@ -66,6 +89,10 @@ export function mapServiceChargeRow(row: ServiceChargeRow): SaleServiceCharge {
     id: row.id,
     name: row.name,
     feeCents: row.fee_cents,
-    costCents: row.cost_cents
+    costCents: row.cost_cents,
+    taxType: row.tax_type as ServiceChargeTaxType,
+    taxInclusive: row.tax_inclusive === null ? null : Boolean(row.tax_inclusive),
+    taxAmountCents: row.tax_amount_cents,
+    lineTotalCents: row.line_total_cents
   };
 }

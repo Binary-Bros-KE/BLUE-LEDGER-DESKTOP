@@ -21,10 +21,10 @@ import {
   type CheckoutInput,
   type SaleCartInput
 } from "@shared/schemas/sale";
-import { computeLineTax, resolveProductTaxConfig } from "@shared/lib/tax-calculation";
+import { computeLineTax, resolveProductTaxConfig, type TenantTaxConfig } from "@shared/lib/tax-calculation";
 import { isStorefrontType, type LocationType } from "@shared/types/location";
 import type { ProductTaxType } from "@shared/types/product";
-import type { PendingSaleListItem, Sale, SaleListItem } from "@shared/types/sale";
+import type { PendingSaleListItem, Sale, SaleListItem, SaleServiceCharge } from "@shared/types/sale";
 import type { ProductRow } from "@main/database/repositories/product-repository";
 
 export type PreparedItem = {
@@ -50,10 +50,14 @@ export type PreparedCart = {
   items: PreparedItem[];
   subtotalCents: number;
   discountAmountCents: number;
+  /** Includes each taxable service charge's own taxAmountCents — see prepareCart. */
   taxAmountCents: number;
-  /** Includes serviceCharges/delivery fees folded in — see prepareCart. */
+  /** Includes serviceCharges (each charge's own lineTotalCents, not its raw feeCents — see
+   * prepareCart)/delivery fees folded in. */
   grandTotalCents: number;
-  serviceCharges: ServiceChargeInput[];
+  /** `id` is always "" here — a real id only exists once persistServiceCharges actually inserts
+   * the row; every other field (including the computed taxAmountCents/lineTotalCents) is real. */
+  serviceCharges: SaleServiceCharge[];
   delivery: DeliveryInput | null;
 };
 
@@ -242,14 +246,39 @@ export function prepareCart(
     };
   });
 
-  const serviceCharges = extras?.serviceCharges ?? [];
+  // Client request: each service charge gets the SAME tax treatment a product line would, except
+  // there's no product/tenant-default fallback to resolve through first — "none" (no tax at all)
+  // is the deliberate default, only overridden when the user actually picks a treatment. See
+  // computeServiceChargeTax's own doc comment.
+  const preparedServiceCharges: SaleServiceCharge[] = (extras?.serviceCharges ?? []).map((charge) => {
+    const { taxAmountCents: chargeTaxAmountCents, lineTotalCents: chargeLineTotalCents } = computeServiceChargeTax(
+      charge.feeCents,
+      charge.taxType,
+      charge.taxInclusive,
+      tenantTaxConfig
+    );
+    taxAmountCents += chargeTaxAmountCents;
+    return {
+      id: "",
+      name: charge.name,
+      feeCents: charge.feeCents,
+      costCents: charge.costCents,
+      taxType: charge.taxType,
+      taxInclusive: charge.taxInclusive,
+      taxAmountCents: chargeTaxAmountCents,
+      lineTotalCents: chargeLineTotalCents
+    };
+  });
   const delivery = extras?.delivery ?? null;
   const extraFeesCents =
-    serviceCharges.reduce((sum, charge) => sum + charge.feeCents, 0) + (delivery?.feeCents ?? 0);
+    preparedServiceCharges.reduce((sum, charge) => sum + charge.lineTotalCents, 0) + (delivery?.feeCents ?? 0);
 
   // Summing each line's own grossCents (rather than branching subtotalCents - discount + tax off a
   // single global toggle) is what makes a cart with mixed inclusive/exclusive products total
   // correctly — each line already resolved its OWN effective mode above via resolveProductTaxConfig.
+  // Service charges follow the identical principle: extraFeesCents already sums each charge's OWN
+  // lineTotalCents (gross), not its raw feeCents, so a VAT-exclusive charge correctly adds MORE
+  // than its typed fee here, same as an exclusive product line already does.
   const grandTotalCents = preparedItems.reduce((sum, item) => sum + item.lineTotalCents, 0) + extraFeesCents;
 
   return {
@@ -258,9 +287,34 @@ export function prepareCart(
     discountAmountCents,
     taxAmountCents,
     grandTotalCents,
-    serviceCharges,
+    serviceCharges: preparedServiceCharges,
     delivery
   };
+}
+
+/** A service charge's own tax computation — mirrors computeLineTax's own contract, plus the "none"
+ * short-circuit computeLineTax doesn't have (it only ever sees a PRODUCT's tax type, which is
+ * always one of "vat"/"exempted"/"zero_rated" — never "none"). No product/tenant-default fallback
+ * for WHETHER tax applies at all — that's the one deliberate divergence from
+ * resolveProductTaxConfig, see ServiceChargeTaxType's own doc comment (shared/schemas/charges.ts).
+ * taxInclusive falling back to the tenant's own inclusive/exclusive convention only matters for a
+ * non-UI caller — the renderer's own select always sends an explicit true/false the moment taxType
+ * is "vat" at all (see ExtraChargesSection.tsx), never a bare "vat" with no sub-mode chosen. */
+function computeServiceChargeTax(
+  feeCents: number,
+  taxType: ServiceChargeInput["taxType"],
+  taxInclusive: boolean | null,
+  tenantTaxConfig: TenantTaxConfig
+): { taxAmountCents: number; lineTotalCents: number } {
+  if (taxType === "none") {
+    return { taxAmountCents: 0, lineTotalCents: feeCents };
+  }
+  const effectiveConfig: TenantTaxConfig = {
+    vatRatePercent: tenantTaxConfig.vatRatePercent,
+    pricesTaxInclusive: taxInclusive ?? tenantTaxConfig.pricesTaxInclusive
+  };
+  const { grossCents, taxCents } = computeLineTax(feeCents, taxType, effectiveConfig);
+  return { taxAmountCents: taxCents, lineTotalCents: grossCents };
 }
 
 function persistServiceCharges(
@@ -278,7 +332,11 @@ function persistServiceCharges(
       quotationId,
       name: charge.name,
       feeCents: charge.feeCents,
-      costCents: charge.costCents
+      costCents: charge.costCents,
+      taxType: charge.taxType,
+      taxInclusive: charge.taxInclusive,
+      taxAmountCents: charge.taxAmountCents,
+      lineTotalCents: charge.lineTotalCents
     });
   }
 }

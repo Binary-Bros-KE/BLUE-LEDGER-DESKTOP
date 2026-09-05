@@ -42,13 +42,20 @@ import { SupplierPicker } from "@renderer/shared/components/SupplierPicker";
 import { TaxBreakdownTable } from "@renderer/shared/components/TaxBreakdownTable";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { useProductStockOverview } from "@renderer/shared/hooks/use-product-stock-overview";
-import { computeLinePricing, isPriceBelowMinimum } from "@renderer/shared/lib/cart-pricing";
+import { computeLinePricing, computeServiceChargeAmount, isPriceBelowMinimum } from "@renderer/shared/lib/cart-pricing";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents, totalCentsToUnitCostText, unitCostToTotalCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { groupItemsBySections, type NotesSection } from "@shared/lib/document-sections";
-import { computeAddedTaxCents, computeTaxBreakdown, resolveProductTaxConfig, taxModeBadgeLabel } from "@shared/lib/tax-calculation";
+import {
+  computeAddedTaxCents,
+  computeTaxBreakdown,
+  resolveProductTaxConfig,
+  taxModeBadgeLabel,
+  withTaxableServiceCharges
+} from "@shared/lib/tax-calculation";
+import type { ServiceChargeTaxType } from "@shared/schemas/charges";
 import {
   ALL_YEARS_VALUE,
   buildAvailableYears,
@@ -813,18 +820,36 @@ export function InvoicesRoute(): React.JSX.Element {
       taxAmountCents += entry.pricing.taxCents;
       lineTotalCentsSum += entry.pricing.lineTotalCents;
     }
-    const serviceChargesFeeCents = createServiceCharges.reduce((sum, charge) => sum + toCents(charge.fee), 0);
+    // Client request: each service charge gets the same tax treatment a product line would — see
+    // CheckoutRoute.tsx's computeDraftTotals for the same reasoning.
+    const preparedCharges = createServiceCharges.map((charge) => {
+      const feeCents = toCents(charge.fee);
+      const amount = computeServiceChargeAmount(
+        feeCents,
+        charge.taxType,
+        charge.taxInclusive,
+        { vatRatePercent: tenantContext?.vatRatePercent ?? 16, pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true }
+      );
+      return { feeCents, taxType: charge.taxType, taxAmountCents: amount.taxAmountCents, lineTotalCents: amount.lineTotalCents };
+    });
+    const serviceChargesFeeCents = preparedCharges.reduce((sum, charge) => sum + charge.lineTotalCents, 0);
+    taxAmountCents += preparedCharges.reduce((sum, charge) => sum + charge.taxAmountCents, 0);
     const deliveryFeeCents = createDelivery ? toCents(createDelivery.fee) : 0;
     // Sums each line's own lineTotalCents (already resolved per-product) rather than branching off
     // one global toggle — see CheckoutRoute.tsx's computeDraftTotals for the same reasoning.
     const grandTotalCents = lineTotalCentsSum + serviceChargesFeeCents + deliveryFeeCents;
     const addedTaxCents = computeAddedTaxCents(
-      createLinePricing.map((entry) => ({
-        unitPriceCents: entry.pricing.unitPriceCents,
-        quantity: entry.line.quantity,
-        discountAmountCents: entry.pricing.discountAmountCents,
-        lineTotalCents: entry.pricing.lineTotalCents
-      }))
+      withTaxableServiceCharges(
+        createLinePricing.map((entry) => ({
+          unitPriceCents: entry.pricing.unitPriceCents,
+          quantity: entry.line.quantity,
+          discountAmountCents: entry.pricing.discountAmountCents,
+          taxType: entry.product.taxType,
+          taxAmountCents: entry.pricing.taxCents,
+          lineTotalCents: entry.pricing.lineTotalCents
+        })),
+        preparedCharges
+      )
     );
     return {
       subtotalCents,
@@ -833,9 +858,10 @@ export function InvoicesRoute(): React.JSX.Element {
       serviceChargesFeeCents,
       deliveryFeeCents,
       grandTotalCents,
-      addedTaxCents
+      addedTaxCents,
+      preparedCharges
     };
-  }, [createLinePricing, createServiceCharges, createDelivery]);
+  }, [createLinePricing, createServiceCharges, createDelivery, tenantContext]);
 
   const initialPaymentCents = includeInitialPayment && initialPaymentAmount.trim() !== "" ? toCents(initialPaymentAmount) : 0;
 
@@ -961,7 +987,9 @@ export function InvoicesRoute(): React.JSX.Element {
         key: crypto.randomUUID(),
         name: charge.name,
         fee: fromCents(charge.feeCents),
-        cost: fromCents(charge.costCents)
+        cost: fromCents(charge.costCents),
+        taxType: charge.taxType,
+        taxInclusive: charge.taxInclusive
       }))
     );
     setCreateDelivery(
@@ -1189,7 +1217,9 @@ export function InvoicesRoute(): React.JSX.Element {
       serviceCharges: createServiceCharges.map((charge) => ({
         name: charge.name,
         feeCents: toCents(charge.fee),
-        costCents: toCents(charge.cost)
+        costCents: toCents(charge.cost),
+        taxType: charge.taxType,
+        taxInclusive: charge.taxInclusive
       })),
       notesSections: createNotesSections
         .filter((section) => section.title.trim())
@@ -1721,7 +1751,7 @@ export function InvoicesRoute(): React.JSX.Element {
                 <div className="flex justify-between text-muted">
                   <span className="font-semibold">Service Charges</span>
                   <span className="font-bold tabular-nums">
-                    {formatCents(viewingSale.serviceCharges.reduce((sum, charge) => sum + charge.feeCents, 0))}
+                    {formatCents(viewingSale.serviceCharges.reduce((sum, charge) => sum + charge.lineTotalCents, 0))}
                   </span>
                 </div>
               )}
@@ -1731,12 +1761,15 @@ export function InvoicesRoute(): React.JSX.Element {
                   <span className="font-bold tabular-nums">{formatCents(viewingSale.delivery.feeCents)}</span>
                 </div>
               )}
-              {viewingSale.includeTaxBreakdown && computeAddedTaxCents(viewingSale.items) > 0 && (
-                <div className="flex justify-between text-muted">
-                  <span className="font-semibold">Total Tax</span>
-                  <span className="font-bold tabular-nums">{formatCents(computeAddedTaxCents(viewingSale.items))}</span>
-                </div>
-              )}
+              {viewingSale.includeTaxBreakdown &&
+                computeAddedTaxCents(withTaxableServiceCharges(viewingSale.items, viewingSale.serviceCharges)) > 0 && (
+                  <div className="flex justify-between text-muted">
+                    <span className="font-semibold">Total Tax</span>
+                    <span className="font-bold tabular-nums">
+                      {formatCents(computeAddedTaxCents(withTaxableServiceCharges(viewingSale.items, viewingSale.serviceCharges)))}
+                    </span>
+                  </div>
+                )}
               <div className="flex justify-between text-base font-extrabold text-ink">
                 <span>Total</span>
                 <span>{formatCents(viewingSale.grandTotalCents)}</span>
@@ -1752,7 +1785,7 @@ export function InvoicesRoute(): React.JSX.Element {
             </div>
 
             <TaxBreakdownTable
-              breakdown={computeTaxBreakdown(viewingSale.items)}
+              breakdown={computeTaxBreakdown(withTaxableServiceCharges(viewingSale.items, viewingSale.serviceCharges))}
               tenantTaxConfig={{ vatRatePercent: tenantContext?.vatRatePercent ?? 16, pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true }}
             />
 
@@ -2618,6 +2651,7 @@ export function InvoicesRoute(): React.JSX.Element {
             delivery={createDelivery}
             onDeliveryChange={setCreateDelivery}
             customerName={selectedCreateCustomer?.name ?? ""}
+            tenantTaxConfig={{ vatRatePercent: tenantContext?.vatRatePercent ?? 16, pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true }}
           />
 
           {!editingInvoiceId && (
@@ -2705,14 +2739,17 @@ export function InvoicesRoute(): React.JSX.Element {
 
           <TaxBreakdownTable
             breakdown={computeTaxBreakdown(
-              createLinePricing.map((entry) => ({
-                unitPriceCents: entry.pricing.unitPriceCents,
-                quantity: entry.line.quantity,
-                discountAmountCents: entry.pricing.discountAmountCents,
-                taxType: entry.product.taxType,
-                taxAmountCents: entry.pricing.taxCents,
-                lineTotalCents: entry.pricing.lineTotalCents
-              }))
+              withTaxableServiceCharges(
+                createLinePricing.map((entry) => ({
+                  unitPriceCents: entry.pricing.unitPriceCents,
+                  quantity: entry.line.quantity,
+                  discountAmountCents: entry.pricing.discountAmountCents,
+                  taxType: entry.product.taxType,
+                  taxAmountCents: entry.pricing.taxCents,
+                  lineTotalCents: entry.pricing.lineTotalCents
+                })),
+                createTotals.preparedCharges
+              )
             )}
             tenantTaxConfig={{ vatRatePercent: tenantContext?.vatRatePercent ?? 16, pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true }}
           />

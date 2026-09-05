@@ -3,8 +3,12 @@ import { Plus, Trash2, Truck, Wrench } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { CheckboxField, Field, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
+import { computeServiceChargeAmount } from "@renderer/shared/lib/cart-pricing";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { formatCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
+import type { ServiceChargeTaxType } from "@shared/schemas/charges";
+import type { TenantTaxConfig } from "@shared/lib/tax-calculation";
 import type { Rider } from "@shared/types/rider";
 
 /** fee/cost are kept as the raw text the user typed (currency units, e.g. "250.00"), not cents —
@@ -16,7 +20,29 @@ export type ServiceChargeDraft = {
   name: string;
   fee: string;
   cost: string;
+  /** Client request: a service charge's own tax classification — deliberately defaults to "none"
+   * (no tax at all), NOT the tenant's business-wide default a product would fall back to. See
+   * ServiceChargeTaxType's own doc comment (shared/schemas/charges.ts). */
+  taxType: ServiceChargeTaxType;
+  /** Only meaningful when taxType is "vat". */
+  taxInclusive: boolean | null;
 };
+
+/** The five tax treatments a service charge can have, combined into one <select> value — "vat"
+ * alone is never a real UI state, since the select always presents Inclusive/Exclusive as two
+ * distinct options rather than a bare "vat" needing a separate sub-mode question. */
+type TaxSelectValue = "none" | "vat_inclusive" | "vat_exclusive" | "exempted" | "zero_rated";
+
+function toTaxSelectValue(taxType: ServiceChargeTaxType, taxInclusive: boolean | null): TaxSelectValue {
+  if (taxType === "vat") return taxInclusive ? "vat_inclusive" : "vat_exclusive";
+  return taxType;
+}
+
+function fromTaxSelectValue(value: TaxSelectValue): { taxType: ServiceChargeTaxType; taxInclusive: boolean | null } {
+  if (value === "vat_inclusive") return { taxType: "vat", taxInclusive: true };
+  if (value === "vat_exclusive") return { taxType: "vat", taxInclusive: false };
+  return { taxType: value, taxInclusive: null };
+}
 
 export type DeliveryDraft = {
   riderId: string | null;
@@ -53,13 +79,17 @@ export function ExtraChargesSection({
   onServiceChargesChange,
   delivery,
   onDeliveryChange,
-  customerName
+  customerName,
+  tenantTaxConfig
 }: {
   serviceCharges: ServiceChargeDraft[];
   onServiceChargesChange: (next: ServiceChargeDraft[]) => void;
   delivery: DeliveryDraft | null;
   onDeliveryChange: (next: DeliveryDraft | null) => void;
   customerName?: string | null;
+  /** Needed only to compute the live "Total: X" hint below a VAT-exclusive charge's own Fee field
+   * — see the tax <select>'s own rendering below. */
+  tenantTaxConfig: TenantTaxConfig;
 }): React.JSX.Element {
   const [riders, setRiders] = useState<Rider[]>([]);
   const [riderModalOpen, setRiderModalOpen] = useState(false);
@@ -72,7 +102,10 @@ export function ExtraChargesSection({
   }, []);
 
   function addServiceCharge(): void {
-    onServiceChargesChange([...serviceCharges, { key: crypto.randomUUID(), name: "", fee: "", cost: "" }]);
+    onServiceChargesChange([
+      ...serviceCharges,
+      { key: crypto.randomUUID(), name: "", fee: "", cost: "", taxType: "none", taxInclusive: null }
+    ]);
   }
 
   function updateServiceCharge(key: string, patch: Partial<ServiceChargeDraft>): void {
@@ -114,41 +147,66 @@ export function ExtraChargesSection({
 
         {serviceCharges.length > 0 && (
           <div className="mt-2 space-y-2">
-            {serviceCharges.map((charge) => (
-              <div
-                key={charge.key}
-                className="grid grid-cols-[1fr_84px_84px_auto] items-end gap-1.5 rounded-lg border border-dashed border-line bg-soft/40 p-2"
-              >
-                <Field
-                  label="Name"
-                  value={charge.name}
-                  onChange={(value) => updateServiceCharge(charge.key, { name: value })}
-                  placeholder="e.g. Labour"
-                />
-                <Field
-                  label="Fee"
-                  type="number"
-                  value={charge.fee}
-                  onChange={(value) => updateServiceCharge(charge.key, { fee: value })}
-                  placeholder="0.00"
-                />
-                <Field
-                  label="Cost"
-                  type="number"
-                  value={charge.cost}
-                  onChange={(value) => updateServiceCharge(charge.key, { cost: value })}
-                  placeholder="0.00"
-                />
-                <button
-                  type="button"
-                  onClick={() => removeServiceCharge(charge.key)}
-                  aria-label="Remove charge"
-                  className="mb-0.5 grid size-9 flex-none place-items-center rounded-md text-muted transition hover:bg-danger-soft hover:text-danger cursor-pointer"
-                >
-                  <Trash2 className="size-3.5" aria-hidden="true" />
-                </button>
-              </div>
-            ))}
+            {serviceCharges.map((charge) => {
+              const feeCents = toCents(charge.fee);
+              const amount = computeServiceChargeAmount(feeCents, charge.taxType, charge.taxInclusive, tenantTaxConfig);
+              return (
+                <div key={charge.key} className="rounded-lg border border-dashed border-line bg-soft/40 p-2">
+                  <div className="grid grid-cols-[1fr_84px_84px_auto] items-end gap-1.5">
+                    <Field
+                      label="Name"
+                      value={charge.name}
+                      onChange={(value) => updateServiceCharge(charge.key, { name: value })}
+                      placeholder="e.g. Labour"
+                    />
+                    <Field
+                      label="Fee"
+                      type="number"
+                      value={charge.fee}
+                      onChange={(value) => updateServiceCharge(charge.key, { fee: value })}
+                      placeholder="0.00"
+                    />
+                    <Field
+                      label="Cost"
+                      type="number"
+                      value={charge.cost}
+                      onChange={(value) => updateServiceCharge(charge.key, { cost: value })}
+                      placeholder="0.00"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeServiceCharge(charge.key)}
+                      aria-label="Remove charge"
+                      className="mb-0.5 grid size-9 flex-none place-items-center rounded-md text-muted transition hover:bg-danger-soft hover:text-danger cursor-pointer"
+                    >
+                      <Trash2 className="size-3.5" aria-hidden="true" />
+                    </button>
+                  </div>
+                  <div className="mt-1.5 flex items-center justify-between gap-2">
+                    <label className="flex items-center gap-1.5 text-[10px] font-bold text-muted">
+                      Tax
+                      <select
+                        value={toTaxSelectValue(charge.taxType, charge.taxInclusive)}
+                        onChange={(event) => updateServiceCharge(charge.key, fromTaxSelectValue(event.target.value as TaxSelectValue))}
+                        className="h-7 rounded-md border border-line px-2 text-xs font-semibold outline-none focus:border-accent"
+                      >
+                        <option value="none">No Tax</option>
+                        <option value="vat_inclusive">VAT Inclusive</option>
+                        <option value="vat_exclusive">VAT Exclusive</option>
+                        <option value="exempted">Exempted</option>
+                        <option value="zero_rated">Zero-Rated</option>
+                      </select>
+                    </label>
+                    {/* Only VAT-exclusive ever makes the charged total differ from the typed fee —
+                        surfacing it here is the actual point of this feature: so what the client
+                        sees on screen already matches what gets charged/printed, no surprises. */}
+                    {amount.lineTotalCents !== feeCents && (
+                      <span className="text-[10px] font-bold text-muted">Total: {formatCents(amount.lineTotalCents)}</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
             <p className="text-[10px] font-semibold text-muted">
               Cost is internal-only — never shown on the receipt/invoice/quotation, used for profit reporting.
             </p>

@@ -1,5 +1,5 @@
 import { formatDocumentDateTime } from "@shared/lib/date";
-import { computeAddedTaxCents, computeTaxBreakdown, type TaxBreakdownEntry } from "@shared/lib/tax-calculation";
+import { computeAddedTaxCents, computeTaxBreakdown, withTaxableServiceCharges, type TaxBreakdownEntry } from "@shared/lib/tax-calculation";
 import type { Sale } from "@shared/types/sale";
 
 /** Formats integer cents for a receipt, e.g. 25050 -> "250.50". Usable from both main and renderer. */
@@ -98,7 +98,7 @@ export function buildReceiptViewModel(sale: Sale, business: ReceiptBusinessInfo)
         name: charge.name,
         quantity: 1,
         unitPriceCents: charge.feeCents,
-        lineTotalCents: charge.feeCents
+        lineTotalCents: charge.lineTotalCents
       })),
       // A seller who absorbs the delivery cost themselves charges the customer nothing for it —
       // a printed "Delivery Fee: 0.00" line would be confusing, so skip it entirely when zero.
@@ -116,8 +116,8 @@ export function buildReceiptViewModel(sale: Sale, business: ReceiptBusinessInfo)
     subtotalCents: sale.subtotalCents,
     discountAmountCents: sale.discountAmountCents,
     taxAmountCents: sale.taxAmountCents,
-    addedTaxCents: computeAddedTaxCents(sale.items),
-    taxBreakdown: computeTaxBreakdown(sale.items),
+    addedTaxCents: computeAddedTaxCents(withTaxableServiceCharges(sale.items, sale.serviceCharges)),
+    taxBreakdown: computeTaxBreakdown(withTaxableServiceCharges(sale.items, sale.serviceCharges)),
     includeTaxBreakdown: sale.includeTaxBreakdown,
     vatRatePercent: business.vatRatePercent,
     grandTotalCents: sale.grandTotalCents,

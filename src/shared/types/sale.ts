@@ -1,4 +1,4 @@
-import type { DeliveryInput } from "@shared/schemas/charges";
+import type { DeliveryInput, ServiceChargeTaxType } from "@shared/schemas/charges";
 import type { NotesSection } from "@shared/lib/document-sections";
 import type { ProductTaxType } from "@shared/types/product";
 
@@ -56,6 +56,19 @@ export type SaleServiceCharge = {
   feeCents: number;
   /** Internal-only, never printed — used to compute the actual margin the charge earned. */
   costCents: number;
+  /** Client request: see ServiceChargeTaxType's own doc comment (shared/schemas/charges.ts) — a
+   * service charge defaults to "none" (no tax at all), unlike a product, which falls back to the
+   * tenant's own Business Profile default. */
+  taxType: ServiceChargeTaxType;
+  /** Only meaningful when taxType is "vat". */
+  taxInclusive: boolean | null;
+  /** Frozen at creation, same "never recompute from a possibly-changed-since VAT rate" principle
+   * SaleItem's own taxAmountCents already follows. Always 0 when taxType is "none". */
+  taxAmountCents: number;
+  /** The actual amount charged — equals feeCents for "none"/inclusive/exempted/zero-rated, or
+   * feeCents + taxAmountCents for VAT-exclusive (tax added on top). Same grossCents-vs-taxable
+   * distinction SaleItem's own lineTotalCents already draws. */
+  lineTotalCents: number;
 };
 
 /** The one optional delivery a sale/invoice/quotation can carry — mirrors a standalone delivery note

@@ -1,3 +1,4 @@
+import type { ServiceChargeTaxType } from "@shared/schemas/charges";
 import { computeLineTax, resolveProductTaxConfig, type TenantTaxConfig } from "@shared/lib/tax-calculation";
 import type { ProductListItem } from "@shared/types/product";
 
@@ -64,4 +65,32 @@ export function computeLinePricing(
     taxCents,
     lineTotalCents: grossCents
   };
+}
+
+export type ServiceChargeAmount = {
+  taxAmountCents: number;
+  lineTotalCents: number;
+};
+
+/** Renderer-side mirror of sale-service.ts's own computeServiceChargeTax — same dual-implementation
+ * pattern computeLinePricing/prepareCart already establish, so the live on-screen total a cashier
+ * sees while picking a tax mode always matches what actually gets charged/persisted. Unlike a
+ * product, there's no fallback to the tenant/product default for WHETHER tax applies at all —
+ * "none" always means exactly zero tax, by design (see ServiceChargeTaxType's own doc comment,
+ * shared/schemas/charges.ts). */
+export function computeServiceChargeAmount(
+  feeCents: number,
+  taxType: ServiceChargeTaxType,
+  taxInclusive: boolean | null,
+  tenantTaxConfig: TenantTaxConfig
+): ServiceChargeAmount {
+  if (taxType === "none") {
+    return { taxAmountCents: 0, lineTotalCents: feeCents };
+  }
+  const effectiveConfig: TenantTaxConfig = {
+    vatRatePercent: tenantTaxConfig.vatRatePercent,
+    pricesTaxInclusive: taxInclusive ?? tenantTaxConfig.pricesTaxInclusive
+  };
+  const { grossCents, taxCents } = computeLineTax(feeCents, taxType, effectiveConfig);
+  return { taxAmountCents: taxCents, lineTotalCents: grossCents };
 }

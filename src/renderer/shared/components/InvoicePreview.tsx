@@ -8,7 +8,7 @@ import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { groupItemsBySections } from "@shared/lib/document-sections";
-import { computeAddedTaxCents } from "@shared/lib/tax-calculation";
+import { computeAddedTaxCents, withTaxableServiceCharges } from "@shared/lib/tax-calculation";
 import type { Sale } from "@shared/types/sale";
 import type { TenantContext } from "@shared/types/tenant";
 
@@ -187,10 +187,12 @@ export function InvoicePreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
                 <td className="border border-ink px-1.5 py-1 text-right">-{money(sale.discountAmountCents)}</td>
               </tr>
             )}
-            {includeTaxBreakdown && computeAddedTaxCents(sale.items) > 0 && (
+            {includeTaxBreakdown && computeAddedTaxCents(withTaxableServiceCharges(sale.items, sale.serviceCharges)) > 0 && (
               <tr>
                 <td className="border border-ink bg-soft px-1.5 py-1 font-bold">Total Tax</td>
-                <td className="border border-ink px-1.5 py-1 text-right">{money(computeAddedTaxCents(sale.items))}</td>
+                <td className="border border-ink px-1.5 py-1 text-right">
+                  {money(computeAddedTaxCents(withTaxableServiceCharges(sale.items, sale.serviceCharges)))}
+                </td>
               </tr>
             )}
             <tr>

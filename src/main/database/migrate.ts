@@ -2954,6 +2954,25 @@ const migrations = [
       ALTER TABLE sales ADD COLUMN notes_sections TEXT NOT NULL DEFAULT '[]';
       ALTER TABLE quotations ADD COLUMN notes_sections TEXT NOT NULL DEFAULT '[]';
     `
+  },
+  {
+    version: 85,
+    name: "service_charge_tax",
+    sql: `
+      -- A client computes VAT on their WHOLE invoice total, but service charges (Labour,
+      -- Installation, ...) had zero tax treatment — a flat untaxed fee — so the app's own tax
+      -- total never matched theirs the moment a document included one. Unlike a product (which
+      -- falls back to the tenant's own Business Profile default the moment nothing is set), a
+      -- service charge defaults to tax_type 'none' — no tax at all — until the user explicitly
+      -- picks a treatment; see ServiceChargeTaxType's own doc comment (shared/schemas/charges.ts).
+      -- line_total_cents backfilled to fee_cents for every existing row: all of them are 'none'-tax
+      -- by definition (this feature didn't exist yet), so gross already equals the fee charged.
+      ALTER TABLE sale_service_charges ADD COLUMN tax_type TEXT NOT NULL DEFAULT 'none';
+      ALTER TABLE sale_service_charges ADD COLUMN tax_inclusive INTEGER;
+      ALTER TABLE sale_service_charges ADD COLUMN tax_amount_cents INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE sale_service_charges ADD COLUMN line_total_cents INTEGER NOT NULL DEFAULT 0;
+      UPDATE sale_service_charges SET line_total_cents = fee_cents;
+    `
   }
 ] as const;
 

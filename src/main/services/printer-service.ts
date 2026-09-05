@@ -32,7 +32,13 @@ import { formatDocumentDate } from "@shared/lib/date";
 import { buildDeliveryNoteViewModel, type DeliveryNoteViewModel } from "@shared/lib/delivery-note";
 import { groupItemsBySections } from "@shared/lib/document-sections";
 import { buildReceiptViewModel, formatReceiptCents, type ReceiptViewModel } from "@shared/lib/receipt";
-import { computeAddedTaxCents, computeTaxBreakdown, taxBreakdownLabel, type TaxBreakdownEntry } from "@shared/lib/tax-calculation";
+import {
+  computeAddedTaxCents,
+  computeTaxBreakdown,
+  taxBreakdownLabel,
+  withTaxableServiceCharges,
+  type TaxBreakdownEntry
+} from "@shared/lib/tax-calculation";
 import { printerSettingsSchema } from "@shared/schemas/printer";
 import { isStorefrontType, type LocationType } from "@shared/types/location";
 import type { LogoRatio } from "@shared/types/logo";
@@ -1170,7 +1176,7 @@ function buildExtraChargeRows(
         <td class="center">1</td>
         <td class="right">${money(charge.feeCents)}</td>
         <td class="right">-</td>
-        <td class="right">${money(charge.feeCents)}</td>
+        <td class="right">${money(charge.lineTotalCents)}</td>
       </tr>`);
   }
 
@@ -1310,7 +1316,7 @@ function buildInvoiceHtml(
       <table class="totals-table">
         <tr><td>Subtotal</td><td>${money(sale.subtotalCents)}</td></tr>
         ${sale.discountAmountCents > 0 ? `<tr><td>Discount</td><td>-${money(sale.discountAmountCents)}</td></tr>` : ""}
-        ${sale.includeTaxBreakdown && computeAddedTaxCents(sale.items) > 0 ? `<tr><td>Total Tax</td><td>${money(computeAddedTaxCents(sale.items))}</td></tr>` : ""}
+        ${sale.includeTaxBreakdown && computeAddedTaxCents(withTaxableServiceCharges(sale.items, sale.serviceCharges)) > 0 ? `<tr><td>Total Tax</td><td>${money(computeAddedTaxCents(withTaxableServiceCharges(sale.items, sale.serviceCharges)))}</td></tr>` : ""}
         <tr class="grand"><td>Total</td><td>${money(sale.grandTotalCents)}</td></tr>
         <tr><td>Amount Paid</td><td>${money(sale.amountPaidCents)}</td></tr>
         <tr class="balance"><td>Balance Due</td><td>${money(sale.balanceDueCents)}</td></tr>
@@ -1329,7 +1335,7 @@ function buildInvoiceHtml(
         : ""
     }
 
-    ${sale.includeTaxBreakdown ? buildTaxBreakdownHtml(computeTaxBreakdown(sale.items), business.vatRatePercent, (cents) => money(cents), "tax-breakdown") : ""}
+    ${sale.includeTaxBreakdown ? buildTaxBreakdownHtml(computeTaxBreakdown(withTaxableServiceCharges(sale.items, sale.serviceCharges)), business.vatRatePercent, (cents) => money(cents), "tax-breakdown") : ""}
 
     ${sale.invoiceNotes ? `<div class="notes"><strong>Notes</strong><p>${escapeHtml(sale.invoiceNotes)}</p></div>` : ""}
 
@@ -1446,7 +1452,7 @@ function buildInvoiceThermalHtml(sale: Sale, business: DocumentBusinessInfo): st
         <td>${escapeHtml(charge.name)}</td>
         <td class="center">1</td>
         <td class="right">${money(charge.feeCents)}</td>
-        <td class="right">${money(charge.feeCents)}</td>
+        <td class="right">${money(charge.lineTotalCents)}</td>
       </tr>`
     ),
     ...(sale.delivery && sale.delivery.feeCents > 0
@@ -1518,12 +1524,12 @@ function buildInvoiceThermalHtml(sale: Sale, business: DocumentBusinessInfo): st
     <table class="totals">
       <tr><td class="label">Subtotal</td><td class="right">${money(sale.subtotalCents)}</td></tr>
       ${sale.discountAmountCents > 0 ? `<tr><td class="label">Discount</td><td class="right">-${money(sale.discountAmountCents)}</td></tr>` : ""}
-      ${sale.includeTaxBreakdown && computeAddedTaxCents(sale.items) > 0 ? `<tr><td class="label">Total Tax</td><td class="right">${money(computeAddedTaxCents(sale.items))}</td></tr>` : ""}
+      ${sale.includeTaxBreakdown && computeAddedTaxCents(withTaxableServiceCharges(sale.items, sale.serviceCharges)) > 0 ? `<tr><td class="label">Total Tax</td><td class="right">${money(computeAddedTaxCents(withTaxableServiceCharges(sale.items, sale.serviceCharges)))}</td></tr>` : ""}
       <tr class="grand"><td class="label">Total</td><td class="right">${money(sale.grandTotalCents)}</td></tr>
       <tr><td class="label">Amount Paid</td><td class="right">${money(sale.amountPaidCents)}</td></tr>
       <tr class="balance"><td class="label">Balance Due</td><td class="right">${money(sale.balanceDueCents)}</td></tr>
     </table>
-    ${sale.includeTaxBreakdown ? buildTaxBreakdownHtml(computeTaxBreakdown(sale.items), business.vatRatePercent, (cents) => money(cents), "items") : ""}
+    ${sale.includeTaxBreakdown ? buildTaxBreakdownHtml(computeTaxBreakdown(withTaxableServiceCharges(sale.items, sale.serviceCharges)), business.vatRatePercent, (cents) => money(cents), "items") : ""}
     ${sale.invoiceNotes ? `<hr/><p class="muted">Notes: ${escapeHtml(sale.invoiceNotes)}</p>` : ""}
     ${sale.notesSections.map((section) => `<hr/><p class="muted">${escapeHtml(section.title)}: ${escapeHtml(section.body)}</p>`).join("")}
     <hr/>
@@ -1702,12 +1708,12 @@ function buildQuotationHtml(
       <table class="totals-table">
         <tr><td>Subtotal</td><td>${money(quotation.subtotalCents)}</td></tr>
         ${quotation.discountAmountCents > 0 ? `<tr><td>Discount</td><td>-${money(quotation.discountAmountCents)}</td></tr>` : ""}
-        ${quotation.includeTaxBreakdown && computeAddedTaxCents(quotation.items) > 0 ? `<tr><td>Total Tax</td><td>${money(computeAddedTaxCents(quotation.items))}</td></tr>` : ""}
+        ${quotation.includeTaxBreakdown && computeAddedTaxCents(withTaxableServiceCharges(quotation.items, quotation.serviceCharges)) > 0 ? `<tr><td>Total Tax</td><td>${money(computeAddedTaxCents(withTaxableServiceCharges(quotation.items, quotation.serviceCharges)))}</td></tr>` : ""}
         <tr class="grand"><td>Total</td><td>${money(quotation.grandTotalCents)}</td></tr>
       </table>
     </div>
 
-    ${quotation.includeTaxBreakdown ? buildTaxBreakdownHtml(computeTaxBreakdown(quotation.items), business.vatRatePercent, (cents) => money(cents), "tax-breakdown") : ""}
+    ${quotation.includeTaxBreakdown ? buildTaxBreakdownHtml(computeTaxBreakdown(withTaxableServiceCharges(quotation.items, quotation.serviceCharges)), business.vatRatePercent, (cents) => money(cents), "tax-breakdown") : ""}
 
     ${quotation.notes ? `<div class="notes"><strong>Notes</strong><p>${escapeHtml(quotation.notes)}</p></div>` : ""}
 
@@ -1826,7 +1832,7 @@ function buildQuotationThermalHtml(quotation: Quotation, business: DocumentBusin
         <td>${escapeHtml(charge.name)}</td>
         <td class="center">1</td>
         <td class="right">${money(charge.feeCents)}</td>
-        <td class="right">${money(charge.feeCents)}</td>
+        <td class="right">${money(charge.lineTotalCents)}</td>
       </tr>`
     ),
     ...(quotation.delivery && quotation.delivery.feeCents > 0
@@ -1897,10 +1903,10 @@ function buildQuotationThermalHtml(quotation: Quotation, business: DocumentBusin
     <table class="totals">
       <tr><td class="label">Subtotal</td><td class="right">${money(quotation.subtotalCents)}</td></tr>
       ${quotation.discountAmountCents > 0 ? `<tr><td class="label">Discount</td><td class="right">-${money(quotation.discountAmountCents)}</td></tr>` : ""}
-      ${quotation.includeTaxBreakdown && computeAddedTaxCents(quotation.items) > 0 ? `<tr><td class="label">Total Tax</td><td class="right">${money(computeAddedTaxCents(quotation.items))}</td></tr>` : ""}
+      ${quotation.includeTaxBreakdown && computeAddedTaxCents(withTaxableServiceCharges(quotation.items, quotation.serviceCharges)) > 0 ? `<tr><td class="label">Total Tax</td><td class="right">${money(computeAddedTaxCents(withTaxableServiceCharges(quotation.items, quotation.serviceCharges)))}</td></tr>` : ""}
       <tr class="grand"><td class="label">Total</td><td class="right">${money(quotation.grandTotalCents)}</td></tr>
     </table>
-    ${quotation.includeTaxBreakdown ? buildTaxBreakdownHtml(computeTaxBreakdown(quotation.items), business.vatRatePercent, (cents) => money(cents), "items") : ""}
+    ${quotation.includeTaxBreakdown ? buildTaxBreakdownHtml(computeTaxBreakdown(withTaxableServiceCharges(quotation.items, quotation.serviceCharges)), business.vatRatePercent, (cents) => money(cents), "items") : ""}
     ${quotation.notes ? `<hr/><p class="muted">Notes: ${escapeHtml(quotation.notes)}</p>` : ""}
     ${quotation.notesSections.map((section) => `<hr/><p class="muted">${escapeHtml(section.title)}: ${escapeHtml(section.body)}</p>`).join("")}
     <hr/>

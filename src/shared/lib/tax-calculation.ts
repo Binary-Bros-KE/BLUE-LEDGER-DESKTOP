@@ -1,3 +1,4 @@
+import type { ServiceChargeTaxType } from "@shared/schemas/charges";
 import { TAX_TYPE_OPTIONS, type ProductTaxType } from "@shared/types/product";
 
 /** Tenant's own tax regime — see shared/types/tenant.ts's TenantRecord. Never hardcoded to Kenya's
@@ -197,4 +198,62 @@ export function computeTaxBreakdown(
   return order
     .map(({ taxType, pricingMode }) => byKey.get(`${taxType}:${pricingMode ?? ""}`))
     .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
+}
+
+/** One service charge's own frozen tax figures — see SaleServiceCharge's own doc comment
+ * (shared/types/sale.ts) for what each field means. */
+export type TaxableServiceCharge = {
+  feeCents: number;
+  taxType: ServiceChargeTaxType;
+  taxAmountCents: number;
+  lineTotalCents: number;
+};
+
+/**
+ * Client request: folds a document's service charges into the SAME {unitPriceCents, quantity,
+ * discountAmountCents, taxType, taxAmountCents, lineTotalCents} shape product/sale items already
+ * use, so computeTaxBreakdown/computeAddedTaxCents can treat both uniformly with ZERO changes to
+ * either function — every call site that used to pass just `items` now passes
+ * `withTaxableServiceCharges(items, serviceCharges)` instead.
+ *
+ * Charges marked "none" are deliberately EXCLUDED, not folded in as some zero-tax category — "none"
+ * means this charge was never given a tax classification at all (see ServiceChargeTaxType's own
+ * doc comment), so it belongs in tax reporting no more than an unrelated flat fee would. This is
+ * the actual mechanism behind the "service charges default to no tax, only count once the user
+ * opts in" behavior the client asked for.
+ *
+ * quantity is always 1 and discountAmountCents always 0 — a service charge has no concept of
+ * either.
+ */
+export function withTaxableServiceCharges<
+  T extends {
+    unitPriceCents: number;
+    quantity: number;
+    discountAmountCents: number;
+    taxType: ProductTaxType;
+    taxAmountCents: number;
+    lineTotalCents: number;
+  }
+>(
+  lines: T[],
+  serviceCharges: TaxableServiceCharge[]
+): Array<{
+  unitPriceCents: number;
+  quantity: number;
+  discountAmountCents: number;
+  taxType: ProductTaxType;
+  taxAmountCents: number;
+  lineTotalCents: number;
+}> {
+  const taxableCharges = serviceCharges
+    .filter((charge): charge is TaxableServiceCharge & { taxType: ProductTaxType } => charge.taxType !== "none")
+    .map((charge) => ({
+      unitPriceCents: charge.feeCents,
+      quantity: 1,
+      discountAmountCents: 0,
+      taxType: charge.taxType,
+      taxAmountCents: charge.taxAmountCents,
+      lineTotalCents: charge.lineTotalCents
+    }));
+  return [...lines, ...taxableCharges];
 }

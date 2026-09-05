@@ -865,6 +865,12 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       name: s.name,
       feeCents: s.fee_cents,
       costCents: s.cost_cents,
+      // Client request: now sent — see ServiceChargeTaxType's own doc comment
+      // (shared/schemas/charges.ts).
+      taxType: s.tax_type,
+      taxInclusive: s.tax_inclusive === null ? null : Boolean(s.tax_inclusive),
+      taxAmountCents: s.tax_amount_cents,
+      lineTotalCents: s.line_total_cents,
       createdAt: s.created_at
     }));
 
@@ -1131,6 +1137,12 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       name: s.name,
       feeCents: s.fee_cents,
       costCents: s.cost_cents,
+      // Client request: now sent — see ServiceChargeTaxType's own doc comment
+      // (shared/schemas/charges.ts).
+      taxType: s.tax_type,
+      taxInclusive: s.tax_inclusive === null ? null : Boolean(s.tax_inclusive),
+      taxAmountCents: s.tax_amount_cents,
+      lineTotalCents: s.line_total_cents,
       createdAt: s.created_at
     }));
 
@@ -2431,8 +2443,8 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
     const serviceCharges = (row.serviceCharges as Array<Record<string, unknown>>) ?? [];
     for (const charge of serviceCharges) {
       db.prepare(
-        `INSERT INTO sale_service_charges (id, tenant_id, sale_id, quotation_id, name, fee_cents, cost_cents, created_at, sync_status)
-         VALUES (?, ?, ?, NULL, ?, ?, ?, ?, 'synced')`
+        `INSERT INTO sale_service_charges (id, tenant_id, sale_id, quotation_id, name, fee_cents, cost_cents, tax_type, tax_inclusive, tax_amount_cents, line_total_cents, created_at, sync_status)
+         VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')`
       ).run(
         charge.id as string,
         localTenantId,
@@ -2440,6 +2452,12 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         charge.name as string,
         charge.feeCents as number,
         (charge.costCents as number | undefined) ?? 0,
+        // Older device's payload predates these fields entirely — same fallback reasoning as
+        // taxType/sectionLabel above for sale_items.
+        (charge.taxType as string | undefined) ?? "none",
+        charge.taxInclusive === undefined || charge.taxInclusive === null ? null : charge.taxInclusive ? 1 : 0,
+        (charge.taxAmountCents as number | undefined) ?? 0,
+        (charge.lineTotalCents as number | undefined) ?? (charge.feeCents as number),
         charge.createdAt as string
       );
     }
@@ -2738,8 +2756,8 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
     const serviceCharges = (row.serviceCharges as Array<Record<string, unknown>>) ?? [];
     for (const charge of serviceCharges) {
       db.prepare(
-        `INSERT INTO sale_service_charges (id, tenant_id, sale_id, quotation_id, name, fee_cents, cost_cents, created_at, sync_status)
-         VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 'synced')`
+        `INSERT INTO sale_service_charges (id, tenant_id, sale_id, quotation_id, name, fee_cents, cost_cents, tax_type, tax_inclusive, tax_amount_cents, line_total_cents, created_at, sync_status)
+         VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')`
       ).run(
         charge.id as string,
         localTenantId,
@@ -2747,6 +2765,10 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
         charge.name as string,
         charge.feeCents as number,
         (charge.costCents as number | undefined) ?? 0,
+        (charge.taxType as string | undefined) ?? "none",
+        charge.taxInclusive === undefined || charge.taxInclusive === null ? null : charge.taxInclusive ? 1 : 0,
+        (charge.taxAmountCents as number | undefined) ?? 0,
+        (charge.lineTotalCents as number | undefined) ?? (charge.feeCents as number),
         charge.createdAt as string
       );
     }

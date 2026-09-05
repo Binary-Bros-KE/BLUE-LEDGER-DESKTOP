@@ -37,13 +37,20 @@ import { StorefrontPicker } from "@renderer/shared/components/StorefrontPicker";
 import { SupplierPicker } from "@renderer/shared/components/SupplierPicker";
 import { TaxBreakdownTable } from "@renderer/shared/components/TaxBreakdownTable";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
-import { computeLinePricing, isPriceBelowMinimum, type LinePricing } from "@renderer/shared/lib/cart-pricing";
+import { computeLinePricing, computeServiceChargeAmount, isPriceBelowMinimum, type LinePricing } from "@renderer/shared/lib/cart-pricing";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents, totalCentsToUnitCostText, unitCostToTotalCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useAppStore } from "@renderer/shared/stores/app-store";
-import { computeAddedTaxCents, computeTaxBreakdown, resolveProductTaxConfig, taxModeBadgeLabel } from "@shared/lib/tax-calculation";
+import {
+  computeAddedTaxCents,
+  computeTaxBreakdown,
+  resolveProductTaxConfig,
+  taxModeBadgeLabel,
+  withTaxableServiceCharges
+} from "@shared/lib/tax-calculation";
+import type { ServiceChargeTaxType } from "@shared/schemas/charges";
 import type { Customer } from "@shared/types/customer";
 import type { LocationStockLevel } from "@shared/types/inventory";
 import type { MpesaTransactionStatus } from "@shared/types/mpesa";
@@ -270,7 +277,9 @@ export function CheckoutRoute(): React.JSX.Element {
                 key: charge.id,
                 name: charge.name,
                 fee: fromCents(charge.feeCents),
-                cost: fromCents(charge.costCents)
+                cost: fromCents(charge.costCents),
+                taxType: charge.taxType,
+                taxInclusive: charge.taxInclusive
               })),
               // A held sale never has a real (numbered) delivery attached — see suspendSale in
               // sale-service.ts — so this restores from the plain draft it stashed instead.
@@ -399,7 +408,17 @@ export function CheckoutRoute(): React.JSX.Element {
       lines.push({ line, product, pricing });
     }
 
-    const serviceChargesFeeCents = serviceCharges.reduce((sum, charge) => sum + toCents(charge.fee), 0);
+    // Client request: each service charge gets the same tax treatment a product line would (see
+    // computeServiceChargeAmount's own doc comment) — "none" (the default) contributes its raw
+    // fee untaxed, same as before this feature; a taxed charge's own lineTotalCents can exceed its
+    // typed fee (VAT-exclusive), same distinction a product line's lineTotalCents already draws.
+    const preparedCharges = serviceCharges.map((charge) => {
+      const feeCents = toCents(charge.fee);
+      const amount = computeServiceChargeAmount(feeCents, charge.taxType, charge.taxInclusive, tenantTaxConfig);
+      return { feeCents, taxType: charge.taxType, taxAmountCents: amount.taxAmountCents, lineTotalCents: amount.lineTotalCents };
+    });
+    const serviceChargesFeeCents = preparedCharges.reduce((sum, charge) => sum + charge.lineTotalCents, 0);
+    taxAmountCents += preparedCharges.reduce((sum, charge) => sum + charge.taxAmountCents, 0);
     const deliveryFeeCents = delivery ? toCents(delivery.fee) : 0;
 
     // Sums each line's own lineTotalCents (already resolved per-product by computeLinePricing)
@@ -407,12 +426,17 @@ export function CheckoutRoute(): React.JSX.Element {
     // products via their own overrides, see cart-pricing.ts/tax-calculation.ts.
     const grandTotalCents = lineTotalCentsSum + serviceChargesFeeCents + deliveryFeeCents;
     const addedTaxCents = computeAddedTaxCents(
-      lines.map(({ line, pricing }) => ({
-        unitPriceCents: pricing.unitPriceCents,
-        quantity: line.quantity,
-        discountAmountCents: pricing.discountAmountCents,
-        lineTotalCents: pricing.lineTotalCents
-      }))
+      withTaxableServiceCharges(
+        lines.map(({ line, product, pricing }) => ({
+          unitPriceCents: pricing.unitPriceCents,
+          quantity: line.quantity,
+          discountAmountCents: pricing.discountAmountCents,
+          taxType: product.taxType,
+          taxAmountCents: pricing.taxCents,
+          lineTotalCents: pricing.lineTotalCents
+        })),
+        preparedCharges
+      )
     );
 
     return {
@@ -777,7 +801,13 @@ export function CheckoutRoute(): React.JSX.Element {
   }
 
   function buildExtrasPayload(draft: OpenSaleDraft): {
-    serviceCharges: Array<{ name: string; feeCents: number; costCents: number }>;
+    serviceCharges: Array<{
+      name: string;
+      feeCents: number;
+      costCents: number;
+      taxType: ServiceChargeTaxType;
+      taxInclusive: boolean | null;
+    }>;
     delivery: {
       riderId: string | null;
       recipientName: string;
@@ -793,7 +823,9 @@ export function CheckoutRoute(): React.JSX.Element {
       serviceCharges: draft.serviceCharges.map((charge) => ({
         name: charge.name,
         feeCents: toCents(charge.fee),
-        costCents: toCents(charge.cost)
+        costCents: toCents(charge.cost),
+        taxType: charge.taxType,
+        taxInclusive: charge.taxInclusive
       })),
       delivery: draft.delivery
         ? {
@@ -1367,6 +1399,7 @@ export function CheckoutRoute(): React.JSX.Element {
                       delivery={draft.delivery}
                       onDeliveryChange={updateActiveDelivery}
                       customerName={draft.customerId ? customerLabel(draft.customerId) : draft.walkInName}
+                      tenantTaxConfig={{ vatRatePercent: tenantContext?.vatRatePercent ?? 16, pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true }}
                     />
                   )}
 
