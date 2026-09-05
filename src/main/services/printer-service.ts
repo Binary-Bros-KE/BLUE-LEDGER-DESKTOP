@@ -18,6 +18,7 @@ import * as stockRequestRepository from "@main/database/repositories/stock-reque
 import * as tenantRepository from "@main/database/repositories/tenant-repository";
 import { buildRendererCsp } from "@main/security/content-security-policy";
 import { requirePermission } from "@main/services/auth-service";
+import { loadHtmlIntoWindow } from "@main/services/html-window-loader";
 import {
   readManagedBusinessLogoPreview,
   readManagedLocationLogoPreview,
@@ -718,7 +719,7 @@ async function renderHtmlToPdfBuffer(
 ): Promise<Buffer> {
   const win = new BrowserWindow({ show: false });
   try {
-    await win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(html).toString("base64")}`);
+    await loadHtmlIntoWindow(win, html);
     // Only ever adds `.fill-page` (the flex/min-height treatment — see LETTERHEAD_STYLES's own doc
     // comment) once fonts have settled AND the frame's real content is confirmed short enough that
     // forcing it to 500px can't possibly require fragmentation. This is the actual fix for content
@@ -914,7 +915,7 @@ async function renderThermalHtmlToPdfBuffer(html: string, widthIn: number): Prom
   const sizedHtml = html.replace("<head>", `<head><style>html, body { width: ${widthIn}in !important; }</style>`);
   const win = new BrowserWindow({ show: false });
   try {
-    await win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(sizedHtml).toString("base64")}`);
+    await loadHtmlIntoWindow(win, sizedHtml);
     const contentHeightPx = (await win.webContents.executeJavaScript("document.documentElement.scrollHeight")) as number;
     // Padded by 0.25in (not a token 0.1in) deliberately: under-measuring even slightly means real
     // content overflows onto a second physical print (the exact regression this fix addresses), so

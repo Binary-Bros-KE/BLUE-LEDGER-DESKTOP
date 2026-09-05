@@ -16,6 +16,7 @@ import {
   INK,
   timestampedFileName
 } from "@main/services/export-shared";
+import { loadHtmlIntoWindow } from "@main/services/html-window-loader";
 import { openPdfPreviewWindow } from "@main/services/printer-service";
 import type {
   ReportCardTone,
@@ -47,7 +48,10 @@ export async function exportReportToPdf(request: ReportExportRequest): Promise<v
   const win = new BrowserWindow({ show: false });
   let buffer: Buffer;
   try {
-    await win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(html).toString("base64")}`);
+    // See loadHtmlIntoWindow's own doc comment — a data:base64 URL here hit the same
+    // ERR_INVALID_URL ceiling on a large report, not just the invoice/quotation case it was first
+    // found on.
+    await loadHtmlIntoWindow(win, html);
     buffer = await win.webContents.printToPDF({ printBackground: true, landscape: true });
   } finally {
     win.destroy();

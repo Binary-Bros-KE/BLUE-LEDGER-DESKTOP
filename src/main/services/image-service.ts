@@ -3,6 +3,7 @@ import { copyFileSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { extname, isAbsolute, join } from "node:path";
 import electron from "electron";
+import { loadHtmlIntoWindow } from "@main/services/html-window-loader";
 
 const { app, dialog, shell, BrowserWindow } = electron;
 
@@ -57,7 +58,10 @@ async function convertWebpToPngDataUrl(rawDataUrl: string): Promise<string | nul
   });
   try {
     const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:transparent;"><img id="managed-image" src="${rawDataUrl}" style="display:block;" /></body></html>`;
-    await win.loadURL(`data:text/html;charset=utf-8;base64,${Buffer.from(html).toString("base64")}`);
+    // See loadHtmlIntoWindow's own doc comment — a data:base64 URL here has the same
+    // ERR_INVALID_URL ceiling for a large enough source image (a full-resolution phone photo can
+    // run several MB), not just the invoice/quotation case it was first found on.
+    await loadHtmlIntoWindow(win, html);
     const size = (await win.webContents.executeJavaScript(`
       new Promise((resolve) => {
         const img = document.getElementById("managed-image");
