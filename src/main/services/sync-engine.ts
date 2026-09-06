@@ -519,6 +519,13 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       // images folder to a second device makes that device's copy resolve correctly too. Before
       // this, neither the path nor the file ever left the originating device.
       imagePath: p.imagePath,
+      // Online store (migration v86 / ECOMMERCE-ARCHITECTURE.md §8). The image URLs travel, never
+      // the bytes — the file is uploaded straight to R2 via /shop-admin/upload, which returns the
+      // hosted URL that's stored here. onlineImageUrls is always a real array (never null).
+      publishedOnline: p.publishedOnline,
+      onlineDescription: p.onlineDescription,
+      onlinePriceCents: p.onlinePriceCents,
+      onlineImageUrls: p.onlineImageUrls,
       localCreatedAt: p.createdAt,
       localUpdatedAt: p.updatedAt,
       // The optimistic-lock baseline — see CONFLICT_AWARE_ENTITIES's own comment. Null on a
@@ -1764,7 +1771,15 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       // Older device's payload predates this field entirely (undefined, not null) — no `default`
       // set, so toLocalValue's undefined-fallback resolves to plain null, same as a product that
       // genuinely has no image.
-      { local: "image_path", cloud: "imagePath" }
+      { local: "image_path", cloud: "imagePath" },
+      // Online store (migration v86). Defaults matter for a device that pulls a product last edited
+      // by an older device whose payload predates these keys — published_online NOT NULL DEFAULT 0,
+      // online_image_urls NOT NULL DEFAULT '[]' (a pre-stringified string, returned as-is by
+      // toLocalValue's null/undefined branch BEFORE the type:"json" stringify would run).
+      { local: "published_online", cloud: "publishedOnline", type: "bool", default: 0 },
+      { local: "online_description", cloud: "onlineDescription" },
+      { local: "online_price_cents", cloud: "onlinePriceCents" },
+      { local: "online_image_urls", cloud: "onlineImageUrls", type: "json", default: "[]" }
     ]
   },
   employees: {

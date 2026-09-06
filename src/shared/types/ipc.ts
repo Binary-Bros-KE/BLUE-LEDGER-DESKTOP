@@ -23,6 +23,7 @@ import type {
   StockRequestAvailability
 } from "./main-store";
 import type { Product, ProductListItem, ProductStatus, ProductStockSummary } from "./product";
+import type { ProductOnlinePatch, StoreConfigPatch, StoreOwnerView } from "./online-store";
 import type { ProductSalesHistoryEntry, ProductsPerformanceReport } from "./product-report";
 import type { CustomerPurchaseHistoryEntry, OutstandingInvoicesSummary, TopCustomerRow } from "./customer-report";
 import type { OutstandingPurchasesSummary, SupplierPurchaseHistoryEntry, SupplierSpendRow } from "./supplier-report";
@@ -295,6 +296,26 @@ export type IpcInvokeMap = {
   "product:read-image-preview": {
     args: [string];
     result: string | null;
+  };
+  "online-store:overview": {
+    args: [];
+    result: StoreOwnerView;
+  };
+  "online-store:set-product-online": {
+    args: [productId: string, patch: ProductOnlinePatch];
+    result: Product;
+  };
+  "online-store:upload-image": {
+    args: [productId: string];
+    result: Product;
+  };
+  "online-store:delete-image": {
+    args: [productId: string, url: string];
+    result: Product;
+  };
+  "online-store:update-config": {
+    args: [patch: StoreConfigPatch];
+    result: StoreOwnerView;
   };
   "main-store:product-list": {
     args: [string | null];
@@ -1433,6 +1454,21 @@ export type BlueLedgerApi = {
     readImagePreview: (
       relativePath: string
     ) => Promise<IpcInvokeMap["product:read-image-preview"]["result"]>;
+  };
+  onlineStore: {
+    overview: () => Promise<IpcInvokeMap["online-store:overview"]["result"]>;
+    setProductOnline: (
+      productId: string,
+      patch: ProductOnlinePatch
+    ) => Promise<IpcInvokeMap["online-store:set-product-online"]["result"]>;
+    uploadImage: (productId: string) => Promise<IpcInvokeMap["online-store:upload-image"]["result"]>;
+    deleteImage: (
+      productId: string,
+      url: string
+    ) => Promise<IpcInvokeMap["online-store:delete-image"]["result"]>;
+    updateConfig: (
+      patch: StoreConfigPatch
+    ) => Promise<IpcInvokeMap["online-store:update-config"]["result"]>;
   };
   mainStore: {
     listProducts: (

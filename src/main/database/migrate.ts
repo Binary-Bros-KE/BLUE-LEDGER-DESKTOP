@@ -2973,6 +2973,32 @@ const migrations = [
       ALTER TABLE sale_service_charges ADD COLUMN line_total_cents INTEGER NOT NULL DEFAULT 0;
       UPDATE sale_service_charges SET line_total_cents = fee_cents;
     `
+  },
+  {
+    version: 86,
+    name: "product_online_store_fields",
+    sql: `
+      -- E-commerce (see ECOMMERCE-ARCHITECTURE.md). The shop owner curates their online catalogue
+      -- from the desktop "Online Store" tab; these four columns are plain synced Product fields,
+      -- carried to the cloud by the normal sync engine like image_path already is. The image URLs
+      -- travel, never the bytes — the file is uploaded straight to object storage (R2) via the
+      -- device-authed /shop-admin/upload endpoint, which hands back the hosted URL that gets stored
+      -- here. Every existing product is unpublished with no overrides, so this is inert until the
+      -- owner opts a product in.
+      --   published_online   : 1 = visible in the online store
+      --   online_description : null = fall back to the main description
+      --   online_price_cents : null = fall back to selling_price_cents
+      --   online_image_urls  : JSON array of { url, thumbUrl }; '[]' = none
+      ALTER TABLE products ADD COLUMN published_online INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE products ADD COLUMN online_description TEXT;
+      ALTER TABLE products ADD COLUMN online_price_cents INTEGER;
+      ALTER TABLE products ADD COLUMN online_image_urls TEXT NOT NULL DEFAULT '[]';
+
+      -- Whether this tenant may run an online store at all — mirrors the cloud's
+      -- (Tenant.ecommerceEnabled OR Plan.featureEcommerce), refreshed on every activation/heartbeat
+      -- (see license-service.ts). The renderer hides the "Online Store" nav item unless this is 1.
+      ALTER TABLE tenant ADD COLUMN ecommerce_enabled INTEGER NOT NULL DEFAULT 0;
+    `
   }
 ] as const;
 

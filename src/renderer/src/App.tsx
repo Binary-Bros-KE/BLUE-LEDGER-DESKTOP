@@ -31,6 +31,7 @@ import { CustomersReportRoute } from "@renderer/app/routes/CustomersReportRoute"
 import { SuppliersReportRoute } from "@renderer/app/routes/SuppliersReportRoute";
 import { TaxReportRoute } from "@renderer/app/routes/TaxReportRoute";
 import { ProductsRoute } from "@renderer/app/routes/ProductsRoute";
+import { OnlineStoreRoute } from "@renderer/app/routes/OnlineStoreRoute";
 import { PurchasesRoute } from "@renderer/app/routes/PurchasesRoute";
 import { QuotationsRoute } from "@renderer/app/routes/QuotationsRoute";
 import { ReceiptsRoute } from "@renderer/app/routes/ReceiptsRoute";
@@ -150,6 +151,8 @@ export function App(): React.JSX.Element {
         <BusinessProfileRoute />
       ) : activeNavKey === "storefronts" ? (
         <StorefrontsRoute />
+      ) : activeNavKey === "online-store" ? (
+        <OnlineStoreRoute />
       ) : activeNavKey === "categories" ? (
         <CategoriesRoute />
       ) : activeNavKey === "products" ? (

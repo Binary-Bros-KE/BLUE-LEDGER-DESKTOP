@@ -12,6 +12,7 @@ import {
   FileSpreadsheet,
   FileText,
   FolderTree,
+  Globe,
   Handshake,
   LayoutDashboard,
   Package,
@@ -306,6 +307,13 @@ export const navGroups: NavGroup[] = [
         description: "Branches & warehouses",
         icon: Store,
         permissionModule: "locations"
+      },
+      {
+        key: "online-store",
+        label: "Online Store",
+        description: "Publish products & manage your website",
+        icon: Globe,
+        permissionModule: "online_store"
       },
       {
         key: "data-import",

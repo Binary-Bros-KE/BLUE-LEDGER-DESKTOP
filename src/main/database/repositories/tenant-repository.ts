@@ -56,6 +56,10 @@ export type TenantRow = {
   max_branches: number;
   max_users: number;
   max_devices: number;
+  /// Mirrors the cloud's (Tenant.ecommerceEnabled OR Plan.featureEcommerce), refreshed on every
+  /// activation/heartbeat (migration v86). 0/1 — the renderer hides the "Online Store" nav item
+  /// unless it's 1.
+  ecommerce_enabled: number;
   developer_notes: string | null;
   is_demo_account: number;
   is_suspended: number;
@@ -288,6 +292,7 @@ export function mapTenantRow(row: TenantRow, appVersion: string): TenantRecord {
     maxBranches: row.max_branches,
     maxUsers: row.max_users,
     maxDevices: row.max_devices,
+    ecommerceEnabled: Boolean(row.ecommerce_enabled),
     appVersion,
     pendingSyncRecords: countPendingSyncRecords(),
     developerNotes: row.developer_notes,
@@ -323,6 +328,11 @@ export function updateTenantLicenseRow(input: {
   maxUsers: number;
   maxDevices: number;
   isSuspended: boolean;
+  /** From the cloud's (Tenant.ecommerceEnabled OR Plan.featureEcommerce). Optional: a SERVER that
+   * predates this field, or the 403-suspended path that has no typed body, passes nothing — the
+   * COALESCE below then keeps whatever was last known rather than clobbering it. (`| undefined`
+   * explicit for exactOptionalPropertyTypes — callers forward a possibly-undefined response field.) */
+  ecommerceEnabled?: boolean | undefined;
 }): TenantRow {
   const now = new Date().toISOString();
   const existing = findTenantRow();
@@ -346,6 +356,7 @@ export function updateTenantLicenseRow(input: {
         max_branches = ?,
         max_users = ?,
         max_devices = ?,
+        ecommerce_enabled = COALESCE(?, ecommerce_enabled),
         is_suspended = ?,
         last_license_check_at = ?,
         updated_at = ?
@@ -365,6 +376,7 @@ export function updateTenantLicenseRow(input: {
       input.maxBranches,
       input.maxUsers,
       input.maxDevices,
+      input.ecommerceEnabled === undefined ? null : input.ecommerceEnabled ? 1 : 0,
       input.isSuspended ? 1 : 0,
       now,
       now,

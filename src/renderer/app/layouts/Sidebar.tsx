@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronLeft, ChevronRight, LogOut, Store, UserRound } from "lucide-react";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
+import { useAppStore } from "@renderer/shared/stores/app-store";
 import { useAuthStore } from "@renderer/shared/stores/auth-store";
 import { useUiStore } from "@renderer/shared/stores/ui-store";
 import { cn } from "@renderer/shared/lib/cn";
@@ -21,16 +22,24 @@ export function Sidebar(): React.JSX.Element {
   const setActiveNavKey = useUiStore((state) => state.setActiveNavKey);
   const { can, session } = usePermissions();
   const logout = useAuthStore((state) => state.logout);
+  // The "Online Store" tab is doubly gated: the online_store permission AND the tenant actually
+  // being on an e-commerce plan (Tenant.ecommerceEnabled OR Plan.featureEcommerce, cached from the
+  // last activation/heartbeat). Without the plan, the tab stays hidden even for a Super Admin.
+  const ecommerceEnabled = useAppStore((state) => state.context?.tenant.ecommerceEnabled ?? false);
 
   const visibleGroups = useMemo(
     () =>
       navGroups
         .map((group) => ({
           ...group,
-          items: group.items.filter((item) => can(item.permissionModule, "view"))
+          items: group.items.filter(
+            (item) =>
+              can(item.permissionModule, "view") &&
+              (item.key !== "online-store" || ecommerceEnabled)
+          )
         }))
         .filter((group) => group.items.length > 0),
-    [can]
+    [can, ecommerceEnabled]
   );
 
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);

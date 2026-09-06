@@ -97,10 +97,22 @@ export type ProductInputFields = {
   imagePath: string | null;
 };
 
+/** One hosted product photo — the resized WebP plus its thumbnail (see ECOMMERCE-ARCHITECTURE.md
+ * §8). Uploaded via the device-authed /shop-admin/upload endpoint, which returns exactly this
+ * shape; only the URLs are ever stored/synced, never the image bytes. */
+export type OnlineImageRef = { url: string; thumbUrl: string };
+
 export type Product = ProductInputFields & {
   id: ProductId;
   tenantId: string;
   status: ProductStatus;
+  /** Online store — managed from the "Online Store" tab, not the product form. Synced to the cloud
+   * like any other column. publishedOnline gates visibility; onlineDescription/onlinePriceCents are
+   * null when the product falls back to its main description/selling price. */
+  publishedOnline: boolean;
+  onlineDescription: string | null;
+  onlinePriceCents: number | null;
+  onlineImageUrls: OnlineImageRef[];
   createdAt: string;
   updatedAt: string;
   createdBy: string | null;

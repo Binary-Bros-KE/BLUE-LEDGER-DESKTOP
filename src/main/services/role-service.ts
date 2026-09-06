@@ -613,6 +613,34 @@ export function ensureOwnerAppPermission(tenantId: string): void {
 }
 
 /**
+ * Retroactively grants "online_store" (Super Admin only, per DEFAULT_SYSTEM_ROLES via
+ * fullAccess(ALL_MODULE_KEYS)) to system roles seeded before the e-commerce "Online Store" tab
+ * existed — new installs get it for free. The tenant's Super Admin can then extend it to other
+ * roles from the Roles screen. Safe every boot: a no-op once a role already has online_store.
+ */
+export function ensureOnlineStorePermission(tenantId: string): void {
+  const defaultsByName = new Map(
+    DEFAULT_SYSTEM_ROLES.map((role) => [role.roleName, role.permissions.online_store])
+  );
+
+  for (const row of roleRepository.findAllRoleRows(tenantId)) {
+    if (!row.is_system_role) continue;
+    const grant = defaultsByName.get(row.role_name);
+    if (!grant || grant.length === 0) continue;
+
+    const role = roleRepository.mapRoleRow(row);
+    if (role.permissions.online_store) continue;
+
+    roleRepository.updateRoleRow(row.id, {
+      roleName: role.roleName,
+      description: role.description,
+      permissions: { ...role.permissions, online_store: grant },
+      updatedBy: null
+    });
+  }
+}
+
+/**
  * Retroactively grants full "employees" access to the Manager role, seeded before a tenant decided
  * Managers should manage staff too — new installs get it for free via DEFAULT_SYSTEM_ROLES. Safe
  * every boot: a no-op once Manager's stored permissions already include employees.

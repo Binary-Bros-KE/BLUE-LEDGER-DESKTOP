@@ -85,6 +85,13 @@ const api: BlueLedgerApi = {
     pickImage: () => invoke("product:pick-image"),
     readImagePreview: (relativePath) => invoke("product:read-image-preview", relativePath)
   },
+  onlineStore: {
+    overview: () => invoke("online-store:overview"),
+    setProductOnline: (productId, patch) => invoke("online-store:set-product-online", productId, patch),
+    uploadImage: (productId) => invoke("online-store:upload-image", productId),
+    deleteImage: (productId, url) => invoke("online-store:delete-image", productId, url),
+    updateConfig: (patch) => invoke("online-store:update-config", patch)
+  },
   mainStore: {
     listProducts: (locationId) => invoke("main-store:product-list", locationId),
     allocationSummary: () => invoke("main-store:allocation-summary"),

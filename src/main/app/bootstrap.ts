@@ -17,6 +17,7 @@ import {
   ensureLocalPurchasesPermission,
   ensureMainStorePermission,
   ensureManagerEmployeesPermission,
+  ensureOnlineStorePermission,
   ensureOwnerAppPermission,
   ensureQuotationsPermission,
   ensureRidersPermission,
@@ -134,6 +135,7 @@ export async function bootstrap(): Promise<void> {
   ensureManagerEmployeesPermission(tenant.tenantId);
   ensureDataImportPermission(tenant.tenantId);
   ensureOwnerAppPermission(tenant.tenantId);
+  ensureOnlineStorePermission(tenant.tenantId);
   restrictReportsToAdminRoles(tenant.tenantId);
   fixCashierPermissionDrift(tenant.tenantId);
   ensureMainStoreLocation(tenant.tenantId);

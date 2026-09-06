@@ -182,6 +182,13 @@ import {
   updateProduct
 } from "@main/services/product-service";
 import {
+  deleteProductImage as deleteOnlineStoreProductImage,
+  getOverview as getOnlineStoreOverview,
+  setProductOnline as setOnlineStoreProductOnline,
+  updateStoreConfig as updateOnlineStoreConfig,
+  uploadProductImage as uploadOnlineStoreProductImage
+} from "@main/services/online-store-service";
+import {
   distributeFromMainStore,
   getMainStoreAllocationSummary,
   getMainStoreAvailabilityForStockRequest,
@@ -345,6 +352,7 @@ import type { RecurringBillStatus } from "@shared/types/recurring-bill";
 import type { EmployeeStatus } from "@shared/types/employee";
 import type { LocationStatus } from "@shared/types/location";
 import type { ProductStatus } from "@shared/types/product";
+import type { ProductOnlinePatch, StoreConfigPatch } from "@shared/types/online-store";
 import type { QuotationStatus } from "@shared/types/quotation";
 import type { ImportEntityType } from "@shared/types/import";
 import type { ShareDocumentEntity } from "@shared/types/share";
@@ -476,6 +484,19 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.productPickImage, () => pickAndStoreProductImage());
   ipcMain.handle(ipcChannels.productReadImagePreview, (_event, relativePath: string) =>
     readManagedProductImagePreview(relativePath)
+  );
+  ipcMain.handle(ipcChannels.onlineStoreOverview, () => getOnlineStoreOverview());
+  ipcMain.handle(ipcChannels.onlineStoreSetProductOnline, (_event, productId: string, patch: unknown) =>
+    setOnlineStoreProductOnline(productId, patch as ProductOnlinePatch)
+  );
+  ipcMain.handle(ipcChannels.onlineStoreUploadImage, (_event, productId: string) =>
+    uploadOnlineStoreProductImage(productId)
+  );
+  ipcMain.handle(ipcChannels.onlineStoreDeleteImage, (_event, productId: string, url: string) =>
+    deleteOnlineStoreProductImage(productId, url)
+  );
+  ipcMain.handle(ipcChannels.onlineStoreUpdateConfig, (_event, patch: unknown) =>
+    updateOnlineStoreConfig(patch as StoreConfigPatch)
   );
   ipcMain.handle(ipcChannels.mainStoreProductList, (_event, locationId: string | null) =>
     listProductsForStorefront(locationId)

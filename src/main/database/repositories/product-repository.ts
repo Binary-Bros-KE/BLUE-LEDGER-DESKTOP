@@ -1,6 +1,28 @@
 import { getDatabase } from "@main/database/connection";
 import type { ProductCreateInput, ProductUpdateInput } from "@shared/schemas/product";
-import type { Product, ProductListItem, ProductStatus, ProductSyncStatus } from "@shared/types/product";
+import type {
+  OnlineImageRef,
+  Product,
+  ProductListItem,
+  ProductStatus,
+  ProductSyncStatus
+} from "@shared/types/product";
+
+/** online_image_urls is stored as a JSON TEXT column — tolerate anything that isn't a clean array
+ * of {url, thumbUrl} (a hand-edited row, an older write) by falling back to empty rather than
+ * throwing on a read that half the app depends on. */
+function parseOnlineImageUrls(raw: string | null): OnlineImageRef[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((e): e is OnlineImageRef => Boolean(e) && typeof e.url === "string")
+      .map((e) => ({ url: e.url, thumbUrl: typeof e.thumbUrl === "string" ? e.thumbUrl : e.url }));
+  } catch {
+    return [];
+  }
+}
 
 export type ProductRow = {
   id: string;
@@ -27,6 +49,13 @@ export type ProductRow = {
   track_stock: number;
   allow_negative_stock: number;
   image_path: string | null;
+  /** Online store (migration v86). published_online is 0/1; online_price_cents/online_description
+   * are null when the product falls back to its main price/description; online_image_urls is a JSON
+   * TEXT array of { url, thumbUrl } (never bytes — see ECOMMERCE-ARCHITECTURE.md §8). */
+  published_online: number;
+  online_description: string | null;
+  online_price_cents: number | null;
+  online_image_urls: string;
   status: string;
   created_at: string;
   updated_at: string;
@@ -325,6 +354,61 @@ export function bulkSetTaxTypeRows(tenantId: string, productIds: string[], taxTy
   return Number(result.changes);
 }
 
+/** The "Online Store" tab's own narrow mutation — deliberately separate from updateProductRow (the
+ * full product form). Only the keys passed are touched; every call bumps sync_status/updated_at so
+ * the existing AFTER UPDATE sync-outbox trigger carries it to the cloud, same shape as
+ * setProductStatusRow. */
+export function setProductOnlineRow(
+  id: string,
+  input: {
+    publishedOnline?: boolean;
+    onlineDescription?: string | null;
+    onlinePriceCents?: number | null;
+    onlineImageUrls?: OnlineImageRef[];
+  }
+): ProductRow {
+  const sets: string[] = [];
+  const params: Array<string | number | null> = [];
+
+  if (input.publishedOnline !== undefined) {
+    sets.push("published_online = ?");
+    params.push(input.publishedOnline ? 1 : 0);
+  }
+  if (input.onlineDescription !== undefined) {
+    sets.push("online_description = ?");
+    params.push(input.onlineDescription);
+  }
+  if (input.onlinePriceCents !== undefined) {
+    sets.push("online_price_cents = ?");
+    params.push(input.onlinePriceCents);
+  }
+  if (input.onlineImageUrls !== undefined) {
+    sets.push("online_image_urls = ?");
+    params.push(
+      JSON.stringify(input.onlineImageUrls.map((e) => ({ url: e.url, thumbUrl: e.thumbUrl })))
+    );
+  }
+
+  if (sets.length === 0) {
+    const current = findProductRowById(id);
+    if (!current) throw new Error("Product not found");
+    return current;
+  }
+
+  const now = new Date().toISOString();
+  getDatabase()
+    .prepare(
+      `UPDATE products SET ${sets.join(", ")}, sync_status = 'pending', updated_at = ? WHERE id = ?`
+    )
+    .run(...params, now, id);
+
+  const row = findProductRowById(id);
+  if (!row) {
+    throw new Error("Product not found after online-store update");
+  }
+  return row;
+}
+
 export function mapProductRow(row: ProductRow): Product {
   return {
     id: row.id,
@@ -350,6 +434,10 @@ export function mapProductRow(row: ProductRow): Product {
     trackStock: Boolean(row.track_stock),
     allowNegativeStock: Boolean(row.allow_negative_stock),
     imagePath: row.image_path,
+    publishedOnline: Boolean(row.published_online),
+    onlineDescription: row.online_description,
+    onlinePriceCents: row.online_price_cents,
+    onlineImageUrls: parseOnlineImageUrls(row.online_image_urls),
     status: row.status as ProductStatus,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

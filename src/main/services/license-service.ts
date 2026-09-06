@@ -59,6 +59,9 @@ type RegisterResponse = CloudBusinessProfileFields & {
   maxBranches: number;
   maxUsers: number;
   maxDevices: number;
+  /** Optional — a SERVER that predates the e-commerce feature won't send it (see the "?? null"
+   * defensiveness on subscriptionStartDate below for why fields can genuinely be undefined). */
+  ecommerceEnabled?: boolean;
 };
 
 type HeartbeatResponse = CloudBusinessProfileFields & {
@@ -72,6 +75,7 @@ type HeartbeatResponse = CloudBusinessProfileFields & {
   maxBranches: number;
   maxUsers: number;
   maxDevices: number;
+  ecommerceEnabled?: boolean;
 };
 
 function osDescription(): string {
@@ -146,6 +150,7 @@ export async function activateInstallation(licenseKey: string): Promise<TenantCo
     maxBranches: result.maxBranches,
     maxUsers: result.maxUsers,
     maxDevices: result.maxDevices,
+    ecommerceEnabled: result.ecommerceEnabled,
     isSuspended: false
   });
 
@@ -239,6 +244,8 @@ export async function checkInWithServer(): Promise<void> {
       maxBranches: result.maxBranches,
       maxUsers: result.maxUsers,
       maxDevices: result.maxDevices,
+      // undefined (older SERVER) → updateTenantLicenseRow's COALESCE keeps the last known value.
+      ecommerceEnabled: result.ecommerceEnabled,
       isSuspended: result.licenseStatus === "SUSPENDED"
     });
     tenantRepository.backfillWorkstationDeviceSequenceRow(workstation.id, result.deviceSequence);

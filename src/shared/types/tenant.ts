@@ -81,6 +81,10 @@ export type TenantManagement = {
   maxBranches: number;
   maxUsers: number;
   maxDevices: number;
+  /** Whether this tenant may run an online store — the cloud's (Tenant.ecommerceEnabled OR
+   * Plan.featureEcommerce), refreshed on every activation/heartbeat. Gates the "Online Store" nav
+   * item (see ECOMMERCE-ARCHITECTURE.md §7.3). */
+  ecommerceEnabled: boolean;
   appVersion: string;
   pendingSyncRecords: number;
   developerNotes: string | null;
@@ -132,6 +136,9 @@ export type TenantContext = {
    * licenseStatus above. */
   nextDueDate: string | null;
   subscriptionType: SubscriptionType | null;
+  /** Cached from the last activation/heartbeat — the renderer's Sidebar hides the "Online Store"
+   * nav item unless this is true. See TenantManagement.ecommerceEnabled. */
+  ecommerceEnabled: boolean;
   createdAt: string;
   updatedAt: string;
 };
