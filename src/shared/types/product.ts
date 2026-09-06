@@ -102,6 +102,21 @@ export type ProductInputFields = {
  * shape; only the URLs are ever stored/synced, never the image bytes. */
 export type OnlineImageRef = { url: string; thumbUrl: string };
 
+/** One block of the rich product-detail content (rendered + crawlable on the storefront). */
+export type OnlineContentBlock = {
+  type: "paragraph" | "specs" | "notes";
+  heading?: string | undefined;
+  body?: string | undefined;
+  items?: string[] | undefined;
+};
+
+export type ProductOnlineContent = {
+  /** Short bullet list shown near the top, under the description. */
+  quickSpecs: string[];
+  /** Ordered rich content after the related-products grid (paragraphs / spec lists / notes). */
+  blocks: OnlineContentBlock[];
+};
+
 export type Product = ProductInputFields & {
   id: ProductId;
   tenantId: string;
@@ -116,6 +131,8 @@ export type Product = ProductInputFields & {
   /** Extra category ids this product appears under on the website, on top of its single
    * `categoryId`. Managed from the "Online Store" tab. */
   onlineCategoryIds: string[];
+  /** Rich product-detail content (quick specs + ordered blocks) — managed from the "Online Store" tab. */
+  onlineContent: ProductOnlineContent;
   createdAt: string;
   updatedAt: string;
   createdBy: string | null;

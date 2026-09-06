@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
   Check,
   Copy,
   Globe,
@@ -7,6 +9,7 @@ import {
   Loader2,
   Package,
   PackageCheck,
+  Plus,
   ShoppingCart,
   Store,
   Trash2,
@@ -25,7 +28,7 @@ import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { Category } from "@shared/types/category";
 import type { StoreOwnerView } from "@shared/types/online-store";
-import type { Product, ProductListItem } from "@shared/types/product";
+import type { OnlineContentBlock, Product, ProductListItem } from "@shared/types/product";
 import { DeliveryPanel } from "./online-store/DeliveryPanel";
 import { ThemePanel } from "./online-store/ThemePanel";
 
@@ -430,8 +433,27 @@ function OnlineProductModal({
   const [images, setImages] = useState(product.onlineImageUrls);
   const [categories, setCategories] = useState<Category[]>([]);
   const [catIds, setCatIds] = useState<Set<string>>(() => new Set(product.onlineCategoryIds));
+  const [quickSpecs, setQuickSpecs] = useState(product.onlineContent.quickSpecs.join("\n"));
+  const [blocks, setBlocks] = useState<OnlineContentBlock[]>(() =>
+    product.onlineContent.blocks.map((b) => ({ ...b, items: b.items ?? [] }))
+  );
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+
+  const patchBlock = useCallback((i: number, patch: Partial<OnlineContentBlock>) => {
+    setBlocks((prev) => prev.map((b, j) => (j === i ? { ...b, ...patch } : b)));
+  }, []);
+  const moveBlock = useCallback((i: number, dir: -1 | 1) => {
+    setBlocks((prev) => {
+      const j = i + dir;
+      if (j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      const a = next[i]!;
+      next[i] = next[j]!;
+      next[j] = a;
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     void window.blueLedger.category.list().then(setCategories).catch(() => setCategories([]));
@@ -454,7 +476,21 @@ function OnlineProductModal({
         onlinePriceCents: trimmed === "" ? null : toCents(trimmed),
         onlineDescription: description.trim() === "" ? null : description.trim(),
         // never store the product's own primary category as an "extra"
-        onlineCategoryIds: [...catIds].filter((id) => id !== product.categoryId)
+        onlineCategoryIds: [...catIds].filter((id) => id !== product.categoryId),
+        onlineContent: {
+          quickSpecs: quickSpecs.split("\n").map((s) => s.trim()).filter(Boolean),
+          blocks: blocks
+            .map((b) => ({
+              type: b.type,
+              heading: b.heading?.trim() || undefined,
+              body: b.type === "specs" ? undefined : b.body?.trim() || undefined,
+              items:
+                b.type === "specs"
+                  ? (b.items ?? []).map((s) => s.trim()).filter(Boolean)
+                  : undefined
+            }))
+            .filter((b) => (b.type === "specs" ? (b.items?.length ?? 0) > 0 : Boolean(b.body)))
+        }
       });
       onSaved(updated);
       showSuccessToast(`Saved online details for "${product.name}"`);
@@ -464,7 +500,18 @@ function OnlineProductModal({
     } finally {
       setSaving(false);
     }
-  }, [catIds, description, onClose, onSaved, priceText, product.categoryId, product.id, product.name]);
+  }, [
+    blocks,
+    catIds,
+    description,
+    onClose,
+    onSaved,
+    priceText,
+    product.categoryId,
+    product.id,
+    product.name,
+    quickSpecs
+  ]);
 
   const addPhoto = useCallback(async () => {
     setUploading(true);
@@ -510,6 +557,109 @@ function OnlineProductModal({
           rows={4}
           placeholder={product.description ?? "Describe this product for online shoppers"}
         />
+
+        <TextAreaField
+          label="Quick specs — one per line (shown as a bullet list near the top)"
+          value={quickSpecs}
+          onChange={setQuickSpecs}
+          rows={4}
+          placeholder={"2× RCA female to 1× RCA male\nGold-plated contacts\nLength: 15 cm"}
+        />
+
+        {/* Rich detail-page content — ordered paragraph / specs / notes blocks */}
+        <div>
+          <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
+            Detail page content
+          </span>
+          <p className="mt-0.5 text-[11px] text-muted">
+            Extra sections shown below the related products — long descriptions, detailed specs,
+            notes. Rendered on the page and read by search engines.
+          </p>
+          <div className="mt-2 space-y-3">
+            {blocks.map((b, i) => (
+              <div key={i} className="rounded-md border border-line p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <select
+                    value={b.type}
+                    onChange={(e) =>
+                      patchBlock(i, { type: e.target.value as OnlineContentBlock["type"] })
+                    }
+                    className="h-8 rounded-md border border-line bg-white px-2 text-xs font-bold uppercase tracking-wide outline-none"
+                  >
+                    <option value="paragraph">Paragraph</option>
+                    <option value="specs">Specs list</option>
+                    <option value="notes">Notes</option>
+                  </select>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => moveBlock(i, -1)}
+                      disabled={i === 0}
+                      aria-label="Move up"
+                      className="grid size-7 place-items-center rounded-md border border-line text-muted transition hover:bg-soft disabled:opacity-40"
+                    >
+                      <ArrowUp className="size-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveBlock(i, 1)}
+                      disabled={i === blocks.length - 1}
+                      aria-label="Move down"
+                      className="grid size-7 place-items-center rounded-md border border-line text-muted transition hover:bg-soft disabled:opacity-40"
+                    >
+                      <ArrowDown className="size-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBlocks((prev) => prev.filter((_, j) => j !== i))}
+                      aria-label="Remove block"
+                      className="grid size-7 place-items-center rounded-md border border-line text-danger transition hover:bg-danger-soft"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-2 space-y-2">
+                  <Field
+                    label="Heading (optional)"
+                    value={b.heading ?? ""}
+                    onChange={(v) => patchBlock(i, { heading: v })}
+                    placeholder={
+                      b.type === "specs" ? "Detailed specs" : b.type === "notes" ? "Notes" : "About this product"
+                    }
+                  />
+                  {b.type === "specs" ? (
+                    <TextAreaField
+                      label="Spec lines — one per line"
+                      value={(b.items ?? []).join("\n")}
+                      onChange={(v) => patchBlock(i, { items: v.split("\n") })}
+                      rows={4}
+                    />
+                  ) : (
+                    <TextAreaField
+                      label="Text"
+                      value={b.body ?? ""}
+                      onChange={(v) => patchBlock(i, { body: v })}
+                      rows={4}
+                    />
+                  )}
+                </div>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() =>
+                setBlocks((prev) =>
+                  prev.length >= 12 ? prev : [...prev, { type: "paragraph", body: "", items: [] }]
+                )
+              }
+              disabled={blocks.length >= 12}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-line px-3 text-xs font-extrabold uppercase tracking-wide text-ink transition hover:bg-soft disabled:opacity-50"
+            >
+              <Plus className="size-3.5" /> Add section
+            </button>
+          </div>
+        </div>
 
         <div>
           <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">

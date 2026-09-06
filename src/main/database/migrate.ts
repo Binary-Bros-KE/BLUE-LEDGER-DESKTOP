@@ -3011,6 +3011,16 @@ const migrations = [
       -- online_image_urls (values travel, it's just JSON).
       ALTER TABLE products ADD COLUMN online_category_ids TEXT NOT NULL DEFAULT '[]';
     `
+  },
+  {
+    version: 88,
+    name: "product_online_content_json",
+    sql: `
+      -- Rich web-only product-detail content: { quickSpecs: string[], blocks: [{ type:
+      -- paragraph|specs|notes, heading?, body?, items?: string[] }] }. Rendered on the storefront
+      -- product page and exposed to crawlers. '{}' = none. Synced like online_image_urls.
+      ALTER TABLE products ADD COLUMN online_content_json TEXT NOT NULL DEFAULT '{}';
+    `
   }
 ] as const;
 

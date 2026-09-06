@@ -527,6 +527,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       onlinePriceCents: p.onlinePriceCents,
       onlineImageUrls: p.onlineImageUrls,
       onlineCategoryIds: p.onlineCategoryIds,
+      onlineContentJson: p.onlineContent,
       localCreatedAt: p.createdAt,
       localUpdatedAt: p.updatedAt,
       // The optimistic-lock baseline — see CONFLICT_AWARE_ENTITIES's own comment. Null on a
@@ -1781,7 +1782,8 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       { local: "online_description", cloud: "onlineDescription" },
       { local: "online_price_cents", cloud: "onlinePriceCents" },
       { local: "online_image_urls", cloud: "onlineImageUrls", type: "json", default: "[]" },
-      { local: "online_category_ids", cloud: "onlineCategoryIds", type: "json", default: "[]" }
+      { local: "online_category_ids", cloud: "onlineCategoryIds", type: "json", default: "[]" },
+      { local: "online_content_json", cloud: "onlineContentJson", type: "json", default: "{}" }
     ]
   },
   employees: {

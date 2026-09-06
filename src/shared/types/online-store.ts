@@ -5,6 +5,8 @@
  * controls themselves from their POS.
  */
 
+import type { ProductOnlineContent } from "./product";
+
 export type OnlineStoreDomainStatus = "NONE" | "PENDING_DNS" | "VERIFYING_TLS" | "LIVE";
 export type OnlineStoreStatus = "DRAFT" | "LIVE" | "SUSPENDED";
 
@@ -48,6 +50,7 @@ export type ProductOnlinePatch = {
   onlineDescription?: string | null;
   onlinePriceCents?: number | null;
   onlineCategoryIds?: string[];
+  onlineContent?: ProductOnlineContent;
 };
 
 // --- Trylist theme (storefront look) ------------------------------------------------------------

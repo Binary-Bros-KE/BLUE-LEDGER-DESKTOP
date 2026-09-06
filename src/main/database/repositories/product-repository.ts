@@ -1,9 +1,11 @@
 import { getDatabase } from "@main/database/connection";
 import type { ProductCreateInput, ProductUpdateInput } from "@shared/schemas/product";
 import type {
+  OnlineContentBlock,
   OnlineImageRef,
   Product,
   ProductListItem,
+  ProductOnlineContent,
   ProductStatus,
   ProductSyncStatus
 } from "@shared/types/product";
@@ -33,6 +35,47 @@ function parseIdArray(raw: string | null): string[] {
   } catch {
     return [];
   }
+}
+
+function strList(v: unknown): string[] {
+  return Array.isArray(v) ? v.map((x) => (typeof x === "string" ? x : "")).filter((x) => x.length > 0) : [];
+}
+
+/** online_content_json — { quickSpecs, blocks }. Defensive: any malformed shape reads as empty. */
+function parseOnlineContent(raw: string | null): ProductOnlineContent {
+  const empty: ProductOnlineContent = { quickSpecs: [], blocks: [] };
+  if (!raw) return empty;
+  try {
+    const o = JSON.parse(raw);
+    if (!o || typeof o !== "object") return empty;
+    const blocks: OnlineContentBlock[] = (Array.isArray(o.blocks) ? o.blocks : [])
+      .map((b: unknown): OnlineContentBlock => {
+        const bb = (b && typeof b === "object" ? b : {}) as Record<string, unknown>;
+        const type = bb.type === "specs" || bb.type === "notes" ? bb.type : "paragraph";
+        return {
+          type,
+          heading: typeof bb.heading === "string" ? bb.heading : undefined,
+          body: typeof bb.body === "string" ? bb.body : undefined,
+          items: strList(bb.items)
+        };
+      })
+      .slice(0, 12);
+    return { quickSpecs: strList(o.quickSpecs).slice(0, 20), blocks };
+  } catch {
+    return empty;
+  }
+}
+
+function serializeOnlineContent(c: ProductOnlineContent): string {
+  return JSON.stringify({
+    quickSpecs: strList(c.quickSpecs).slice(0, 20),
+    blocks: (c.blocks ?? []).slice(0, 12).map((b) => ({
+      type: b.type === "specs" || b.type === "notes" ? b.type : "paragraph",
+      ...(b.heading?.trim() ? { heading: b.heading.trim() } : {}),
+      ...(b.body?.trim() ? { body: b.body.trim() } : {}),
+      ...(b.type === "specs" ? { items: strList(b.items) } : {})
+    }))
+  });
 }
 
 export type ProductRow = {
@@ -70,6 +113,8 @@ export type ProductRow = {
   /** Online store (migration v87). JSON TEXT string array of extra category ids this product shows
    * under on the website, on top of category_id. '[]' = none. */
   online_category_ids: string;
+  /** Online store (migration v88). JSON TEXT { quickSpecs, blocks } — rich detail-page content. */
+  online_content_json: string;
   status: string;
   created_at: string;
   updated_at: string;
@@ -380,6 +425,7 @@ export function setProductOnlineRow(
     onlinePriceCents?: number | null;
     onlineImageUrls?: OnlineImageRef[];
     onlineCategoryIds?: string[];
+    onlineContent?: ProductOnlineContent;
   }
 ): ProductRow {
   const sets: string[] = [];
@@ -406,6 +452,10 @@ export function setProductOnlineRow(
   if (input.onlineCategoryIds !== undefined) {
     sets.push("online_category_ids = ?");
     params.push(JSON.stringify([...new Set(input.onlineCategoryIds.filter((v) => typeof v === "string" && v))]));
+  }
+  if (input.onlineContent !== undefined) {
+    sets.push("online_content_json = ?");
+    params.push(serializeOnlineContent(input.onlineContent));
   }
 
   if (sets.length === 0) {
@@ -458,6 +508,7 @@ export function mapProductRow(row: ProductRow): Product {
     onlinePriceCents: row.online_price_cents,
     onlineImageUrls: parseOnlineImageUrls(row.online_image_urls),
     onlineCategoryIds: parseIdArray(row.online_category_ids),
+    onlineContent: parseOnlineContent(row.online_content_json),
     status: row.status as ProductStatus,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
