@@ -12,7 +12,13 @@ import { showErrorToast } from "@renderer/shared/lib/toast";
 import type { DateRangeInput, SalesReportMode } from "@shared/types/report";
 import type { ProductsPerformanceReport } from "@shared/types/product-report";
 import type { ReportExportRequest, ReportExportSection } from "@shared/types/report-export";
-import { BestSellingProductsTable } from "./reports/BestSellingProductsTable";
+import {
+  BestSellingProductsTable,
+  DEFAULT_BEST_SELLING_LIMIT,
+  SORT_OPTIONS,
+  sortAndLimitBestSelling,
+  type BestSellingSortKey
+} from "./reports/BestSellingProductsTable";
 import { ProductSalesHistorySection } from "./reports/ProductSalesHistorySection";
 import { defaultAnchorForMode, rangeForAnchor, shiftAnchor, todayIso } from "./reports/salesReportDate";
 import { SalesModeSelector } from "./reports/SalesModeSelector";
@@ -41,6 +47,11 @@ export function ProductsReportRoute(): React.JSX.Element {
 
   const [data, setData] = useState<ProductsPerformanceReport | null>(null);
   const [slowMovingLimit, setSlowMovingLimit] = useState(20);
+  // Lifted out of BestSellingProductsTable (rather than left as that component's own local state)
+  // specifically so the export builder below can read the exact sort/limit the user picked on
+  // screen — see sortAndLimitBestSelling's own doc comment for the bug this fixes.
+  const [bestSellingSortKey, setBestSellingSortKey] = useState<BestSellingSortKey>("quantitySold");
+  const [bestSellingLimit, setBestSellingLimit] = useState(DEFAULT_BEST_SELLING_LIMIT);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,6 +74,16 @@ export function ProductsReportRoute(): React.JSX.Element {
     void load(resolvedRange, slowMovingLimit, locationFilter.locationId);
   }, [resolvedRange.startDate, resolvedRange.endDate, slowMovingLimit, locationFilter.locationId, load]);
 
+  // Client-reported bug: exporting "Best Selling Products" always showed the full, default-ordered
+  // list regardless of the on-screen sort ("By Profit" etc.) or "Show N" limit the user had just set
+  // — because the export below used to read data.bestSelling directly, and sortKey/limit used to be
+  // BestSellingProductsTable's own local state, invisible from here. This is the exact same
+  // sorted-and-limited set the table itself renders, so the export always matches what's on screen.
+  const bestSellingForExport = useMemo(
+    () => (data ? sortAndLimitBestSelling(data.bestSelling, bestSellingSortKey, bestSellingLimit) : []),
+    [data, bestSellingSortKey, bestSellingLimit]
+  );
+
   const reportExportRequest = useMemo<ReportExportRequest | null>(() => {
     if (!data) return null;
 
@@ -80,9 +101,10 @@ export function ProductsReportRoute(): React.JSX.Element {
           { label: "Profit", value: formatCents(totalProfit) }
         ]
       },
-      data.bestSelling.length > 0 && {
+      bestSellingForExport.length > 0 && {
         type: "table",
         title: "Best Selling Products",
+        description: `Sorted ${SORT_OPTIONS.find((o) => o.key === bestSellingSortKey)?.label.toLowerCase() ?? ""}, top ${bestSellingLimit} — matches the on-screen table.`,
         columns: [
           { key: "product", header: "Product" },
           { key: "sku", header: "SKU" },
@@ -92,7 +114,7 @@ export function ProductsReportRoute(): React.JSX.Element {
           { key: "profit", header: "Profit", align: "right" },
           { key: "margin", header: "Margin", align: "right" }
         ],
-        rows: data.bestSelling.map((row) => ({
+        rows: bestSellingForExport.map((row) => ({
           product: row.productName,
           sku: row.sku,
           category: row.categoryName ?? "—",
@@ -137,7 +159,7 @@ export function ProductsReportRoute(): React.JSX.Element {
       sections,
       fileBaseName: `ProductsReport_${resolvedRange.startDate}_to_${resolvedRange.endDate}`
     };
-  }, [data, resolvedRange]);
+  }, [data, resolvedRange, bestSellingForExport, bestSellingSortKey, bestSellingLimit]);
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }} className="mt-6 space-y-5 pb-10">
@@ -180,7 +202,13 @@ export function ProductsReportRoute(): React.JSX.Element {
           )}
           {data && (
             <>
-              <BestSellingProductsTable rows={data.bestSelling} />
+              <BestSellingProductsTable
+                rows={data.bestSelling}
+                sortKey={bestSellingSortKey}
+                onSortKeyChange={setBestSellingSortKey}
+                limit={bestSellingLimit}
+                onLimitChange={setBestSellingLimit}
+              />
               <SlowMovingProductsTable rows={data.slowMoving} limit={slowMovingLimit} onLimitChange={setSlowMovingLimit} />
             </>
           )}

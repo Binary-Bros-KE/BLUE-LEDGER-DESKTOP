@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { cn } from "@renderer/shared/lib/cn";
 import { formatCents } from "@renderer/shared/lib/money";
 import type { ProductPerformanceRow } from "@shared/types/product-report";
@@ -7,25 +7,48 @@ function money(cents: number): string {
   return formatCents(cents);
 }
 
-type SortKey = "quantitySold" | "revenueCents" | "profitCents";
-const DEFAULT_LIMIT = 20;
+export type BestSellingSortKey = "quantitySold" | "revenueCents" | "profitCents";
+export const DEFAULT_BEST_SELLING_LIMIT = 20;
 const MAX_LIMIT = 500;
 
-const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+export const SORT_OPTIONS: { key: BestSellingSortKey; label: string }[] = [
   { key: "quantitySold", label: "By Quantity" },
   { key: "revenueCents", label: "By Revenue" },
   { key: "profitCents", label: "By Profit" },
 ];
 
+/** Single source of truth for "what the on-screen table is actually showing right now" — shared
+ * with ProductsReportRoute's own export builder so a "By Profit" + "Show 50" export always matches
+ * what's on screen, instead of silently exporting the full, default-ordered set (the bug this fixed:
+ * sortKey/limit used to be local-only state here, invisible to the export). */
+export function sortAndLimitBestSelling(
+  rows: ProductPerformanceRow[],
+  sortKey: BestSellingSortKey,
+  limit: number
+): ProductPerformanceRow[] {
+  return [...rows].sort((a, b) => b[sortKey] - a[sortKey]).slice(0, limit);
+}
+
 /** The top N products (user-adjustable, defaults to 20) by whichever metric is selected —
  * re-sorted client side from the full set of products that sold anything in the period, so
  * switching to "By Revenue" can surface a low-volume, high-value product that a quantity-only
- * cut would have dropped entirely. */
-export function BestSellingProductsTable({ rows }: { rows: ProductPerformanceRow[] }): React.JSX.Element {
-  const [sortKey, setSortKey] = useState<SortKey>("quantitySold");
-  const [limit, setLimit] = useState(DEFAULT_LIMIT);
-
-  const topRows = useMemo(() => [...rows].sort((a, b) => b[sortKey] - a[sortKey]).slice(0, limit), [rows, sortKey, limit]);
+ * cut would have dropped entirely. sortKey/limit are lifted to ProductsReportRoute (rather than
+ * local state) specifically so its export builder can read the exact same values — see
+ * sortAndLimitBestSelling's own doc comment. */
+export function BestSellingProductsTable({
+  rows,
+  sortKey,
+  onSortKeyChange,
+  limit,
+  onLimitChange
+}: {
+  rows: ProductPerformanceRow[];
+  sortKey: BestSellingSortKey;
+  onSortKeyChange: (key: BestSellingSortKey) => void;
+  limit: number;
+  onLimitChange: (limit: number) => void;
+}): React.JSX.Element {
+  const topRows = useMemo(() => sortAndLimitBestSelling(rows, sortKey, limit), [rows, sortKey, limit]);
 
   return (
     <div className="rounded-lg border border-line bg-white p-4">
@@ -39,7 +62,7 @@ export function BestSellingProductsTable({ rows }: { rows: ProductPerformanceRow
               min={1}
               max={MAX_LIMIT}
               value={limit}
-              onChange={(event) => setLimit(Math.max(1, Math.min(MAX_LIMIT, Number(event.target.value) || 1)))}
+              onChange={(event) => onLimitChange(Math.max(1, Math.min(MAX_LIMIT, Number(event.target.value) || 1)))}
               className="h-7 w-16 rounded-md border border-line bg-white px-2 text-xs font-bold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
             />
           </label>
@@ -48,7 +71,7 @@ export function BestSellingProductsTable({ rows }: { rows: ProductPerformanceRow
               <button
                 key={option.key}
                 type="button"
-                onClick={() => setSortKey(option.key)}
+                onClick={() => onSortKeyChange(option.key)}
                 className={cn(
                   "rounded-md px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide transition cursor-pointer",
                   sortKey === option.key ? "bg-primary text-white" : "text-muted hover:bg-white"
