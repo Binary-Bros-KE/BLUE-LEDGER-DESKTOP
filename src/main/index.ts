@@ -72,6 +72,16 @@ if (process.env.BLUE_LEDGER_DATA_DIR) {
   console.log(`[Blue Ledger] Using overridden userData/sessionData path: ${app.getPath("userData")}`);
 }
 
+// Client request: every date shown by our OWN formatting code already uses formatDocumentDate()
+// (dd/mm/yyyy, locale-independent) — but native <input type="date"> fields (Purchases' From/To
+// Date filters, etc.) are rendered entirely by Chromium itself and follow Chromium's OWN locale
+// (navigator.language / Intl), not this app's HTML `lang` attribute and not anything our own code
+// can format. On a US-locale Windows install that locale defaults to en-US, showing "mm/dd/yyyy" —
+// exactly the bug the app-wide dd/mm/yyyy sweep was meant to kill everywhere. Must run before
+// app.whenReady() (bootstrap.ts's very first line) — a Chromium command-line switch has no effect
+// once Chromium has already initialized with the OS's own locale.
+app.commandLine.appendSwitch("lang", "en-GB");
+
 if (!app.isPackaged) {
   app.commandLine.appendSwitch("disable-crash-reporter");
 }
