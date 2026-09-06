@@ -102,6 +102,7 @@ export async function uploadProductImage(productId: string): Promise<Product> {
   const bytes = await readFile(sourcePath);
   const uploaded = await postShopAdmin<{ url: string; thumbUrl: string }>("/shop-admin/upload", {
     productId,
+    productName: existing.name,
     filename: basename(sourcePath),
     dataBase64: bytes.toString("base64"),
   });
