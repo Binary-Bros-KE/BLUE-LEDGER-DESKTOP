@@ -155,6 +155,7 @@ export function ThemePanel({
   const [savingTrade, setSavingTrade] = useState(false);
 
   const [brand, setBrand] = useState<TrylistThemeConfig["brand"]>(() => parseThemeConfig(themeJson).brand);
+  const [headerImageUrl, setHeaderImageUrl] = useState(() => parseThemeConfig(themeJson).headerImageUrl);
   const [topBar, setTopBar] = useState<TrylistThemeConfig["topBar"]>(() => parseThemeConfig(themeJson).topBar);
   const [contact, setContact] = useState<TrylistThemeConfig["contact"]>(() => parseThemeConfig(themeJson).contact);
   const [savingBrand, setSavingBrand] = useState(false);
@@ -171,6 +172,7 @@ export function ThemePanel({
     setDealTile((d) => ({ ...d, imageUrl: initial.dealTile.imageUrl }));
     setTradeTile((t) => ({ ...t, imageUrl: initial.tradeTile.imageUrl }));
     setBrand((b) => ({ ...b, logoImageUrl: initial.brand.logoImageUrl }));
+    setHeaderImageUrl(initial.headerImageUrl);
   }, [initial]);
 
   // Client request: the price + offer price the shop owner types drive an auto-calculated discount
@@ -853,6 +855,19 @@ export function ThemePanel({
           One image per category — used on the home category grid and as the banner on that
           category&apos;s page. Saved as soon as you upload.
         </p>
+
+        <ImageSlot
+          label="Default header background"
+          hint="Behind the breadcrumb / title band on the All-products page, and on any category or product page whose category has no image below."
+          url={headerImageUrl}
+          slot="page-header"
+          enabled={imageUploadsEnabled}
+          onChange={(url) => {
+            setHeaderImageUrl(url ?? "");
+            return apply({ headerImageUrl: url });
+          }}
+        />
+
         {categories.length === 0 ? (
           <p className="text-xs text-muted">No categories yet.</p>
         ) : (

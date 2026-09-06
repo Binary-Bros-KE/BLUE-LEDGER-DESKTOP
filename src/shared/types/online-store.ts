@@ -122,6 +122,8 @@ export type TrylistThemeConfig = {
   };
   story: ThemeStoryRow[];
   categoryImages: Record<string, string>;
+  /** Fallback background for the /products header band + any category / product header without one. */
+  headerImageUrl: string;
   productSections: ThemeProductSectionRow[];
   dealTile: ThemeDealTile;
   tradeTile: ThemeTradeTile;
@@ -153,6 +155,7 @@ export type ThemeUpdatePatch = {
   };
   story?: ThemeStoryRow[];
   categoryImages?: Record<string, string | null>;
+  headerImageUrl?: string | null;
   productSections?: ThemeProductSectionRow[];
   dealTile?: {
     title?: string | null;
@@ -256,6 +259,7 @@ export function parseThemeConfig(raw: Record<string, unknown> | null | undefined
     categoryImages: Object.fromEntries(
       Object.entries(catRaw).flatMap(([k, v]) => (str(v) ? [[k, str(v)] as const] : []))
     ),
+    headerImageUrl: str(o.headerImageUrl),
     productSections: sectionsRaw.slice(0, 6).map((s) => {
       const ss = (s && typeof s === "object" ? s : {}) as Record<string, unknown>;
       return {
