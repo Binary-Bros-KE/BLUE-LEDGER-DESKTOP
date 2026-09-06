@@ -3,13 +3,16 @@ import { ImagePlus, Loader2, Plus, Trash2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { Field, TextAreaField } from "@renderer/shared/components/form-fields";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { fromCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { cn } from "@renderer/shared/lib/cn";
 import type { Category } from "@shared/types/category";
 import {
   parseThemeConfig,
+  type ThemeDealTile,
   type ThemeProductSectionRow,
   type ThemeStoryRow,
+  type ThemeTradeTile,
   type ThemeUpdatePatch,
   type TrylistThemeConfig
 } from "@shared/types/online-store";
@@ -139,6 +142,18 @@ export function ThemePanel({
   const [savingStory, setSavingStory] = useState(false);
   const [savingSections, setSavingSections] = useState(false);
 
+  // Hero right-rail tiles — same "seeded once, images resync separately" split as hero/story above.
+  const [dealTile, setDealTile] = useState<ThemeDealTile>(() => parseThemeConfig(themeJson).dealTile);
+  // Money fields keep their own raw-text state per this app's own established convention (never
+  // re-derive a price input's text from cents on every render — see DeliveryPanel.tsx's priceText).
+  const [dealPriceText, setDealPriceText] = useState(() => fromCents(parseThemeConfig(themeJson).dealTile.priceCents ?? null));
+  const [dealOfferPriceText, setDealOfferPriceText] = useState(() =>
+    fromCents(parseThemeConfig(themeJson).dealTile.offerPriceCents ?? null)
+  );
+  const [savingDeal, setSavingDeal] = useState(false);
+  const [tradeTile, setTradeTile] = useState<ThemeTradeTile>(() => parseThemeConfig(themeJson).tradeTile);
+  const [savingTrade, setSavingTrade] = useState(false);
+
   useEffect(() => {
     setCatImages(initial.categoryImages);
     setHero((h) => ({
@@ -146,7 +161,19 @@ export function ThemePanel({
       shotImageUrl: initial.hero.shotImageUrl,
       backgroundImageUrl: initial.hero.backgroundImageUrl
     }));
+    setDealTile((d) => ({ ...d, imageUrl: initial.dealTile.imageUrl }));
+    setTradeTile((t) => ({ ...t, imageUrl: initial.tradeTile.imageUrl }));
   }, [initial]);
+
+  // Client request: the price + offer price the shop owner types drive an auto-calculated discount
+  // — never a separately-entered/stored percentage, so the badge can never drift out of sync with
+  // the two prices it's supposedly describing.
+  const dealDiscountPercent = useMemo(() => {
+    const price = dealPriceText.trim() ? toCents(dealPriceText.trim()) : 0;
+    const offer = dealOfferPriceText.trim() ? toCents(dealOfferPriceText.trim()) : 0;
+    if (price <= 0 || offer <= 0 || offer >= price) return null;
+    return Math.round((1 - offer / price) * 100);
+  }, [dealPriceText, dealOfferPriceText]);
 
   useEffect(() => {
     void window.blueLedger.category.list().then(setCategories).catch(() => setCategories([]));
@@ -225,6 +252,50 @@ export function ThemePanel({
       setSavingSections(false);
     }
   }, [apply, sections]);
+
+  const saveDeal = useCallback(async () => {
+    setSavingDeal(true);
+    try {
+      await apply(
+        {
+          dealTile: {
+            title: dealTile.title?.trim() || null,
+            priceCents: dealPriceText.trim() ? toCents(dealPriceText.trim()) : null,
+            offerPriceCents: dealOfferPriceText.trim() ? toCents(dealOfferPriceText.trim()) : null,
+            ctaLabel: dealTile.ctaLabel?.trim() || null,
+            ctaHref: dealTile.ctaHref?.trim() || null
+          }
+        },
+        "Deal tile saved"
+      );
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Couldn't save"));
+    } finally {
+      setSavingDeal(false);
+    }
+  }, [apply, dealTile, dealPriceText, dealOfferPriceText]);
+
+  const saveTrade = useCallback(async () => {
+    setSavingTrade(true);
+    try {
+      await apply(
+        {
+          tradeTile: {
+            categoryLabel: tradeTile.categoryLabel?.trim() || null,
+            title: tradeTile.title?.trim() || null,
+            description: tradeTile.description?.trim() || null,
+            ctaLabel: tradeTile.ctaLabel?.trim() || null,
+            ctaHref: tradeTile.ctaHref?.trim() || null
+          }
+        },
+        "Trade tile saved"
+      );
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Couldn't save"));
+    } finally {
+      setSavingTrade(false);
+    }
+  }, [apply, tradeTile]);
 
   const setStoryImage = useCallback(
     async (index: number, url: string | null) => {
@@ -337,6 +408,135 @@ export function ThemePanel({
             onChange={(url) => {
               setHero((h) => ({ ...h, backgroundImageUrl: url ?? "" }));
               return apply({ hero: { backgroundImageUrl: url } });
+            }}
+          />
+        </div>
+      </Card>
+
+      <Card title="Deal tile (hero, red)">
+        <p className="text-xs text-muted">
+          The &ldquo;Deal of the week&rdquo; label stays fixed — everything below it is yours to set.
+          Enter both prices and the discount badge is calculated for you, so it can never drift out
+          of sync with what you typed.
+        </p>
+        <TextAreaField
+          label="Headline (blank = theme default)"
+          value={dealTile.title ?? ""}
+          onChange={(v) => setDealTile((d) => ({ ...d, title: v }))}
+          rows={2}
+          placeholder={"Thermal printers\n25% off"}
+        />
+        <div className="grid grid-cols-2 gap-3">
+          <Field
+            label="Price"
+            type="number"
+            value={dealPriceText}
+            onChange={setDealPriceText}
+            placeholder="0.00"
+          />
+          <Field
+            label="Offer price"
+            type="number"
+            value={dealOfferPriceText}
+            onChange={setDealOfferPriceText}
+            placeholder="0.00"
+          />
+        </div>
+        <p className="text-xs font-bold text-muted">
+          {dealDiscountPercent !== null
+            ? `Discount badge will show: ${dealDiscountPercent}% OFF`
+            : "Enter a price and a lower offer price to preview the discount badge."}
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <Field
+            label="Call to action — label"
+            value={dealTile.ctaLabel ?? ""}
+            onChange={(v) => setDealTile((d) => ({ ...d, ctaLabel: v }))}
+            placeholder="Buy Now"
+          />
+          <Field
+            label="Call to action — link"
+            value={dealTile.ctaHref ?? ""}
+            onChange={(v) => setDealTile((d) => ({ ...d, ctaHref: v }))}
+            placeholder="/products/thermal-printer"
+          />
+        </div>
+        <div className="flex justify-end">
+          <Button onClick={() => void saveDeal()} disabled={savingDeal}>
+            {savingDeal ? <Loader2 className="size-4 animate-spin" /> : "Save deal tile"}
+          </Button>
+        </div>
+
+        <div className="border-t border-line pt-4">
+          <ImageSlot
+            label="Featured product image"
+            hint="Shown in the bottom-right corner of the deal tile."
+            url={dealTile.imageUrl ?? ""}
+            slot="deal-product"
+            enabled={imageUploadsEnabled}
+            aspect="aspect-square"
+            onChange={(url) => {
+              setDealTile((d) => ({ ...d, imageUrl: url ?? undefined }));
+              return apply({ dealTile: { imageUrl: url } });
+            }}
+          />
+        </div>
+      </Card>
+
+      <Card title="Trade tile (hero, cream)">
+        <p className="text-xs text-muted">
+          A single featured category highlight next to the deal tile above.
+        </p>
+        <Field
+          label="Category label (blank = theme default)"
+          value={tradeTile.categoryLabel ?? ""}
+          onChange={(v) => setTradeTile((t) => ({ ...t, categoryLabel: v }))}
+          placeholder="Trade accounts"
+        />
+        <Field
+          label="Title"
+          value={tradeTile.title ?? ""}
+          onChange={(v) => setTradeTile((t) => ({ ...t, title: v }))}
+          placeholder="Buying for a whole branch?"
+        />
+        <TextAreaField
+          label="Description"
+          value={tradeTile.description ?? ""}
+          onChange={(v) => setTradeTile((t) => ({ ...t, description: v }))}
+          rows={3}
+          placeholder="Tiered pricing, 30-day terms and LPO invoicing for registered businesses."
+        />
+        <div className="grid grid-cols-2 gap-3">
+          <Field
+            label="Call to action — label"
+            value={tradeTile.ctaLabel ?? ""}
+            onChange={(v) => setTradeTile((t) => ({ ...t, ctaLabel: v }))}
+            placeholder="Apply for terms"
+          />
+          <Field
+            label="Call to action — link"
+            value={tradeTile.ctaHref ?? ""}
+            onChange={(v) => setTradeTile((t) => ({ ...t, ctaHref: v }))}
+            placeholder="/trade"
+          />
+        </div>
+        <div className="flex justify-end">
+          <Button onClick={() => void saveTrade()} disabled={savingTrade}>
+            {savingTrade ? <Loader2 className="size-4 animate-spin" /> : "Save trade tile"}
+          </Button>
+        </div>
+
+        <div className="border-t border-line pt-4">
+          <ImageSlot
+            label="Featured category image"
+            hint="Shown in the bottom-right corner of the trade tile."
+            url={tradeTile.imageUrl ?? ""}
+            slot="trade-category"
+            enabled={imageUploadsEnabled}
+            aspect="aspect-square"
+            onChange={(url) => {
+              setTradeTile((t) => ({ ...t, imageUrl: url ?? undefined }));
+              return apply({ tradeTile: { imageUrl: url } });
             }}
           />
         </div>

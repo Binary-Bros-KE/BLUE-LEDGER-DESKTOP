@@ -72,6 +72,29 @@ export type ThemeProductSectionRow = {
   ctaLabel?: string | undefined;
 };
 
+/** Hero right-rail tile 1 (red). "Deal of the week" is a static label, not part of this config —
+ * only the fields below are editable. priceCents/offerPriceCents drive an auto-calculated discount
+ * badge storefront-side; the percentage itself is never stored (see NEXT/storefront DealTile.tsx). */
+export type ThemeDealTile = {
+  title?: string | undefined;
+  priceCents?: number | undefined;
+  offerPriceCents?: number | undefined;
+  ctaLabel?: string | undefined;
+  ctaHref?: string | undefined;
+  imageUrl?: string | undefined;
+};
+
+/** Hero right-rail tile 2 (cream). A single featured category highlight — categoryLabel is free
+ * text (like every other theme copy field), not a live category id/filter. */
+export type ThemeTradeTile = {
+  categoryLabel?: string | undefined;
+  title?: string | undefined;
+  description?: string | undefined;
+  ctaLabel?: string | undefined;
+  ctaHref?: string | undefined;
+  imageUrl?: string | undefined;
+};
+
 /** Fully-resolved theme (every field present) — what the editor works with. */
 export type TrylistThemeConfig = {
   hero: {
@@ -85,6 +108,8 @@ export type TrylistThemeConfig = {
   story: ThemeStoryRow[];
   categoryImages: Record<string, string>;
   productSections: ThemeProductSectionRow[];
+  dealTile: ThemeDealTile;
+  tradeTile: ThemeTradeTile;
 };
 
 /** Partial patch sent to POST /shop-admin/theme/update. `null` clears a field; `story` /
@@ -103,6 +128,22 @@ export type ThemeUpdatePatch = {
   story?: ThemeStoryRow[];
   categoryImages?: Record<string, string | null>;
   productSections?: ThemeProductSectionRow[];
+  dealTile?: {
+    title?: string | null;
+    priceCents?: number | null;
+    offerPriceCents?: number | null;
+    ctaLabel?: string | null;
+    ctaHref?: string | null;
+    imageUrl?: string | null;
+  };
+  tradeTile?: {
+    categoryLabel?: string | null;
+    title?: string | null;
+    description?: string | null;
+    ctaLabel?: string | null;
+    ctaHref?: string | null;
+    imageUrl?: string | null;
+  };
 };
 
 // --- Delivery methods (storefront checkout options) -------------------------------------------
@@ -127,6 +168,10 @@ function str(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
+function num(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
 function cta(v: unknown): ThemeCta {
   if (!v || typeof v !== "object") return {};
   const o = v as Record<string, unknown>;
@@ -143,6 +188,8 @@ export function parseThemeConfig(raw: Record<string, unknown> | null | undefined
     string,
     unknown
   >;
+  const dealTileRaw = (o.dealTile && typeof o.dealTile === "object" ? o.dealTile : {}) as Record<string, unknown>;
+  const tradeTileRaw = (o.tradeTile && typeof o.tradeTile === "object" ? o.tradeTile : {}) as Record<string, unknown>;
   return {
     hero: {
       headline: str(heroRaw.headline),
@@ -172,6 +219,22 @@ export function parseThemeConfig(raw: Record<string, unknown> | null | undefined
         categoryId: str(ss.categoryId) || undefined,
         ctaLabel: str(ss.ctaLabel) || undefined
       };
-    })
+    }),
+    dealTile: {
+      title: str(dealTileRaw.title) || undefined,
+      priceCents: num(dealTileRaw.priceCents),
+      offerPriceCents: num(dealTileRaw.offerPriceCents),
+      ctaLabel: str(dealTileRaw.ctaLabel) || undefined,
+      ctaHref: str(dealTileRaw.ctaHref) || undefined,
+      imageUrl: str(dealTileRaw.imageUrl) || undefined
+    },
+    tradeTile: {
+      categoryLabel: str(tradeTileRaw.categoryLabel) || undefined,
+      title: str(tradeTileRaw.title) || undefined,
+      description: str(tradeTileRaw.description) || undefined,
+      ctaLabel: str(tradeTileRaw.ctaLabel) || undefined,
+      ctaHref: str(tradeTileRaw.ctaHref) || undefined,
+      imageUrl: str(tradeTileRaw.imageUrl) || undefined
+    }
   };
 }
