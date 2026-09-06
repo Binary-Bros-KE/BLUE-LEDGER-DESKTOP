@@ -95,8 +95,23 @@ export type ThemeTradeTile = {
   imageUrl?: string | undefined;
 };
 
+export type ThemeBrand = { logoImageUrl: string; nameLine1: string; nameLine2: string };
+export type ThemeTopBar = { announcement: string };
+export type ThemeContact = {
+  whatsappSalesLabel: string;
+  whatsappSalesNumber: string;
+  whatsappSupportLabel: string;
+  whatsappSupportNumber: string;
+  email: string;
+  instagram: string;
+  facebook: string;
+};
+
 /** Fully-resolved theme (every field present) — what the editor works with. */
 export type TrylistThemeConfig = {
+  brand: ThemeBrand;
+  topBar: ThemeTopBar;
+  contact: ThemeContact;
   hero: {
     headline: string;
     sub: string;
@@ -117,6 +132,17 @@ export type TrylistThemeConfig = {
  * deletes that key). */
 export type ThemeUpdatePatch = {
   name?: "trylist";
+  brand?: { logoImageUrl?: string | null; nameLine1?: string | null; nameLine2?: string | null };
+  topBar?: { announcement?: string | null };
+  contact?: {
+    whatsappSalesLabel?: string | null;
+    whatsappSalesNumber?: string | null;
+    whatsappSupportLabel?: string | null;
+    whatsappSupportNumber?: string | null;
+    email?: string | null;
+    instagram?: string | null;
+    facebook?: string | null;
+  };
   hero?: {
     headline?: string | null;
     sub?: string | null;
@@ -190,7 +216,25 @@ export function parseThemeConfig(raw: Record<string, unknown> | null | undefined
   >;
   const dealTileRaw = (o.dealTile && typeof o.dealTile === "object" ? o.dealTile : {}) as Record<string, unknown>;
   const tradeTileRaw = (o.tradeTile && typeof o.tradeTile === "object" ? o.tradeTile : {}) as Record<string, unknown>;
+  const brandRaw = (o.brand && typeof o.brand === "object" ? o.brand : {}) as Record<string, unknown>;
+  const topBarRaw = (o.topBar && typeof o.topBar === "object" ? o.topBar : {}) as Record<string, unknown>;
+  const contactRaw = (o.contact && typeof o.contact === "object" ? o.contact : {}) as Record<string, unknown>;
   return {
+    brand: {
+      logoImageUrl: str(brandRaw.logoImageUrl),
+      nameLine1: str(brandRaw.nameLine1),
+      nameLine2: str(brandRaw.nameLine2)
+    },
+    topBar: { announcement: str(topBarRaw.announcement) },
+    contact: {
+      whatsappSalesLabel: str(contactRaw.whatsappSalesLabel),
+      whatsappSalesNumber: str(contactRaw.whatsappSalesNumber),
+      whatsappSupportLabel: str(contactRaw.whatsappSupportLabel),
+      whatsappSupportNumber: str(contactRaw.whatsappSupportNumber),
+      email: str(contactRaw.email),
+      instagram: str(contactRaw.instagram),
+      facebook: str(contactRaw.facebook)
+    },
     hero: {
       headline: str(heroRaw.headline),
       sub: str(heroRaw.sub),

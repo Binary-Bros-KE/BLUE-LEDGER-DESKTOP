@@ -154,6 +154,13 @@ export function ThemePanel({
   const [tradeTile, setTradeTile] = useState<ThemeTradeTile>(() => parseThemeConfig(themeJson).tradeTile);
   const [savingTrade, setSavingTrade] = useState(false);
 
+  const [brand, setBrand] = useState<TrylistThemeConfig["brand"]>(() => parseThemeConfig(themeJson).brand);
+  const [topBar, setTopBar] = useState<TrylistThemeConfig["topBar"]>(() => parseThemeConfig(themeJson).topBar);
+  const [contact, setContact] = useState<TrylistThemeConfig["contact"]>(() => parseThemeConfig(themeJson).contact);
+  const [savingBrand, setSavingBrand] = useState(false);
+  const [savingTopBar, setSavingTopBar] = useState(false);
+  const [savingContact, setSavingContact] = useState(false);
+
   useEffect(() => {
     setCatImages(initial.categoryImages);
     setHero((h) => ({
@@ -163,6 +170,7 @@ export function ThemePanel({
     }));
     setDealTile((d) => ({ ...d, imageUrl: initial.dealTile.imageUrl }));
     setTradeTile((t) => ({ ...t, imageUrl: initial.tradeTile.imageUrl }));
+    setBrand((b) => ({ ...b, logoImageUrl: initial.brand.logoImageUrl }));
   }, [initial]);
 
   // Client request: the price + offer price the shop owner types drive an auto-calculated discount
@@ -187,6 +195,56 @@ export function ThemePanel({
     },
     [onSaved]
   );
+
+  const saveBrandText = useCallback(async () => {
+    setSavingBrand(true);
+    try {
+      await apply(
+        { brand: { nameLine1: brand.nameLine1.trim() || null, nameLine2: brand.nameLine2.trim() || null } },
+        "Brand name saved"
+      );
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Couldn't save"));
+    } finally {
+      setSavingBrand(false);
+    }
+  }, [apply, brand]);
+
+  const saveTopBar = useCallback(async () => {
+    setSavingTopBar(true);
+    try {
+      await apply({ topBar: { announcement: topBar.announcement.trim() || null } }, "Top bar saved");
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Couldn't save"));
+    } finally {
+      setSavingTopBar(false);
+    }
+  }, [apply, topBar]);
+
+  const saveContact = useCallback(async () => {
+    setSavingContact(true);
+    try {
+      const c = contact;
+      await apply(
+        {
+          contact: {
+            whatsappSalesLabel: c.whatsappSalesLabel.trim() || null,
+            whatsappSalesNumber: c.whatsappSalesNumber.trim() || null,
+            whatsappSupportLabel: c.whatsappSupportLabel.trim() || null,
+            whatsappSupportNumber: c.whatsappSupportNumber.trim() || null,
+            email: c.email.trim() || null,
+            instagram: c.instagram.trim() || null,
+            facebook: c.facebook.trim() || null
+          }
+        },
+        "Contact details saved"
+      );
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Couldn't save"));
+    } finally {
+      setSavingContact(false);
+    }
+  }, [apply, contact]);
 
   const saveHeroText = useCallback(async () => {
     setSavingHero(true);
@@ -338,6 +396,113 @@ export function ThemePanel({
   return (
     <div className="space-y-5">
       {notice}
+
+      <Card title="Brand & logo">
+        <div className="grid gap-5 sm:grid-cols-[auto_1fr]">
+          <ImageSlot
+            label="Logo"
+            hint="Replaces the letter square in the header, and is used as the site favicon."
+            url={brand.logoImageUrl}
+            slot="brand-logo"
+            enabled={imageUploadsEnabled}
+            aspect="aspect-square"
+            onChange={(url) => {
+              setBrand((b) => ({ ...b, logoImageUrl: url ?? "" }));
+              return apply({ brand: { logoImageUrl: url } });
+            }}
+          />
+          <div className="space-y-3">
+            <Field
+              label="Store name — line 1"
+              value={brand.nameLine1}
+              onChange={(v) => setBrand((b) => ({ ...b, nameLine1: v }))}
+              placeholder="Trylist"
+            />
+            <Field
+              label="Store name — line 2"
+              value={brand.nameLine2}
+              onChange={(v) => setBrand((b) => ({ ...b, nameLine2: v }))}
+              placeholder="Solutions LTD"
+            />
+            <p className="text-[11px] text-muted">Blank = the store name split on its first space.</p>
+          </div>
+        </div>
+        <div className="flex justify-end">
+          <Button onClick={() => void saveBrandText()} disabled={savingBrand}>
+            {savingBrand ? <Loader2 className="size-4 animate-spin" /> : "Save name"}
+          </Button>
+        </div>
+      </Card>
+
+      <Card title="Top bar">
+        <Field
+          label="Announcement (blank = default)"
+          value={topBar.announcement}
+          onChange={(v) => setTopBar({ announcement: v })}
+          placeholder="Free Delivery within Nairobi - CBD."
+        />
+        <div className="flex justify-end">
+          <Button onClick={() => void saveTopBar()} disabled={savingTopBar}>
+            {savingTopBar ? <Loader2 className="size-4 animate-spin" /> : "Save"}
+          </Button>
+        </div>
+      </Card>
+
+      <Card title="Contact channels">
+        <p className="text-xs text-muted">
+          Shown in the &ldquo;Contact us&rdquo; pop-up (top bar + call-to-action buttons). Leave a
+          field blank to hide that channel.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field
+            label="WhatsApp 1 — label"
+            value={contact.whatsappSalesLabel}
+            onChange={(v) => setContact((c) => ({ ...c, whatsappSalesLabel: v }))}
+            placeholder="Sales Consultant"
+          />
+          <Field
+            label="WhatsApp 1 — number"
+            value={contact.whatsappSalesNumber}
+            onChange={(v) => setContact((c) => ({ ...c, whatsappSalesNumber: v }))}
+            placeholder="0791 880 412"
+          />
+          <Field
+            label="WhatsApp 2 — label"
+            value={contact.whatsappSupportLabel}
+            onChange={(v) => setContact((c) => ({ ...c, whatsappSupportLabel: v }))}
+            placeholder="Support"
+          />
+          <Field
+            label="WhatsApp 2 — number"
+            value={contact.whatsappSupportNumber}
+            onChange={(v) => setContact((c) => ({ ...c, whatsappSupportNumber: v }))}
+            placeholder="0742 593 840"
+          />
+          <Field
+            label="Email"
+            value={contact.email}
+            onChange={(v) => setContact((c) => ({ ...c, email: v }))}
+            placeholder="info@yourshop.co.ke"
+          />
+          <Field
+            label="Instagram handle"
+            value={contact.instagram}
+            onChange={(v) => setContact((c) => ({ ...c, instagram: v }))}
+            placeholder="@yourshop"
+          />
+          <Field
+            label="Facebook handle"
+            value={contact.facebook}
+            onChange={(v) => setContact((c) => ({ ...c, facebook: v }))}
+            placeholder="@yourshop"
+          />
+        </div>
+        <div className="flex justify-end">
+          <Button onClick={() => void saveContact()} disabled={savingContact}>
+            {savingContact ? <Loader2 className="size-4 animate-spin" /> : "Save contact details"}
+          </Button>
+        </div>
+      </Card>
 
       <Card title="Home hero">
         <TextAreaField
