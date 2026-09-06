@@ -182,10 +182,15 @@ import {
   updateProduct
 } from "@main/services/product-service";
 import {
+  createDeliveryMethod as createOnlineStoreDeliveryMethod,
+  deleteDeliveryMethod as deleteOnlineStoreDeliveryMethod,
   deleteProductImage as deleteOnlineStoreProductImage,
   deleteThemeImage as deleteOnlineStoreThemeImage,
   getOverview as getOnlineStoreOverview,
+  listDeliveryMethods as listOnlineStoreDeliveryMethods,
+  reorderDeliveryMethods as reorderOnlineStoreDeliveryMethods,
   setProductOnline as setOnlineStoreProductOnline,
+  updateDeliveryMethod as updateOnlineStoreDeliveryMethod,
   updateStoreConfig as updateOnlineStoreConfig,
   updateTheme as updateOnlineStoreTheme,
   uploadProductImage as uploadOnlineStoreProductImage,
@@ -355,7 +360,11 @@ import type { RecurringBillStatus } from "@shared/types/recurring-bill";
 import type { EmployeeStatus } from "@shared/types/employee";
 import type { LocationStatus } from "@shared/types/location";
 import type { ProductStatus } from "@shared/types/product";
-import type { ProductOnlinePatch, StoreConfigPatch } from "@shared/types/online-store";
+import type {
+  DeliveryMethodInput,
+  ProductOnlinePatch,
+  StoreConfigPatch
+} from "@shared/types/online-store";
 import type { QuotationStatus } from "@shared/types/quotation";
 import type { ImportEntityType } from "@shared/types/import";
 import type { ShareDocumentEntity } from "@shared/types/share";
@@ -509,6 +518,19 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.onlineStoreThemeDeleteImage, (_event, url: string) =>
     deleteOnlineStoreThemeImage(url)
+  );
+  ipcMain.handle(ipcChannels.onlineStoreDeliveryList, () => listOnlineStoreDeliveryMethods());
+  ipcMain.handle(ipcChannels.onlineStoreDeliveryCreate, (_event, input: unknown) =>
+    createOnlineStoreDeliveryMethod(input as DeliveryMethodInput)
+  );
+  ipcMain.handle(ipcChannels.onlineStoreDeliveryUpdate, (_event, id: string, patch: unknown) =>
+    updateOnlineStoreDeliveryMethod(id, patch as Partial<DeliveryMethodInput>)
+  );
+  ipcMain.handle(ipcChannels.onlineStoreDeliveryDelete, (_event, id: string) =>
+    deleteOnlineStoreDeliveryMethod(id)
+  );
+  ipcMain.handle(ipcChannels.onlineStoreDeliveryReorder, (_event, orderedIds: string[]) =>
+    reorderOnlineStoreDeliveryMethods(orderedIds)
   );
   ipcMain.handle(ipcChannels.mainStoreProductList, (_event, locationId: string | null) =>
     listProductsForStorefront(locationId)

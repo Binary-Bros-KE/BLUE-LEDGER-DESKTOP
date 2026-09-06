@@ -93,7 +93,12 @@ const api: BlueLedgerApi = {
     updateConfig: (patch) => invoke("online-store:update-config", patch),
     themeUpdate: (patch) => invoke("online-store:theme-update", patch),
     themeUpload: (slot) => invoke("online-store:theme-upload", slot),
-    themeDeleteImage: (url) => invoke("online-store:theme-delete-image", url)
+    themeDeleteImage: (url) => invoke("online-store:theme-delete-image", url),
+    deliveryList: () => invoke("online-store:delivery-list"),
+    deliveryCreate: (input) => invoke("online-store:delivery-create", input),
+    deliveryUpdate: (id, patch) => invoke("online-store:delivery-update", id, patch),
+    deliveryDelete: (id) => invoke("online-store:delivery-delete", id),
+    deliveryReorder: (orderedIds) => invoke("online-store:delivery-reorder", orderedIds)
   },
   mainStore: {
     listProducts: (locationId) => invoke("main-store:product-list", locationId),

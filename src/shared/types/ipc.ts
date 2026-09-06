@@ -24,10 +24,12 @@ import type {
 } from "./main-store";
 import type { Product, ProductListItem, ProductStatus, ProductStockSummary } from "./product";
 import type {
+  DeliveryMethodInput,
   ProductOnlinePatch,
   StoreConfigPatch,
   StoreOwnerView,
-  ThemeUpdatePatch
+  ThemeUpdatePatch,
+  WebDeliveryMethod
 } from "./online-store";
 import type { ProductSalesHistoryEntry, ProductsPerformanceReport } from "./product-report";
 import type { CustomerPurchaseHistoryEntry, OutstandingInvoicesSummary, TopCustomerRow } from "./customer-report";
@@ -333,6 +335,26 @@ export type IpcInvokeMap = {
   "online-store:theme-delete-image": {
     args: [url: string];
     result: { ok: true };
+  };
+  "online-store:delivery-list": {
+    args: [];
+    result: WebDeliveryMethod[];
+  };
+  "online-store:delivery-create": {
+    args: [input: DeliveryMethodInput];
+    result: WebDeliveryMethod[];
+  };
+  "online-store:delivery-update": {
+    args: [id: string, patch: Partial<DeliveryMethodInput>];
+    result: WebDeliveryMethod[];
+  };
+  "online-store:delivery-delete": {
+    args: [id: string];
+    result: WebDeliveryMethod[];
+  };
+  "online-store:delivery-reorder": {
+    args: [orderedIds: string[]];
+    result: WebDeliveryMethod[];
   };
   "main-store:product-list": {
     args: [string | null];
@@ -1493,6 +1515,18 @@ export type BlueLedgerApi = {
     themeDeleteImage: (
       url: string
     ) => Promise<IpcInvokeMap["online-store:theme-delete-image"]["result"]>;
+    deliveryList: () => Promise<IpcInvokeMap["online-store:delivery-list"]["result"]>;
+    deliveryCreate: (
+      input: DeliveryMethodInput
+    ) => Promise<IpcInvokeMap["online-store:delivery-create"]["result"]>;
+    deliveryUpdate: (
+      id: string,
+      patch: Partial<DeliveryMethodInput>
+    ) => Promise<IpcInvokeMap["online-store:delivery-update"]["result"]>;
+    deliveryDelete: (id: string) => Promise<IpcInvokeMap["online-store:delivery-delete"]["result"]>;
+    deliveryReorder: (
+      orderedIds: string[]
+    ) => Promise<IpcInvokeMap["online-store:delivery-reorder"]["result"]>;
   };
   mainStore: {
     listProducts: (

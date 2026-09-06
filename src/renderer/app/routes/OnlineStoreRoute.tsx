@@ -25,6 +25,7 @@ import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { StoreOwnerView } from "@shared/types/online-store";
 import type { Product, ProductListItem } from "@shared/types/product";
+import { DeliveryPanel } from "./online-store/DeliveryPanel";
 import { ThemePanel } from "./online-store/ThemePanel";
 
 type PublishFilter = "all" | "published" | "unpublished";
@@ -57,7 +58,7 @@ export function OnlineStoreRoute(): React.JSX.Element {
   const [products, setProducts] = useState<ProductListItem[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [tab, setTab] = useState<"products" | "look">("products");
+  const [tab, setTab] = useState<"products" | "look" | "delivery">("products");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<PublishFilter>("all");
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
@@ -255,7 +256,7 @@ export function OnlineStoreRoute(): React.JSX.Element {
 
       {/* Tabs ----------------------------------------------------------------------- */}
       <div className="flex overflow-hidden rounded-md border border-line">
-        {(["products", "look"] as const).map((t) => (
+        {(["products", "look", "delivery"] as const).map((t) => (
           <button
             key={t}
             type="button"
@@ -265,22 +266,24 @@ export function OnlineStoreRoute(): React.JSX.Element {
               tab === t ? "bg-ink text-white" : "bg-white text-muted hover:bg-soft"
             )}
           >
-            {t === "products" ? "Products" : "Storefront look"}
+            {t === "products" ? "Products" : t === "look" ? "Storefront look" : "Delivery"}
           </button>
         ))}
       </div>
 
-      {tab === "look" ? (
-        overview?.store ? (
+      {tab === "look" || tab === "delivery" ? (
+        !overview?.store ? (
+          <p className="rounded-lg border border-line bg-white p-5 text-sm font-semibold text-muted shadow-soft">
+            Your online store isn&apos;t set up yet — once Blue Ledger provisions it you can configure it here.
+          </p>
+        ) : tab === "look" ? (
           <ThemePanel
             themeJson={overview.store.themeJson}
             imageUploadsEnabled={overview.imageUploadsEnabled}
             onSaved={loadOverview}
           />
         ) : (
-          <p className="rounded-lg border border-line bg-white p-5 text-sm font-semibold text-muted shadow-soft">
-            Your online store isn&apos;t set up yet — once Blue Ledger provisions it you can style it here.
-          </p>
+          <DeliveryPanel />
         )
       ) : (
       /* Product list --------------------------------------------------------------- */

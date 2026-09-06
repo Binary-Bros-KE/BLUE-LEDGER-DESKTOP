@@ -92,6 +92,24 @@ export type ThemeUpdatePatch = {
   categoryImages?: Record<string, string | null>;
 };
 
+// --- Delivery methods (storefront checkout options) -------------------------------------------
+
+export type WebDeliveryMethod = {
+  id: string;
+  name: string;
+  description: string | null;
+  priceCents: number;
+  sortOrder: number;
+  active: boolean;
+};
+
+export type DeliveryMethodInput = {
+  name: string;
+  description?: string | null;
+  priceCents: number;
+  active?: boolean;
+};
+
 function str(v: unknown): string {
   return typeof v === "string" ? v : "";
 }

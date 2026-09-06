@@ -6,7 +6,13 @@ import * as productRepository from "@main/database/repositories/product-reposito
 import { API_BASE_URL } from "@main/services/license-service";
 import { getCloudIdentity } from "@main/services/sync-engine";
 import type { OnlineImageRef, Product } from "@shared/types/product";
-import type { ProductOnlinePatch, StoreConfigPatch, StoreOwnerView } from "@shared/types/online-store";
+import type {
+  DeliveryMethodInput,
+  ProductOnlinePatch,
+  StoreConfigPatch,
+  StoreOwnerView,
+  WebDeliveryMethod
+} from "@shared/types/online-store";
 
 const { dialog } = electron;
 
@@ -163,4 +169,30 @@ export async function uploadThemeImage(slot: string): Promise<{ url: string; thu
 export async function deleteThemeImage(url: string): Promise<{ ok: true }> {
   await postShopAdmin("/shop-admin/image/delete", { url }).catch(() => undefined);
   return { ok: true };
+}
+
+// --- Delivery methods (storefront checkout options) -------------------------------------------
+// Every call returns the full fresh list.
+
+export function listDeliveryMethods(): Promise<WebDeliveryMethod[]> {
+  return postShopAdmin<WebDeliveryMethod[]>("/shop-admin/delivery", {});
+}
+
+export function createDeliveryMethod(input: DeliveryMethodInput): Promise<WebDeliveryMethod[]> {
+  return postShopAdmin<WebDeliveryMethod[]>("/shop-admin/delivery/create", input as Record<string, unknown>);
+}
+
+export function updateDeliveryMethod(
+  id: string,
+  patch: Partial<DeliveryMethodInput>,
+): Promise<WebDeliveryMethod[]> {
+  return postShopAdmin<WebDeliveryMethod[]>("/shop-admin/delivery/update", { id, ...patch });
+}
+
+export function deleteDeliveryMethod(id: string): Promise<WebDeliveryMethod[]> {
+  return postShopAdmin<WebDeliveryMethod[]>("/shop-admin/delivery/delete", { id });
+}
+
+export function reorderDeliveryMethods(orderedIds: string[]): Promise<WebDeliveryMethod[]> {
+  return postShopAdmin<WebDeliveryMethod[]>("/shop-admin/delivery/reorder", { orderedIds });
 }
