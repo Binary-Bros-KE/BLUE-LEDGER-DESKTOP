@@ -9,6 +9,7 @@ import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import { showErrorToast } from "@renderer/shared/lib/toast";
+import { formatDocumentDate } from "@shared/lib/date";
 import type { DateRangeInput, SalesReportMode } from "@shared/types/report";
 import type { ProductsPerformanceReport } from "@shared/types/product-report";
 import type { ReportExportRequest, ReportExportSection } from "@shared/types/report-export";
@@ -145,7 +146,7 @@ export function ProductsReportRoute(): React.JSX.Element {
           lastSold:
             row.lastSoldAt === null
               ? "Never sold"
-              : `${new Date(row.lastSoldAt).toLocaleDateString()}${row.daysSinceLastSale !== null ? ` (${row.daysSinceLastSale}d ago)` : ""}`,
+              : `${formatDocumentDate(row.lastSoldAt)}${row.daysSinceLastSale !== null ? ` (${row.daysSinceLastSale}d ago)` : ""}`,
           ...(row.quantitySoldInPeriod === 0 ? { _tone: "danger" as const } : {})
         }))
       }

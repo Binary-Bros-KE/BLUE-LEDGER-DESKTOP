@@ -10,6 +10,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { showErrorToast } from "@renderer/shared/lib/toast";
+import { formatDocumentDate } from "@shared/lib/date";
 import type { ExportListRequest } from "@shared/types/export";
 import type { Location } from "@shared/types/location";
 import type { Product, ProductListItem } from "@shared/types/product";
@@ -45,7 +46,7 @@ function statusTone(status: BorrowStatus): "success" | "warning" | "accent" {
 
 function formatDate(value: string): string {
   try {
-    return new Date(value).toLocaleDateString();
+    return formatDocumentDate(value);
   } catch {
     return value;
   }

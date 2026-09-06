@@ -10,6 +10,7 @@ import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import { showErrorToast } from "@renderer/shared/lib/toast";
+import { formatDocumentDate } from "@shared/lib/date";
 import type { DateRangeInput, SalesReportMode } from "@shared/types/report";
 import type { OutstandingInvoicesSummary, TopCustomerRow } from "@shared/types/customer-report";
 import type { ReportExportRequest, ReportExportSection } from "@shared/types/report-export";
@@ -138,8 +139,8 @@ export function CustomersReportRoute(): React.JSX.Element {
         rows: outstanding.invoices.map((invoice) => ({
           customer: invoice.customerName,
           document: invoice.documentNumber ?? "—",
-          issued: new Date(invoice.completedAt).toLocaleDateString(),
-          due: invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : "—",
+          issued: formatDocumentDate(invoice.completedAt),
+          due: invoice.dueDate ? formatDocumentDate(invoice.dueDate) : "—",
           total: formatCents(invoice.grandTotalCents),
           paid: formatCents(invoice.amountPaidCents),
           balance: formatCents(invoice.balanceCents),

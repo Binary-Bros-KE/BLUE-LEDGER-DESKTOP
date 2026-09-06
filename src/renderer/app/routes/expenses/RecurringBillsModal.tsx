@@ -10,6 +10,7 @@ import { getDashboardVariant } from "@renderer/shared/lib/dashboard-role";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, toCents, fromCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
+import { formatDocumentDate } from "@shared/lib/date";
 import type { ExpenseCategory } from "@shared/types/expense-category";
 import { isStorefrontType, type Location } from "@shared/types/location";
 import type { PaymentMethod } from "@shared/types/payment-method";
@@ -381,7 +382,7 @@ export function RecurringBillsModal({
                     {bill.categoryName} · {bill.storefrontName}
                   </p>
                   <p className="text-[11px] font-semibold text-muted">
-                    Next due {new Date(bill.nextDueDate).toLocaleDateString()}
+                    Next due {formatDocumentDate(bill.nextDueDate)}
                   </p>
                 </div>
                 {canManage && (

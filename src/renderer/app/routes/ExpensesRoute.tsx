@@ -33,6 +33,7 @@ import {
   matchesYearFilter,
   yearFilterOptions
 } from "@renderer/shared/lib/year-filter";
+import { formatDocumentDate } from "@shared/lib/date";
 import type { Expense, ExpenseStatus, ExpenseSummary } from "@shared/types/expense";
 import type { ExpenseCategory } from "@shared/types/expense-category";
 import type { ExportListRequest } from "@shared/types/export";
@@ -47,7 +48,7 @@ type StatusFilter = "active" | "archived" | "all";
 
 function formatDate(value: string): string {
   try {
-    return new Date(value).toLocaleDateString();
+    return formatDocumentDate(value);
   } catch {
     return value;
   }

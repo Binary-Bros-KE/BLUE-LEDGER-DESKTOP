@@ -5,6 +5,7 @@ import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { ShareModal } from "@renderer/shared/components/ShareModal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
+import { formatDocumentDate } from "@shared/lib/date";
 import { PAYMENT_STATUS_OPTIONS, type PaymentStatus } from "@shared/types/sale";
 import type { CustomerStatementViewModel } from "@shared/types/statement";
 
@@ -92,7 +93,7 @@ export function StatementPreview({ vm }: { vm: CustomerStatementViewModel }): Re
           </div>
           <div className="text-right">
             <p className="text-xs font-extrabold uppercase tracking-wide text-primary">Statement</p>
-            <p className="text-[11px] font-semibold text-muted">{new Date(vm.generatedAt).toLocaleDateString()}</p>
+            <p className="text-[11px] font-semibold text-muted">{formatDocumentDate(vm.generatedAt)}</p>
           </div>
         </div>
 
@@ -136,7 +137,7 @@ export function StatementPreview({ vm }: { vm: CustomerStatementViewModel }): Re
                   <tr key={invoice.id} className="border-b border-line last:border-0">
                     <td className="px-2.5 py-2 font-bold text-ink">{invoice.invoiceNumber ?? "-"}</td>
                     <td className="px-2.5 py-2 text-muted">
-                      {invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : "-"}
+                      {invoice.dueDate ? formatDocumentDate(invoice.dueDate) : "-"}
                     </td>
                     <td className="px-2.5 py-2 text-right font-semibold text-ink">{money(invoice.grandTotalCents)}</td>
                     <td className="px-2.5 py-2 text-right font-extrabold text-ink">{money(invoice.balanceDueCents)}</td>

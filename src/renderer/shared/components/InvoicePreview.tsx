@@ -7,6 +7,7 @@ import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
+import { formatDocumentDate } from "@shared/lib/date";
 import { groupItemsBySections } from "@shared/lib/document-sections";
 import { computeAddedTaxCents, withTaxableServiceCharges } from "@shared/lib/tax-calculation";
 import type { Sale } from "@shared/types/sale";
@@ -15,7 +16,7 @@ import type { TenantContext } from "@shared/types/tenant";
 function formatDate(value: string | null): string {
   if (!value) return "—";
   try {
-    return new Date(value).toLocaleDateString();
+    return formatDocumentDate(value);
   } catch {
     return value;
   }

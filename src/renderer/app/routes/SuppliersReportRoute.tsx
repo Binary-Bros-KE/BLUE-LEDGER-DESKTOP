@@ -10,6 +10,7 @@ import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import { showErrorToast } from "@renderer/shared/lib/toast";
+import { formatDocumentDate } from "@shared/lib/date";
 import type { DateRangeInput, SalesReportMode } from "@shared/types/report";
 import type { ReportExportRequest, ReportExportSection } from "@shared/types/report-export";
 import type { OutstandingPurchasesSummary, SupplierSpendRow } from "@shared/types/supplier-report";
@@ -142,7 +143,7 @@ export function SuppliersReportRoute(): React.JSX.Element {
           supplier: purchase.supplierName,
           poNumber: purchase.purchaseNumber,
           status: STATUS_LABEL[purchase.status] ?? purchase.status,
-          ordered: purchase.orderedAt ? new Date(purchase.orderedAt).toLocaleDateString() : "—",
+          ordered: purchase.orderedAt ? formatDocumentDate(purchase.orderedAt) : "—",
           total: formatCents(purchase.grandTotalCents),
           paid: formatCents(purchase.amountPaidCents),
           balance: formatCents(purchase.balanceCents),

@@ -31,6 +31,7 @@ import {
   matchesYearFilter,
   yearFilterOptions
 } from "@renderer/shared/lib/year-filter";
+import { formatDocumentDate } from "@shared/lib/date";
 import type { ExportListRequest } from "@shared/types/export";
 import type { Location } from "@shared/types/location";
 import type { PaymentMethod } from "@shared/types/payment-method";
@@ -73,7 +74,7 @@ function paymentStatusTone(status: PurchasePaymentStatus): "success" | "warning"
 function formatDate(value: string | null): string {
   if (!value) return "—";
   try {
-    return new Date(value).toLocaleDateString();
+    return formatDocumentDate(value);
   } catch {
     return value;
   }

@@ -5,6 +5,7 @@ import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
+import { formatDocumentDate } from "@shared/lib/date";
 import { PURCHASE_PAYMENT_STATUS_OPTIONS, type PurchasePaymentStatus } from "@shared/types/purchase";
 import type { Supplier } from "@shared/types/supplier";
 import type { SupplierStatementViewModel } from "@shared/types/supplier-statement";
@@ -190,7 +191,7 @@ export function SupplierStatementModal({
                 </div>
                 <div className="text-right">
                   <p className="text-xs font-extrabold uppercase tracking-wide text-primary">Statement</p>
-                  <p className="text-[11px] font-semibold text-muted">{new Date(vm.generatedAt).toLocaleDateString()}</p>
+                  <p className="text-[11px] font-semibold text-muted">{formatDocumentDate(vm.generatedAt)}</p>
                 </div>
               </div>
 
@@ -234,7 +235,7 @@ export function SupplierStatementModal({
                         <tr key={purchase.id} className="border-b border-line last:border-0">
                           <td className="px-2.5 py-2 font-bold text-ink">{purchase.purchaseNumber}</td>
                           <td className="px-2.5 py-2 text-muted">
-                            {purchase.orderedAt ? new Date(purchase.orderedAt).toLocaleDateString() : "-"}
+                            {purchase.orderedAt ? formatDocumentDate(purchase.orderedAt) : "-"}
                           </td>
                           <td className="px-2.5 py-2 text-right font-semibold text-ink">{money(purchase.grandTotalCents)}</td>
                           <td className="px-2.5 py-2 text-right font-extrabold text-ink">{money(purchase.balanceDueCents)}</td>

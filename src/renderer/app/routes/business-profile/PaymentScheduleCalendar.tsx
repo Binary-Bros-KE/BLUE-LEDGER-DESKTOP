@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { CalendarClock, CreditCard, Loader2, Zap } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { cn } from "@renderer/shared/lib/cn";
+import { formatDocumentDate } from "@shared/lib/date";
 import type { BillingPeriodEntry, PaymentScheduleResult } from "@shared/types/subscription-payment";
 
 const STATUS_STYLE: Record<BillingPeriodEntry["status"], string> = {
@@ -79,7 +80,7 @@ export function PaymentScheduleCalendar({
               <Zap className="size-3 flex-none" aria-hidden="true" />
               Auto-Billing Active
               {schedule.pesapalAutoBillingActivatedAt &&
-                ` since ${new Date(schedule.pesapalAutoBillingActivatedAt).toLocaleDateString()}`}
+                ` since ${formatDocumentDate(schedule.pesapalAutoBillingActivatedAt)}`}
             </span>
           )}
         </div>
@@ -113,7 +114,7 @@ export function PaymentScheduleCalendar({
 
       <p className="mt-3 flex items-center gap-1.5 text-[11px] font-semibold text-muted">
         <CalendarClock className="size-3.5 flex-none" aria-hidden="true" />
-        Next due: {schedule.nextDueDate ? new Date(schedule.nextDueDate).toLocaleDateString() : "—"}
+        Next due: {schedule.nextDueDate ? formatDocumentDate(schedule.nextDueDate) : "—"}
       </p>
     </div>
   );
