@@ -113,6 +113,9 @@ export type Product = ProductInputFields & {
   onlineDescription: string | null;
   onlinePriceCents: number | null;
   onlineImageUrls: OnlineImageRef[];
+  /** Extra category ids this product appears under on the website, on top of its single
+   * `categoryId`. Managed from the "Online Store" tab. */
+  onlineCategoryIds: string[];
   createdAt: string;
   updatedAt: string;
   createdBy: string | null;

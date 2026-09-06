@@ -47,6 +47,7 @@ export type ProductOnlinePatch = {
   publishedOnline?: boolean;
   onlineDescription?: string | null;
   onlinePriceCents?: number | null;
+  onlineCategoryIds?: string[];
 };
 
 // --- Trylist theme (storefront look) ------------------------------------------------------------

@@ -24,6 +24,17 @@ function parseOnlineImageUrls(raw: string | null): OnlineImageRef[] {
   }
 }
 
+/** online_category_ids is a JSON TEXT string array — same defensive parse. */
+function parseIdArray(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string" && v.length > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
 export type ProductRow = {
   id: string;
   tenant_id: string;
@@ -56,6 +67,9 @@ export type ProductRow = {
   online_description: string | null;
   online_price_cents: number | null;
   online_image_urls: string;
+  /** Online store (migration v87). JSON TEXT string array of extra category ids this product shows
+   * under on the website, on top of category_id. '[]' = none. */
+  online_category_ids: string;
   status: string;
   created_at: string;
   updated_at: string;
@@ -365,6 +379,7 @@ export function setProductOnlineRow(
     onlineDescription?: string | null;
     onlinePriceCents?: number | null;
     onlineImageUrls?: OnlineImageRef[];
+    onlineCategoryIds?: string[];
   }
 ): ProductRow {
   const sets: string[] = [];
@@ -387,6 +402,10 @@ export function setProductOnlineRow(
     params.push(
       JSON.stringify(input.onlineImageUrls.map((e) => ({ url: e.url, thumbUrl: e.thumbUrl })))
     );
+  }
+  if (input.onlineCategoryIds !== undefined) {
+    sets.push("online_category_ids = ?");
+    params.push(JSON.stringify([...new Set(input.onlineCategoryIds.filter((v) => typeof v === "string" && v))]));
   }
 
   if (sets.length === 0) {
@@ -438,6 +457,7 @@ export function mapProductRow(row: ProductRow): Product {
     onlineDescription: row.online_description,
     onlinePriceCents: row.online_price_cents,
     onlineImageUrls: parseOnlineImageUrls(row.online_image_urls),
+    onlineCategoryIds: parseIdArray(row.online_category_ids),
     status: row.status as ProductStatus,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

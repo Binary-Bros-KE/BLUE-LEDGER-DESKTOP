@@ -2999,6 +2999,18 @@ const migrations = [
       -- (see license-service.ts). The renderer hides the "Online Store" nav item unless this is 1.
       ALTER TABLE tenant ADD COLUMN ecommerce_enabled INTEGER NOT NULL DEFAULT 0;
     `
+  },
+  {
+    version: 87,
+    name: "product_online_category_ids",
+    sql: `
+      -- Extra category ids a product shows under ONLINE only (JSON string array). The POS keeps its
+      -- single category_id; the storefront treats a product as "in category X" when
+      -- category_id = X OR X is in online_category_ids. Lets one product sit under its real category
+      -- + "Best Sellers" + "New Arrivals" etc. without a many-to-many table. Synced like
+      -- online_image_urls (values travel, it's just JSON).
+      ALTER TABLE products ADD COLUMN online_category_ids TEXT NOT NULL DEFAULT '[]';
+    `
   }
 ] as const;
 

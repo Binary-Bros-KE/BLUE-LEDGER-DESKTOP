@@ -23,6 +23,7 @@ import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
+import type { Category } from "@shared/types/category";
 import type { StoreOwnerView } from "@shared/types/online-store";
 import type { Product, ProductListItem } from "@shared/types/product";
 import { DeliveryPanel } from "./online-store/DeliveryPanel";
@@ -427,8 +428,23 @@ function OnlineProductModal({
   );
   const [description, setDescription] = useState(product.onlineDescription ?? "");
   const [images, setImages] = useState(product.onlineImageUrls);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [catIds, setCatIds] = useState<Set<string>>(() => new Set(product.onlineCategoryIds));
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    void window.blueLedger.category.list().then(setCategories).catch(() => setCategories([]));
+  }, []);
+
+  const toggleCat = useCallback((id: string) => {
+    setCatIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   const save = useCallback(async () => {
     setSaving(true);
@@ -436,7 +452,9 @@ function OnlineProductModal({
       const trimmed = priceText.trim();
       const updated = await window.blueLedger.onlineStore.setProductOnline(product.id, {
         onlinePriceCents: trimmed === "" ? null : toCents(trimmed),
-        onlineDescription: description.trim() === "" ? null : description.trim()
+        onlineDescription: description.trim() === "" ? null : description.trim(),
+        // never store the product's own primary category as an "extra"
+        onlineCategoryIds: [...catIds].filter((id) => id !== product.categoryId)
       });
       onSaved(updated);
       showSuccessToast(`Saved online details for "${product.name}"`);
@@ -446,7 +464,7 @@ function OnlineProductModal({
     } finally {
       setSaving(false);
     }
-  }, [description, onClose, onSaved, priceText, product.id, product.name]);
+  }, [catIds, description, onClose, onSaved, priceText, product.categoryId, product.id, product.name]);
 
   const addPhoto = useCallback(async () => {
     setUploading(true);
@@ -492,6 +510,46 @@ function OnlineProductModal({
           rows={4}
           placeholder={product.description ?? "Describe this product for online shoppers"}
         />
+
+        <div>
+          <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
+            Show under these categories online
+          </span>
+          <p className="mt-0.5 text-[11px] text-muted">
+            Its main category ({product.categoryName ?? "Uncategorised"}) is always included. Tick any
+            extra ones — e.g. Best Sellers, New Arrivals.
+          </p>
+          {categories.length === 0 ? (
+            <p className="mt-2 text-xs text-muted">No categories yet.</p>
+          ) : (
+            <div className="mt-2 grid max-h-44 grid-cols-2 gap-x-4 gap-y-1.5 overflow-y-auto rounded-md border border-line p-3">
+              {categories.map((c) => {
+                const isPrimary = c.id === product.categoryId;
+                return (
+                  <label
+                    key={c.id}
+                    className={cn(
+                      "flex items-center gap-2 text-[13px]",
+                      isPrimary ? "text-muted" : "cursor-pointer text-ink"
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isPrimary || catIds.has(c.id)}
+                      disabled={isPrimary}
+                      onChange={() => toggleCat(c.id)}
+                      className="size-3.5 flex-none accent-primary"
+                    />
+                    <span className="truncate">
+                      {c.name}
+                      {isPrimary ? " (main)" : ""}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
         <div>
           <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Photos</span>
