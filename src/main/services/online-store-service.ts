@@ -120,3 +120,47 @@ export async function deleteProductImage(productId: string, url: string): Promis
   const row = productRepository.setProductOnlineRow(productId, { onlineImageUrls: next });
   return productRepository.mapProductRow(row);
 }
+
+// --- Trylist theme (storefront look) ----------------------------------------------------------
+
+/** Opens a file picker, validates, and returns the chosen image as base64 + its basename — or null
+ * if the picker was cancelled. Shared by product + theme uploads. */
+async function pickImageBase64(title: string): Promise<{ filename: string; dataBase64: string } | null> {
+  const picked = await dialog.showOpenDialog({
+    title,
+    properties: ["openFile"],
+    filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp"] }],
+  });
+  const [sourcePath] = picked.filePaths;
+  if (picked.canceled || !sourcePath) return null;
+
+  const ext = extname(sourcePath).toLowerCase();
+  if (!ALLOWED_EXTENSIONS.has(ext)) {
+    throw new Error("Unsupported image type. Use a JPG, PNG or WEBP file.");
+  }
+  if (statSync(sourcePath).size > UPLOAD_MAX_BYTES) {
+    throw new Error("That image is larger than 5 MB — please choose a smaller file.");
+  }
+  const bytes = await readFile(sourcePath);
+  return { filename: basename(sourcePath), dataBase64: bytes.toString("base64") };
+}
+
+/** Deep-merges a partial Trylist theme into the cloud web_stores.themeJson. Returns the fresh view. */
+export function updateTheme(patch: Record<string, unknown>): Promise<StoreOwnerView> {
+  return postShopAdmin<StoreOwnerView>("/shop-admin/theme/update", patch);
+}
+
+/** Picks + uploads a theme decoration image (hero shot/background, story row, category). Returns
+ * the hosted URL pair — the renderer then writes it into the theme via updateTheme. `null` if the
+ * picker was cancelled. */
+export async function uploadThemeImage(slot: string): Promise<{ url: string; thumbUrl: string } | null> {
+  const file = await pickImageBase64("Choose an image");
+  if (!file) return null;
+  return postShopAdmin<{ url: string; thumbUrl: string }>("/shop-admin/theme/upload", { slot, ...file });
+}
+
+/** Best-effort delete of any stored image (product or theme) by URL. */
+export async function deleteThemeImage(url: string): Promise<{ ok: true }> {
+  await postShopAdmin("/shop-admin/image/delete", { url }).catch(() => undefined);
+  return { ok: true };
+}

@@ -23,7 +23,12 @@ import type {
   StockRequestAvailability
 } from "./main-store";
 import type { Product, ProductListItem, ProductStatus, ProductStockSummary } from "./product";
-import type { ProductOnlinePatch, StoreConfigPatch, StoreOwnerView } from "./online-store";
+import type {
+  ProductOnlinePatch,
+  StoreConfigPatch,
+  StoreOwnerView,
+  ThemeUpdatePatch
+} from "./online-store";
 import type { ProductSalesHistoryEntry, ProductsPerformanceReport } from "./product-report";
 import type { CustomerPurchaseHistoryEntry, OutstandingInvoicesSummary, TopCustomerRow } from "./customer-report";
 import type { OutstandingPurchasesSummary, SupplierPurchaseHistoryEntry, SupplierSpendRow } from "./supplier-report";
@@ -316,6 +321,18 @@ export type IpcInvokeMap = {
   "online-store:update-config": {
     args: [patch: StoreConfigPatch];
     result: StoreOwnerView;
+  };
+  "online-store:theme-update": {
+    args: [patch: ThemeUpdatePatch];
+    result: StoreOwnerView;
+  };
+  "online-store:theme-upload": {
+    args: [slot: string];
+    result: { url: string; thumbUrl: string } | null;
+  };
+  "online-store:theme-delete-image": {
+    args: [url: string];
+    result: { ok: true };
   };
   "main-store:product-list": {
     args: [string | null];
@@ -1469,6 +1486,13 @@ export type BlueLedgerApi = {
     updateConfig: (
       patch: StoreConfigPatch
     ) => Promise<IpcInvokeMap["online-store:update-config"]["result"]>;
+    themeUpdate: (
+      patch: ThemeUpdatePatch
+    ) => Promise<IpcInvokeMap["online-store:theme-update"]["result"]>;
+    themeUpload: (slot: string) => Promise<IpcInvokeMap["online-store:theme-upload"]["result"]>;
+    themeDeleteImage: (
+      url: string
+    ) => Promise<IpcInvokeMap["online-store:theme-delete-image"]["result"]>;
   };
   mainStore: {
     listProducts: (

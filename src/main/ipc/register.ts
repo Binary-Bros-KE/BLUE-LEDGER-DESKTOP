@@ -183,10 +183,13 @@ import {
 } from "@main/services/product-service";
 import {
   deleteProductImage as deleteOnlineStoreProductImage,
+  deleteThemeImage as deleteOnlineStoreThemeImage,
   getOverview as getOnlineStoreOverview,
   setProductOnline as setOnlineStoreProductOnline,
   updateStoreConfig as updateOnlineStoreConfig,
-  uploadProductImage as uploadOnlineStoreProductImage
+  updateTheme as updateOnlineStoreTheme,
+  uploadProductImage as uploadOnlineStoreProductImage,
+  uploadThemeImage as uploadOnlineStoreThemeImage
 } from "@main/services/online-store-service";
 import {
   distributeFromMainStore,
@@ -497,6 +500,15 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.onlineStoreUpdateConfig, (_event, patch: unknown) =>
     updateOnlineStoreConfig(patch as StoreConfigPatch)
+  );
+  ipcMain.handle(ipcChannels.onlineStoreThemeUpdate, (_event, patch: unknown) =>
+    updateOnlineStoreTheme(patch as Record<string, unknown>)
+  );
+  ipcMain.handle(ipcChannels.onlineStoreThemeUpload, (_event, slot: string) =>
+    uploadOnlineStoreThemeImage(slot)
+  );
+  ipcMain.handle(ipcChannels.onlineStoreThemeDeleteImage, (_event, url: string) =>
+    deleteOnlineStoreThemeImage(url)
   );
   ipcMain.handle(ipcChannels.mainStoreProductList, (_event, locationId: string | null) =>
     listProductsForStorefront(locationId)

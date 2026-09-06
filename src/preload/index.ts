@@ -90,7 +90,10 @@ const api: BlueLedgerApi = {
     setProductOnline: (productId, patch) => invoke("online-store:set-product-online", productId, patch),
     uploadImage: (productId) => invoke("online-store:upload-image", productId),
     deleteImage: (productId, url) => invoke("online-store:delete-image", productId, url),
-    updateConfig: (patch) => invoke("online-store:update-config", patch)
+    updateConfig: (patch) => invoke("online-store:update-config", patch),
+    themeUpdate: (patch) => invoke("online-store:theme-update", patch),
+    themeUpload: (slot) => invoke("online-store:theme-upload", slot),
+    themeDeleteImage: (url) => invoke("online-store:theme-delete-image", url)
   },
   mainStore: {
     listProducts: (locationId) => invoke("main-store:product-list", locationId),

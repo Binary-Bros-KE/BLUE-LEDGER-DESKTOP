@@ -25,6 +25,7 @@ import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { StoreOwnerView } from "@shared/types/online-store";
 import type { Product, ProductListItem } from "@shared/types/product";
+import { ThemePanel } from "./online-store/ThemePanel";
 
 type PublishFilter = "all" | "published" | "unpublished";
 
@@ -56,6 +57,7 @@ export function OnlineStoreRoute(): React.JSX.Element {
   const [products, setProducts] = useState<ProductListItem[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  const [tab, setTab] = useState<"products" | "look">("products");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<PublishFilter>("all");
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
@@ -251,7 +253,37 @@ export function OnlineStoreRoute(): React.JSX.Element {
         />
       </div>
 
-      {/* Product list --------------------------------------------------------------- */}
+      {/* Tabs ----------------------------------------------------------------------- */}
+      <div className="flex overflow-hidden rounded-md border border-line">
+        {(["products", "look"] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={cn(
+              "px-4 py-2.5 text-[11px] font-extrabold uppercase tracking-wide transition",
+              tab === t ? "bg-ink text-white" : "bg-white text-muted hover:bg-soft"
+            )}
+          >
+            {t === "products" ? "Products" : "Storefront look"}
+          </button>
+        ))}
+      </div>
+
+      {tab === "look" ? (
+        overview?.store ? (
+          <ThemePanel
+            themeJson={overview.store.themeJson}
+            imageUploadsEnabled={overview.imageUploadsEnabled}
+            onSaved={loadOverview}
+          />
+        ) : (
+          <p className="rounded-lg border border-line bg-white p-5 text-sm font-semibold text-muted shadow-soft">
+            Your online store isn&apos;t set up yet — once Blue Ledger provisions it you can style it here.
+          </p>
+        )
+      ) : (
+      /* Product list --------------------------------------------------------------- */
       <div className="rounded-lg border border-line bg-white shadow-soft">
         <div className="flex flex-wrap items-center gap-3 border-b border-line p-4">
           <div className="relative flex-1 min-w-[200px]">
@@ -357,6 +389,7 @@ export function OnlineStoreRoute(): React.JSX.Element {
           </ul>
         )}
       </div>
+      )}
 
       {editingProduct && (
         <OnlineProductModal
