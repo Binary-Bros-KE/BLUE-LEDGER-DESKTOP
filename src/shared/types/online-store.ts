@@ -63,6 +63,12 @@ export type ThemeStoryRow = {
   ctaHref?: string | undefined;
 };
 
+export type ThemeProductSectionRow = {
+  title?: string | undefined;
+  categoryId?: string | undefined;
+  ctaLabel?: string | undefined;
+};
+
 /** Fully-resolved theme (every field present) — what the editor works with. */
 export type TrylistThemeConfig = {
   hero: {
@@ -75,10 +81,12 @@ export type TrylistThemeConfig = {
   };
   story: ThemeStoryRow[];
   categoryImages: Record<string, string>;
+  productSections: ThemeProductSectionRow[];
 };
 
-/** Partial patch sent to POST /shop-admin/theme/update. `null` clears a field; `story` replaces
- * the whole array; `categoryImages` merges by key (a `null` value deletes that key). */
+/** Partial patch sent to POST /shop-admin/theme/update. `null` clears a field; `story` /
+ * `productSections` replace the whole array; `categoryImages` merges by key (a `null` value
+ * deletes that key). */
 export type ThemeUpdatePatch = {
   name?: "trylist";
   hero?: {
@@ -91,6 +99,7 @@ export type ThemeUpdatePatch = {
   };
   story?: ThemeStoryRow[];
   categoryImages?: Record<string, string | null>;
+  productSections?: ThemeProductSectionRow[];
 };
 
 // --- Delivery methods (storefront checkout options) -------------------------------------------
@@ -126,6 +135,7 @@ export function parseThemeConfig(raw: Record<string, unknown> | null | undefined
   const o = raw && typeof raw === "object" ? raw : {};
   const heroRaw = (o.hero && typeof o.hero === "object" ? o.hero : {}) as Record<string, unknown>;
   const storyRaw = Array.isArray(o.story) ? o.story : [];
+  const sectionsRaw = Array.isArray(o.productSections) ? o.productSections : [];
   const catRaw = (o.categoryImages && typeof o.categoryImages === "object" ? o.categoryImages : {}) as Record<
     string,
     unknown
@@ -151,6 +161,14 @@ export function parseThemeConfig(raw: Record<string, unknown> | null | undefined
     }),
     categoryImages: Object.fromEntries(
       Object.entries(catRaw).flatMap(([k, v]) => (str(v) ? [[k, str(v)] as const] : []))
-    )
+    ),
+    productSections: sectionsRaw.slice(0, 6).map((s) => {
+      const ss = (s && typeof s === "object" ? s : {}) as Record<string, unknown>;
+      return {
+        title: str(ss.title) || undefined,
+        categoryId: str(ss.categoryId) || undefined,
+        ctaLabel: str(ss.ctaLabel) || undefined
+      };
+    })
   };
 }

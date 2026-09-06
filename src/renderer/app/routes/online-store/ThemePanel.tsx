@@ -8,6 +8,7 @@ import { cn } from "@renderer/shared/lib/cn";
 import type { Category } from "@shared/types/category";
 import {
   parseThemeConfig,
+  type ThemeProductSectionRow,
   type ThemeStoryRow,
   type ThemeUpdatePatch,
   type TrylistThemeConfig
@@ -128,11 +129,15 @@ export function ThemePanel({
   // (a later parent reload after e.g. a category upload must not wipe unsaved text).
   const [hero, setHero] = useState<TrylistThemeConfig["hero"]>(() => parseThemeConfig(themeJson).hero);
   const [story, setStory] = useState<ThemeStoryRow[]>(() => parseThemeConfig(themeJson).story);
+  const [sections, setSections] = useState<ThemeProductSectionRow[]>(
+    () => parseThemeConfig(themeJson).productSections
+  );
   const [categories, setCategories] = useState<Category[]>([]);
   // Category + hero/story *images* persist immediately, so this stays in sync with the server.
   const [catImages, setCatImages] = useState<Record<string, string>>(initial.categoryImages);
   const [savingHero, setSavingHero] = useState(false);
   const [savingStory, setSavingStory] = useState(false);
+  const [savingSections, setSavingSections] = useState(false);
 
   useEffect(() => {
     setCatImages(initial.categoryImages);
@@ -202,6 +207,24 @@ export function ThemePanel({
       setSavingStory(false);
     }
   }, [apply, story]);
+
+  const saveSections = useCallback(async () => {
+    setSavingSections(true);
+    try {
+      const cleaned = sections
+        .map((s) => ({
+          title: s.title?.trim() || undefined,
+          categoryId: s.categoryId || undefined,
+          ctaLabel: s.ctaLabel?.trim() || undefined
+        }))
+        .filter((s) => s.title && s.categoryId);
+      await apply({ productSections: cleaned }, "Home sections saved");
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Couldn't save"));
+    } finally {
+      setSavingSections(false);
+    }
+  }, [apply, sections]);
 
   const setStoryImage = useCallback(
     async (index: number, url: string | null) => {
@@ -384,6 +407,78 @@ export function ThemePanel({
           </button>
           <Button onClick={() => void saveStory()} disabled={savingStory}>
             {savingStory ? <Loader2 className="size-4 animate-spin" /> : "Save story blocks"}
+          </Button>
+        </div>
+      </Card>
+
+      <Card title="Home product sections">
+        <p className="text-xs text-muted">
+          Curated rows on the home page — each shows one category&apos;s products with a heading and
+          a &ldquo;see all&rdquo; link (e.g. Best Sellers, New Arrivals, Daily Deals). Up to 6. Leave
+          empty for the default single product grid.
+        </p>
+        {sections.map((s, i) => (
+          <div key={i} className="rounded-md border border-line p-4">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
+                Section {i + 1}
+              </span>
+              <button
+                type="button"
+                onClick={() => setSections((prev) => prev.filter((_, j) => j !== i))}
+                className="inline-flex items-center gap-1 text-xs font-extrabold uppercase tracking-wide text-danger transition hover:opacity-70"
+              >
+                <Trash2 className="size-3.5" /> Remove
+              </button>
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <Field
+                label="Heading"
+                value={s.title ?? ""}
+                onChange={(v) => setSections((prev) => prev.map((r, j) => (j === i ? { ...r, title: v } : r)))}
+                placeholder="Best Sellers"
+              />
+              <label className="block">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Category</span>
+                <select
+                  value={s.categoryId ?? ""}
+                  onChange={(e) =>
+                    setSections((prev) =>
+                      prev.map((r, j) => (j === i ? { ...r, categoryId: e.target.value || undefined } : r))
+                    )
+                  }
+                  className="mt-1 h-10 w-full rounded-md border border-line bg-white px-2 text-sm font-semibold outline-none focus:ring-4 focus:ring-accent/20"
+                >
+                  <option value="">— choose a category —</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Field
+                label="Link label (optional)"
+                value={s.ctaLabel ?? ""}
+                onChange={(v) =>
+                  setSections((prev) => prev.map((r, j) => (j === i ? { ...r, ctaLabel: v } : r)))
+                }
+                placeholder="See all best sellers"
+              />
+            </div>
+          </div>
+        ))}
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => setSections((prev) => (prev.length >= 6 ? prev : [...prev, {}]))}
+            disabled={sections.length >= 6}
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-line px-3 text-xs font-extrabold uppercase tracking-wide text-ink transition hover:bg-soft disabled:opacity-50"
+          >
+            <Plus className="size-3.5" /> Add section
+          </button>
+          <Button onClick={() => void saveSections()} disabled={savingSections}>
+            {savingSections ? <Loader2 className="size-4 animate-spin" /> : "Save home sections"}
           </Button>
         </div>
       </Card>

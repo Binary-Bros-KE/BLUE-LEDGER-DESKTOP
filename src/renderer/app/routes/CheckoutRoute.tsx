@@ -1103,7 +1103,16 @@ export function CheckoutRoute(): React.JSX.Element {
           </div>
         </section>
 
-        <div className="space-y-3">
+        {/* Client request: the active order used to scroll away with the rest of the page whenever
+            it grew tall (many lines + totals + payment fields), forcing a cashier to keep scrolling
+            down to check quantities/totals then back up to add another product. Pinning this whole
+            column (sticky, same row as the search bar so it starts at that same level) with its own
+            internal scroll means it's always fully reachable without ever touching the page's own
+            scroll — same idea already used for the product list on the left (search bar fixed, list
+            scrolls beneath it). Only active from lg: up, matching the breakpoint the two-column grid
+            itself switches on at — below that everything already stacks in one natural scrolling
+            column, where a sticky/capped sidebar would fight the layout instead of helping it. */}
+        <div className="space-y-3 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:self-start lg:overflow-y-auto lg:pr-1">
           <Button type="button" onClick={handleNewSale} className="h-10 w-full text-xs">
             <Plus className="mr-1.5 size-4" aria-hidden="true" />
             New Sale
