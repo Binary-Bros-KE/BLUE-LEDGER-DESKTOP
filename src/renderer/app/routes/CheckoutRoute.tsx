@@ -184,6 +184,54 @@ export function CheckoutRoute(): React.JSX.Element {
   // cashier's StorefrontPicker choice below stands in for it.
   const effectiveLocationId = branchId ?? (storefrontId || null);
 
+  // Client-reported bug: a cashier switching to another tab (or logging out) while a sale still had
+  // items typed in but was never explicitly held/deleted lost that entire cart outright —
+  // CheckoutRoute simply unmounts (App.tsx's activeNavKey ternary swaps in a different route
+  // component; authStatus flipping to "unauthenticated" swaps in LoginRoute) and nothing had ever
+  // persisted the draft. Rather than blocking navigation with a "hold or delete?" prompt (the other
+  // option raised), auto-suspending every still-unsaved draft on unmount covers BOTH causes
+  // uniformly with zero added friction on the happy path — a tab switch and a logout both just
+  // unmount this component the same way, so one cleanup effect below handles both.
+  //
+  // These three refs exist only so that cleanup effect (which must use an EMPTY dependency array —
+  // it should fire once, on true unmount, not on every openSales/session/storefrontId change) can
+  // still read the LATEST values: an empty-deps effect's cleanup closure otherwise only ever sees
+  // whatever these were on the component's very first render.
+  const openSalesRef = useRef(openSales);
+  const sessionRef = useRef(session);
+  const storefrontIdRef = useRef(storefrontId);
+  useEffect(() => {
+    openSalesRef.current = openSales;
+  }, [openSales]);
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
+  useEffect(() => {
+    storefrontIdRef.current = storefrontId;
+  }, [storefrontId]);
+
+  useEffect(() => {
+    return () => {
+      const currentSession = sessionRef.current;
+      const locationId = currentSession && !currentSession.branch ? storefrontIdRef.current : undefined;
+      // A session with no assigned branch that never picked a storefront can't be auto-held either
+      // — same precondition handleSuspend enforces (there's no location to attach the sale to, and
+      // nothing left to prompt for once we're already unmounting).
+      if (currentSession && !currentSession.branch && !locationId) return;
+      const draftsToSave = openSalesRef.current.filter((draft) => draft.status === "draft" && draft.items.length > 0);
+      if (draftsToSave.length === 0) return;
+      void Promise.allSettled(
+        draftsToSave.map((draft) => window.blueLedger.sale.suspend(buildSuspendPayload(draft, locationId)))
+      ).then((results) => {
+        const savedCount = results.filter((result) => result.status === "fulfilled").length;
+        if (savedCount > 0) {
+          showSuccessToast(`Held ${savedCount} open sale${savedCount === 1 ? "" : "s"} automatically so nothing was lost`);
+        }
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (!effectiveLocationId) {
       defaultIncludeBusinessInfoRef.current = true;
@@ -871,6 +919,39 @@ export function CheckoutRoute(): React.JSX.Element {
     }
   }
 
+  // Shared by handleSuspend (the explicit "Hold" button) and the auto-suspend-on-unmount guard
+  // below — pure function of a draft + resolved locationId, no other component state involved, so
+  // it's safe to call from either place (including from an effect cleanup running after unmount).
+  function buildSuspendPayload(draft: OpenSaleDraft, locationId: string | undefined) {
+    return {
+      resumeSaleId: draft.dbSaleId,
+      customerId: draft.customerId,
+      walkInName: draft.customerId ? undefined : draft.walkInName.trim() || undefined,
+      notes: draft.notes,
+      items: draft.items.map((line) => ({
+        productId: line.productId,
+        quantity: line.quantity,
+        discountAmountCents: toCents(line.discount),
+        unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined,
+        isLocallySourced: line.isLocallySourced,
+        // line.localCost is what the cashier typed as the PER-UNIT cost — localCostCents itself is
+        // still stored/reported as the line's total (see money.ts's own doc comment), so multiply
+        // here rather than changing anything downstream.
+        localCostCents:
+          line.isLocallySourced && line.localCost.trim() ? unitCostToTotalCents(line.localCost, line.quantity) : undefined,
+        localSupplierId: line.localSupplierId,
+        taxInclusiveOverride: line.taxInclusiveOverride
+      })),
+      ...buildExtrasPayload(draft),
+      paymentMethodId: draft.paymentMethodId || undefined,
+      paymentReference: draft.paymentReference || undefined,
+      amountReceivedCents: draft.amountReceived.trim() === "" ? null : toCents(draft.amountReceived),
+      includeTaxBreakdown: draft.includeTaxBreakdown,
+      includeBusinessInfo: draft.includeBusinessInfo,
+      locationId
+    };
+  }
+
   async function handleSuspend(): Promise<void> {
     if (!activeDraft || activeDraft.items.length === 0) return;
     if (session && !session.branch && !storefrontId) {
@@ -882,33 +963,9 @@ export function CheckoutRoute(): React.JSX.Element {
     setSuspending(true);
     setActionError(null);
     try {
-      const result = await window.blueLedger.sale.suspend({
-        resumeSaleId: activeDraft.dbSaleId,
-        customerId: activeDraft.customerId,
-        walkInName: activeDraft.customerId ? undefined : activeDraft.walkInName.trim() || undefined,
-        notes: activeDraft.notes,
-        items: activeDraft.items.map((line) => ({
-          productId: line.productId,
-          quantity: line.quantity,
-          discountAmountCents: toCents(line.discount),
-          unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined,
-          isLocallySourced: line.isLocallySourced,
-          // line.localCost is what the cashier typed as the PER-UNIT cost — localCostCents itself is
-          // still stored/reported as the line's total (see money.ts's own doc comment), so multiply
-          // here rather than changing anything downstream.
-          localCostCents:
-            line.isLocallySourced && line.localCost.trim() ? unitCostToTotalCents(line.localCost, line.quantity) : undefined,
-          localSupplierId: line.localSupplierId,
-          taxInclusiveOverride: line.taxInclusiveOverride
-        })),
-        ...buildExtrasPayload(activeDraft),
-        paymentMethodId: activeDraft.paymentMethodId || undefined,
-        paymentReference: activeDraft.paymentReference || undefined,
-        amountReceivedCents: activeDraft.amountReceived.trim() === "" ? null : toCents(activeDraft.amountReceived),
-        includeTaxBreakdown: activeDraft.includeTaxBreakdown,
-        includeBusinessInfo: activeDraft.includeBusinessInfo,
-        locationId: session && !session.branch ? storefrontId : undefined
-      });
+      const result = await window.blueLedger.sale.suspend(
+        buildSuspendPayload(activeDraft, session && !session.branch ? storefrontId : undefined)
+      );
       const suspendedKey = activeDraft.key;
       setOpenSales((prev) =>
         prev.map((draft) =>
