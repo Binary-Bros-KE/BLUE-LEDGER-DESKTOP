@@ -218,14 +218,22 @@ export function CheckoutRoute(): React.JSX.Element {
       // — same precondition handleSuspend enforces (there's no location to attach the sale to, and
       // nothing left to prompt for once we're already unmounting).
       if (currentSession && !currentSession.branch && !locationId) return;
-      const draftsToSave = openSalesRef.current.filter((draft) => draft.status === "draft" && draft.items.length > 0);
+      // Client-reported follow-up: an already-"suspended" draft that gets reopened and edited stays
+      // "suspended" the whole time (nothing ever flips it back to "draft") — so filtering on status
+      // here missed exactly the case that actually needed saving: the cashier's in-memory edits to a
+      // resumed sale. Re-suspending EVERY open draft with items, regardless of status, is simpler
+      // than tracking a separate "dirty since resume" flag and just as correct — resuming with
+      // resumeSaleId already set (see buildSuspendPayload) updates that same row rather than
+      // duplicating it, so re-saving an untouched suspended draft is a harmless no-op write, not a
+      // second copy.
+      const draftsToSave = openSalesRef.current.filter((draft) => draft.items.length > 0);
       if (draftsToSave.length === 0) return;
       void Promise.allSettled(
         draftsToSave.map((draft) => window.blueLedger.sale.suspend(buildSuspendPayload(draft, locationId)))
       ).then((results) => {
         const savedCount = results.filter((result) => result.status === "fulfilled").length;
         if (savedCount > 0) {
-          showSuccessToast(`Held ${savedCount} open sale${savedCount === 1 ? "" : "s"} automatically so nothing was lost`);
+          showSuccessToast(`Saved ${savedCount} open sale${savedCount === 1 ? "" : "s"} automatically so nothing was lost`);
         }
       });
     };
