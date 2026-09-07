@@ -166,6 +166,12 @@ export function PurchasesRoute(): React.JSX.Element {
 
     if (statusFilter !== "all") {
       list = list.filter((purchase) => purchase.status === statusFilter);
+    } else {
+      // Client request: a cancelled purchase has no hard-delete mechanism (see this app's own
+      // "record, never destroy" convention), so it stays in the database forever — but it shouldn't
+      // keep cluttering the everyday "All Statuses" view once it's been cancelled. Only picking the
+      // "Cancelled" status filter explicitly still shows it (the branch above, untouched).
+      list = list.filter((purchase) => purchase.status !== "cancelled");
     }
     if (supplierFilter) {
       list = list.filter((purchase) => purchase.supplierId === supplierFilter);
@@ -641,7 +647,13 @@ export function PurchasesRoute(): React.JSX.Element {
         />
       )}
 
-      <SupplierStatementModal open={statementOpen} onClose={() => setStatementOpen(false)} suppliers={suppliers} />
+      <SupplierStatementModal
+        open={statementOpen}
+        onClose={() => setStatementOpen(false)}
+        suppliers={suppliers}
+        paymentMethods={paymentMethods}
+        onPaid={() => void loadAll()}
+      />
     </motion.div>
   );
 }

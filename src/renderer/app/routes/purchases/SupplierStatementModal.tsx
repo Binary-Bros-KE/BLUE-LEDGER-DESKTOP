@@ -1,11 +1,13 @@
 import { useMemo, useState } from "react";
-import { Eye, Loader2, Printer, Search } from "lucide-react";
+import { Eye, Loader2, Printer, Search, Wallet } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { Field, SelectField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { formatDocumentDate } from "@shared/lib/date";
+import type { PaymentMethod } from "@shared/types/payment-method";
 import { PURCHASE_PAYMENT_STATUS_OPTIONS, type PurchasePaymentStatus } from "@shared/types/purchase";
 import type { Supplier } from "@shared/types/supplier";
 import type { SupplierStatementViewModel } from "@shared/types/supplier-statement";
@@ -30,11 +32,18 @@ function statusLabel(status: PurchasePaymentStatus): string {
 export function SupplierStatementModal({
   open,
   onClose,
-  suppliers
+  suppliers,
+  paymentMethods,
+  onPaid
 }: {
   open: boolean;
   onClose: () => void;
   suppliers: Supplier[];
+  paymentMethods: PaymentMethod[];
+  /** Called after a bulk payment successfully clears at least one purchase — lets the parent
+   * (PurchasesRoute) refresh its own list/summary, which this modal's own re-fetched `vm` doesn't
+   * touch. */
+  onPaid: () => void;
 }): React.JSX.Element {
   const [search, setSearch] = useState("");
   const [vm, setVm] = useState<SupplierStatementViewModel | null>(null);
@@ -45,6 +54,23 @@ export function SupplierStatementModal({
   const [previewing, setPreviewing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // Client request: five-plus pending purchases from the same supplier used to mean finding and
+  // marking each one paid individually. This records ONE payment for the supplier's WHOLE
+  // outstanding balance (never a user-typed amount — see submitBulkPayment) via the same
+  // per-purchase markPaid mechanism PurchaseDetailModal already uses, once per outstanding purchase,
+  // all sharing this one reference — exactly what the client described.
+  const [bulkPaymentOpen, setBulkPaymentOpen] = useState(false);
+  const [bulkPaymentMethodId, setBulkPaymentMethodId] = useState("");
+  const [bulkReference, setBulkReference] = useState("");
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+
+  const activePaymentMethods = useMemo(
+    () => paymentMethods.filter((method) => method.isActive).sort((a, b) => a.sortOrder - b.sortOrder),
+    [paymentMethods]
+  );
+  const selectedBulkMethod = activePaymentMethods.find((method) => method.id === bulkPaymentMethodId) ?? null;
 
   const filteredSuppliers = useMemo(() => {
     const active = suppliers.filter((supplier) => supplier.status === "active");
@@ -60,6 +86,52 @@ export function SupplierStatementModal({
     setLoadError(null);
     setNotice(null);
     setActionError(null);
+    setBulkPaymentOpen(false);
+  }
+
+  function openBulkPayment(): void {
+    setBulkPaymentMethodId("");
+    setBulkReference("");
+    setBulkError(null);
+    setBulkPaymentOpen(true);
+  }
+
+  async function submitBulkPayment(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    if (!vm || vm.purchases.length === 0) return;
+    setBulkSaving(true);
+    setBulkError(null);
+    // Sequential, not Promise.all — these are real money-recording writes against the same
+    // supplier's balance; running them one at a time keeps the outcome predictable (a failure
+    // partway through leaves a clean "N of M paid" result instead of an unordered race) and lets
+    // this report exactly which purchase(s) failed rather than an all-or-nothing outcome.
+    let paidCount = 0;
+    const failures: string[] = [];
+    for (const purchase of vm.purchases) {
+      try {
+        await window.blueLedger.purchase.markPaid(purchase.id, {
+          paymentMethodId: bulkPaymentMethodId,
+          reference: bulkReference,
+          notes: null
+        });
+        paidCount += 1;
+      } catch (err) {
+        failures.push(`${purchase.purchaseNumber}: ${getErrorMessage(err, "Failed to record payment")}`);
+      }
+    }
+    setBulkSaving(false);
+    if (paidCount > 0) {
+      showSuccessToast(`Recorded payment for ${paidCount} purchase${paidCount === 1 ? "" : "s"}`);
+      onPaid();
+      await openStatement(vm.supplierId);
+    }
+    if (failures.length > 0) {
+      const message = `${failures.length} purchase${failures.length === 1 ? "" : "s"} could not be marked paid: ${failures.join("; ")}`;
+      setBulkError(message);
+      showErrorToast(message);
+    } else {
+      setBulkPaymentOpen(false);
+    }
   }
 
   async function openStatement(supplierId: string): Promise<void> {
@@ -265,6 +337,17 @@ export function SupplierStatementModal({
               </div>
             </div>
 
+            {vm.purchases.length > 0 && (
+              <Button
+                type="button"
+                onClick={openBulkPayment}
+                className="mt-4 h-10 w-full bg-success text-xs hover:brightness-110"
+              >
+                <Wallet className="mr-1.5 size-4" aria-hidden="true" />
+                Record Payment — Clear {money(vm.totalOutstandingCents)}
+              </Button>
+            )}
+
             <div className="mt-4 grid grid-cols-2 gap-2">
               <Button
                 type="button"
@@ -288,6 +371,68 @@ export function SupplierStatementModal({
           </div>
         )}
       </Modal>
+
+      {vm && (
+        <Modal
+          open={bulkPaymentOpen}
+          onClose={() => setBulkPaymentOpen(false)}
+          title="Record Payment"
+          description={`Settles all ${vm.purchases.length} outstanding purchase${vm.purchases.length === 1 ? "" : "s"} for ${vm.supplierName} at once.`}
+          widthClassName="max-w-sm"
+        >
+          <form onSubmit={submitBulkPayment}>
+            {bulkError && (
+              <div className="mb-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
+                {bulkError}
+              </div>
+            )}
+            {/* Client request: only ever the FULL outstanding total — never a user-typed amount —
+                since this pays off every listed purchase for its own individual balance, not one
+                arbitrary lump sum split across them. */}
+            <p className="mb-4 text-xs font-semibold text-muted">
+              This will record a payment of{" "}
+              <span className="font-extrabold text-ink">{money(vm.totalOutstandingCents)}</span>, marking every
+              purchase below as paid in full with the same reference.
+            </p>
+            <SelectField
+              label="Payment Method"
+              value={bulkPaymentMethodId}
+              onChange={setBulkPaymentMethodId}
+              options={[
+                { value: "", label: "Select payment method" },
+                ...activePaymentMethods.map((method) => ({ value: method.id, label: method.name }))
+              ]}
+            />
+            {selectedBulkMethod?.requiresReference && (
+              <Field
+                label="Reference"
+                value={bulkReference}
+                onChange={setBulkReference}
+                placeholder="e.g. M-Pesa code, transaction ID"
+                required
+                className="mt-4"
+              />
+            )}
+            <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
+              <Button
+                type="button"
+                onClick={() => setBulkPaymentOpen(false)}
+                className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={bulkSaving || !bulkPaymentMethodId}
+                className="h-9 bg-success text-xs hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {bulkSaving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
+                {bulkSaving ? "Saving..." : "Confirm Paid"}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </>
   );
 }
