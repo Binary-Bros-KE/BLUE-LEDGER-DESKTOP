@@ -202,7 +202,14 @@ export function EmployeesRoute(): React.JSX.Element {
       }
       if (roleFilter && employee.roleId !== roleFilter) return false;
       if (branchFilter && employee.branchId !== branchFilter) return false;
-      if (statusFilter && employee.status !== statusFilter) return false;
+      if (statusFilter) {
+        if (employee.status !== statusFilter) return false;
+      } else if (employee.status === "terminated") {
+        // Client request: a terminated employee clutters the default view forever (no hard-delete
+        // mechanism exists) — hide them from "All Statuses" until the user explicitly filters to
+        // "Terminated", same convention as PurchasesRoute.tsx hiding cancelled purchases.
+        return false;
+      }
       return true;
     });
   }, [employees, searchTerm, roleFilter, branchFilter, statusFilter]);
