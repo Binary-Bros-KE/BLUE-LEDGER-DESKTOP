@@ -290,8 +290,8 @@ export function SupplierStatementModal({
                     <tr className="border-b border-line bg-soft text-[10px] font-extrabold uppercase tracking-wide text-muted">
                       <th className="px-2.5 py-2 text-left">Purchase</th>
                       <th className="px-2.5 py-2 text-left">Ordered</th>
-                      <th className="px-2.5 py-2 text-right">Total</th>
-                      <th className="px-2.5 py-2 text-right">Balance</th>
+                      <th className="px-2.5 py-2 text-right">Total Ordered</th>
+                      <th className="px-2.5 py-2 text-right">Due Balance</th>
                       <th className="px-2.5 py-2 text-left">Status</th>
                     </tr>
                   </thead>

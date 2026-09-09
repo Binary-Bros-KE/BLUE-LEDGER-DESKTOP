@@ -3119,9 +3119,9 @@ function buildSupplierStatementHtml(vm: SupplierStatementViewModel): string {
             <th>#</th>
             <th>Purchase</th>
             <th>Ordered</th>
-            <th class="right">Total</th>
+            <th class="right">Total Ordered</th>
             <th class="right">Paid</th>
-            <th class="right">Balance</th>
+            <th class="right">Due Balance</th>
             <th>Status</th>
           </tr>
         </thead>
