@@ -70,7 +70,12 @@ import type { SaleReturn } from "./sale-return";
 import type { SaleVoid } from "./sale-void";
 import type { InvoiceCancellation } from "./invoice-cancellation";
 import type { RecurringBill } from "./recurring-bill";
-import type { StockMovement, StockMovementFeedItem, StockTransferResult } from "./stock-movement";
+import type {
+  StockMovement,
+  StockMovementFeedItem,
+  StockMovementWithUnitPrice,
+  StockTransferResult
+} from "./stock-movement";
 import type { StockReceipt, StockReceiptListItem } from "./stock-receipt";
 import type { StockRequest, StockRequestListItem } from "./stock-request";
 import type {
@@ -410,7 +415,7 @@ export type IpcInvokeMap = {
   };
   "stock-movement:list": {
     args: [string, { limit?: number; startDate?: string; endDate?: string }];
-    result: StockMovement[];
+    result: StockMovementWithUnitPrice[];
   };
   "stock-movement:list-all": {
     args: [{ startDate?: string; endDate?: string; limit?: number }];

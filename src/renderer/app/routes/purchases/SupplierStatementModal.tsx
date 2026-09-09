@@ -243,7 +243,7 @@ export function SupplierStatementModal({
         onClose={handleClose}
         title={vm ? `Statement — ${vm.supplierName}` : "Statement"}
         description="Print or download this supplier's outstanding balance."
-        widthClassName="max-w-lg"
+        widthClassName="max-w-3xl"
       >
         {vm && (
           <div>

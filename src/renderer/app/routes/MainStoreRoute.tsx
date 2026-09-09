@@ -28,6 +28,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
+import { useAppStore } from "@renderer/shared/stores/app-store";
 import type { Category } from "@shared/types/category";
 import type { ExportListRequest } from "@shared/types/export";
 import { isStorefrontType, type Location } from "@shared/types/location";
@@ -67,6 +68,7 @@ export function MainStoreRoute(): React.JSX.Element {
   const canEdit = can("products", "edit");
   const canManageStock = can("main_store", "edit") || can("stock_transfers", "create");
   const canExport = can("main_store", "export");
+  const currency = useAppStore((state) => state.context?.tenant.currency ?? "");
 
   const [locations, setLocations] = useState<Location[] | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -544,6 +546,7 @@ export function MainStoreRoute(): React.JSX.Element {
         <ProductHistoryModal
           productId={historyProduct.productId}
           productName={historyProduct.productName}
+          currency={currency}
           onClose={() => setHistoryProduct(null)}
         />
       )}

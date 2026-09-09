@@ -78,6 +78,14 @@ export type StockTransferResult = {
   transferIn: StockMovement;
 };
 
+/** A single product's own movement history row (Main Store's ProductHistoryModal, Products tab's
+ * ProductDetailModal) plus its unit price — same field/meaning as StockMovementFeedItem's own
+ * unitPriceCents below, just without the whole-tenant-feed extras (productName/sku/valueCents) these
+ * single-product views don't need, since the caller already knows which product it's looking at. */
+export type StockMovementWithUnitPrice = StockMovement & {
+  unitPriceCents: number;
+};
+
 /** One row in the global Stock Ledger feed — a movement plus enough product context to display it
  * without a second lookup, its cost value for the Stock In/Out Value stat tiles, and its own unit
  * price for the ledger's per-row "Unit Price" column. */

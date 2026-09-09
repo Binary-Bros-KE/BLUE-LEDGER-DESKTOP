@@ -4,7 +4,8 @@ import type {
   StockMovement,
   StockMovementFeedItem,
   StockMovementSyncStatus,
-  StockMovementType
+  StockMovementType,
+  StockMovementWithUnitPrice
 } from "@shared/types/stock-movement";
 
 export type StockMovementRow = {
@@ -103,6 +104,15 @@ export function insertStockMovementRow(
   return row;
 }
 
+/** Row shape for a single product's own movement history (Main Store's ProductHistoryModal and
+ * Products tab's ProductDetailModal) — same selling-price/frozen-sale-price pair as
+ * StockMovementFeedRow above, just scoped to one already-known product instead of the whole tenant
+ * feed. See mapStockMovementProductRow's own doc comment for how the two combine into unitPriceCents. */
+export type StockMovementProductRow = StockMovementListRow & {
+  selling_price_cents: number;
+  sale_unit_price_cents: number | null;
+};
+
 /** Pass null for both date bounds to skip date filtering entirely (the default "recent" view) — same
  * `created_at >= ? AND created_at < ?` convention as findAllStockMovementRows/report-repository.ts's
  * own date-range queries; the caller converts a plain calendar date into the device-local-timezone-
@@ -112,14 +122,22 @@ export function findStockMovementRowsForProduct(
   limit: number,
   startDateIso: string | null,
   endDateIsoExclusive: string | null
-): StockMovementListRow[] {
+): StockMovementProductRow[] {
   return getDatabase()
     .prepare(
       `
-      SELECT sm.*, l.location_name AS location_name, (e.first_name || ' ' || e.last_name) AS performed_by_name
+      SELECT sm.*, l.location_name AS location_name, p.selling_price_cents AS selling_price_cents,
+        si.unit_price_cents AS sale_unit_price_cents,
+        (e.first_name || ' ' || e.last_name) AS performed_by_name
       FROM stock_movements sm
       JOIN locations l ON l.id = sm.location_id
+      JOIN products p ON p.id = sm.product_id
       LEFT JOIN employees e ON e.id = sm.performed_by
+      -- See findAllStockMovementRows' own comment on this exact join — 'sale'/'invoice' both point at
+      -- the same sales/sale_items rows, just from before/after an older refactor unified the label.
+      LEFT JOIN sale_items si
+        ON sm.movement_type = 'sale' AND sm.reference_type IN ('sale', 'invoice')
+        AND si.sale_id = sm.reference_id AND si.product_id = sm.product_id
       WHERE sm.product_id = ?
         AND (? IS NULL OR sm.created_at >= ?)
         AND (? IS NULL OR sm.created_at < ?)
@@ -127,7 +145,7 @@ export function findStockMovementRowsForProduct(
       LIMIT ?
     `
     )
-    .all(productId, startDateIso, startDateIso, endDateIsoExclusive, endDateIsoExclusive, limit) as StockMovementListRow[];
+    .all(productId, startDateIso, startDateIso, endDateIsoExclusive, endDateIsoExclusive, limit) as StockMovementProductRow[];
 }
 
 export type StockMovementFeedRow = StockMovementListRow & {
@@ -216,6 +234,16 @@ export function mapStockMovementRow(row: StockMovementListRow): StockMovement {
     createdAt: row.created_at,
     syncStatus: row.sync_status as StockMovementSyncStatus,
     lastSyncedAt: row.last_synced_at
+  };
+}
+
+/** Client request: same "Unit Price" logic as mapStockMovementFeedRow below, for the single-product
+ * history views (Main Store's ProductHistoryModal, Products tab's ProductDetailModal) — the product's
+ * own current selling price by default, or the price a "sale" line actually sold at when it differs. */
+export function mapStockMovementProductRow(row: StockMovementProductRow): StockMovementWithUnitPrice {
+  return {
+    ...mapStockMovementRow(row),
+    unitPriceCents: row.sale_unit_price_cents ?? row.selling_price_cents
   };
 }
 

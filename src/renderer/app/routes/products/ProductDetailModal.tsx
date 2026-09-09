@@ -19,8 +19,8 @@ import {
   AUTO_DECREASE_MOVEMENT_TYPES,
   MANUAL_STOCK_MOVEMENT_TYPE_OPTIONS,
   STOCK_MOVEMENT_TYPE_OPTIONS,
-  type StockMovement,
-  type StockMovementType
+  type StockMovementType,
+  type StockMovementWithUnitPrice
 } from "@shared/types/stock-movement";
 
 const INCREASING_TYPES = new Set(["purchase", "transfer_in", "return", "opening_stock", "borrow_in", "loan_return_in"]);
@@ -91,7 +91,7 @@ export function ProductDetailModal({
   const canExport = can("inventory", "export");
 
   const [overview, setOverview] = useState<InventoryBalance[] | null>(null);
-  const [movements, setMovements] = useState<StockMovement[] | null>(null);
+  const [movements, setMovements] = useState<StockMovementWithUnitPrice[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [mode, setMode] = useState<MovementMode>(canRecordMovement ? "single" : "transfer");
   const [singleForm, setSingleForm] = useState<SingleFormState>(emptySingleForm);
@@ -263,6 +263,7 @@ export function ProductDetailModal({
         { key: "change", header: "Change", align: "right" },
         { key: "stockBefore", header: "Stock Before", align: "right" },
         { key: "stockAfter", header: "Stock After", align: "right" },
+        { key: "unitPrice", header: "Unit Price", align: "right" },
         { key: "recordedBy", header: "Recorded By" }
       ],
       rows: movements.map((movement) => ({
@@ -272,12 +273,13 @@ export function ProductDetailModal({
         change: `${movement.quantityChange > 0 ? "+" : ""}${movement.quantityChange}`,
         stockBefore: movement.previousQuantity === null ? "—" : String(movement.previousQuantity),
         stockAfter: movement.newQuantity === null ? "—" : String(movement.newQuantity),
+        unitPrice: `${currency} ${formatCents(movement.unitPriceCents)}`,
         recordedBy: movement.performedByName ?? "—"
       })),
       stats: [{ label: "Total Movements", value: String(movements.length) }],
       fileBaseName: `${product.sku}_StockMovements`
     };
-  }, [movements, movementDateFrom, movementDateTo, product.name, product.sku]);
+  }, [movements, movementDateFrom, movementDateTo, product.name, product.sku, currency]);
 
   return (
     <Modal
@@ -285,7 +287,7 @@ export function ProductDetailModal({
       onClose={onClose}
       title={product.name}
       description={`SKU ${product.sku}${product.categoryName ? ` · ${product.categoryName}` : ""}`}
-      widthClassName="max-w-4xl"
+      widthClassName="max-w-6xl"
     >
       {loadError ? (
         <div className="rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
@@ -538,7 +540,7 @@ export function ProductDetailModal({
                     : "No stock movements recorded yet."}
                 </p>
               ) : (
-                <table className="w-full min-w-[700px] border-collapse text-sm">
+                <table className="w-full min-w-[820px] border-collapse text-sm">
                   <thead className="sticky top-0">
                     <tr className="bg-primary text-white">
                       <Th>Date</Th>
@@ -547,6 +549,7 @@ export function ProductDetailModal({
                       <Th className="text-right">Change</Th>
                       <Th className="text-right">Stock Before</Th>
                       <Th className="text-right">Stock After</Th>
+                      <Th className="text-right">Unit Price</Th>
                       <Th>Recorded By</Th>
                     </tr>
                   </thead>
@@ -579,6 +582,9 @@ export function ProductDetailModal({
                         </td>
                         <td className="px-4 py-2.5 text-right text-xs font-bold tabular-nums text-ink">
                           {movement.newQuantity ?? "—"}
+                        </td>
+                        <td className="px-4 py-2.5 text-right text-xs font-bold tabular-nums text-ink">
+                          {currency} {formatCents(movement.unitPriceCents)}
                         </td>
                         <td className="px-4 py-2.5 text-xs font-semibold text-muted">
                           {movement.performedByName ?? "—"}

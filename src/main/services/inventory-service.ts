@@ -17,6 +17,7 @@ import type {
   StockMovement,
   StockMovementFeedItem,
   StockMovementType,
+  StockMovementWithUnitPrice,
   StockTransferResult
 } from "@shared/types/stock-movement";
 
@@ -262,13 +263,13 @@ export function listStockMovements(
   limit = 100,
   startDate?: string,
   endDate?: string
-): StockMovement[] {
+): StockMovementWithUnitPrice[] {
   requirePermission("inventory", "view");
   const startIso = startDate ? startOfDayIso(startDate) : null;
   const endIsoExclusive = endDate ? startOfDayIso(addDaysIso(endDate, 1)) : null;
   return stockMovementRepository
     .findStockMovementRowsForProduct(productId, limit, startIso, endIsoExclusive)
-    .map(stockMovementRepository.mapStockMovementRow);
+    .map(stockMovementRepository.mapStockMovementProductRow);
 }
 
 /** Every product's stock movements in one feed — the Stock Ledger. Branch-scoped like everything

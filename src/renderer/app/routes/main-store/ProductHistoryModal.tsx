@@ -8,9 +8,14 @@ import { Modal } from "@renderer/shared/components/Modal";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { formatCents } from "@renderer/shared/lib/money";
 import { showErrorToast } from "@renderer/shared/lib/toast";
 import type { ExportListRequest } from "@shared/types/export";
-import { STOCK_MOVEMENT_TYPE_OPTIONS, type StockMovement, type StockMovementType } from "@shared/types/stock-movement";
+import {
+  STOCK_MOVEMENT_TYPE_OPTIONS,
+  type StockMovementType,
+  type StockMovementWithUnitPrice
+} from "@shared/types/stock-movement";
 
 const INCREASING_TYPES = new Set<StockMovementType>([
   "purchase",
@@ -34,16 +39,18 @@ function movementTypeLabel(type: StockMovementType): string {
 export function ProductHistoryModal({
   productId,
   productName,
+  currency,
   onClose
 }: {
   productId: string;
   productName: string;
+  currency: string;
   onClose: () => void;
 }): React.JSX.Element {
   const { can } = usePermissions();
   const canExport = can("inventory", "export");
 
-  const [movements, setMovements] = useState<StockMovement[] | null>(null);
+  const [movements, setMovements] = useState<StockMovementWithUnitPrice[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Empty string on either end means "no bound" — the default view (most recent 150, any date).
   const [dateFrom, setDateFrom] = useState("");
@@ -87,6 +94,7 @@ export function ProductHistoryModal({
         { key: "change", header: "Change", align: "right" },
         { key: "stockBefore", header: "Stock Before", align: "right" },
         { key: "stockAfter", header: "Stock After", align: "right" },
+        { key: "unitPrice", header: "Unit Price", align: "right" },
         { key: "recordedBy", header: "Recorded By" }
       ],
       rows: movements.map((movement) => ({
@@ -96,12 +104,13 @@ export function ProductHistoryModal({
         change: `${movement.quantityChange > 0 ? "+" : ""}${movement.quantityChange}`,
         stockBefore: movement.previousQuantity === null ? "—" : String(movement.previousQuantity),
         stockAfter: movement.newQuantity === null ? "—" : String(movement.newQuantity),
+        unitPrice: `${currency} ${formatCents(movement.unitPriceCents)}`,
         recordedBy: movement.performedByName ?? "—"
       })),
       stats: [{ label: "Total Movements", value: String(movements.length) }],
       fileBaseName: `${productName.replace(/\s+/g, "_")}_StockMovements`
     };
-  }, [movements, dateFrom, dateTo, productName]);
+  }, [movements, dateFrom, dateTo, productName, currency]);
 
   return (
     <Modal
@@ -109,7 +118,7 @@ export function ProductHistoryModal({
       onClose={onClose}
       title={productName}
       description="Every purchase, transfer, return, damage, and adjustment for this product."
-      widthClassName="max-w-3xl"
+      widthClassName="max-w-6xl"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-end gap-3">
@@ -161,7 +170,7 @@ export function ProductHistoryModal({
         </p>
       ) : (
         <div className="mt-4 max-h-[60vh] overflow-x-auto overflow-y-auto rounded-lg border border-line">
-          <table className="w-full min-w-[700px] border-collapse text-sm">
+          <table className="w-full min-w-[820px] border-collapse text-sm">
             <thead className="sticky top-0">
               <tr className="bg-primary text-white">
                 <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Date</th>
@@ -170,6 +179,7 @@ export function ProductHistoryModal({
                 <th className="px-4 py-2.5 text-right text-[10px] font-extrabold uppercase tracking-wider">Change</th>
                 <th className="px-4 py-2.5 text-right text-[10px] font-extrabold uppercase tracking-wider">Stock Before</th>
                 <th className="px-4 py-2.5 text-right text-[10px] font-extrabold uppercase tracking-wider">Stock After</th>
+                <th className="px-4 py-2.5 text-right text-[10px] font-extrabold uppercase tracking-wider">Unit Price</th>
                 <th className="px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider">Recorded By</th>
               </tr>
             </thead>
@@ -199,6 +209,9 @@ export function ProductHistoryModal({
                   </td>
                   <td className="px-4 py-2.5 text-right text-xs font-bold tabular-nums text-ink">
                     {movement.newQuantity ?? "—"}
+                  </td>
+                  <td className="px-4 py-2.5 text-right text-xs font-bold tabular-nums text-ink">
+                    {currency} {formatCents(movement.unitPriceCents)}
                   </td>
                   <td className="px-4 py-2.5 text-xs font-semibold text-muted">{movement.performedByName ?? "—"}</td>
                 </tr>
