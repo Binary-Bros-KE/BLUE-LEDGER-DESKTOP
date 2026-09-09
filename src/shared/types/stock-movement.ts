@@ -79,9 +79,15 @@ export type StockTransferResult = {
 };
 
 /** One row in the global Stock Ledger feed — a movement plus enough product context to display it
- * without a second lookup, and its cost value for the "value of stock moved" column. */
+ * without a second lookup, its cost value for the Stock In/Out Value stat tiles, and its own unit
+ * price for the ledger's per-row "Unit Price" column. */
 export type StockMovementFeedItem = StockMovement & {
   productName: string;
   sku: string;
   valueCents: number;
+  /** Client request: the product's own current selling price by default — except for a "sale"
+   * movement, where it's the price that line ACTUALLY sold at (frozen on the sale item, honors any
+   * cashier price-override from Checkout/Invoices), never the product's live selling price, which
+   * could have changed since. See stock-movement-repository.ts's mapStockMovementFeedRow. */
+  unitPriceCents: number;
 };

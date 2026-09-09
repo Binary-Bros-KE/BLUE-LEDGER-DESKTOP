@@ -134,6 +134,14 @@ export type StockMovementFeedRow = StockMovementListRow & {
   product_name: string;
   sku: string;
   buying_price_cents: number;
+  selling_price_cents: number;
+  // Client request: for a "sale" movement, the unit price column should show what the product
+  // ACTUALLY sold at — which can differ from the product's own current selling_price_cents via a
+  // cashier's price-override at Checkout/Invoices (see cart-pricing.ts/sale-service.ts's own
+  // priceOverrideCents) — never the product's live price, which could since have changed anyway.
+  // Null whenever this movement isn't a sale line (every other movement type falls back to
+  // selling_price_cents in mapStockMovementFeedRow below).
+  sale_unit_price_cents: number | null;
 };
 
 /** Pass null for locationId to see every branch's movements (e.g. a super-admin with no assigned
@@ -152,12 +160,23 @@ export function findAllStockMovementRows(
   return getDatabase()
     .prepare(
       `
-      SELECT sm.*, l.location_name AS location_name, p.name AS product_name, p.sku AS sku, p.buying_price_cents AS buying_price_cents,
+      SELECT sm.*, l.location_name AS location_name, p.name AS product_name, p.sku AS sku,
+        p.buying_price_cents AS buying_price_cents, p.selling_price_cents AS selling_price_cents,
+        si.unit_price_cents AS sale_unit_price_cents,
         (e.first_name || ' ' || e.last_name) AS performed_by_name
       FROM stock_movements sm
       JOIN locations l ON l.id = sm.location_id
       JOIN products p ON p.id = sm.product_id
       LEFT JOIN employees e ON e.id = sm.performed_by
+      -- The exact sale line this movement came from, when it is one — see StockMovementFeedRow's
+      -- own doc comment on sale_unit_price_cents for why this beats the product's live price.
+      -- reference_type is 'sale' for every movement going forward, but a real batch of historical
+      -- ones (from before an older refactor unified this) still carry 'invoice' — an invoice is a
+      -- sale row like any other (just with invoiceNumber set), never a separate table, so both
+      -- values point at the exact same sales/sale_items rows and need covering here.
+      LEFT JOIN sale_items si
+        ON sm.movement_type = 'sale' AND sm.reference_type IN ('sale', 'invoice')
+        AND si.sale_id = sm.reference_id AND si.product_id = sm.product_id
       WHERE sm.tenant_id = ?
         AND (? IS NULL OR sm.location_id = ?)
         AND (? IS NULL OR sm.created_at >= ?)
@@ -201,12 +220,17 @@ export function mapStockMovementRow(row: StockMovementListRow): StockMovement {
 }
 
 /** The cost value moved (quantity x the product's current buying price) — a simple, live snapshot
- * rather than a price frozen at the time of the movement. */
+ * rather than a price frozen at the time of the movement. Powers the Stock In/Out Value stat tiles;
+ * unrelated to unitPriceCents below (a per-unit SELLING price, not a total cost). */
 export function mapStockMovementFeedRow(row: StockMovementFeedRow): StockMovementFeedItem {
   return {
     ...mapStockMovementRow(row),
     productName: row.product_name,
     sku: row.sku,
-    valueCents: Math.abs(row.quantity_change) * row.buying_price_cents
+    valueCents: Math.abs(row.quantity_change) * row.buying_price_cents,
+    // Client request: the product's own selling price by default — but for a sale, the price it
+    // ACTUALLY sold at (frozen on the sale line, honors any cashier price-override), never the
+    // product's live selling price which could have changed since.
+    unitPriceCents: row.sale_unit_price_cents ?? row.selling_price_cents
   };
 }

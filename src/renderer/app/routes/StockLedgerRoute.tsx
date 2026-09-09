@@ -165,7 +165,7 @@ export function StockLedgerRoute(): React.JSX.Element {
         { key: "change", header: "Change", align: "right" },
         { key: "stockBefore", header: "Stock Before", align: "right" },
         { key: "stockAfter", header: "Stock After", align: "right" },
-        { key: "value", header: "Value", align: "right" },
+        { key: "unitPrice", header: "Unit Price", align: "right" },
         { key: "recordedBy", header: "Recorded By" },
         { key: "notes", header: "Notes" }
       ],
@@ -179,7 +179,10 @@ export function StockLedgerRoute(): React.JSX.Element {
         stockBefore: movement.previousQuantity === null ? "—" : String(movement.previousQuantity),
         stockAfter: movement.newQuantity === null ? "—" : String(movement.newQuantity),
         recordedBy: movement.performedByName ?? "—",
-        value: `${currency} ${formatCents(movement.valueCents)}`,
+        // Client request: the unit price this product actually sold at (honors any Checkout/Invoice
+        // price override), not the total cost value moved — see StockMovementFeedItem's own doc
+        // comment. The Stock In/Out Value stat tiles below are untouched, still cost-based.
+        unitPrice: `${currency} ${formatCents(movement.unitPriceCents)}`,
         notes: movement.notes ?? "—"
       })),
       stats: summary
@@ -366,7 +369,7 @@ export function StockLedgerRoute(): React.JSX.Element {
                     <Th className="text-right">Change</Th>
                     <Th className="text-right">Stock Before</Th>
                     <Th className="text-right">Stock After</Th>
-                    <Th className="text-right">Value</Th>
+                    <Th className="text-right">Unit Price</Th>
                     <Th>Recorded By</Th>
                   </tr>
                 </thead>
@@ -402,7 +405,7 @@ export function StockLedgerRoute(): React.JSX.Element {
                         {movement.newQuantity ?? "—"}
                       </td>
                       <td className="px-3 py-2.5 text-right text-xs font-bold tabular-nums text-ink">
-                        {currency} {formatCents(movement.valueCents)}
+                        {currency} {formatCents(movement.unitPriceCents)}
                       </td>
                       <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">
                         {movement.performedByName ?? "—"}
