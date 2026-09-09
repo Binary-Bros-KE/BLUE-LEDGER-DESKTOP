@@ -258,19 +258,9 @@ export function createPurchase(input: unknown): Purchase {
 
     if (parsed.intent === "ordered") {
       syncProductPricingFromOrder(cart.items);
-      // "Ordered, not yet paid" is exactly when the client's own spec says the supplier balance
-      // should increase — a draft is never a real commitment, so it never touches this (see
-      // supplier-balance-service.ts's own doc comment for the full design).
-      recordSupplierBalanceEntry({
-        tenantId,
-        supplierId: parsed.supplierId,
-        entryType: "purchase_ordered",
-        amountCents: cart.grandTotalCents,
-        referenceType: "purchase",
-        referenceId: purchaseId,
-        notes: null,
-        performedBy: employeeId
-      });
+      // Client request: placing an order no longer touches the supplier balance at all — it only
+      // grows as goods are actually received (see receivePurchaseGoods's own "purchase_received"
+      // hook below), never at order time, and never including shippingCostCents.
     }
 
     return getPurchaseDetail(purchaseId);
@@ -302,17 +292,17 @@ function requireEditablePurchase(id: string, tenantId: string): PurchaseRow {
 /** A draft can be freely re-priced/re-itemized — nothing has been ordered or received yet. An
  * already-"ordered" purchase can be edited too (see requireEditablePurchase) but stays "ordered" —
  * this function never demotes one back to draft (Cancel Purchase already covers "undo the order"
- * cleanly); parsed.intent is only consulted for a purchase that was still a draft going in. Editing
- * an ordered purchase's totals or supplier needs its already-recorded balance impact corrected to
- * match, since createPurchase/markPurchaseOrdered's own "purchase_ordered" hook already fired once
- * for the OLD numbers. */
+ * cleanly); parsed.intent is only consulted for a purchase that was still a draft going in.
+ * Editing an ordered purchase's totals/supplier needs no balance correction of its own anymore —
+ * requireEditablePurchase already guarantees this only ever runs before anything's been received,
+ * and placing/editing an order no longer touches the supplier balance at all (see
+ * receivePurchaseGoods's own "purchase_received" hook for the only thing that does now). */
 export function updatePurchase(id: string, input: unknown): Purchase {
   requirePermission("purchases", "edit");
   const parsed: PurchaseUpdateInput = purchaseUpdateSchema.parse(input);
   const { tenantId } = getCurrentTenant();
   const existing = requireEditablePurchase(id, tenantId);
   const wasOrdered = existing.status === "ordered";
-  const employeeId = getCurrentEmployeeId();
 
   assertSupplierExists(tenantId, parsed.supplierId);
   assertLocationBelongsToTenant(tenantId, parsed.locationId);
@@ -358,66 +348,12 @@ export function updatePurchase(id: string, input: unknown): Purchase {
 
     if (wasOrdered) {
       // Already a real order — stays one, just with corrected numbers. Re-sync pricing off the
-      // fresh items, same as the draft→ordered transition below does.
+      // fresh items, same as the draft→ordered transition below does. Nothing to correct on the
+      // supplier balance — see this function's own doc comment above.
       syncProductPricingFromOrder(cart.items);
-
-      if (existing.supplier_id !== parsed.supplierId) {
-        // Reassigned to a different supplier — reverse the full original order off the old one
-        // (safe: requireEditablePurchase already guarantees nothing's been paid toward it yet, so
-        // there's no payment entry left stranded the way cancelPurchase has to work around) and
-        // record a fresh order on the new supplier for the current total.
-        recordSupplierBalanceEntry({
-          tenantId,
-          supplierId: existing.supplier_id,
-          entryType: "purchase_cancelled",
-          amountCents: -existing.grand_total_cents,
-          referenceType: "purchase",
-          referenceId: id,
-          notes: `Reassigned to a different supplier while editing ${existing.purchase_number}.`,
-          performedBy: employeeId
-        });
-        recordSupplierBalanceEntry({
-          tenantId,
-          supplierId: parsed.supplierId,
-          entryType: "purchase_ordered",
-          amountCents: cart.grandTotalCents,
-          referenceType: "purchase",
-          referenceId: id,
-          notes: null,
-          performedBy: employeeId
-        });
-      } else {
-        // Same supplier — just correct the balance by whatever the total actually changed by.
-        // recordSupplierBalanceEntry itself no-ops when the delta is 0 (items reordered/repriced
-        // to the same grand total), so no empty entry gets left behind.
-        const deltaCents = cart.grandTotalCents - existing.grand_total_cents;
-        recordSupplierBalanceEntry({
-          tenantId,
-          supplierId: parsed.supplierId,
-          entryType: "manual_adjustment",
-          amountCents: deltaCents,
-          referenceType: "purchase",
-          referenceId: id,
-          notes: `Purchase ${existing.purchase_number} edited — total changed from ${(existing.grand_total_cents / 100).toFixed(2)} to ${(cart.grandTotalCents / 100).toFixed(2)}.`,
-          performedBy: employeeId
-        });
-      }
     } else if (parsed.intent === "ordered") {
       purchaseRepository.updatePurchaseStatusRow(id, "ordered", { orderedAt: now });
       syncProductPricingFromOrder(cart.items);
-      // Same draft→ordered transition as createPurchase's own hook — requireEditablePurchase above
-      // guarantees this branch only runs for a purchase that was still a draft, so this fires at
-      // most once per purchase, never a double-count.
-      recordSupplierBalanceEntry({
-        tenantId,
-        supplierId: parsed.supplierId,
-        entryType: "purchase_ordered",
-        amountCents: cart.grandTotalCents,
-        referenceType: "purchase",
-        referenceId: id,
-        notes: null,
-        performedBy: employeeId
-      });
     }
 
     return getPurchaseDetail(id);
@@ -452,18 +388,8 @@ export function markPurchaseOrdered(id: string): Purchase {
       }))
     );
 
-    // Same draft→ordered balance hook as createPurchase/updatePurchase — the guard above already
-    // confirmed this purchase was still a draft, so this fires exactly once.
-    recordSupplierBalanceEntry({
-      tenantId,
-      supplierId: row.supplier_id,
-      entryType: "purchase_ordered",
-      amountCents: row.grand_total_cents,
-      referenceType: "purchase",
-      referenceId: id,
-      notes: null,
-      performedBy: getCurrentEmployeeId()
-    });
+    // Client request: no supplier-balance hook here anymore — placing an order never touches the
+    // balance, only receiving does (see receivePurchaseGoods).
 
     return getPurchaseDetail(id);
   });
@@ -488,26 +414,11 @@ export function cancelPurchase(id: string): Purchase {
   return runInTransaction(() => {
     purchaseRepository.updatePurchaseStatusRow(id, "cancelled");
 
-    // Only "ordered" ever increased the supplier balance in the first place (a draft never does —
-    // see createPurchase/updatePurchase/markPurchaseOrdered's own hooks) — reverse exactly the
-    // OUTSTANDING remainder (grand total minus whatever's already been paid), not the full grand
-    // total: any payments already recorded already decreased the balance via applyPayment and stay
-    // exactly as they are, a real historical fact regardless of what happens to the order itself.
-    if (row.status === "ordered") {
-      const outstandingCents = row.grand_total_cents - row.amount_paid_cents;
-      if (outstandingCents > 0) {
-        recordSupplierBalanceEntry({
-          tenantId,
-          supplierId: row.supplier_id,
-          entryType: "purchase_cancelled",
-          amountCents: -outstandingCents,
-          referenceType: "purchase",
-          referenceId: id,
-          notes: null,
-          performedBy: getCurrentEmployeeId()
-        });
-      }
-    }
+    // Client request: nothing to reverse on the supplier balance anymore — placing an order never
+    // added anything to it in the first place (only receiving does, see receivePurchaseGoods), and
+    // cancelling is only ever reachable before anything's received (the guard above), which under
+    // the new model also guarantees amount_paid_cents is still 0 here (applyPayment now refuses a
+    // payment against a purchase with nothing received — see its own balanceDueCents check).
 
     return getPurchaseDetail(id);
   });
@@ -552,6 +463,12 @@ export function receivePurchaseGoods(id: string, input: unknown): Purchase {
 
   return runInTransaction(() => {
     const eventItems: PurchaseReceivingEventItem[] = [];
+    // Client request: the supplier balance only grows by exactly what THIS batch is actually worth
+    // — built purely from each item's own line_total_cents (never shippingCostCents, which lives
+    // only on the purchase header and is never touched here), proportional to how much of that
+    // line's ordered quantity this batch covers. Same formula migration 89's backfill used, so
+    // historical and future entries are computed identically.
+    let batchValueCents = 0;
 
     for (const entry of parsed.items) {
       const item = itemById.get(entry.purchaseItemId);
@@ -562,6 +479,8 @@ export function receivePurchaseGoods(id: string, input: unknown): Purchase {
 
       const newReceivedQuantity = item.received_quantity + entry.receivingQuantity;
       purchaseRepository.updatePurchaseItemReceivedQuantityRow(item.id, newReceivedQuantity);
+
+      batchValueCents += Math.round((item.line_total_cents * entry.receivingQuantity) / item.ordered_quantity);
 
       applyValidatedStockMovement(
         {
@@ -600,6 +519,28 @@ export function receivePurchaseGoods(id: string, input: unknown): Purchase {
       purchaseRepository.appendReceivingEventToPurchaseRow({
         id,
         receivingEvents: [...existingEvents, newEvent]
+      });
+    }
+
+    if (batchValueCents > 0) {
+      // Receiving more can retroactively flip an already-"paid" purchase back to "partially_paid"
+      // — more is now owed than before — so this recompute can't be skipped even though nothing
+      // about amount_paid_cents itself changed.
+      const newReceivedValueCents = purchase.received_value_cents + batchValueCents;
+      const newPaymentStatus = computePurchasePaymentStatus({
+        receivedValueCents: newReceivedValueCents,
+        amountPaidCents: purchase.amount_paid_cents
+      });
+      purchaseRepository.incrementPurchaseReceivedValueRow(id, batchValueCents, newPaymentStatus);
+      recordSupplierBalanceEntry({
+        tenantId,
+        supplierId: purchase.supplier_id,
+        entryType: "purchase_received",
+        amountCents: batchValueCents,
+        referenceType: "purchase",
+        referenceId: id,
+        notes: null,
+        performedBy: employeeId
       });
     }
 
@@ -654,16 +595,21 @@ function applyPayment(
   if (row.status === "cancelled") {
     throw new Error("This purchase has been cancelled");
   }
-  // Was never actually enforced before this function started also moving the supplier balance: a
-  // still-draft purchase never went through the "ordered" balance-increase hook (see createPurchase/
-  // updatePurchase/markPurchaseOrdered), so a payment recorded against one here would decrease the
-  // supplier's balance with no corresponding increase to offset it.
+  // A still-draft purchase was never even placed with the supplier, so nothing on it could ever
+  // have been received yet either.
   if (row.status === "draft") {
     throw new Error("This purchase hasn't been ordered yet — place the order before recording a payment");
   }
-  const balanceDueCents = row.grand_total_cents - row.amount_paid_cents;
+  // Client request: you can only pay for what's actually arrived — balanceDueCents is now the
+  // received value minus what's already paid, never the full order total (see
+  // receivePurchaseGoods's own "purchase_received" hook, the only thing that grows this).
+  const balanceDueCents = row.received_value_cents - row.amount_paid_cents;
   if (balanceDueCents <= 0) {
-    throw new Error("This purchase is already fully paid");
+    throw new Error(
+      row.received_value_cents === 0
+        ? "Nothing has been received on this purchase yet — receive some or all of it before recording a payment"
+        : "This purchase is already fully paid for what's been received"
+    );
   }
   if (payment.amountCents > balanceDueCents) {
     throw new Error(`Amount exceeds the outstanding balance of ${(balanceDueCents / 100).toFixed(2)}`);
@@ -690,7 +636,7 @@ function applyPayment(
   const payments = [...existingPayments, newPayment];
   const amountPaidCents = payments.reduce((sum, entry) => sum + entry.amountCents, 0);
   const paymentStatus = computePurchasePaymentStatus({
-    grandTotalCents: row.grand_total_cents,
+    receivedValueCents: row.received_value_cents,
     amountPaidCents
   });
 
@@ -706,9 +652,9 @@ function applyPayment(
 
     // Every payment against a purchase — including partial — decreases what's owed to the supplier.
     // No status check needed here the way cancelPurchase needs one: applyPayment already refuses a
-    // cancelled purchase above, and a payment against a still-draft purchase is impossible (nothing
-    // in this app lets a draft take a payment), so any purchase reaching this point already went
-    // through the "ordered" balance-increase hook at some point.
+    // cancelled or still-draft purchase above, and the balanceDueCents guard above already refuses
+    // a payment against a purchase with nothing received, so any purchase reaching this point
+    // already has a real received-value balance to decrease.
     recordSupplierBalanceEntry({
       tenantId,
       supplierId: row.supplier_id,
@@ -742,9 +688,11 @@ export function markPurchasePaid(purchaseId: string, input: unknown): Purchase {
     throw new Error("Purchase not found");
   }
 
+  // Client request: "pay it off" now means paying off what's actually been received, not the full
+  // order total — applyPayment's own balanceDueCents guard would reject anything larger anyway.
   return applyPayment(tenantId, purchaseId, {
     paymentMethodId: parsed.paymentMethodId,
-    amountCents: row.grand_total_cents - row.amount_paid_cents,
+    amountCents: row.received_value_cents - row.amount_paid_cents,
     reference: parsed.reference,
     notes: parsed.notes
   });

@@ -121,6 +121,11 @@ export type Purchase = {
    * deducted from profit. */
   shippingCostCents: number;
   grandTotalCents: number;
+  /** Client request: how much of grandTotalCents has actually arrived, in currency terms — the
+   * supplier balance and payment recording are based on THIS, not grandTotalCents. Maintained
+   * incrementally by receivePurchaseGoods; never includes shippingCostCents (built purely from each
+   * item's own lineTotalCents). See supplier-balance-service.ts's own doc comment. */
+  receivedValueCents: number;
   paymentMethodId: string | null;
   paymentMethodName: string | null;
   paymentReference: string | null;
@@ -153,6 +158,7 @@ export type PurchaseListItem = {
   status: PurchaseStatus;
   taxType: PurchaseTaxType;
   grandTotalCents: number;
+  receivedValueCents: number;
   paymentStatus: PurchasePaymentStatus;
   amountPaidCents: number;
   orderedAt: string | null;

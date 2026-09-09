@@ -21,9 +21,16 @@ export function getSupplierStatement(supplierId: string): SupplierStatementViewM
     .findOutstandingPurchaseRowsForSupplier(tenant.tenantId, supplierId)
     .map(purchaseRepository.mapPurchaseListRow);
 
+  // Client request: "outstanding" is what's owed for received goods only — totalOrderedCents/
+  // totalPaidCents stay as full-order-value context (still genuinely useful figures), but
+  // totalOutstandingCents is the SUM of the same per-purchase balanceDueCents below, so the
+  // statement's own total always matches the sum of the rows it shows.
   const totalOrderedCents = purchases.reduce((sum, purchase) => sum + purchase.grandTotalCents, 0);
   const totalPaidCents = purchases.reduce((sum, purchase) => sum + purchase.amountPaidCents, 0);
-  const totalOutstandingCents = totalOrderedCents - totalPaidCents;
+  const totalOutstandingCents = purchases.reduce(
+    (sum, purchase) => sum + (purchase.receivedValueCents - purchase.amountPaidCents),
+    0
+  );
 
   return {
     businessName: tenant.businessName,
@@ -42,7 +49,8 @@ export function getSupplierStatement(supplierId: string): SupplierStatementViewM
       orderedAt: purchase.orderedAt,
       grandTotalCents: purchase.grandTotalCents,
       amountPaidCents: purchase.amountPaidCents,
-      balanceDueCents: purchase.grandTotalCents - purchase.amountPaidCents,
+      // Client request: only ever the received-goods balance, never the full order total.
+      balanceDueCents: purchase.receivedValueCents - purchase.amountPaidCents,
       paymentStatus: purchase.paymentStatus
     })),
     totalOrderedCents,

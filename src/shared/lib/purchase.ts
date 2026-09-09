@@ -1,12 +1,17 @@
 import type { PurchasePaymentStatus } from "@shared/types/purchase";
 
 /** Derives Unpaid/Partially Paid/Paid from the numbers rather than trusting a stored value. */
+/** Client request: based on what's actually been RECEIVED, not the full order total — you can only
+ * pay for goods that have arrived (see applyPayment's own balanceDueCents check, purchase-
+ * service.ts), so a purchase reads "Paid" once everything currently owed is settled, even if more
+ * is still to arrive (and be paid for) later. A purchase with nothing received yet stays "unpaid"
+ * forever until something arrives — there's nothing to pay against before then. */
 export function computePurchasePaymentStatus(params: {
-  grandTotalCents: number;
+  receivedValueCents: number;
   amountPaidCents: number;
 }): PurchasePaymentStatus {
   if (params.amountPaidCents <= 0) return "unpaid";
-  if (params.amountPaidCents >= params.grandTotalCents) return "paid";
+  if (params.amountPaidCents >= params.receivedValueCents) return "paid";
   return "partially_paid";
 }
 

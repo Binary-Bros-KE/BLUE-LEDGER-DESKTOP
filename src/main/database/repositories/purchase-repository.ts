@@ -27,6 +27,11 @@ export type PurchaseRow = {
   tax_amount_cents: number;
   shipping_cost_cents: number;
   grand_total_cents: number;
+  // Client request: how much of grand_total_cents has actually arrived, in currency terms —
+  // maintained incrementally by receivePurchaseGoods, never includes shipping (built purely from
+  // purchase_items.line_total_cents). This, not grand_total_cents, is what the supplier balance and
+  // payment recording are now based on — see supplier-balance-service.ts's own doc comment.
+  received_value_cents: number;
   payment_method_id: string | null;
   payment_reference: string | null;
   payment_status: string;
@@ -63,6 +68,7 @@ export type PurchaseListRow = {
   status: string;
   tax_type: string;
   grand_total_cents: number;
+  received_value_cents: number;
   payment_status: string;
   amount_paid_cents: number;
   ordered_at: string | null;
@@ -108,6 +114,7 @@ export function findAllPurchaseListRows(tenantId: string, locationId: string | n
         p.status,
         p.tax_type,
         p.grand_total_cents,
+        p.received_value_cents,
         p.payment_status,
         p.amount_paid_cents,
         p.ordered_at,
@@ -185,6 +192,7 @@ export function findOutstandingPurchaseRowsForSupplier(tenantId: string, supplie
         p.status,
         p.tax_type,
         p.grand_total_cents,
+        p.received_value_cents,
         p.payment_status,
         p.amount_paid_cents,
         p.ordered_at,
@@ -193,7 +201,10 @@ export function findOutstandingPurchaseRowsForSupplier(tenantId: string, supplie
       FROM purchases p
       JOIN suppliers s ON s.id = p.supplier_id
       JOIN locations l ON l.id = p.location_id
-      WHERE p.tenant_id = ? AND p.supplier_id = ? AND p.status NOT IN ('draft', 'cancelled') AND p.payment_status != 'paid'
+      -- Client request: "outstanding" now means an actual received-value balance, not the
+      -- payment_status label — an "ordered, nothing received" purchase has received_value_cents 0
+      -- and so can never appear here, exactly what makes it drop off the statement on its own.
+      WHERE p.tenant_id = ? AND p.supplier_id = ? AND p.status NOT IN ('draft', 'cancelled') AND p.received_value_cents > p.amount_paid_cents
       ORDER BY COALESCE(p.ordered_at, p.created_at) ASC
     `
     )
@@ -212,6 +223,7 @@ export function mapPurchaseListRow(row: PurchaseListRow): PurchaseListItem {
     status: row.status as PurchaseStatus,
     taxType: row.tax_type as PurchaseTaxType,
     grandTotalCents: row.grand_total_cents,
+    receivedValueCents: row.received_value_cents,
     paymentStatus: row.payment_status as PurchasePaymentStatus,
     amountPaidCents: row.amount_paid_cents,
     orderedAt: row.ordered_at,
@@ -239,7 +251,9 @@ export function findPurchaseSummaryRow(tenantId: string, locationId: string | nu
         COALESCE(SUM(CASE WHEN status = 'ordered' THEN 1 ELSE 0 END), 0) AS ordered_count,
         COALESCE(SUM(CASE WHEN status = 'partially_received' THEN 1 ELSE 0 END), 0) AS partially_received_count,
         COALESCE(SUM(CASE WHEN status = 'received' THEN 1 ELSE 0 END), 0) AS received_count,
-        COALESCE(SUM(CASE WHEN status != 'cancelled' THEN grand_total_cents - amount_paid_cents ELSE 0 END), 0)
+        -- Client request: "outstanding" is what's owed for received goods only, not the full order
+        -- — an "ordered, nothing received" purchase naturally contributes 0 here now.
+        COALESCE(SUM(CASE WHEN status != 'cancelled' THEN received_value_cents - amount_paid_cents ELSE 0 END), 0)
           AS outstanding_supplier_payments_cents
       FROM purchases
       WHERE tenant_id = ? AND (? IS NULL OR location_id = ?)
@@ -551,6 +565,39 @@ export function updatePurchaseStatusRow(
   return row;
 }
 
+/** Client request: the supplier balance only grows as goods are received (see purchase-service.ts's
+ * receivePurchaseGoods) — this is the ONE place received_value_cents ever changes, incremented by
+ * exactly the receiving batch's own value (never recomputed from scratch, same "ledger-derived,
+ * never summed live" discipline as adjustSupplierBalanceCents/upsertInventoryQuantity elsewhere).
+ * Bundles the payment_status recompute into the same write since receiving more can retroactively
+ * flip an already-"paid" purchase back to "partially_paid" (more is now owed than before). */
+export function incrementPurchaseReceivedValueRow(
+  id: string,
+  deltaCents: number,
+  paymentStatus: PurchasePaymentStatus
+): PurchaseRow {
+  const now = new Date().toISOString();
+
+  getDatabase()
+    .prepare(
+      `
+      UPDATE purchases SET
+        received_value_cents = received_value_cents + ?,
+        payment_status = ?,
+        sync_status = 'pending',
+        updated_at = ?
+      WHERE id = ?
+    `
+    )
+    .run(deltaCents, paymentStatus, now, id);
+
+  const row = findPurchaseRowById(id);
+  if (!row) {
+    throw new Error("Purchase not found after receiving-value update");
+  }
+  return row;
+}
+
 /** Appends a payment to the purchase's payment history and persists the recalculated totals — the
  * header payment_method_id/payment_reference columns mirror the most recent payment for quick display. */
 export function appendPaymentToPurchaseRow(input: {
@@ -682,11 +729,12 @@ export function mapPurchaseDetailRow(row: PurchaseDetailRow, items: PurchaseItem
     taxAmountCents: row.tax_amount_cents,
     shippingCostCents: row.shipping_cost_cents,
     grandTotalCents: row.grand_total_cents,
+    receivedValueCents: row.received_value_cents,
     paymentMethodId: row.payment_method_id,
     paymentMethodName: row.payment_method_name,
     paymentReference: row.payment_reference,
     paymentStatus: computePurchasePaymentStatus({
-      grandTotalCents: row.grand_total_cents,
+      receivedValueCents: row.received_value_cents,
       amountPaidCents: row.amount_paid_cents
     }),
     amountPaidCents: row.amount_paid_cents,

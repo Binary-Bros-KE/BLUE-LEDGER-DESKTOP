@@ -1252,6 +1252,9 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       taxAmountCents: row.tax_amount_cents,
       shippingCostCents: row.shipping_cost_cents,
       grandTotalCents: row.grand_total_cents,
+      // Client request: how much of grandTotalCents has actually been received — see migrate.ts's
+      // migration 89 doc comment for the full design.
+      receivedValueCents: row.received_value_cents,
       paymentMethodId: row.payment_method_id,
       paymentReference: row.payment_reference,
       paymentStatus: row.payment_status,
@@ -2856,6 +2859,15 @@ function applyPurchasePulledRow(row: Record<string, unknown>, force: boolean): v
     if (!localTenantId) return;
 
     const db = getDatabase();
+    // Not part of PURCHASE_HEADER_COLUMNS on purpose — that generic path reads row[cloud] directly
+    // with no fallback, and a payload from a device that predates this field simply won't have
+    // receivedValueCents at all (undefined binds to nothing better-sqlite3 will accept). Same
+    // "older payload predates this field" ?? fallback already used for embedded JSON items elsewhere.
+    db.prepare("UPDATE purchases SET received_value_cents = ? WHERE id = ?").run(
+      (row.receivedValueCents as number | undefined) ?? 0,
+      id
+    );
+
     // remaining_quantity is a GENERATED ALWAYS column — never in the insert column list.
     db.prepare("DELETE FROM purchase_items WHERE purchase_id = ?").run(id);
     const items = (row.items as Array<Record<string, unknown>>) ?? [];

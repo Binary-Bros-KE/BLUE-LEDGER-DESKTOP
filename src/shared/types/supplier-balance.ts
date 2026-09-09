@@ -1,9 +1,18 @@
-/** Why one entry exists — 'purchase_ordered'/'purchase_cancelled'/'payment' are written automatically
- * by purchase-service.ts (see its own comments at each call site); 'manual_adjustment' is the only one
+/** Why one entry exists — 'purchase_received'/'payment' are written automatically by
+ * purchase-service.ts (see its own comments at each call site); 'manual_adjustment' is the only one
  * a person creates directly, via supplier-service.ts's adjustSupplierBalance — covers both "record
  * balance carried forward from the old system" and any later correction (see
- * supplierBalanceAdjustSchema's own doc comment for why those share one action). */
+ * supplierBalanceAdjustSchema's own doc comment for why those share one action).
+ *
+ * Client request: the balance only grows as goods are RECEIVED (never at order time, never
+ * including shipping) — 'purchase_ordered'/'purchase_cancelled' are legacy values, kept so
+ * pre-existing history still reads correctly, but no longer written for new activity; placing or
+ * cancelling an order is a no-op for the balance now (see purchase-service.ts's createPurchase/
+ * updatePurchase/markPurchaseOrdered/cancelPurchase, all of which used to touch this ledger and no
+ * longer do). 'purchase_received' is the one real replacement — fired once per receiving batch, for
+ * exactly that batch's own value. */
 export const SUPPLIER_BALANCE_ENTRY_TYPE_OPTIONS = [
+  { value: "purchase_received", label: "Purchase Received" },
   { value: "purchase_ordered", label: "Purchase Ordered" },
   { value: "purchase_cancelled", label: "Purchase Cancelled" },
   { value: "payment", label: "Payment" },

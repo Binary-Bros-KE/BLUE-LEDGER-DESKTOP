@@ -94,7 +94,9 @@ export function PurchaseDetailModal({
   const selectedRecordMethod = activePaymentMethods.find((method) => method.id === paymentMethodId) ?? null;
   const selectedMarkPaidMethod = activePaymentMethods.find((method) => method.id === markPaidMethodId) ?? null;
 
-  const balanceDueCents = purchase.grandTotalCents - purchase.amountPaidCents;
+  // Client request: only ever the received-goods balance, never the full order total — this
+  // decides both when "Record Payment"/"Mark as Paid" show up and what they'll actually let you pay.
+  const balanceDueCents = purchase.receivedValueCents - purchase.amountPaidCents;
   const canReceive = purchase.status === "ordered" || purchase.status === "partially_received";
   // Mirrors purchase-service.ts's own requireEditablePurchase exactly: a draft is always editable;
   // an "ordered" purchase stays editable right up until either goods start arriving (it would
