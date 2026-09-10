@@ -62,7 +62,9 @@ export type Quotation = {
   discountAmountCents: number;
   taxAmountCents: number;
   grandTotalCents: number;
-  validUntil: string;
+  /** Null means the quotation never expires — the client didn't set an expiry date. Only an explicit
+   * past date makes a live quotation "expired". See computeQuotationStatus. */
+  validUntil: string | null;
   notes: string | null;
   /** Same additional titled note blocks as Sale["notesSections"]'s own doc comment
    * (shared/types/sale.ts) — the identical concept, defaults to []. */
@@ -93,7 +95,8 @@ export type QuotationListItem = {
   employeeName: string;
   status: QuotationStatus;
   grandTotalCents: number;
-  validUntil: string;
+  /** Null means the quotation never expires — see Quotation["validUntil"]. */
+  validUntil: string | null;
   createdAt: string;
   hasDeliveryNote: boolean;
 };

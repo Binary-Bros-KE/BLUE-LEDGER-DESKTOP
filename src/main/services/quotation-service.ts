@@ -185,12 +185,32 @@ function requireEditableDraft(id: string, tenantId: string): quotationRepository
   return row;
 }
 
-/** A draft can be freely re-priced from live product data — nothing has been quoted to the customer yet. */
+/** Like requireEditableDraft, but also lets through a quotation that has gone EXPIRED (its
+ * valid_until is in the past) whatever its stored status — client request: an expired quotation was
+ * completely locked, so there was no way to reopen it and push the expiry date out. computeQuotation
+ * Status already keeps rejected/converted terminal, so those still can't reach the editable branch. */
+function requireEditableOrExpired(id: string, tenantId: string): quotationRepository.QuotationRow {
+  const row = quotationRepository.findQuotationRowById(id);
+  if (!row || row.tenant_id !== tenantId) {
+    throw new Error("Quotation not found");
+  }
+  const liveStatus = computeQuotationStatus({
+    storedStatus: row.status as QuotationStatus,
+    validUntil: row.valid_until
+  });
+  if (row.status !== "draft" && liveStatus !== "expired") {
+    throw new Error("Only draft or expired quotations can be edited");
+  }
+  return row;
+}
+
+/** A draft can be freely re-priced from live product data — nothing has been quoted to the customer
+ * yet. An expired quotation is also editable so its owner can extend the expiry (or clear it). */
 export function updateQuotation(id: string, input: unknown): Quotation {
   requirePermission("quotations", "edit");
   const parsed = quotationUpdateSchema.parse(input);
   const { tenantId } = getCurrentTenant();
-  requireEditableDraft(id, tenantId);
+  requireEditableOrExpired(id, tenantId);
   assertCustomerExists(tenantId, parsed.customerId);
   const cart = prepareCart(tenantId, parsed.items, {
     serviceCharges: parsed.serviceCharges,

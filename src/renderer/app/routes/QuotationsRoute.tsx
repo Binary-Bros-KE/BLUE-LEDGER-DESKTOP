@@ -219,7 +219,10 @@ export function QuotationsRoute(): React.JSX.Element {
   const [customerSearch, setCustomerSearch] = useState("");
   const [quickCreateCustomerOpen, setQuickCreateCustomerOpen] = useState(false);
   const [quickCreateProductOpen, setQuickCreateProductOpen] = useState(false);
-  const [createValidUntil, setCreateValidUntil] = useState(addDaysIso(7));
+  // Empty = no expiry date set, and the quotation never expires (client request — a quotation
+  // shouldn't time out on its own just because the user didn't pick a date). Only set when the user
+  // explicitly picks one.
+  const [createValidUntil, setCreateValidUntil] = useState("");
   const [createNotes, setCreateNotes] = useState("");
   const [createIncludeTaxBreakdown, setCreateIncludeTaxBreakdown] = useState(true);
   const [createIncludeBusinessInfo, setCreateIncludeBusinessInfo] = useState(true);
@@ -802,7 +805,7 @@ export function QuotationsRoute(): React.JSX.Element {
     setCreateCustomerChosen(false);
     setCreateStorefrontId("");
     setCustomerSearch("");
-    setCreateValidUntil(addDaysIso(7));
+    setCreateValidUntil("");
     setCreateNotes("");
     setCreateIncludeTaxBreakdown(true);
     setCreateIncludeBusinessInfo(defaultIncludeBusinessInfoRef.current);
@@ -818,16 +821,17 @@ export function QuotationsRoute(): React.JSX.Element {
     setCreateOpen(true);
   }
 
-  /** Prefills the same create-quotation form/state in place of a blank one — only reachable while
-   * status is "draft" (see updateQuotation's own requireEditableDraft). The storefront section stays
-   * hidden in this mode — a quotation's storefront is fixed at creation. */
+  /** Prefills the same create-quotation form/state in place of a blank one — reachable while status
+   * is "draft", or while it's "expired" so the user can push the expiry date out (or clear it) — see
+   * updateQuotation's requireEditableOrExpired. The storefront section stays hidden in this mode — a
+   * quotation's storefront is fixed at creation. */
   function openEditQuotation(quotation: Quotation): void {
     setEditingQuotationId(quotation.id);
     setCreateCustomerId(quotation.customerId);
     setCreateCustomerChosen(true);
     setCreateStorefrontId(quotation.locationId);
     setCustomerSearch("");
-    setCreateValidUntil(quotation.validUntil);
+    setCreateValidUntil(quotation.validUntil ?? "");
     setCreateNotes(quotation.notes ?? "");
     setCreateIncludeTaxBreakdown(quotation.includeTaxBreakdown);
     setCreateIncludeBusinessInfo(quotation.includeBusinessInfo);
@@ -1066,7 +1070,8 @@ export function QuotationsRoute(): React.JSX.Element {
 
     const payload = {
       customerId: createCustomerId,
-      validUntil: createValidUntil,
+      // Blank = no expiry; the quotation never goes "expired" on its own.
+      validUntil: createValidUntil.trim() ? createValidUntil : null,
       notes: createNotes,
       includeTaxBreakdown: createIncludeTaxBreakdown,
       includeBusinessInfo: createIncludeBusinessInfo,
@@ -1709,20 +1714,22 @@ export function QuotationsRoute(): React.JSX.Element {
               hasDeliveryNote={viewingQuotation.delivery !== null}
             />
 
-            {canEdit && viewingQuotation.status === "draft" && (
-              <div className="mt-2 grid grid-cols-2 gap-2">
+            {canEdit && (viewingQuotation.status === "draft" || viewingQuotation.status === "expired") && (
+              <div className={cn("mt-2 grid gap-2", viewingQuotation.status === "draft" ? "grid-cols-2" : "grid-cols-1")}>
                 <Button
                   type="button"
                   onClick={() => openEditQuotation(viewingQuotation)}
                   className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
                 >
                   <FileText className="mr-1.5 size-3.5" aria-hidden="true" />
-                  Edit Quotation
+                  {viewingQuotation.status === "expired" ? "Edit / Extend Expiry" : "Edit Quotation"}
                 </Button>
-                <Button type="button" onClick={() => void handleSetStatus("sent")} className="h-9 text-xs">
-                  <Send className="mr-1.5 size-3.5" aria-hidden="true" />
-                  Mark as Sent
-                </Button>
+                {viewingQuotation.status === "draft" && (
+                  <Button type="button" onClick={() => void handleSetStatus("sent")} className="h-9 text-xs">
+                    <Send className="mr-1.5 size-3.5" aria-hidden="true" />
+                    Mark as Sent
+                  </Button>
+                )}
               </div>
             )}
 
@@ -2111,7 +2118,23 @@ export function QuotationsRoute(): React.JSX.Element {
             )}
           </div>
 
-          <Field label="Valid Until" type="date" value={createValidUntil} onChange={setCreateValidUntil} required className="mt-4" />
+          <div className="mt-4">
+            <Field label="Valid Until" type="date" value={createValidUntil} onChange={setCreateValidUntil} />
+            <p className="mt-1 text-[11px] font-semibold text-muted">
+              {createValidUntil
+                ? "This quotation will show as expired after this date."
+                : "Leave blank and this quotation never expires."}
+              {createValidUntil && (
+                <button
+                  type="button"
+                  onClick={() => setCreateValidUntil("")}
+                  className="ml-2 font-extrabold uppercase tracking-wider text-accent hover:underline"
+                >
+                  Clear
+                </button>
+              )}
+            </p>
+          </div>
 
           <div className="mt-4">
             <div className="flex items-center justify-between">

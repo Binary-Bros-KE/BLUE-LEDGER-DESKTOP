@@ -1677,7 +1677,7 @@ function buildQuotationHtml(
       <tbody>
         <tr>
           <td>${formatInvoiceDate(quotation.createdAt)}</td>
-          <td>${formatInvoiceDate(quotation.validUntil)}</td>
+          <td>${quotation.validUntil ? formatInvoiceDate(quotation.validUntil) : "No expiry"}</td>
           ${quotation.includeBusinessInfo ? `<td>${escapeHtml(quotation.employeeName)}</td>` : ""}
         </tr>
       </tbody>
@@ -1720,7 +1720,11 @@ function buildQuotationHtml(
     ${quotation.notesSections.map((section) => `<div class="notes"><strong>${escapeHtml(section.title)}</strong><p>${escapeHtml(section.body)}</p></div>`).join("")}
 
     <div class="terms">
-      This quotation is valid until ${formatInvoiceDate(quotation.validUntil)}. Prices, discounts, and availability
+      ${
+        quotation.validUntil
+          ? `This quotation is valid until ${formatInvoiceDate(quotation.validUntil)}.`
+          : `This quotation does not have an expiry date.`
+      } Prices, discounts, and availability
       are subject to confirmation at the time of order. Acceptance of this quotation does not reserve stock.
     </div>
 
@@ -1886,7 +1890,7 @@ function buildQuotationThermalHtml(quotation: Quotation, business: DocumentBusin
     <p class="muted">
       Quoted To: ${escapeHtml(quotation.customerName ?? "Walk-in Customer")}<br/>
       Date Prepared: ${formatInvoiceDate(quotation.createdAt)}<br/>
-      Valid Until: ${formatInvoiceDate(quotation.validUntil)}
+      Valid Until: ${quotation.validUntil ? formatInvoiceDate(quotation.validUntil) : "No expiry"}
       ${quotation.includeBusinessInfo ? `<br/>Storefront: ${escapeHtml(quotation.locationName)} &middot; Prepared By: ${escapeHtml(quotation.employeeName)}` : ""}
     </p>
     <table class="items">

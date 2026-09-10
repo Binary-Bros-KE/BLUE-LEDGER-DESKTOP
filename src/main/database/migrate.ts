@@ -3280,6 +3280,97 @@ const migrations = [
             ), 0)
       ) != 0;
     `
+  },
+  {
+    version: 91,
+    name: "quotation_valid_until_optional",
+    sql: `
+      -- Client request: a quotation should only expire if the user explicitly set an expiry date.
+      -- valid_until was TEXT NOT NULL, and every create/edit form defaulted a date in — so a
+      -- quotation the user never meant to time-limit still went "expired" on its own and locked
+      -- (see computeQuotationStatus / the newly-relaxed requireEditableOrExpired). This makes the
+      -- column nullable: NULL means "never expires". SQLite has no ALTER COLUMN, so the table is
+      -- rebuilt — same create/copy/drop/rename shape migration 67 used on this table. Every existing
+      -- row keeps its current valid_until value verbatim; only NEW quotations saved without a date
+      -- get NULL. Column list is the full CURRENT schema (base + every later ADD COLUMN:
+      -- include_tax_breakdown, include_business_info, notes_sections).
+      --
+      -- This migration is run with foreign_keys OFF (see FK_UNSAFE_MIGRATIONS in migrateDatabase) —
+      -- the "DROP TABLE quotations" below does an implicit DELETE that RESTRICT-fails with FK
+      -- enforcement on the moment quotation_items / sale_service_charges / delivery_notes hold any
+      -- child row (confirmed live: 130 quotation_items on the tenant this was written for). SQLite
+      -- disallows toggling foreign_keys inside a transaction, so it's toggled around this one
+      -- migration's own transaction, with a PRAGMA foreign_key_check run straight after to prove the
+      -- rebuild left no dangling references. migration 67 got away with the same shape only because
+      -- it ran before any quotation had synced down into a fresh install.
+      CREATE TABLE quotations_new (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        quotation_number TEXT NOT NULL,
+        customer_id TEXT,
+        location_id TEXT NOT NULL,
+        employee_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'sent', 'accepted', 'rejected', 'expired', 'converted')),
+        subtotal_cents INTEGER NOT NULL DEFAULT 0,
+        discount_amount_cents INTEGER NOT NULL DEFAULT 0,
+        tax_amount_cents INTEGER NOT NULL DEFAULT 0,
+        grand_total_cents INTEGER NOT NULL DEFAULT 0,
+        valid_until TEXT,
+        notes TEXT,
+        converted_sale_id TEXT,
+        converted_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        synced_updated_at TEXT,
+        include_tax_breakdown INTEGER NOT NULL DEFAULT 1,
+        include_business_info INTEGER NOT NULL DEFAULT 1,
+        notes_sections TEXT NOT NULL DEFAULT '[]',
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (customer_id) REFERENCES customers(id),
+        FOREIGN KEY (location_id) REFERENCES locations(id),
+        FOREIGN KEY (employee_id) REFERENCES employees(id),
+        FOREIGN KEY (converted_sale_id) REFERENCES sales(id)
+      );
+
+      INSERT INTO quotations_new (
+        id, tenant_id, quotation_number, customer_id, location_id, employee_id, status,
+        subtotal_cents, discount_amount_cents, tax_amount_cents, grand_total_cents, valid_until,
+        notes, converted_sale_id, converted_at, created_at, updated_at, sync_status, last_synced_at,
+        synced_updated_at, include_tax_breakdown, include_business_info, notes_sections
+      )
+      SELECT
+        id, tenant_id, quotation_number, customer_id, location_id, employee_id, status,
+        subtotal_cents, discount_amount_cents, tax_amount_cents, grand_total_cents, valid_until,
+        notes, converted_sale_id, converted_at, created_at, updated_at, sync_status, last_synced_at,
+        synced_updated_at, include_tax_breakdown, include_business_info, notes_sections
+      FROM quotations;
+
+      DROP TABLE quotations;
+
+      PRAGMA legacy_alter_table = ON;
+      ALTER TABLE quotations_new RENAME TO quotations;
+      PRAGMA legacy_alter_table = OFF;
+
+      CREATE UNIQUE INDEX idx_quotations_tenant_number ON quotations(tenant_id, quotation_number);
+      CREATE INDEX idx_quotations_tenant_status ON quotations(tenant_id, status);
+      CREATE INDEX idx_quotations_location ON quotations(location_id);
+      CREATE INDEX idx_quotations_customer ON quotations(customer_id);
+
+      CREATE TRIGGER trg_quotations_sync_ai AFTER INSERT ON quotations BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'quotations', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_quotations_sync_au AFTER UPDATE ON quotations WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'quotations', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_quotations_sync_ad AFTER DELETE ON quotations BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'quotations', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+    `
   }
 ] as const;
 
@@ -3308,6 +3399,17 @@ export type MigrationFailure = { version: number; name: string; error: string };
  * failure the next time that feature is actually used — not a reason to lock every other feature (and
  * every other tenant on a shared device) out of the app entirely.
  */
+/**
+ * Migrations that rebuild a table OTHER tables hold a foreign key into (e.g. quotations, which
+ * quotation_items / sale_service_charges / delivery_notes reference) — their `DROP TABLE <parent>`
+ * does an implicit DELETE that RESTRICT-fails with foreign_keys ON the moment a child row exists.
+ * SQLite forbids toggling `PRAGMA foreign_keys` inside a transaction, so migrateDatabase drops
+ * enforcement around just these migrations' own transaction and runs `PRAGMA foreign_key_check`
+ * straight after to prove the rebuild left nothing dangling (a non-empty result is treated as the
+ * migration failing, so it rolls back and retries next launch like any other failure).
+ */
+const FK_UNSAFE_MIGRATIONS = new Set<number>([91]);
+
 export function migrateDatabase(): MigrationFailure[] {
   const db = getDatabase();
   db.exec(`
@@ -3330,9 +3432,26 @@ export function migrateDatabase(): MigrationFailure[] {
       continue;
     }
 
+    const fkUnsafe = FK_UNSAFE_MIGRATIONS.has(migration.version);
+
     try {
+      // Toggled OUTSIDE runInTransaction's BEGIN/COMMIT — SQLite silently ignores a foreign_keys
+      // change made while a transaction is open. Nothing else runs between migrations, so flipping
+      // it here only affects this one.
+      if (fkUnsafe) {
+        db.exec("PRAGMA foreign_keys = OFF");
+      }
+
       runInTransaction(() => {
         db.exec(migration.sql);
+        if (fkUnsafe) {
+          const violations = db.prepare("PRAGMA foreign_key_check").all();
+          if (violations.length > 0) {
+            throw new Error(
+              `foreign_key_check found ${violations.length} dangling reference(s) after the rebuild: ${JSON.stringify(violations.slice(0, 5))}`
+            );
+          }
+        }
         db.prepare("INSERT INTO migrations (version, name) VALUES (?, ?)").run(
           migration.version,
           migration.name
@@ -3346,6 +3465,12 @@ export function migrateDatabase(): MigrationFailure[] {
       const cause = error instanceof Error ? error.message : String(error);
       console.error(`[migrate] Migration ${migration.version} (${migration.name}) failed — skipping, will retry next launch: ${cause}`);
       failures.push({ version: migration.version, name: migration.name, error: cause });
+    } finally {
+      // Always restore enforcement, even if the migration threw — connection.ts opened this
+      // connection with it ON and every other code path assumes that.
+      if (fkUnsafe) {
+        db.exec("PRAGMA foreign_keys = ON");
+      }
     }
   }
 

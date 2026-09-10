@@ -38,7 +38,15 @@ export const quotationCreateSchema = z
       .nullable()
       .optional()
       .transform((value) => (value === undefined ? null : value)),
-    validUntil: z.string().trim().min(1, "Valid-until date is required"),
+    // Optional now: a blank/omitted expiry means the quotation never expires (the client didn't set
+    // one) — see the quotation_valid_until_optional migration and computeQuotationStatus. An empty
+    // string from the form normalizes to null.
+    validUntil: z
+      .string()
+      .trim()
+      .nullable()
+      .optional()
+      .transform((value) => (value && value.length > 0 ? value : null)),
     notes: optionalText(1000),
     /** Whether the "Tax Breakdown" section prints/downloads/shares on this quotation — see
      * Sale["includeTaxBreakdown"]'s own doc comment, the identical concept. */

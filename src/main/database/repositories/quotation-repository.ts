@@ -22,7 +22,9 @@ export type QuotationRow = {
   discount_amount_cents: number;
   tax_amount_cents: number;
   grand_total_cents: number;
-  valid_until: string;
+  /** Nullable — null means "never expires" (client set no expiry date). See the
+   * quotation_valid_until_optional migration and computeQuotationStatus. */
+  valid_until: string | null;
   notes: string | null;
   /** JSON-serialized NotesSection[] — see Quotation["notesSections"]'s own doc comment. */
   notes_sections: string;
@@ -159,7 +161,8 @@ export function insertQuotationRow(input: {
   discountAmountCents: number;
   taxAmountCents: number;
   grandTotalCents: number;
-  validUntil: string;
+  /** Null means "never expires" — see the quotation_valid_until_optional migration. */
+  validUntil: string | null;
   notes: string | null;
   notesSections: NotesSection[];
   /** Defaults to true (today's behavior) when omitted — see the include_tax_breakdown migration's
@@ -274,7 +277,8 @@ export function updateQuotationRow(
     discountAmountCents: number;
     taxAmountCents: number;
     grandTotalCents: number;
-    validUntil: string;
+    /** Null means "never expires" — see the quotation_valid_until_optional migration. */
+    validUntil: string | null;
     notes: string | null;
     notesSections: NotesSection[];
     /** Defaults to true (today's behavior) when omitted — see the include_tax_breakdown migration's
