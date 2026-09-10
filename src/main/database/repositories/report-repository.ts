@@ -198,6 +198,64 @@ export function findApprovedInvoiceCancellationRows(
     .all(tenantId, startIso, endIsoExclusive, locationId, locationId) as ApprovedInvoiceCancellationRow[];
 }
 
+export type ApprovedReturnTransactionRow = {
+  return_id: string;
+  approved_at: string;
+  location_name: string;
+  customer_name: string | null;
+  /** The employee on the ORIGINAL sale — used both for display and to actor-scope this OUT row to
+   * the cashier who made the sale (same reasoning as invoice_refund using the original payment
+   * taker). */
+  sale_employee_id: string;
+  sale_employee_name: string;
+  document_number: string | null;
+  payment_method_name: string | null;
+  /** SUM(sale_return_items.line_total_cents) for this return — each item's line_total is already
+   * unit_price x returned_quantity, so a partial return only ever counts the units actually sent
+   * back. */
+  returned_value_cents: number;
+};
+
+/**
+ * Every APPROVED sale return whose `approved_at` falls in range — the raw material
+ * getPaymentTransactions (report-service.ts) turns into one "out" row per return, mirroring
+ * invoice_refund. A still-pending or rejected return hasn't reversed anything, so it never appears.
+ */
+export function findApprovedReturnTransactionRows(
+  tenantId: string,
+  locationId: string | null,
+  startIso: string,
+  endIsoExclusive: string
+): ApprovedReturnTransactionRow[] {
+  return getDatabase()
+    .prepare(
+      `
+      SELECT
+        sr.id AS return_id,
+        sr.approved_at,
+        l.location_name AS location_name,
+        c.name AS customer_name,
+        s.employee_id AS sale_employee_id,
+        (e.first_name || ' ' || e.last_name) AS sale_employee_name,
+        COALESCE(s.invoice_number, s.receipt_number) AS document_number,
+        pm.name AS payment_method_name,
+        COALESCE((SELECT SUM(sri.line_total_cents) FROM sale_return_items sri WHERE sri.sale_return_id = sr.id), 0)
+          AS returned_value_cents
+      FROM sale_returns sr
+      JOIN sales s ON s.id = sr.sale_id
+      JOIN locations l ON l.id = s.location_id
+      JOIN employees e ON e.id = s.employee_id
+      LEFT JOIN customers c ON c.id = s.customer_id
+      LEFT JOIN payment_methods pm ON pm.id = s.payment_method_id
+      WHERE sr.tenant_id = ? AND sr.status = 'approved' AND sr.approved_at IS NOT NULL
+        AND sr.approved_at >= ? AND sr.approved_at < ?
+        AND (? IS NULL OR s.location_id = ?)
+      ORDER BY sr.approved_at DESC
+    `
+    )
+    .all(tenantId, startIso, endIsoExclusive, locationId, locationId) as ApprovedReturnTransactionRow[];
+}
+
 export type SaleItemProfitRow = {
   sale_id: string;
   product_id: string;

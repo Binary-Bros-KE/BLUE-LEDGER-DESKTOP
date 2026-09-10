@@ -240,17 +240,35 @@ export function ReceiptsRoute(): React.JSX.Element {
     });
   }, [sales, searchTerm, yearFilter, locationFilter, dateFrom, dateTo, deliveryFilter, returnsFilter, saleStatusInfo]);
 
+  /** Value of goods returned per sale, from APPROVED returns only — each return item's
+   * lineTotalCents is already unit_price x returned_quantity (see sale-return-service.ts), so a
+   * partial return (2 of 10) only ever contributes those 2 units' value here. Same basis the Sales
+   * Report / Dashboard use to net returns out of Total Revenue. */
+  const returnedValueBySaleId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const returnRequest of returns) {
+      if (returnRequest.status !== "approved") continue;
+      const value = returnRequest.items.reduce((sum, item) => sum + item.lineTotalCents, 0);
+      map.set(returnRequest.saleId, (map.get(returnRequest.saleId) ?? 0) + value);
+    }
+    return map;
+  }, [returns]);
+
   const summary = useMemo(() => {
     if (!filteredSales) return null;
-    const totalRevenueCents = filteredSales.reduce((sum, sale) => sum + sale.grandTotalCents, 0);
+    const grossRevenueCents = filteredSales.reduce((sum, sale) => sum + sale.grandTotalCents, 0);
+    const returnedCents = filteredSales.reduce((sum, sale) => sum + (returnedValueBySaleId.get(sale.id) ?? 0), 0);
     const totalItems = filteredSales.reduce((sum, sale) => sum + sale.itemCount, 0);
     return {
       count: filteredSales.length,
-      totalRevenueCents,
+      grossRevenueCents,
+      returnedCents,
+      // "Total Revenue" here excludes returned goods, matching the Sales Report / Dashboard.
+      totalRevenueCents: grossRevenueCents - returnedCents,
       totalItems,
-      averageCents: filteredSales.length > 0 ? Math.round(totalRevenueCents / filteredSales.length) : 0
+      averageCents: filteredSales.length > 0 ? Math.round(grossRevenueCents / filteredSales.length) : 0
     };
-  }, [filteredSales]);
+  }, [filteredSales, returnedValueBySaleId]);
 
   const exportRequest = useMemo<ExportListRequest | null>(() => {
     if (!filteredSales) return null;
@@ -295,6 +313,8 @@ export function ReceiptsRoute(): React.JSX.Element {
       stats: summary
         ? [
             { label: "Total Receipts", value: String(summary.count) },
+            { label: "Gross Sales", value: formatCents(summary.grossRevenueCents) },
+            { label: "Returns", value: formatCents(summary.returnedCents) },
             { label: "Total Revenue", value: formatCents(summary.totalRevenueCents) },
             { label: "Items Sold", value: String(summary.totalItems) },
             { label: "Average Sale", value: formatCents(summary.averageCents) }
@@ -458,9 +478,20 @@ export function ReceiptsRoute(): React.JSX.Element {
 
         {sales !== null && sales.length > 0 && (
           <>
-            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
               <StatTile icon={ReceiptText} label="Total Receipts" value={String(summary?.count ?? 0)} tone="primary" />
-              <StatTile icon={Wallet} label="Total Revenue" value={formatCents(summary?.totalRevenueCents ?? 0)} tone="success" />
+              <StatTile
+                icon={Wallet}
+                label="Total Revenue"
+                value={formatCents(summary?.totalRevenueCents ?? 0)}
+                tone="success"
+              />
+              <StatTile
+                icon={Undo2}
+                label="Returns"
+                value={formatCents(summary?.returnedCents ?? 0)}
+                tone="danger"
+              />
               <StatTile icon={Layers} label="Items Sold" value={String(summary?.totalItems ?? 0)} tone="accent" />
               <StatTile icon={ReceiptText} label="Average Sale" value={formatCents(summary?.averageCents ?? 0)} tone="warning" />
             </div>

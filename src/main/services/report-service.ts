@@ -745,6 +745,31 @@ export function getPaymentTransactions(input: unknown): PaymentTransactionRow[] 
     }
   }
 
+  // Approved sale returns — one "out" row each, dated by approval, for the value of the goods
+  // actually sent back (partial returns only count the returned units). Gated the same as the sale
+  // "in" rows and invoice_refund above (not the stricter "reports:view" money-OUT block) — this
+  // reverses SALE revenue, not a business-expense category. Mirrors how the Sales Report / Dashboard
+  // already net these out of Total Revenue; this just makes the Transactions ledger reconcile too.
+  const returnRows = reportRepository.findApprovedReturnTransactionRows(tenantId, locationId, startIso, endIsoExclusive);
+  for (const row of returnRows) {
+    if (row.returned_value_cents <= 0) continue;
+    results.push({
+      id: `return:${row.return_id}`,
+      transactionCode: row.document_number ?? row.return_id,
+      occurredAt: row.approved_at,
+      locationName: row.location_name,
+      paymentMethodName: row.payment_method_name,
+      processedByName: row.sale_employee_name,
+      performedByEmployeeId: row.sale_employee_id,
+      partyName: row.customer_name ?? "Walk-in customer",
+      partyLabel: "Customer",
+      sourceType: "sale_return",
+      direction: "out",
+      amountCents: row.returned_value_cents,
+      status: "complete"
+    });
+  }
+
   // See the doc comment above — every money-OUT category shares this one gate rather than each
   // riding on its own (differently-scoped) view permission.
   if (hasPermission("reports", "view")) {

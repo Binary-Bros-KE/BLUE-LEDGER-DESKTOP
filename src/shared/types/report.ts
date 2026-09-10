@@ -213,7 +213,13 @@ export type PaymentTransactionStatus = "complete" | "failed";
  * an expense, or a salary payout). */
 export type PaymentTransactionDirection = "in" | "out";
 
-export type PaymentTransactionSourceType = "sale" | "invoice_refund" | "purchase" | "expense" | "salary";
+export type PaymentTransactionSourceType =
+  | "sale"
+  | "invoice_refund"
+  | "sale_return"
+  | "purchase"
+  | "expense"
+  | "salary";
 
 /** What `partyName` represents, per source — the OTHER side of the transaction from the business
  * itself: who paid us (Customer), who we paid (Supplier/Employee), or what an expense was for. */
