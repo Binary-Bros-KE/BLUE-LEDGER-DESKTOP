@@ -38,11 +38,13 @@ function formatDateTime(iso: string): string {
 /** Every actual money-movement event across the business, in one flat list — money coming IN
  * (sales/invoice payments) and money going OUT (purchase payments, expenses, salary payouts),
  * flagged per row. Searched by the transaction's own unique code. Cashier-accessible (gated on
- * "sales", same as Checkout/Receipts) and always branch-scoped like everything else in this app —
- * a Cashier only ever sees their own storefront's sales rows here. Money-OUT rows are gated
- * server-side (getPaymentTransactions) on "reports:view" as a whole — Super Admin/Manager only by
- * default — so a Cashier/Storekeeper simply never receives purchase/expense/salary rows here;
- * nothing to hide client-side. */
+ * "sales", same as Checkout/Receipts) and always branch-scoped like everything else in this app.
+ * Money-OUT rows are gated server-side (getPaymentTransactions) on "reports:view".
+ *
+ * On top of that, the server actor-scopes the whole list: a Super Admin gets every person's
+ * transactions, everyone else only the rows they personally handled — so a Cashier (even one whose
+ * role was granted "reports:view") can't see the owner's supplier payments. The banner below tells
+ * a non-Super-Admin they're looking at a filtered view. */
 export function TransactionsRoute(): React.JSX.Element {
   const { can, session } = usePermissions();
   // Gated on "no assigned branch" (Super Admin, typically, but any branch-less role too — e.g. a
@@ -349,6 +351,12 @@ export function TransactionsRoute(): React.JSX.Element {
             </button>
           )}
         </div>
+
+        {session?.role?.isSuperAdmin === false && (
+          <p className="mt-4 rounded-lg border border-line bg-soft/60 px-3.5 py-2.5 text-xs font-semibold text-muted">
+            You're seeing only transactions you handled. A Super Admin sees the full business ledger.
+          </p>
+        )}
 
         <div className="mt-5">
           {transactions === null ? (

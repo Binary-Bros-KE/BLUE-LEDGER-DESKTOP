@@ -378,6 +378,7 @@ export type ExpenseTransactionSourceRow = {
   category_name: string;
   location_name: string;
   payment_method_name: string | null;
+  created_by: string | null;
   created_by_name: string | null;
 };
 
@@ -398,6 +399,7 @@ export function findExpenseTransactionRows(
         ec.name AS category_name,
         COALESCE(l.location_name, 'General') AS location_name,
         pm.name AS payment_method_name,
+        e.created_by AS created_by,
         (emp.first_name || ' ' || emp.last_name) AS created_by_name
       FROM expenses e
       JOIN expense_categories ec ON ec.id = e.category_id
@@ -422,6 +424,7 @@ export type SalaryTransactionSourceRow = {
   created_at: string;
   payment_method_name: string | null;
   employee_name: string;
+  created_by: string | null;
   created_by_name: string | null;
   location_name: string;
 };
@@ -443,6 +446,7 @@ export function findSalaryTransactionRows(
         s.id, s.payslip_number, s.net_pay_cents, s.payment_reference, s.status, s.created_at,
         pm.name AS payment_method_name,
         (emp.first_name || ' ' || emp.last_name) AS employee_name,
+        s.created_by AS created_by,
         (creator.first_name || ' ' || creator.last_name) AS created_by_name,
         COALESCE(l.location_name, 'Unassigned') AS location_name
       FROM salaries s

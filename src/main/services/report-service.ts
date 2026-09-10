@@ -4,6 +4,7 @@ import type { CompletedSaleRow, InvoicePaymentCandidateRow, PurchasePaymentCandi
 import {
   getCurrentBranchScope,
   getCurrentEmployeeId,
+  getCurrentIsSuperAdmin,
   hasPermission,
   requirePermission,
   requirePermissionAnyOf,
@@ -648,6 +649,12 @@ function parseSalePaymentsJson(raw: string): SalePayment[] {
  * elsewhere in role-service.ts: "Reports tabs must stay Super Admin/Manager only") — by default only
  * Manager and Super Admin hold it, and using it here doesn't touch Cashier's own-payslip viewing or
  * Storekeeper's purchase-order visibility anywhere else in the app.
+ *
+ * ON TOP of that permission gate, the final result is actor-scoped: a Super Admin sees the whole
+ * business, everyone else sees only rows they personally handled (see the filter at the end). This
+ * closes a real client complaint — a role that had been granted "reports:view" could read the
+ * owner's supplier-payment amounts and references. Now even with the permission, a non-Super-Admin
+ * only ever sees their own money movements here.
  */
 export function getPaymentTransactions(input: unknown): PaymentTransactionRow[] {
   requirePermissionAnyOf([
@@ -676,6 +683,7 @@ export function getPaymentTransactions(input: unknown): PaymentTransactionRow[] 
           locationName: row.location_name,
           paymentMethodName: payment.paymentMethodName,
           processedByName: payment.receivedByName,
+          performedByEmployeeId: payment.receivedBy || null,
           partyName,
           partyLabel: "Customer",
           sourceType: "sale",
@@ -692,6 +700,7 @@ export function getPaymentTransactions(input: unknown): PaymentTransactionRow[] 
         locationName: row.location_name,
         paymentMethodName: row.payment_method_name,
         processedByName: row.employee_name,
+        performedByEmployeeId: row.employee_id,
         partyName,
         partyLabel: "Customer",
         sourceType: "sale",
@@ -725,6 +734,7 @@ export function getPaymentTransactions(input: unknown): PaymentTransactionRow[] 
         locationName: row.location_name,
         paymentMethodName: payment.paymentMethodName,
         processedByName: payment.receivedByName,
+        performedByEmployeeId: payment.receivedBy || null,
         partyName: row.customer_name ?? "Walk-in customer",
         partyLabel: "Customer",
         sourceType: "invoice_refund",
@@ -749,6 +759,7 @@ export function getPaymentTransactions(input: unknown): PaymentTransactionRow[] 
           locationName: row.location_name,
           paymentMethodName: payment.paymentMethodName,
           processedByName: payment.paidByName,
+          performedByEmployeeId: payment.paidBy || null,
           partyName: row.supplier_name,
           partyLabel: "Supplier",
           sourceType: "purchase",
@@ -774,6 +785,7 @@ export function getPaymentTransactions(input: unknown): PaymentTransactionRow[] 
         locationName: row.location_name,
         paymentMethodName: row.payment_method_name,
         processedByName: row.created_by_name ?? "—",
+        performedByEmployeeId: row.created_by,
         partyName: row.description?.trim() || row.category_name,
         partyLabel: "For",
         sourceType: "expense",
@@ -792,6 +804,7 @@ export function getPaymentTransactions(input: unknown): PaymentTransactionRow[] 
         locationName: row.location_name,
         paymentMethodName: row.payment_method_name,
         processedByName: row.created_by_name ?? "Payroll",
+        performedByEmployeeId: row.created_by,
         partyName: row.employee_name,
         partyLabel: "Employee",
         sourceType: "salary",
@@ -802,7 +815,15 @@ export function getPaymentTransactions(input: unknown): PaymentTransactionRow[] 
     }
   }
 
-  return results.sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
+  // Client request: a Cashier could see the owner's supplier payments (and every other person's
+  // money movements) in this ledger. A Super Admin still sees the whole business; everyone else is
+  // scoped to only the rows THEY personally handled — took the payment, recorded the expense, ran
+  // the payout. A row with no attributable actor (legacy data) is only shown to a Super Admin.
+  const scoped = getCurrentIsSuperAdmin()
+    ? results
+    : results.filter((row) => row.performedByEmployeeId != null && row.performedByEmployeeId === getCurrentEmployeeId());
+
+  return scoped.sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
 }
 
 /** The current employee's own completed sales in the range, newest first —

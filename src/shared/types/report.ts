@@ -232,6 +232,11 @@ export type PaymentTransactionRow = {
   locationName: string;
   paymentMethodName: string | null;
   processedByName: string;
+  /** The employee who actually handled this money movement — took the payment, recorded the expense,
+   * ran the payout. The Transactions tab shows a non-Super-Admin only the rows where this is them
+   * (see getPaymentTransactions), so a Cashier can't see the owner's supplier payments. Null only
+   * for a legacy row with no attributable actor. */
+  performedByEmployeeId: string | null;
   /** The customer who paid (sale), the supplier/employee who was paid (purchase/salary), or what an
    * expense was for (description, falling back to its category) — null only when a sale has no
    * customer on file and isn't a walk-in either (shouldn't normally happen, but the type stays
