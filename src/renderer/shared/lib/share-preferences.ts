@@ -15,7 +15,9 @@ export type SharePreferences = {
   whatsappInstalled: boolean;
 };
 
-const DEFAULT_PREFERENCES: SharePreferences = { includeWhatsappPreview: false, includeDelivery: true, whatsappInstalled: true };
+// includeWhatsappPreview defaults ON — most shares go out over WhatsApp and the link preview is
+// what makes them look legit; a user who doesn't want it unchecks it once and that's remembered.
+const DEFAULT_PREFERENCES: SharePreferences = { includeWhatsappPreview: true, includeDelivery: true, whatsappInstalled: true };
 
 export function getSharePreferences(): SharePreferences {
   try {

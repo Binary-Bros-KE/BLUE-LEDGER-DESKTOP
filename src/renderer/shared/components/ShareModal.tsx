@@ -55,7 +55,9 @@ export function ShareModal({
   const [customerEmail, setCustomerEmail] = useState("");
   const [recipient, setRecipient] = useState("");
   const [includeDelivery, setIncludeDelivery] = useState(true);
-  const [includeWhatsappPreview, setIncludeWhatsappPreview] = useState(false);
+  // Initial value only — the open effect below immediately replaces it with the remembered
+  // preference (default ON, see share-preferences.ts). Kept in sync to avoid a first-frame flash.
+  const [includeWhatsappPreview, setIncludeWhatsappPreview] = useState(true);
   const [sending, setSending] = useState(false);
 
   function handleIncludeDeliveryChange(checked: boolean): void {
