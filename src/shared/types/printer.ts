@@ -27,10 +27,10 @@ export type PrinterSettings = {
 };
 
 export const DEFAULT_PRINTER_SETTINGS: PrinterSettings = {
-  enabled: false,
-  connectionType: "network",
+  enabled: true,
+  connectionType: "usb",
   address: "",
-  printerType: "epson",
+  printerType: "custom",
   // Was 48, briefly bumped to 70 — but that number was found while printing still used SumatraPDF's
   // default "fit" scaling (silently shrinking an oversized page to fit the real printable area,
   // masking how wide 70 actually was). Once printing switched to `scale: "noscale"` (needed to fix a
