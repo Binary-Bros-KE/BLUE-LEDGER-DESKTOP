@@ -10,6 +10,20 @@ export type StatementFilters = {
   dateTo: string | null;
 };
 
+/** One payment actually recorded against a statement line — normalized from SalePayment/
+ * PurchasePayment (each side names its own "who/when" fields slightly differently: receivedBy/
+ * receivedAt vs paidBy/paidAt) into one shape so StatementPreview.tsx and SupplierStatementModal.tsx
+ * can render an identical payment-history sub-table either side. Client request: a statement used to
+ * show only the running totals, not the payments that actually produced them. */
+export type StatementPaymentEntry = {
+  id: string;
+  occurredAt: string;
+  amountCents: number;
+  paymentMethodName: string;
+  reference: string | null;
+  performedByName: string;
+};
+
 export type StatementInvoiceLine = {
   id: string;
   invoiceNumber: string | null;
@@ -19,6 +33,8 @@ export type StatementInvoiceLine = {
   amountPaidCents: number;
   balanceDueCents: number;
   paymentStatus: PaymentStatus;
+  /** Newest first — every payment actually recorded against this invoice. */
+  payments: StatementPaymentEntry[];
 };
 
 /** A customer's "Statement of Account" — every invoice they haven't fully paid off yet, across every

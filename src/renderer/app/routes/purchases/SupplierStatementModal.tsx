@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Eye, Loader2, Printer, Search, Wallet } from "lucide-react";
+import { Fragment, useMemo, useState } from "react";
+import { ChevronDown, ChevronRight, Eye, Loader2, Printer, Search, Wallet } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { Field, SelectField } from "@renderer/shared/components/form-fields";
@@ -196,6 +196,19 @@ export function SupplierStatementModal({
   // screen.
   const outstandingPurchases = useMemo(() => (vm ? vm.purchases.filter((p) => p.balanceDueCents > 0) : []), [vm]);
 
+  // Client request: a statement used to show only the running totals, not the payments that
+  // actually produced them. Collapsed by default (a history view can list many purchases) — expand
+  // one at a time to see its payment history.
+  const [expandedPurchaseIds, setExpandedPurchaseIds] = useState<Set<string>>(new Set());
+  function toggleExpanded(purchaseId: string): void {
+    setExpandedPurchaseIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(purchaseId)) next.delete(purchaseId);
+      else next.add(purchaseId);
+      return next;
+    });
+  }
+
   async function handlePrint(): Promise<void> {
     if (!vm) return;
     setPrinting(true);
@@ -385,29 +398,81 @@ export function SupplierStatementModal({
                       <th className="px-2.5 py-2 text-right">Total Ordered</th>
                       <th className="px-2.5 py-2 text-right">Due Balance</th>
                       <th className="px-2.5 py-2 text-left">Status</th>
+                      <th className="px-2.5 py-2 text-left">Payments</th>
                     </tr>
                   </thead>
                   <tbody>
                     {vm.purchases.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="px-2.5 py-4 text-center font-semibold text-muted">
+                        <td colSpan={6} className="px-2.5 py-4 text-center font-semibold text-muted">
                           {statusFilter === "pending" ? "No outstanding purchases" : "No purchases match this filter"}
                         </td>
                       </tr>
                     ) : (
-                      vm.purchases.map((purchase) => (
-                        <tr key={purchase.id} className="border-b border-line last:border-0">
-                          <td className="px-2.5 py-2 font-bold text-ink">{purchase.purchaseNumber}</td>
-                          <td className="px-2.5 py-2 text-muted">
-                            {purchase.orderedAt ? formatDocumentDate(purchase.orderedAt) : "-"}
-                          </td>
-                          <td className="px-2.5 py-2 text-right font-semibold text-ink">{money(purchase.grandTotalCents)}</td>
-                          <td className="px-2.5 py-2 text-right font-extrabold text-ink">{money(purchase.balanceDueCents)}</td>
-                          <td className="px-2.5 py-2">
-                            <DashedPill tone={statusTone(purchase.paymentStatus)}>{statusLabel(purchase.paymentStatus)}</DashedPill>
-                          </td>
-                        </tr>
-                      ))
+                      vm.purchases.map((purchase) => {
+                        const expanded = expandedPurchaseIds.has(purchase.id);
+                        return (
+                          <Fragment key={purchase.id}>
+                            <tr className="border-b border-line last:border-0">
+                              <td className="px-2.5 py-2 font-bold text-ink">{purchase.purchaseNumber}</td>
+                              <td className="px-2.5 py-2 text-muted">
+                                {purchase.orderedAt ? formatDocumentDate(purchase.orderedAt) : "-"}
+                              </td>
+                              <td className="px-2.5 py-2 text-right font-semibold text-ink">{money(purchase.grandTotalCents)}</td>
+                              <td className="px-2.5 py-2 text-right font-extrabold text-ink">{money(purchase.balanceDueCents)}</td>
+                              <td className="px-2.5 py-2">
+                                <DashedPill tone={statusTone(purchase.paymentStatus)}>{statusLabel(purchase.paymentStatus)}</DashedPill>
+                              </td>
+                              <td className="px-2.5 py-2">
+                                {purchase.payments.length === 0 ? (
+                                  <span className="text-muted">-</span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleExpanded(purchase.id)}
+                                    className="inline-flex items-center gap-1 font-bold text-primary hover:underline cursor-pointer"
+                                  >
+                                    {expanded ? (
+                                      <ChevronDown className="size-3.5" aria-hidden="true" />
+                                    ) : (
+                                      <ChevronRight className="size-3.5" aria-hidden="true" />
+                                    )}
+                                    {purchase.payments.length} payment{purchase.payments.length === 1 ? "" : "s"}
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                            {expanded && purchase.payments.length > 0 && (
+                              <tr className="border-b border-line bg-soft/60 last:border-0">
+                                <td colSpan={6} className="px-2.5 py-2">
+                                  <table className="w-full text-[11px]">
+                                    <thead>
+                                      <tr className="text-[9px] font-extrabold uppercase tracking-wide text-muted">
+                                        <th className="px-2 py-1 text-left">Date</th>
+                                        <th className="px-2 py-1 text-right">Amount</th>
+                                        <th className="px-2 py-1 text-left">Method</th>
+                                        <th className="px-2 py-1 text-left">Reference</th>
+                                        <th className="px-2 py-1 text-left">Recorded By</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {purchase.payments.map((payment) => (
+                                        <tr key={payment.id} className="border-t border-line/60">
+                                          <td className="px-2 py-1 text-muted">{formatDocumentDate(payment.occurredAt)}</td>
+                                          <td className="px-2 py-1 text-right font-bold text-ink">{money(payment.amountCents)}</td>
+                                          <td className="px-2 py-1 text-ink">{payment.paymentMethodName}</td>
+                                          <td className="px-2 py-1 text-muted">{payment.reference ?? "-"}</td>
+                                          <td className="px-2 py-1 text-muted">{payment.performedByName}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>

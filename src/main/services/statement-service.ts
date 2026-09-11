@@ -3,7 +3,24 @@ import * as saleRepository from "@main/database/repositories/sale-repository";
 import { requirePermission } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { statementFiltersSchema } from "@shared/schemas/statement";
-import type { CustomerStatementViewModel } from "@shared/types/statement";
+import type { CustomerStatementViewModel, StatementPaymentEntry } from "@shared/types/statement";
+
+/** SalePayment (sale.ts) names its "who/when" fields receivedBy/receivedAt — normalized here into
+ * the one StatementPaymentEntry shape shared with the supplier side. Newest first, matching how the
+ * invoice list itself sorts in a history view. */
+function toStatementPayments(raw: string): StatementPaymentEntry[] {
+  return saleRepository
+    .parseSalePayments(raw)
+    .map((payment) => ({
+      id: payment.id,
+      occurredAt: payment.receivedAt,
+      amountCents: payment.amountCents,
+      paymentMethodName: payment.paymentMethodName,
+      reference: payment.reference,
+      performedByName: payment.receivedByName
+    }))
+    .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
+}
 
 /** Ported from report-service.ts's own identical helper — ties a plain YYYY-MM-DD to THIS device's
  * local midnight (never UTC midnight, which would silently shift a boundary invoice into the wrong
@@ -36,13 +53,13 @@ export function getCustomerStatement(customerId: string, filtersInput: unknown =
     throw new Error("Customer not found");
   }
 
-  const invoices = saleRepository
-    .findInvoiceRowsForCustomer(tenant.tenantId, customerId, {
-      status: filters.status,
-      dateFromIso: filters.dateFrom ? startOfDayIso(filters.dateFrom) : null,
-      dateToExclusiveIso: filters.dateTo ? addDaysIso(filters.dateTo, 1) : null
-    })
-    .map(saleRepository.mapInvoiceListRow);
+  const rawInvoiceRows = saleRepository.findInvoiceRowsForCustomer(tenant.tenantId, customerId, {
+    status: filters.status,
+    dateFromIso: filters.dateFrom ? startOfDayIso(filters.dateFrom) : null,
+    dateToExclusiveIso: filters.dateTo ? addDaysIso(filters.dateTo, 1) : null
+  });
+  const invoices = rawInvoiceRows.map(saleRepository.mapInvoiceListRow);
+  const paymentsByInvoiceId = new Map(rawInvoiceRows.map((row) => [row.id, toStatementPayments(row.payments)]));
 
   const totalInvoicedCents = invoices.reduce((sum, invoice) => sum + invoice.grandTotalCents, 0);
   const totalPaidCents = invoices.reduce((sum, invoice) => sum + invoice.amountPaidCents, 0);
@@ -68,7 +85,8 @@ export function getCustomerStatement(customerId: string, filtersInput: unknown =
       grandTotalCents: invoice.grandTotalCents,
       amountPaidCents: invoice.amountPaidCents,
       balanceDueCents: invoice.balanceDueCents,
-      paymentStatus: invoice.paymentStatus
+      paymentStatus: invoice.paymentStatus,
+      payments: paymentsByInvoiceId.get(invoice.id) ?? []
     })),
     totalInvoicedCents,
     totalPaidCents,

@@ -261,10 +261,13 @@ export function findAllInvoiceRows(tenantId: string, locationId: string | null):
     .all(tenantId, locationId, locationId) as InvoiceRow[];
 }
 
-/** Every one of this customer's invoices not yet fully paid off or cancelled — the basis of a
- * Statement of Account. Oldest due date first, matching how a real statement reads. Same row shape
- * as findAllInvoiceRows (reuses mapInvoiceListRow) — just scoped to one customer and pre-filtered to
- * outstanding balances instead of covering every invoice tenant-wide. */
+/** Same shape as InvoiceRow, plus the raw payments JSON — only findInvoiceRowsForCustomer needs the
+ * per-payment history (client request: a statement's payment history, not just the totals), and
+ * this function has exactly one caller (statement-service.ts), so it's safe to widen just here
+ * rather than adding `payments` to the shared InvoiceRow every other query would then have to
+ * remember to select (or silently carry a lying type). */
+export type InvoiceRowWithPayments = InvoiceRow & { payments: string };
+
 /** Client request: a Statement used to always mean "what's still owed", with no way to see paid or
  * historical invoices. `filters.status` picks the slice — "pending" (default, unchanged behavior)
  * keeps today's NOT IN ('paid','cancelled') + oldest-due-first ordering (actionable collections
@@ -280,7 +283,7 @@ export function findInvoiceRowsForCustomer(
   tenantId: string,
   customerId: string,
   filters: { status: "pending" | "paid" | "all"; dateFromIso: string | null; dateToExclusiveIso: string | null }
-): InvoiceRow[] {
+): InvoiceRowWithPayments[] {
   const statusClause =
     filters.status === "paid"
       ? "s.payment_status = 'paid'"
@@ -307,7 +310,8 @@ export function findInvoiceRowsForCustomer(
         s.payment_status,
         s.created_at,
         EXISTS(SELECT 1 FROM delivery_notes dn WHERE dn.sale_id = s.id) AS has_delivery_note,
-        s.location_id
+        s.location_id,
+        s.payments
       FROM sales s
       JOIN locations l ON l.id = s.location_id
       LEFT JOIN customers c ON c.id = s.customer_id
@@ -325,7 +329,7 @@ export function findInvoiceRowsForCustomer(
       filters.dateFromIso,
       filters.dateToExclusiveIso,
       filters.dateToExclusiveIso
-    ) as InvoiceRow[];
+    ) as InvoiceRowWithPayments[];
 }
 
 export function mapInvoiceListRow(row: InvoiceRow): InvoiceListItem {

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Eye, Loader2, Printer, Share2 } from "lucide-react";
+import { Fragment, useState } from "react";
+import { ChevronDown, ChevronRight, Eye, Loader2, Printer, Share2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { ShareModal } from "@renderer/shared/components/ShareModal";
@@ -65,6 +65,19 @@ export function StatementPreview({
   // Rather than let Share silently send something different from what's on screen, it's only
   // enabled for the exact filter state Share itself supports.
   const isShareableFilter = vm.filters.status === "pending" && !vm.filters.dateFrom && !vm.filters.dateTo;
+
+  // Client request: a statement used to show only the running totals, not the payments that
+  // actually produced them. Collapsed by default (a history view can list many invoices) — expand
+  // one at a time to see its payment history.
+  const [expandedInvoiceIds, setExpandedInvoiceIds] = useState<Set<string>>(new Set());
+  function toggleExpanded(invoiceId: string): void {
+    setExpandedInvoiceIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(invoiceId)) next.delete(invoiceId);
+      else next.add(invoiceId);
+      return next;
+    });
+  }
 
   async function handlePrint(): Promise<void> {
     setPrinting(true);
@@ -201,29 +214,81 @@ export function StatementPreview({
                 <th className="px-2.5 py-2 text-right">Total</th>
                 <th className="px-2.5 py-2 text-right">Balance</th>
                 <th className="px-2.5 py-2 text-left">Status</th>
+                <th className="px-2.5 py-2 text-left">Payments</th>
               </tr>
             </thead>
             <tbody>
               {vm.invoices.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-2.5 py-4 text-center font-semibold text-muted">
+                  <td colSpan={6} className="px-2.5 py-4 text-center font-semibold text-muted">
                     {vm.filters.status === "pending" ? "No outstanding invoices" : "No invoices match this filter"}
                   </td>
                 </tr>
               ) : (
-                vm.invoices.map((invoice) => (
-                  <tr key={invoice.id} className="border-b border-line last:border-0">
-                    <td className="px-2.5 py-2 font-bold text-ink">{invoice.invoiceNumber ?? "-"}</td>
-                    <td className="px-2.5 py-2 text-muted">
-                      {invoice.dueDate ? formatDocumentDate(invoice.dueDate) : "-"}
-                    </td>
-                    <td className="px-2.5 py-2 text-right font-semibold text-ink">{money(invoice.grandTotalCents)}</td>
-                    <td className="px-2.5 py-2 text-right font-extrabold text-ink">{money(invoice.balanceDueCents)}</td>
-                    <td className="px-2.5 py-2">
-                      <DashedPill tone={statusTone(invoice.paymentStatus)}>{statusLabel(invoice.paymentStatus)}</DashedPill>
-                    </td>
-                  </tr>
-                ))
+                vm.invoices.map((invoice) => {
+                  const expanded = expandedInvoiceIds.has(invoice.id);
+                  return (
+                    <Fragment key={invoice.id}>
+                      <tr className="border-b border-line last:border-0">
+                        <td className="px-2.5 py-2 font-bold text-ink">{invoice.invoiceNumber ?? "-"}</td>
+                        <td className="px-2.5 py-2 text-muted">
+                          {invoice.dueDate ? formatDocumentDate(invoice.dueDate) : "-"}
+                        </td>
+                        <td className="px-2.5 py-2 text-right font-semibold text-ink">{money(invoice.grandTotalCents)}</td>
+                        <td className="px-2.5 py-2 text-right font-extrabold text-ink">{money(invoice.balanceDueCents)}</td>
+                        <td className="px-2.5 py-2">
+                          <DashedPill tone={statusTone(invoice.paymentStatus)}>{statusLabel(invoice.paymentStatus)}</DashedPill>
+                        </td>
+                        <td className="px-2.5 py-2">
+                          {invoice.payments.length === 0 ? (
+                            <span className="text-muted">-</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => toggleExpanded(invoice.id)}
+                              className="inline-flex items-center gap-1 font-bold text-primary hover:underline cursor-pointer"
+                            >
+                              {expanded ? (
+                                <ChevronDown className="size-3.5" aria-hidden="true" />
+                              ) : (
+                                <ChevronRight className="size-3.5" aria-hidden="true" />
+                              )}
+                              {invoice.payments.length} payment{invoice.payments.length === 1 ? "" : "s"}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                      {expanded && invoice.payments.length > 0 && (
+                        <tr className="border-b border-line bg-soft/60 last:border-0">
+                          <td colSpan={6} className="px-2.5 py-2">
+                            <table className="w-full text-[11px]">
+                              <thead>
+                                <tr className="text-[9px] font-extrabold uppercase tracking-wide text-muted">
+                                  <th className="px-2 py-1 text-left">Date</th>
+                                  <th className="px-2 py-1 text-right">Amount</th>
+                                  <th className="px-2 py-1 text-left">Method</th>
+                                  <th className="px-2 py-1 text-left">Reference</th>
+                                  <th className="px-2 py-1 text-left">Recorded By</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {invoice.payments.map((payment) => (
+                                  <tr key={payment.id} className="border-t border-line/60">
+                                    <td className="px-2 py-1 text-muted">{formatDocumentDate(payment.occurredAt)}</td>
+                                    <td className="px-2 py-1 text-right font-bold text-ink">{money(payment.amountCents)}</td>
+                                    <td className="px-2 py-1 text-ink">{payment.paymentMethodName}</td>
+                                    <td className="px-2 py-1 text-muted">{payment.reference ?? "-"}</td>
+                                    <td className="px-2 py-1 text-muted">{payment.performedByName}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })
               )}
             </tbody>
           </table>

@@ -190,11 +190,18 @@ export function findCancelledPurchaseRowsInRange(
  * sale-repository.ts's identical findInvoiceRowsForCustomer for the full reasoning. Pass null for
  * either to skip that bound. See statementFiltersSchema (shared/schemas/statement.ts). Same row
  * shape as findAllPurchaseListRows (reuses mapPurchaseListRow) — just scoped to one supplier. */
+/** Same shape as PurchaseListRow, plus the raw payments JSON — only findPurchaseRowsForSupplier
+ * needs the per-payment history (client request: a statement's payment history, not just the
+ * totals), and this function has exactly one caller (supplier-statement-service.ts), so it's safe
+ * to widen just here rather than adding `payments` to the shared PurchaseListRow every other query
+ * would then have to remember to select. */
+export type PurchaseListRowWithPayments = PurchaseListRow & { payments: string };
+
 export function findPurchaseRowsForSupplier(
   tenantId: string,
   supplierId: string,
   filters: { status: "pending" | "paid" | "all"; dateFromIso: string | null; dateToExclusiveIso: string | null }
-): PurchaseListRow[] {
+): PurchaseListRowWithPayments[] {
   const statusClause =
     filters.status === "paid"
       ? "p.status NOT IN ('draft', 'cancelled') AND p.payment_status = 'paid'"
@@ -223,7 +230,8 @@ export function findPurchaseRowsForSupplier(
         p.amount_paid_cents,
         p.ordered_at,
         p.received_at,
-        p.created_at
+        p.created_at,
+        p.payments
       FROM purchases p
       JOIN suppliers s ON s.id = p.supplier_id
       JOIN locations l ON l.id = p.location_id
@@ -241,7 +249,7 @@ export function findPurchaseRowsForSupplier(
       filters.dateFromIso,
       filters.dateToExclusiveIso,
       filters.dateToExclusiveIso
-    ) as PurchaseListRow[];
+    ) as PurchaseListRowWithPayments[];
 }
 
 export function mapPurchaseListRow(row: PurchaseListRow): PurchaseListItem {
@@ -727,7 +735,10 @@ export function mapPurchaseItemDetailRow(row: PurchaseItemDetailRow): PurchaseIt
   };
 }
 
-function parsePurchasePayments(raw: string): PurchasePayment[] {
+/** Exported for supplier-statement-service.ts, which needs a purchase's own payment history
+ * alongside its totals — same "the JSON column is the one source of truth, parse it defensively"
+ * reasoning as sale-repository.ts's own parseSalePayments. */
+export function parsePurchasePayments(raw: string): PurchasePayment[] {
   try {
     const parsed: unknown = JSON.parse(raw);
     return Array.isArray(parsed) ? (parsed as PurchasePayment[]) : [];

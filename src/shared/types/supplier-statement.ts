@@ -1,5 +1,5 @@
 import type { PurchasePaymentStatus } from "./purchase";
-import type { StatementFilters } from "./statement";
+import type { StatementFilters, StatementPaymentEntry } from "./statement";
 
 export type StatementPurchaseLine = {
   id: string;
@@ -9,6 +9,8 @@ export type StatementPurchaseLine = {
   amountPaidCents: number;
   balanceDueCents: number;
   paymentStatus: PurchasePaymentStatus;
+  /** Newest first — every payment we've actually recorded against this purchase. Client request. */
+  payments: StatementPaymentEntry[];
 };
 
 /** A supplier's "Statement of Account" — every purchase order we haven't fully paid off yet, across

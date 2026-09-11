@@ -2917,6 +2917,23 @@ function statementScopeLabel(filters: { status: "pending" | "paid" | "all"; date
  * several), so unlike every other document template here this one never resolves a per-location
  * business override; vm's business fields are already the tenant-wide default (see
  * statement-service.ts). Reuses the same letterhead styling as buildInvoiceHtml for visual family. */
+/** Client request: a statement used to show only the running totals, not the payments that actually
+ * produced them. One compact line per document (not a nested table — PDF/print space is tighter
+ * than the on-screen expandable version), listing every payment newest-first: date, amount, method,
+ * and reference when there is one. Shared by both statement templates — StatementPaymentEntry is the
+ * same shape either side. Returns "" (renders nothing) when there are no payments to show. */
+function formatPaymentHistoryLine(
+  payments: Array<{ occurredAt: string; amountCents: number; paymentMethodName: string; reference: string | null }>,
+  money: (cents: number) => string
+): string {
+  if (payments.length === 0) return "";
+  const parts = payments.map(
+    (payment) =>
+      `${formatInvoiceDate(payment.occurredAt)} ${money(payment.amountCents)} (${escapeHtml(payment.paymentMethodName)}${payment.reference ? ` · ${escapeHtml(payment.reference)}` : ""})`
+  );
+  return `<div class="muted" style="font-size:10px; margin-top:2px;">Paid: ${parts.join(" &nbsp;·&nbsp; ")}</div>`;
+}
+
 function buildStatementHtml(vm: CustomerStatementViewModel): string {
   const money = (cents: number): string => `${vm.currency} ${formatReceiptCents(cents)}`;
 
@@ -2932,7 +2949,7 @@ function buildStatementHtml(vm: CustomerStatementViewModel): string {
         <td class="right">${money(invoice.grandTotalCents)}</td>
         <td class="right">${money(invoice.amountPaidCents)}</td>
         <td class="right">${money(invoice.balanceDueCents)}</td>
-        <td><span class="badge">${escapeHtml(paymentStatusLabel(invoice.paymentStatus))}</span></td>
+        <td><span class="badge">${escapeHtml(paymentStatusLabel(invoice.paymentStatus))}</span>${formatPaymentHistoryLine(invoice.payments, money)}</td>
       </tr>`
       )
       .join("") ||
@@ -3085,7 +3102,7 @@ function buildSupplierStatementHtml(vm: SupplierStatementViewModel): string {
         <td class="right">${money(purchase.grandTotalCents)}</td>
         <td class="right">${money(purchase.amountPaidCents)}</td>
         <td class="right">${money(purchase.balanceDueCents)}</td>
-        <td><span class="badge">${escapeHtml(purchasePaymentStatusLabel(purchase.paymentStatus))}</span></td>
+        <td><span class="badge">${escapeHtml(purchasePaymentStatusLabel(purchase.paymentStatus))}</span>${formatPaymentHistoryLine(purchase.payments, money)}</td>
       </tr>`
       )
       .join("") ||

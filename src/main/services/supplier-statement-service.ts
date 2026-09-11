@@ -3,7 +3,26 @@ import * as supplierRepository from "@main/database/repositories/supplier-reposi
 import { requirePermission } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { statementFiltersSchema } from "@shared/schemas/statement";
+import type { StatementPaymentEntry } from "@shared/types/statement";
 import type { SupplierStatementViewModel } from "@shared/types/supplier-statement";
+
+/** PurchasePayment (purchase.ts) names its "who/when" fields paidBy/paidAt — normalized here into
+ * the one StatementPaymentEntry shape shared with the customer side (see statement-service.ts's
+ * identical toStatementPayments). Newest first, matching how the purchase list itself sorts in a
+ * history view. */
+function toStatementPayments(raw: string): StatementPaymentEntry[] {
+  return purchaseRepository
+    .parsePurchasePayments(raw)
+    .map((payment) => ({
+      id: payment.id,
+      occurredAt: payment.paidAt,
+      amountCents: payment.amountCents,
+      paymentMethodName: payment.paymentMethodName,
+      reference: payment.reference,
+      performedByName: payment.paidByName
+    }))
+    .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
+}
 
 /** Ported from statement-service.ts's own identical helper (itself ported from report-service.ts) —
  * ties a plain YYYY-MM-DD to THIS device's local midnight. */
@@ -35,13 +54,13 @@ export function getSupplierStatement(supplierId: string, filtersInput: unknown =
     throw new Error("Supplier not found");
   }
 
-  const purchases = purchaseRepository
-    .findPurchaseRowsForSupplier(tenant.tenantId, supplierId, {
-      status: filters.status,
-      dateFromIso: filters.dateFrom ? startOfDayIso(filters.dateFrom) : null,
-      dateToExclusiveIso: filters.dateTo ? addDaysIso(filters.dateTo, 1) : null
-    })
-    .map(purchaseRepository.mapPurchaseListRow);
+  const rawPurchaseRows = purchaseRepository.findPurchaseRowsForSupplier(tenant.tenantId, supplierId, {
+    status: filters.status,
+    dateFromIso: filters.dateFrom ? startOfDayIso(filters.dateFrom) : null,
+    dateToExclusiveIso: filters.dateTo ? addDaysIso(filters.dateTo, 1) : null
+  });
+  const purchases = rawPurchaseRows.map(purchaseRepository.mapPurchaseListRow);
+  const paymentsByPurchaseId = new Map(rawPurchaseRows.map((row) => [row.id, toStatementPayments(row.payments)]));
 
   // Client request: "outstanding" is what's owed for received goods only — totalOrderedCents/
   // totalPaidCents stay as full-order-value context (still genuinely useful figures), but
@@ -74,7 +93,8 @@ export function getSupplierStatement(supplierId: string, filtersInput: unknown =
       amountPaidCents: purchase.amountPaidCents,
       // Client request: only ever the received-goods balance, never the full order total.
       balanceDueCents: purchase.receivedValueCents - purchase.amountPaidCents,
-      paymentStatus: purchase.paymentStatus
+      paymentStatus: purchase.paymentStatus,
+      payments: paymentsByPurchaseId.get(purchase.id) ?? []
     })),
     totalOrderedCents,
     totalPaidCents,
