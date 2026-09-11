@@ -2927,11 +2927,18 @@ function formatPaymentHistoryLine(
   money: (cents: number) => string
 ): string {
   if (payments.length === 0) return "";
-  const parts = payments.map(
-    (payment) =>
-      `${formatInvoiceDate(payment.occurredAt)} ${money(payment.amountCents)} (${escapeHtml(payment.paymentMethodName)}${payment.reference ? ` · ${escapeHtml(payment.reference)}` : ""})`
-  );
-  return `<div class="muted" style="font-size:10px; margin-top:2px;">Paid: ${parts.join(" &nbsp;·&nbsp; ")}</div>`;
+  // Client feedback: joined with " · " on one line read as one run-on paragraph — each payment
+  // needs to visibly be its own entry, so this is a real list, one <li> per payment.
+  const items = payments
+    .map(
+      (payment) =>
+        `<li>${formatInvoiceDate(payment.occurredAt)} — ${money(payment.amountCents)} (${escapeHtml(payment.paymentMethodName)}${payment.reference ? ` · ${escapeHtml(payment.reference)}` : ""})</li>`
+    )
+    .join("");
+  return `<div class="muted" style="font-size:10px; margin-top:3px;">
+    <div style="font-weight:700;">Payments</div>
+    <ul style="margin:2px 0 0; padding-left:14px; list-style:disc;">${items}</ul>
+  </div>`;
 }
 
 function buildStatementHtml(vm: CustomerStatementViewModel): string {
