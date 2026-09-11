@@ -307,6 +307,7 @@ export const ipcChannels = {
   reportMySales: "report:my-sales",
   reportSalesTrendWindow: "report:sales-trend-window",
   reportSalesByStorefront: "report:sales-by-storefront",
+  reportFinancialsByStorefront: "report:financials-by-storefront",
   reportSalesByEmployee: "report:sales-by-employee",
   reportSalesByPaymentMethod: "report:sales-by-payment-method",
   reportInventoryData: "report:inventory-data",

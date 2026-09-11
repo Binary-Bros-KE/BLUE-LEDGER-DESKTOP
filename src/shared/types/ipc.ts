@@ -52,6 +52,7 @@ import type {
   PaymentTransactionRow,
   SalesByEmployeeRow,
   SalesByPaymentMethodRow,
+  SalesByStorefrontFinancials,
   SalesByStorefrontRow,
   SalesFinancialOverview,
   SalesTransactionRow,
@@ -1326,6 +1327,10 @@ export type IpcInvokeMap = {
     args: [DateRangeInput];
     result: SalesByStorefrontRow[];
   };
+  "report:financials-by-storefront": {
+    args: [DateRangeInput];
+    result: SalesByStorefrontFinancials[];
+  };
   "report:sales-by-employee": {
     args: [DateRangeInput];
     result: SalesByEmployeeRow[];
@@ -2067,6 +2072,7 @@ export type BlueLedgerApi = {
     mySales: (range: DateRangeInput) => Promise<MySaleEntry[]>;
     salesTrendWindow: (input: SalesTrendWindowInput) => Promise<SalesTrendWindowResult>;
     salesByStorefront: (range: DateRangeInput) => Promise<SalesByStorefrontRow[]>;
+    financialsByStorefront: (range: DateRangeInput) => Promise<IpcInvokeMap["report:financials-by-storefront"]["result"]>;
     salesByEmployee: (range: DateRangeInput) => Promise<SalesByEmployeeRow[]>;
     salesByPaymentMethod: (range: DateRangeInput) => Promise<SalesByPaymentMethodRow[]>;
     inventoryData: (input: LocationScopeInput) => Promise<InventoryReportData>;

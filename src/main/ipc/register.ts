@@ -329,6 +329,7 @@ import { createDeliveryShareLink, createShareLink } from "@main/services/share-s
 import { saveTheme } from "@main/services/theme-service";
 import {
   getCancelledPurchasesInRange,
+  getFinancialsByStorefront,
   getMySales,
   getPaymentTransactions,
   getSalesByEmployee,
@@ -953,6 +954,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.reportMySales, (_event, range: unknown) => getMySales(range));
   ipcMain.handle(ipcChannels.reportSalesTrendWindow, (_event, input: unknown) => getSalesTrendWindow(input));
   ipcMain.handle(ipcChannels.reportSalesByStorefront, (_event, range: unknown) => getSalesByStorefront(range));
+  ipcMain.handle(ipcChannels.reportFinancialsByStorefront, (_event, range: unknown) => getFinancialsByStorefront(range));
   ipcMain.handle(ipcChannels.reportSalesByEmployee, (_event, range: unknown) => getSalesByEmployee(range));
   ipcMain.handle(ipcChannels.reportSalesByPaymentMethod, (_event, range: unknown) =>
     getSalesByPaymentMethod(range)

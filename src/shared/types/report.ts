@@ -288,6 +288,22 @@ export type SalesByStorefrontRow = {
   percentOfTotal: number;
 };
 
+/** Client request: the Super Admin Dashboard's own "Sales by Storefront" table — the same four
+ * headline figures getSalesFinancialOverview computes tenant-wide (Total Revenue/Net/Expenses/
+ * Profit), broken out per storefront. Every active storefront appears, even one with zero sales in
+ * range, since it can still carry expenses. General (non-storefront-tagged) expenses/salaries count
+ * toward EVERY row here, same convention a branch-scoped Manager's own Financial Overview already
+ * uses — so this table's rows do NOT sum to the tenant-wide total when general expenses exist; it's
+ * a per-location view, not a partition. */
+export type SalesByStorefrontFinancials = {
+  locationId: string;
+  locationName: string;
+  totalRevenueCents: number;
+  netRevenueCents: number;
+  totalExpensesCents: number;
+  netProfitCents: number;
+};
+
 export type SalesByEmployeeRow = {
   employeeId: string;
   employeeName: string;

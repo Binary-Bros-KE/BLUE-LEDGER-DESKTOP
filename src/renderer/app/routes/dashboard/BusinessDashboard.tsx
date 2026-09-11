@@ -8,10 +8,10 @@ import { useUiStore } from "@renderer/shared/stores/ui-store";
 import { DashboardActionCard } from "@renderer/app/routes/dashboard/DashboardActionCard";
 import { DashboardShell } from "@renderer/app/routes/dashboard/DashboardShell";
 import { SyncStatusCard } from "@renderer/app/routes/dashboard/SyncStatusCard";
-import { CARD_TONE_CYCLE, OverviewCard } from "@renderer/app/routes/reports/FinancialOverviewCards";
+import { OverviewCard } from "@renderer/app/routes/reports/FinancialOverviewCards";
 import { todayIso } from "@renderer/app/routes/reports/salesReportDate";
 import type { PendingSaleListItem } from "@shared/types/sale";
-import type { SalesByEmployeeRow, SalesByStorefrontRow, SalesFinancialOverview, SalesTransactionRow } from "@shared/types/report";
+import type { SalesByEmployeeRow, SalesByStorefrontFinancials, SalesFinancialOverview, SalesTransactionRow } from "@shared/types/report";
 
 function money(cents: number): string {
   return formatCents(cents);
@@ -25,7 +25,7 @@ type BusinessData = {
   overview: SalesFinancialOverview;
   transactions: SalesTransactionRow[];
   heldSales: PendingSaleListItem[];
-  byStorefront: SalesByStorefrontRow[];
+  financialsByStorefront: SalesByStorefrontFinancials[];
   byEmployee: SalesByEmployeeRow[];
   lowStockCount: number;
   outOfStockCount: number;
@@ -58,18 +58,27 @@ export function BusinessDashboard({ isBusinessWide }: { isBusinessWide: boolean 
         const today = todayIso();
         const range = { startDate: today, endDate: today };
 
-        const [overview, transactions, heldSales, byStorefront, byEmployee, inventoryData, voids, returns, recurringBills] =
-          await Promise.all([
-            window.blueLedger.report.salesFinancialOverview(range),
-            window.blueLedger.report.salesTransactions(range),
-            window.blueLedger.sale.listPending(),
-            window.blueLedger.report.salesByStorefront(range),
-            window.blueLedger.report.salesByEmployee(range),
-            window.blueLedger.report.inventoryData({ locationId: null }),
-            window.blueLedger.saleVoid.list(),
-            window.blueLedger.saleReturn.list(),
-            window.blueLedger.recurringBill.list().catch(() => []),
-          ]);
+        const [
+          overview,
+          transactions,
+          heldSales,
+          financialsByStorefront,
+          byEmployee,
+          inventoryData,
+          voids,
+          returns,
+          recurringBills,
+        ] = await Promise.all([
+          window.blueLedger.report.salesFinancialOverview(range),
+          window.blueLedger.report.salesTransactions(range),
+          window.blueLedger.sale.listPending(),
+          isBusinessWide ? window.blueLedger.report.financialsByStorefront(range) : Promise.resolve([]),
+          window.blueLedger.report.salesByEmployee(range),
+          window.blueLedger.report.inventoryData({ locationId: null }),
+          window.blueLedger.saleVoid.list(),
+          window.blueLedger.saleReturn.list(),
+          window.blueLedger.recurringBill.list().catch(() => []),
+        ]);
 
         if (cancelled) return;
 
@@ -81,7 +90,7 @@ export function BusinessDashboard({ isBusinessWide }: { isBusinessWide: boolean 
           overview,
           transactions,
           heldSales,
-          byStorefront,
+          financialsByStorefront,
           byEmployee: [...byEmployee].sort((a, b) => b.revenueCents - a.revenueCents),
           lowStockCount: inventoryData.overview.lowStockProductCount,
           outOfStockCount: inventoryData.overview.outOfStockProductCount,
@@ -107,7 +116,7 @@ export function BusinessDashboard({ isBusinessWide }: { isBusinessWide: boolean 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isBusinessWide]);
 
   const heldSalesValueCents = useMemo(() => (data?.heldSales ?? []).reduce((sum, s) => sum + s.grandTotalCents, 0), [data]);
 
@@ -143,6 +152,46 @@ export function BusinessDashboard({ isBusinessWide }: { isBusinessWide: boolean 
               footnote="So far today"
             />
           </div>
+
+          {isBusinessWide && (
+            <div className="rounded-lg border border-line bg-white">
+              <div className="border-b border-line px-4 py-3">
+                <h3 className="text-sm font-extrabold text-ink">Sales by storefront</h3>
+              </div>
+              {data.financialsByStorefront.length === 0 ? (
+                <p className="p-4 text-sm font-semibold text-muted">No active storefronts.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[560px] border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-primary text-white">
+                        <th className="px-4 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider">Storefront</th>
+                        <th className="px-4 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Total Revenue</th>
+                        <th className="px-4 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Net</th>
+                        <th className="px-4 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Expenses</th>
+                        <th className="px-4 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider">Profit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.financialsByStorefront.map((row) => (
+                        <tr key={row.locationId} className="border-t border-line odd:bg-white even:bg-soft/50">
+                          <td className="truncate px-4 py-2.5 font-bold text-ink">{row.locationName}</td>
+                          <td className="px-4 py-2.5 text-right font-bold tabular-nums text-ink">{money(row.totalRevenueCents)}</td>
+                          <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-muted">{money(row.netRevenueCents)}</td>
+                          <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-danger">{money(row.totalExpensesCents)}</td>
+                          <td
+                            className={`px-4 py-2.5 text-right font-extrabold tabular-nums ${row.netProfitCents >= 0 ? "text-success" : "text-danger"}`}
+                          >
+                            {money(row.netProfitCents)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="rounded-lg border border-line bg-white">
             <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
@@ -202,30 +251,6 @@ export function BusinessDashboard({ isBusinessWide }: { isBusinessWide: boolean 
               </div>
             </div>
           </div>
-
-          {isBusinessWide && (
-            <div>
-              <h3 className="text-sm font-extrabold text-ink">Daily sales by storefront</h3>
-              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                {data.byStorefront.length === 0 ? (
-                  <p className="col-span-full rounded-lg border border-dashed border-line bg-soft/60 py-6 text-center text-sm font-semibold text-muted">
-                    No sales recorded yet today.
-                  </p>
-                ) : (
-                  data.byStorefront.map((row, index) => (
-                    <OverviewCard
-                      key={row.locationId}
-                      tone={CARD_TONE_CYCLE[index % CARD_TONE_CYCLE.length]!}
-                      label={row.locationName}
-                      valueCents={row.revenueCents}
-                      formula={`${row.transactionCount} sale${row.transactionCount === 1 ? "" : "s"} today`}
-                      footnote={`${row.percentOfTotal.toFixed(0)}% of today's revenue`}
-                    />
-                  ))
-                )}
-              </div>
-            </div>
-          )}
 
           <div className="rounded-lg border border-line bg-white p-4">
             <h3 className="text-sm font-extrabold text-ink">Top 10 selling products today</h3>

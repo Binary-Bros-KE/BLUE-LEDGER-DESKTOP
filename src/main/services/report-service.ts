@@ -1,3 +1,4 @@
+import * as locationRepository from "@main/database/repositories/location-repository";
 import * as purchaseRepository from "@main/database/repositories/purchase-repository";
 import * as reportRepository from "@main/database/repositories/report-repository";
 import type { CompletedSaleRow, InvoicePaymentCandidateRow, PurchasePaymentCandidateRow, SaleItemProfitRow } from "@main/database/repositories/report-repository";
@@ -18,6 +19,7 @@ import type {
   PaymentTransactionRow,
   SalesByEmployeeRow,
   SalesByPaymentMethodRow,
+  SalesByStorefrontFinancials,
   SalesByStorefrontRow,
   SalesCategoryBreakdownEntry,
   SalesFinancialOverview,
@@ -33,6 +35,7 @@ import type {
   SalesTrendWindowResult,
   SalesVoidStats,
 } from "@shared/types/report";
+import { isStorefrontType } from "@shared/types/location";
 import type { SalePayment } from "@shared/types/sale";
 import type { PurchasePayment } from "@shared/types/purchase";
 
@@ -545,6 +548,67 @@ export function getSalesFinancialOverview(input: unknown): SalesFinancialOvervie
     voidStats,
     processedReturns,
   };
+}
+
+/** Client request: the Super Admin Dashboard's own "Sales by Storefront" table — Total Revenue, Net
+ * Revenue, Total Expenses, and Net Profit per storefront, the same four figures
+ * getSalesFinancialOverview computes tenant-wide. Deliberately its own lean query set (not N calls
+ * into getSalesFinancialOverview, which also builds debtors/creditors/top-products/etc. nobody here
+ * needs) — same building blocks, just per location instead of once for the whole tenant.
+ *
+ * Every ACTIVE storefront appears, even one with zero sales in range (it can still carry
+ * expenses) — Main Store/warehouse-type locations never sell, so they're excluded. See
+ * SalesByStorefrontFinancials' own doc comment for why this table's rows don't sum to the
+ * tenant-wide total when a general (non-storefront) expense exists. */
+export function getFinancialsByStorefront(input: unknown): SalesByStorefrontFinancials[] {
+  requirePermission("reports", "view");
+  const { startDate, endDate } = dateRangeInputSchema.parse(input);
+  const { tenantId } = getCurrentTenant();
+
+  const startIso = startOfDayIso(startDate);
+  const endIsoExclusive = startOfDayIso(addDaysIso(endDate, 1));
+
+  const storefronts = locationRepository
+    .findAllLocationRows(tenantId)
+    .filter((row) => row.status === "active" && isStorefrontType(row.location_type as Parameters<typeof isStorefrontType>[0]));
+
+  return storefronts.map((location) => {
+    const locationId = location.id;
+
+    const rows = reportRepository.findCompletedSaleRows(tenantId, locationId, startIso, endIsoExclusive);
+    const itemRows = reportRepository.findSaleItemRowsInRange(tenantId, locationId, startIso, endIsoExclusive);
+    const feeRows = reportRepository.findSaleFeeRowsInRange(tenantId, locationId, startIso, endIsoExclusive);
+    const invoiceCandidates = reportRepository.findInvoicePaymentCandidateRows(tenantId, locationId, endIsoExclusive);
+    const refundRows = reportRepository.findApprovedReturnRefundRows(tenantId, locationId);
+
+    const cash = computeCashRevenue(
+      rows.filter((r) => r.invoice_number === null),
+      invoiceCandidates,
+      refundRows,
+      startIso,
+      endIsoExclusive
+    );
+    const netRevenueCents = computeNetRevenueCents(rows, itemRows, feeRows);
+
+    const expenseCategoryRows = reportRepository.findExpenseCategoryBreakdownInRange(tenantId, locationId, startDate, endDate);
+    const generalExpensesCents = expenseCategoryRows.reduce((sum, row) => sum + row.total_cents, 0);
+    const salaryRows = reportRepository.findSalariesByEmployeeInRange(tenantId, locationId, startIso, endIsoExclusive);
+    const salariesPaidCents = salaryRows.reduce((sum, row) => sum + row.total_cents, 0);
+    const serviceChargeCosts = reportRepository.findServiceChargeCostsInRange(tenantId, locationId, startIso, endIsoExclusive);
+    // Same "capital invested is never an expense" reasoning as getSalesFinancialOverview above —
+    // purchases paid deliberately excluded here too.
+    const totalExpensesCents = generalExpensesCents + salariesPaidCents + serviceChargeCosts.totalCents;
+    const netProfitCents = netRevenueCents - totalExpensesCents;
+
+    return {
+      locationId,
+      locationName: location.location_name,
+      totalRevenueCents: cash.totalCents,
+      netRevenueCents,
+      totalExpensesCents,
+      netProfitCents,
+    };
+  });
 }
 
 /** Every individual transaction in the range, newest first — the detail

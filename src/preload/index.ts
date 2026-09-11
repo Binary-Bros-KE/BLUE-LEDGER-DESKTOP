@@ -419,6 +419,7 @@ const api: BlueLedgerApi = {
     mySales: (range) => invoke("report:my-sales", range),
     salesTrendWindow: (input) => invoke("report:sales-trend-window", input),
     salesByStorefront: (range) => invoke("report:sales-by-storefront", range),
+    financialsByStorefront: (range) => invoke("report:financials-by-storefront", range),
     salesByEmployee: (range) => invoke("report:sales-by-employee", range),
     salesByPaymentMethod: (range) => invoke("report:sales-by-payment-method", range),
     inventoryData: (input) => invoke("report:inventory-data", input),
