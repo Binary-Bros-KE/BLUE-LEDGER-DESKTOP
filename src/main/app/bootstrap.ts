@@ -28,7 +28,8 @@ import {
   ensureSuperAdminFlag,
   ensureSuperAdminRole,
   fixCashierPermissionDrift,
-  restrictReportsToAdminRoles
+  restrictReportsToAdminRoles,
+  restrictSuppliersFromCashier
 } from "@main/services/role-service";
 import { ensureTenantContext } from "@main/services/tenant-service";
 import { checkInWithServer } from "@main/services/license-service";
@@ -137,6 +138,7 @@ export async function bootstrap(): Promise<void> {
   ensureOwnerAppPermission(tenant.tenantId);
   ensureOnlineStorePermission(tenant.tenantId);
   restrictReportsToAdminRoles(tenant.tenantId);
+  restrictSuppliersFromCashier(tenant.tenantId);
   fixCashierPermissionDrift(tenant.tenantId);
   ensureMainStoreLocation(tenant.tenantId);
   ensureDefaultSystemEmployee(tenant.tenantId);

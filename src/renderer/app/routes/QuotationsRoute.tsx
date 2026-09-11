@@ -70,7 +70,7 @@ import { isStorefrontType, type Location } from "@shared/types/location";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import type { ProductListItem } from "@shared/types/product";
 import type { SaleDelivery } from "@shared/types/sale";
-import type { Supplier } from "@shared/types/supplier";
+import type { SupplierPickerOption } from "@shared/types/supplier";
 import {
   QUOTATION_STATUS_OPTIONS,
   type Quotation,
@@ -175,7 +175,7 @@ export function QuotationsRoute(): React.JSX.Element {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<ProductListItem[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [suppliers, setSuppliers] = useState<SupplierPickerOption[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -278,7 +278,7 @@ export function QuotationsRoute(): React.JSX.Element {
         window.blueLedger.quotation.list(),
         window.blueLedger.customer.list(),
         window.blueLedger.paymentMethod.list(),
-        window.blueLedger.supplier.list()
+        window.blueLedger.supplier.listPickerOptions()
       ]);
       setSummary(summaryResult);
       setQuotations(quotationList);

@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import * as supplierRepository from "@main/database/repositories/supplier-repository";
-import { requirePermission } from "@main/services/auth-service";
+import { requirePermission, requirePermissionAnyOf } from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { supplierInputSchema } from "@shared/schemas/supplier";
-import type { Supplier, SupplierStatus } from "@shared/types/supplier";
+import type { Supplier, SupplierPickerOption, SupplierStatus } from "@shared/types/supplier";
 
 /** SUP-D1-000001, SUP-D1-000002, ... — generated once at creation and never editable afterward.
  * Device-tagged (see generateDocumentNumber's own doc comment) — two offline devices independently
@@ -38,6 +38,23 @@ export function listSuppliers(): Supplier[] {
   return supplierRepository.findAllSupplierRows(tenantId).map(supplierRepository.mapSupplierRow);
 }
 
+/** Powers the "local/outsourced-source" supplier picker on Checkout/Invoices/Quotations — a role
+ * that can process a sale/invoice/quotation but lacks "suppliers:view" (e.g. a Cashier, per client
+ * request that cashiers not see supplier balances) can still pick a supplier here, since the shape
+ * returned never carries balanceCents or anything else gated behind the full Suppliers tab. */
+export function listSupplierPickerOptions(): SupplierPickerOption[] {
+  requirePermissionAnyOf([
+    ["suppliers", "view"],
+    ["sales", "view"],
+    ["quotations", "view"]
+  ]);
+  const { tenantId } = getCurrentTenant();
+  return supplierRepository
+    .findAllSupplierRows(tenantId)
+    .map(supplierRepository.mapSupplierRow)
+    .map(({ id, businessName, phone1, status }) => ({ id, businessName, phone1, status }));
+}
+
 export function getSupplier(id: string): Supplier {
   requirePermission("suppliers", "view");
   const row = supplierRepository.findSupplierRowById(id);
@@ -47,8 +64,17 @@ export function getSupplier(id: string): Supplier {
   return supplierRepository.mapSupplierRow(row);
 }
 
+/** Also reachable via "sales:create"/"quotations:create" — the quick-create button inside the
+ * local-supplier picker (see listSupplierPickerOptions above) lets a Cashier add a brand-new
+ * supplier mid-sale without ever needing the full "suppliers" module. Creating exposes nothing about
+ * any OTHER supplier (the response is just the one record they themselves just entered), unlike
+ * listSuppliers, so this is safe to widen the same way. */
 export function createSupplier(input: unknown): Supplier {
-  requirePermission("suppliers", "create");
+  requirePermissionAnyOf([
+    ["suppliers", "create"],
+    ["sales", "create"],
+    ["quotations", "create"]
+  ]);
   const parsed = supplierInputSchema.parse(input);
   const { tenantId } = getCurrentTenant();
 

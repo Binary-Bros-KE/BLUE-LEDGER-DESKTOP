@@ -57,7 +57,7 @@ import type { MpesaTransactionStatus } from "@shared/types/mpesa";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import type { ProductListItem } from "@shared/types/product";
 import type { Sale } from "@shared/types/sale";
-import type { Supplier } from "@shared/types/supplier";
+import type { SupplierPickerOption } from "@shared/types/supplier";
 
 type CartLine = {
   productId: string;
@@ -143,7 +143,7 @@ export function CheckoutRoute(): React.JSX.Element {
   const [stockLevels, setStockLevels] = useState<LocationStockLevel[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [suppliers, setSuppliers] = useState<SupplierPickerOption[]>([]);
   const [autoPrintOnSale, setAutoPrintOnSale] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -267,7 +267,7 @@ export function CheckoutRoute(): React.JSX.Element {
           window.blueLedger.product.list(),
           window.blueLedger.customer.list(),
           window.blueLedger.paymentMethod.list(),
-          window.blueLedger.supplier.list(),
+          window.blueLedger.supplier.listPickerOptions(),
           window.blueLedger.sale.listPending(),
           window.blueLedger.printer.getSettings().catch(() => null)
         ]);

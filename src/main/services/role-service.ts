@@ -103,7 +103,10 @@ const DEFAULT_SYSTEM_ROLES: Array<{
       quotations: ["view", "create", "edit"],
       customers: ["view", "create"],
       riders: ["view", "create", "edit"],
-      suppliers: ["view"],
+      // Deliberately NOT "suppliers" — per client request, a Cashier shouldn't see the Suppliers tab
+      // or any supplier's balance. They can still pick/quick-create a supplier when sourcing a
+      // product locally on Checkout/Invoices/Quotations — see supplier-service.ts's
+      // listSupplierPickerOptions, widened via requirePermissionAnyOf instead of granting this module.
       payment_methods: ["view"],
       stock_transfers: ["view"],
       salaries: ["view"],
@@ -358,6 +361,31 @@ export function restrictReportsToAdminRoles(tenantId: string): void {
     if (!role.permissions.reports) continue;
 
     const { reports: _removed, ...rest } = role.permissions;
+    roleRepository.updateRoleRow(row.id, {
+      roleName: role.roleName,
+      description: role.description,
+      permissions: rest,
+      updatedBy: null
+    });
+  }
+}
+
+/**
+ * Cashier shouldn't see the Suppliers tab or any supplier's balance (per client request) — strips
+ * "suppliers" back out of any existing Cashier role row that still has it from before this was
+ * removed from DEFAULT_SYSTEM_ROLES. The local-supplier picker on Checkout/Invoices/Quotations keeps
+ * working regardless, since listSupplierPickerOptions (supplier-service.ts) is reachable via
+ * "sales"/"quotations" permission instead of "suppliers" itself. Safe every boot: a no-op once
+ * Cashier no longer has "suppliers".
+ */
+export function restrictSuppliersFromCashier(tenantId: string): void {
+  for (const row of roleRepository.findAllRoleRows(tenantId)) {
+    if (!row.is_system_role || row.role_name !== "Cashier") continue;
+
+    const role = roleRepository.mapRoleRow(row);
+    if (!role.permissions.suppliers) continue;
+
+    const { suppliers: _removed, ...rest } = role.permissions;
     roleRepository.updateRoleRow(row.id, {
       roleName: role.roleName,
       description: role.description,

@@ -62,7 +62,7 @@ import type {
 } from "./report";
 import type { Quotation, QuotationListItem, QuotationStatus, QuotationStockCheckItem, QuotationSummary } from "./quotation";
 import type { Role, RoleListItem, RolePickerItem } from "./role";
-import type { Supplier, SupplierStatus } from "./supplier";
+import type { Supplier, SupplierPickerOption, SupplierStatus } from "./supplier";
 import type { SupplierBalanceEntry } from "./supplier-balance";
 import type { Rider, RiderStatus } from "./rider";
 import type { DeliveryInput } from "../schemas/charges";
@@ -558,6 +558,10 @@ export type IpcInvokeMap = {
   "supplier:list": {
     args: [];
     result: Supplier[];
+  };
+  "supplier:list-picker-options": {
+    args: [];
+    result: SupplierPickerOption[];
   };
   "supplier:get": {
     args: [string];
@@ -1646,6 +1650,7 @@ export type BlueLedgerApi = {
   };
   supplier: {
     list: () => Promise<IpcInvokeMap["supplier:list"]["result"]>;
+    listPickerOptions: () => Promise<IpcInvokeMap["supplier:list-picker-options"]["result"]>;
     get: (id: string) => Promise<IpcInvokeMap["supplier:get"]["result"]>;
     create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["supplier:create"]["result"]>;
     update: (

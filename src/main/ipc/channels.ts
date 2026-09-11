@@ -115,6 +115,7 @@ export const ipcChannels = {
   customerUpdate: "customer:update",
   customerSetStatus: "customer:set-status",
   supplierList: "supplier:list",
+  supplierListPickerOptions: "supplier:list-picker-options",
   supplierGet: "supplier:get",
   supplierCreate: "supplier:create",
   supplierUpdate: "supplier:update",

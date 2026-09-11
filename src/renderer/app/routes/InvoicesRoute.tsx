@@ -66,7 +66,7 @@ import {
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { formatDocumentDate, formatDocumentDateTime } from "@shared/lib/date";
 import type { Customer } from "@shared/types/customer";
-import type { Supplier } from "@shared/types/supplier";
+import type { SupplierPickerOption } from "@shared/types/supplier";
 import type { ExportListRequest } from "@shared/types/export";
 import type { InvoiceListItem, InvoiceSummary } from "@shared/types/invoice";
 import type { InvoiceCancellation } from "@shared/types/invoice-cancellation";
@@ -210,7 +210,7 @@ export function InvoicesRoute(): React.JSX.Element {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<ProductListItem[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [suppliers, setSuppliers] = useState<SupplierPickerOption[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -328,7 +328,7 @@ export function InvoicesRoute(): React.JSX.Element {
           window.blueLedger.invoice.list(),
           window.blueLedger.customer.list(),
           window.blueLedger.paymentMethod.list(),
-          window.blueLedger.supplier.list(),
+          window.blueLedger.supplier.listPickerOptions(),
           window.blueLedger.invoiceCancellation.list()
         ]);
       setSuppliers(supplierList);

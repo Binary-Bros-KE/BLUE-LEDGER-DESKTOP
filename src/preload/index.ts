@@ -167,6 +167,7 @@ const api: BlueLedgerApi = {
   },
   supplier: {
     list: () => invoke("supplier:list"),
+    listPickerOptions: () => invoke("supplier:list-picker-options"),
     get: (id) => invoke("supplier:get", id),
     create: (input) => invoke("supplier:create", input),
     update: (id, input) => invoke("supplier:update", id, input),

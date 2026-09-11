@@ -63,3 +63,16 @@ export type Supplier = SupplierInputFields & {
   syncStatus: SupplierSyncStatus;
   lastSyncedAt: string | null;
 };
+
+/** A balance-free view of the supplier list — just enough to pick a supplier by name/phone in the
+ * "local/outsourced-source" picker embedded in Checkout/Invoices/Quotations (see
+ * SupplierPicker.tsx). Deliberately excludes balanceCents and every other field gated behind the
+ * full "suppliers" module, so a role that can't see the Suppliers tab (and its balances) can still
+ * pick a supplier here without that data ever reaching the renderer. See
+ * supplier-service.ts's listSupplierPickerOptions. */
+export type SupplierPickerOption = {
+  id: SupplierId;
+  businessName: string;
+  phone1: string;
+  status: SupplierStatus;
+};

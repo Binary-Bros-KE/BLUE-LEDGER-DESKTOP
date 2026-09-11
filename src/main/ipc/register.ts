@@ -227,6 +227,7 @@ import {
   createSupplier,
   getSupplier,
   listSuppliers,
+  listSupplierPickerOptions,
   setSupplierStatus,
   updateSupplier
 } from "@main/services/supplier-service";
@@ -618,6 +619,7 @@ export function registerIpcHandlers(): void {
     setCustomerStatus(id, status)
   );
   ipcMain.handle(ipcChannels.supplierList, () => listSuppliers());
+  ipcMain.handle(ipcChannels.supplierListPickerOptions, () => listSupplierPickerOptions());
   ipcMain.handle(ipcChannels.supplierGet, (_event, id: string) => getSupplier(id));
   ipcMain.handle(ipcChannels.supplierCreate, (_event, input: unknown) => createSupplier(input));
   ipcMain.handle(ipcChannels.supplierUpdate, (_event, id: string, input: unknown) =>

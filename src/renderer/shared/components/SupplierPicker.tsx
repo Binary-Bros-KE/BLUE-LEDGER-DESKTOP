@@ -3,7 +3,7 @@ import { ChevronDown, Plus, Search } from "lucide-react";
 import { Modal } from "@renderer/shared/components/Modal";
 import { QuickCreateSupplierModal } from "@renderer/shared/components/QuickCreateSupplierModal";
 import { cn } from "@renderer/shared/lib/cn";
-import type { Supplier } from "@shared/types/supplier";
+import type { SupplierPickerOption } from "@shared/types/supplier";
 
 /** A searchable supplier picker — a plain `<select>` falls apart once a tenant has more than a
  * handful of suppliers (a real one can have hundreds), forcing a scroll through the entire list to
@@ -21,10 +21,10 @@ export function SupplierPicker({
   onChange,
   onSupplierCreated
 }: {
-  suppliers: Supplier[];
+  suppliers: SupplierPickerOption[];
   value: string | null;
   onChange: (supplierId: string) => void;
-  onSupplierCreated: (supplier: Supplier) => void;
+  onSupplierCreated: (supplier: SupplierPickerOption) => void;
 }): React.JSX.Element {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
@@ -121,7 +121,7 @@ export function SupplierPicker({
         open={quickCreateOpen}
         onClose={() => setQuickCreateOpen(false)}
         onCreated={(supplier) => {
-          onSupplierCreated(supplier);
+          onSupplierCreated({ id: supplier.id, businessName: supplier.businessName, phone1: supplier.phone1, status: supplier.status });
           onChange(supplier.id);
           setQuickCreateOpen(false);
         }}
