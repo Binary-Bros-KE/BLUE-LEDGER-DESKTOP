@@ -3371,6 +3371,46 @@ const migrations = [
         VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'quotations', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
       END;
     `
+  },
+  {
+    version: 92,
+    name: "purchase_received_value_backfill_correction",
+    sql: `
+      -- Follow-up fix for a real bug in migration 89's own received_value_cents backfill, caught
+      -- live: that backfill computed the value from THIS device's purchase_items at the moment the
+      -- migration ran — on a device that had just synced down a large batch of historical
+      -- purchases, the migration ran before those purchases' received_quantity had finished landing
+      -- locally, so it backfilled from data that still looked "nothing received yet." Confirmed
+      -- live: 71 of 95 purchases on one real tenant were stuck at received_value_cents = 0 despite
+      -- being fully received, making the Supplier Statement's per-purchase Due Balance
+      -- (receivedValueCents - amountPaidCents) go negative for every one of them that had already
+      -- been paid.
+      --
+      -- Self-healing and generic, not tied to specific purchase ids — recomputes the same formula
+      -- migration 89 used, but only touches a row whose stored value doesn't match, and — the actual
+      -- fix migration 89 was missing — bumps updated_at and marks sync_status pending so the
+      -- correction actually reaches the cloud and every other device (trg_purchases_sync_au already
+      -- re-enqueues a push on any updated_at change, it just never fired for migration 89's own raw
+      -- UPDATE, which never touched updated_at at all). A safe no-op on any device/purchase where
+      -- migration 89's backfill already got it right the first time.
+      --
+      -- Deliberately does NOT touch suppliers.balance_cents / supplier_balance_entries here — those
+      -- were corrected by migration 89/90 using whatever received_value_cents this same backfill
+      -- produced, which could itself have been wrong, but reconciling that needs a ledger-level
+      -- audit (see the disclosed live findings this was written from), not a blind recompute against
+      -- current purchase state. Tracked as a separate, deliberately NOT-yet-written follow-up.
+      UPDATE purchases
+      SET received_value_cents = (
+        SELECT COALESCE(SUM(CAST(ROUND(pi.line_total_cents * 1.0 * pi.received_quantity / pi.ordered_quantity) AS INTEGER)), 0)
+        FROM purchase_items pi WHERE pi.purchase_id = purchases.id
+      ),
+      sync_status = 'pending',
+      updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      WHERE received_value_cents != (
+        SELECT COALESCE(SUM(CAST(ROUND(pi.line_total_cents * 1.0 * pi.received_quantity / pi.ordered_quantity) AS INTEGER)), 0)
+        FROM purchase_items pi WHERE pi.purchase_id = purchases.id
+      );
+    `
   }
 ] as const;
 
