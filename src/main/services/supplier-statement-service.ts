@@ -2,14 +2,32 @@ import * as purchaseRepository from "@main/database/repositories/purchase-reposi
 import * as supplierRepository from "@main/database/repositories/supplier-repository";
 import { requirePermission } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
+import { statementFiltersSchema } from "@shared/schemas/statement";
 import type { SupplierStatementViewModel } from "@shared/types/supplier-statement";
 
-/** Statement of Account — every purchase order this supplier hasn't been fully paid for yet, across
- * every storefront, with running totals. Mirrors statement-service.ts's getCustomerStatement exactly,
- * just for the accounts-PAYABLE side instead of accounts-receivable: nothing new to persist, a pure
- * read/aggregate over the existing purchases+suppliers rows. */
-export function getSupplierStatement(supplierId: string): SupplierStatementViewModel {
+/** Ported from statement-service.ts's own identical helper (itself ported from report-service.ts) —
+ * ties a plain YYYY-MM-DD to THIS device's local midnight. */
+function startOfDayIso(dateStr: string): string {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return new Date(year ?? 0, (month ?? 1) - 1, day ?? 1).toISOString();
+}
+
+function addDaysIso(dateStr: string, days: number): string {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const date = new Date(year ?? 0, (month ?? 1) - 1, day ?? 1);
+  date.setDate(date.getDate() + days);
+  return date.toISOString();
+}
+
+/** Statement of Account — by default, every purchase order this supplier hasn't been fully paid for
+ * yet, across every storefront, with running totals. Mirrors statement-service.ts's
+ * getCustomerStatement exactly, just for the accounts-PAYABLE side instead of accounts-receivable:
+ * nothing new to persist, a pure read/aggregate over the existing purchases+suppliers rows. Client
+ * request: also needs to show paid/historical purchases on demand (filters.status) and an optional
+ * date range — see statementFiltersSchema. */
+export function getSupplierStatement(supplierId: string, filtersInput: unknown = {}): SupplierStatementViewModel {
   requirePermission("purchases", "view");
+  const filters = statementFiltersSchema.parse(filtersInput);
   const tenant = getCurrentTenant();
 
   const supplier = supplierRepository.findSupplierRowById(supplierId);
@@ -18,7 +36,11 @@ export function getSupplierStatement(supplierId: string): SupplierStatementViewM
   }
 
   const purchases = purchaseRepository
-    .findOutstandingPurchaseRowsForSupplier(tenant.tenantId, supplierId)
+    .findPurchaseRowsForSupplier(tenant.tenantId, supplierId, {
+      status: filters.status,
+      dateFromIso: filters.dateFrom ? startOfDayIso(filters.dateFrom) : null,
+      dateToExclusiveIso: filters.dateTo ? addDaysIso(filters.dateTo, 1) : null
+    })
     .map(purchaseRepository.mapPurchaseListRow);
 
   // Client request: "outstanding" is what's owed for received goods only — totalOrderedCents/
@@ -43,6 +65,7 @@ export function getSupplierStatement(supplierId: string): SupplierStatementViewM
     supplierEmail: supplier.email,
     creditLimitCents: supplier.credit_limit_cents,
     generatedAt: new Date().toISOString(),
+    filters: { status: filters.status, dateFrom: filters.dateFrom ?? null, dateTo: filters.dateTo ?? null },
     purchases: purchases.map((purchase) => ({
       id: purchase.id,
       purchaseNumber: purchase.purchaseNumber,

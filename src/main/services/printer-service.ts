@@ -2899,6 +2899,20 @@ export async function previewStockRequestPdf(stockRequestId: string): Promise<vo
   await openPdfPreviewWindow(buffer, `${vm.requestNumber}.pdf`, `Stock Request ${vm.requestNumber}`);
 }
 
+/** Client request: the statement can now show more than just what's outstanding (see
+ * statementFiltersSchema) — this line under the generated-date makes the printed/PDF/shared document
+ * self-describing about what it actually covers, since a recipient can't see the on-screen filter
+ * controls that produced it. Shared by both the customer and supplier statement templates — same
+ * StatementFilters shape either side. */
+function statementScopeLabel(filters: { status: "pending" | "paid" | "all"; dateFrom: string | null; dateTo: string | null }): string {
+  const statusPart = filters.status === "all" ? "All" : filters.status === "paid" ? "Paid" : "Outstanding";
+  const datePart =
+    filters.dateFrom || filters.dateTo
+      ? ` · ${filters.dateFrom ? formatInvoiceDate(filters.dateFrom) : "earliest"} to ${filters.dateTo ? formatInvoiceDate(filters.dateTo) : "today"}`
+      : "";
+  return `Showing: ${statusPart}${datePart}`;
+}
+
 /** Builds a Statement of Account — not tied to one storefront (a customer's invoices can span
  * several), so unlike every other document template here this one never resolves a per-location
  * business override; vm's business fields are already the tenant-wide default (see
@@ -2922,7 +2936,7 @@ function buildStatementHtml(vm: CustomerStatementViewModel): string {
       </tr>`
       )
       .join("") ||
-    `<tr><td colspan="8" class="center muted" style="padding:16px 4px;">No outstanding invoices</td></tr>`;
+    `<tr><td colspan="8" class="center muted" style="padding:16px 4px;">No invoices match this filter</td></tr>`;
 
   const availableCreditCents =
     vm.creditLimitCents !== null ? Math.max(0, vm.creditLimitCents - vm.totalOutstandingCents) : null;
@@ -2945,6 +2959,7 @@ function buildStatementHtml(vm: CustomerStatementViewModel): string {
         <div>
           <p class="invoice-title">STATEMENT</p>
           <p class="muted" style="text-align:right;">${formatInvoiceDate(vm.generatedAt)}</p>
+          <p class="muted" style="text-align:right;">${escapeHtml(statementScopeLabel(vm.filters))}</p>
         </div>
       </div>
     </div>
@@ -2999,10 +3014,14 @@ function buildStatementHtml(vm: CustomerStatementViewModel): string {
 </html>`;
 }
 
-/** Renders the statement to PDF and prompts the user for a save location. Returns the saved path, or null if cancelled. */
-export async function generateStatementPdf(customerId: string): Promise<string | null> {
+/** Renders the statement to PDF and prompts the user for a save location. Returns the saved path, or
+ * null if cancelled. `filters` (status/date-range — see statementFiltersSchema) defaults to the same
+ * "pending" slice getCustomerStatement itself defaults to when omitted, so an older caller that
+ * doesn't pass one keeps today's behavior; the on-screen preview passes whatever the user currently
+ * has selected, so Print/Preview/Download always match what's on screen. */
+export async function generateStatementPdf(customerId: string, filters: unknown = {}): Promise<string | null> {
   requirePermission("sales", "view");
-  const vm = getCustomerStatement(customerId);
+  const vm = getCustomerStatement(customerId, filters);
   const html = buildStatementHtml(vm);
   const buffer = await renderHtmlToPdfBuffer(html);
 
@@ -3020,10 +3039,11 @@ export async function generateStatementPdf(customerId: string): Promise<string |
 }
 
 /** Opens the statement in a preview window instead of prompting for a save location — see
- * openPdfPreviewWindow's own doc comment. Same data-loading/HTML-build as generateStatementPdf. */
-export async function previewStatementPdf(customerId: string): Promise<void> {
+ * openPdfPreviewWindow's own doc comment. Same data-loading/HTML-build/filters as
+ * generateStatementPdf. */
+export async function previewStatementPdf(customerId: string, filters: unknown = {}): Promise<void> {
   requirePermission("sales", "view");
-  const vm = getCustomerStatement(customerId);
+  const vm = getCustomerStatement(customerId, filters);
   const html = buildStatementHtml(vm);
   const buffer = await renderHtmlToPdfBuffer(html);
   const filename = `Statement-${vm.customerName.replace(/[^a-z0-9]+/gi, "-")}.pdf`;
@@ -3031,11 +3051,11 @@ export async function previewStatementPdf(customerId: string): Promise<void> {
 }
 
 /** Sends the statement straight to Windows' default printer — same A4 system-printer path as
- * printInvoiceDocument, not the ESC/POS thermal one. */
-export async function printStatementDocument(customerId: string): Promise<PrinterActionResult> {
+ * printInvoiceDocument, not the ESC/POS thermal one. Same filters as generateStatementPdf. */
+export async function printStatementDocument(customerId: string, filters: unknown = {}): Promise<PrinterActionResult> {
   requirePermission("sales", "view");
   try {
-    const vm = getCustomerStatement(customerId);
+    const vm = getCustomerStatement(customerId, filters);
     const html = buildStatementHtml(vm);
     await printHtmlViaSystemPrinter(html, "statement");
     return { success: true, message: "Sent to printer" };
@@ -3069,7 +3089,7 @@ function buildSupplierStatementHtml(vm: SupplierStatementViewModel): string {
       </tr>`
       )
       .join("") ||
-    `<tr><td colspan="7" class="center muted" style="padding:16px 4px;">No outstanding purchases</td></tr>`;
+    `<tr><td colspan="7" class="center muted" style="padding:16px 4px;">No purchases match this filter</td></tr>`;
 
   const availableCreditCents =
     vm.creditLimitCents !== null ? Math.max(0, vm.creditLimitCents - vm.totalOutstandingCents) : null;
@@ -3092,6 +3112,7 @@ function buildSupplierStatementHtml(vm: SupplierStatementViewModel): string {
         <div>
           <p class="invoice-title">STATEMENT</p>
           <p class="muted" style="text-align:right;">${formatInvoiceDate(vm.generatedAt)}</p>
+          <p class="muted" style="text-align:right;">${escapeHtml(statementScopeLabel(vm.filters))}</p>
         </div>
       </div>
     </div>
@@ -3146,10 +3167,10 @@ function buildSupplierStatementHtml(vm: SupplierStatementViewModel): string {
 }
 
 /** Renders the supplier statement to PDF and prompts the user for a save location. Returns the saved
- * path, or null if cancelled. Mirrors generateStatementPdf exactly. */
-export async function generateSupplierStatementPdf(supplierId: string): Promise<string | null> {
+ * path, or null if cancelled. Mirrors generateStatementPdf exactly, including its `filters` default. */
+export async function generateSupplierStatementPdf(supplierId: string, filters: unknown = {}): Promise<string | null> {
   requirePermission("purchases", "view");
-  const vm = getSupplierStatement(supplierId);
+  const vm = getSupplierStatement(supplierId, filters);
   const html = buildSupplierStatementHtml(vm);
   const buffer = await renderHtmlToPdfBuffer(html);
 
@@ -3167,10 +3188,11 @@ export async function generateSupplierStatementPdf(supplierId: string): Promise<
 }
 
 /** Opens the supplier statement in a preview window instead of prompting for a save location — see
- * openPdfPreviewWindow's own doc comment. Same data-loading/HTML-build as generateSupplierStatementPdf. */
-export async function previewSupplierStatementPdf(supplierId: string): Promise<void> {
+ * openPdfPreviewWindow's own doc comment. Same data-loading/HTML-build/filters as
+ * generateSupplierStatementPdf. */
+export async function previewSupplierStatementPdf(supplierId: string, filters: unknown = {}): Promise<void> {
   requirePermission("purchases", "view");
-  const vm = getSupplierStatement(supplierId);
+  const vm = getSupplierStatement(supplierId, filters);
   const html = buildSupplierStatementHtml(vm);
   const buffer = await renderHtmlToPdfBuffer(html);
   const filename = `Statement-${vm.supplierName.replace(/[^a-z0-9]+/gi, "-")}.pdf`;
@@ -3178,11 +3200,11 @@ export async function previewSupplierStatementPdf(supplierId: string): Promise<v
 }
 
 /** Sends the supplier statement straight to Windows' default printer — same A4 system-printer path
- * as printStatementDocument, not the ESC/POS thermal one. */
-export async function printSupplierStatementDocument(supplierId: string): Promise<PrinterActionResult> {
+ * as printStatementDocument, not the ESC/POS thermal one. Same filters as generateSupplierStatementPdf. */
+export async function printSupplierStatementDocument(supplierId: string, filters: unknown = {}): Promise<PrinterActionResult> {
   requirePermission("purchases", "view");
   try {
-    const vm = getSupplierStatement(supplierId);
+    const vm = getSupplierStatement(supplierId, filters);
     const html = buildSupplierStatementHtml(vm);
     await printHtmlViaSystemPrinter(html, "statement");
     return { success: true, message: "Sent to printer" };

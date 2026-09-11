@@ -321,12 +321,15 @@ const api: BlueLedgerApi = {
     printDeliveryNoteThermal: (deliveryNoteId) => invoke("printer:print-delivery-note-thermal", deliveryNoteId),
     generateDeliveryNotePdf: (deliveryNoteId) => invoke("printer:generate-delivery-note-pdf", deliveryNoteId),
     previewDeliveryNotePdf: (deliveryNoteId) => invoke("printer:preview-delivery-note-pdf", deliveryNoteId),
-    generateStatementPdf: (customerId) => invoke("printer:generate-statement-pdf", customerId),
-    previewStatementPdf: (customerId) => invoke("printer:preview-statement-pdf", customerId),
-    printStatementDocument: (customerId) => invoke("printer:print-statement-document", customerId),
-    generateSupplierStatementPdf: (supplierId) => invoke("printer:generate-supplier-statement-pdf", supplierId),
-    previewSupplierStatementPdf: (supplierId) => invoke("printer:preview-supplier-statement-pdf", supplierId),
-    printSupplierStatementDocument: (supplierId) => invoke("printer:print-supplier-statement-document", supplierId),
+    generateStatementPdf: (customerId, filters) => invoke("printer:generate-statement-pdf", customerId, filters),
+    previewStatementPdf: (customerId, filters) => invoke("printer:preview-statement-pdf", customerId, filters),
+    printStatementDocument: (customerId, filters) => invoke("printer:print-statement-document", customerId, filters),
+    generateSupplierStatementPdf: (supplierId, filters) =>
+      invoke("printer:generate-supplier-statement-pdf", supplierId, filters),
+    previewSupplierStatementPdf: (supplierId, filters) =>
+      invoke("printer:preview-supplier-statement-pdf", supplierId, filters),
+    printSupplierStatementDocument: (supplierId, filters) =>
+      invoke("printer:print-supplier-statement-document", supplierId, filters),
     generateStockReceiptPdf: (stockReceiptId) => invoke("printer:generate-stock-receipt-pdf", stockReceiptId),
     previewStockReceiptPdf: (stockReceiptId) => invoke("printer:preview-stock-receipt-pdf", stockReceiptId),
     printStockReceiptDocument: (stockReceiptId) => invoke("printer:print-stock-receipt-document", stockReceiptId),
@@ -338,10 +341,10 @@ const api: BlueLedgerApi = {
     downloadPdfPreview: (previewId) => invoke("printer:download-pdf-preview", previewId)
   },
   statement: {
-    getForCustomer: (customerId) => invoke("statement:get-for-customer", customerId)
+    getForCustomer: (customerId, filters) => invoke("statement:get-for-customer", customerId, filters)
   },
   supplierStatement: {
-    getForSupplier: (supplierId) => invoke("supplier-statement:get-for-supplier", supplierId)
+    getForSupplier: (supplierId, filters) => invoke("supplier-statement:get-for-supplier", supplierId, filters)
   },
   deliveryNote: {
     get: (id) => invoke("delivery-note:get", id),

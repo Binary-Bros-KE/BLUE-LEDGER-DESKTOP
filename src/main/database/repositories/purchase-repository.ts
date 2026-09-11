@@ -171,13 +171,39 @@ export function findCancelledPurchaseRowsInRange(
     .all(tenantId, locationId, locationId, startIso, endIsoExclusive) as PurchaseListRow[];
 }
 
-/** Every purchase from this supplier not yet fully paid off — the basis of a Supplier Statement of
- * Account. Excludes drafts (never actually placed with the supplier, nothing owed yet) and cancelled
- * orders, same reasoning as sale-repository.ts's findOutstandingInvoiceRowsForCustomer excluding a
- * cancelled invoice. Oldest first, matching how a real statement reads. Same row shape as
- * findAllPurchaseListRows (reuses mapPurchaseListRow) — just scoped to one supplier and pre-filtered
- * to outstanding balances instead of covering every purchase tenant-wide. */
-export function findOutstandingPurchaseRowsForSupplier(tenantId: string, supplierId: string): PurchaseListRow[] {
+/** Every purchase from this supplier matching the requested slice — the basis of a Supplier
+ * Statement of Account. Client request: a Statement used to always mean "what's still owed for
+ * received goods", with no way to see paid or historical purchases. `filters.status` picks the
+ * slice:
+ *   - "pending" (default, unchanged behavior) — "outstanding" means an actual received-value
+ *     balance, not the payment_status label: an "ordered, nothing received" purchase has
+ *     received_value_cents 0 and so can never appear, exactly what makes it drop off the statement
+ *     on its own. Oldest first, matching how a real statement reads (actionable — pay the old ones
+ *     first).
+ *   - "paid" / "all" — a history view, so newest-first instead. "all" still excludes drafts (never
+ *     actually placed with the supplier — nothing happened yet) but DOES include cancelled orders,
+ *     since those are real history too, just tagged as such.
+ * dateFromIso/dateToExclusiveIso bound COALESCE(ordered_at, created_at) — both full ISO instants,
+ * same fallback findAllPurchaseListRows already uses when a purchase was never formally "ordered"
+ * (still a draft). The caller converts a plain YYYY-MM-DD into the device-local-timezone-correct
+ * instant bound and passes the upper bound EXCLUSIVE (start of the day after dateTo) — see
+ * sale-repository.ts's identical findInvoiceRowsForCustomer for the full reasoning. Pass null for
+ * either to skip that bound. See statementFiltersSchema (shared/schemas/statement.ts). Same row
+ * shape as findAllPurchaseListRows (reuses mapPurchaseListRow) — just scoped to one supplier. */
+export function findPurchaseRowsForSupplier(
+  tenantId: string,
+  supplierId: string,
+  filters: { status: "pending" | "paid" | "all"; dateFromIso: string | null; dateToExclusiveIso: string | null }
+): PurchaseListRow[] {
+  const statusClause =
+    filters.status === "paid"
+      ? "p.status NOT IN ('draft', 'cancelled') AND p.payment_status = 'paid'"
+      : filters.status === "all"
+        ? "p.status != 'draft'"
+        : "p.status NOT IN ('draft', 'cancelled') AND p.received_value_cents > p.amount_paid_cents";
+  const orderClause =
+    filters.status === "pending" ? "COALESCE(p.ordered_at, p.created_at) ASC" : "COALESCE(p.ordered_at, p.created_at) DESC";
+
   return getDatabase()
     .prepare(
       `
@@ -201,14 +227,21 @@ export function findOutstandingPurchaseRowsForSupplier(tenantId: string, supplie
       FROM purchases p
       JOIN suppliers s ON s.id = p.supplier_id
       JOIN locations l ON l.id = p.location_id
-      -- Client request: "outstanding" now means an actual received-value balance, not the
-      -- payment_status label — an "ordered, nothing received" purchase has received_value_cents 0
-      -- and so can never appear here, exactly what makes it drop off the statement on its own.
-      WHERE p.tenant_id = ? AND p.supplier_id = ? AND p.status NOT IN ('draft', 'cancelled') AND p.received_value_cents > p.amount_paid_cents
-      ORDER BY COALESCE(p.ordered_at, p.created_at) ASC
+      WHERE p.tenant_id = ? AND p.supplier_id = ?
+        AND ${statusClause}
+        AND (? IS NULL OR COALESCE(p.ordered_at, p.created_at) >= ?)
+        AND (? IS NULL OR COALESCE(p.ordered_at, p.created_at) < ?)
+      ORDER BY ${orderClause}
     `
     )
-    .all(tenantId, supplierId) as PurchaseListRow[];
+    .all(
+      tenantId,
+      supplierId,
+      filters.dateFromIso,
+      filters.dateFromIso,
+      filters.dateToExclusiveIso,
+      filters.dateToExclusiveIso
+    ) as PurchaseListRow[];
 }
 
 export function mapPurchaseListRow(row: PurchaseListRow): PurchaseListItem {

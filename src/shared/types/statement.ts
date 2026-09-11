@@ -1,5 +1,15 @@
 import type { PaymentStatus } from "./sale";
 
+/** Mirrors statementFiltersSchema (shared/schemas/statement.ts) — echoed back on the view model so
+ * the renderer (and the printed/shared document itself) can show what's actually included without
+ * threading the request's own filter state through separately. */
+export type StatementStatusFilter = "pending" | "paid" | "all";
+export type StatementFilters = {
+  status: StatementStatusFilter;
+  dateFrom: string | null;
+  dateTo: string | null;
+};
+
 export type StatementInvoiceLine = {
   id: string;
   invoiceNumber: string | null;
@@ -28,6 +38,8 @@ export type CustomerStatementViewModel = {
   /** Null when the customer has no credit limit set — the statement simply omits the credit block. */
   creditLimitCents: number | null;
   generatedAt: string;
+  /** What was actually requested — see StatementFilters' own doc comment. */
+  filters: StatementFilters;
   invoices: StatementInvoiceLine[];
   totalInvoicedCents: number;
   totalPaidCents: number;

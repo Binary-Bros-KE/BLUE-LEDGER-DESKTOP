@@ -50,6 +50,14 @@ export function SupplierStatementModal({
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  // Client request: a Statement used to always mean "what's still owed" — these let the user pull
+  // up paid or full history too. "pending" (default) matches today's behavior exactly. Refetches on
+  // every change (see the three onChange handlers below) rather than needing a separate "Apply"
+  // button, same as every other filter bar in this app.
+  const [statusFilter, setStatusFilter] = useState<"pending" | "paid" | "all">("pending");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
   const [printing, setPrinting] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -87,6 +95,9 @@ export function SupplierStatementModal({
     setNotice(null);
     setActionError(null);
     setBulkPaymentOpen(false);
+    setStatusFilter("pending");
+    setDateFrom("");
+    setDateTo("");
   }
 
   function openBulkPayment(): void {
@@ -98,7 +109,7 @@ export function SupplierStatementModal({
 
   async function submitBulkPayment(event: React.FormEvent): Promise<void> {
     event.preventDefault();
-    if (!vm || vm.purchases.length === 0) return;
+    if (!vm || outstandingPurchases.length === 0) return;
     setBulkSaving(true);
     setBulkError(null);
     // Sequential, not Promise.all — these are real money-recording writes against the same
@@ -107,7 +118,7 @@ export function SupplierStatementModal({
     // this report exactly which purchase(s) failed rather than an all-or-nothing outcome.
     let paidCount = 0;
     const failures: string[] = [];
-    for (const purchase of vm.purchases) {
+    for (const purchase of outstandingPurchases) {
       try {
         await window.blueLedger.purchase.markPaid(purchase.id, {
           paymentMethodId: bulkPaymentMethodId,
@@ -134,11 +145,25 @@ export function SupplierStatementModal({
     }
   }
 
-  async function openStatement(supplierId: string): Promise<void> {
+  /** `overrides` lets a filter control pass its OWN fresh value in the same call that sets its own
+   * state — reading the other two filters off current state is fine since a person only ever
+   * changes one control at a time, but the one just changed would otherwise still read its stale
+   * pre-click value (React state updates aren't synchronous). */
+  async function openStatement(
+    supplierId: string,
+    overrides?: { status?: "pending" | "paid" | "all"; dateFrom?: string; dateTo?: string }
+  ): Promise<void> {
+    const status = overrides?.status ?? statusFilter;
+    const from = overrides?.dateFrom ?? dateFrom;
+    const to = overrides?.dateTo ?? dateTo;
     setLoading(true);
     setLoadError(null);
     try {
-      const result = await window.blueLedger.supplierStatement.getForSupplier(supplierId);
+      const result = await window.blueLedger.supplierStatement.getForSupplier(supplierId, {
+        status,
+        dateFrom: from || null,
+        dateTo: to || null
+      });
       setVm(result);
     } catch (err) {
       setLoadError(getErrorMessage(err, "Failed to generate statement"));
@@ -147,9 +172,29 @@ export function SupplierStatementModal({
     }
   }
 
+  function handleStatusFilterChange(value: "pending" | "paid" | "all"): void {
+    setStatusFilter(value);
+    if (vm) void openStatement(vm.supplierId, { status: value });
+  }
+
+  function handleDateFromChange(value: string): void {
+    setDateFrom(value);
+    if (vm) void openStatement(vm.supplierId, { dateFrom: value });
+  }
+
+  function handleDateToChange(value: string): void {
+    setDateTo(value);
+    if (vm) void openStatement(vm.supplierId, { dateTo: value });
+  }
+
   const money = (cents: number): string => (vm ? `${vm.currency} ${(cents / 100).toFixed(2)}` : "");
   const availableCreditCents =
     vm && vm.creditLimitCents !== null ? Math.max(0, vm.creditLimitCents - vm.totalOutstandingCents) : null;
+  // With the "Paid"/"All" filters, vm.purchases can include purchases with nothing left owed — the
+  // bulk-pay flow (button visibility, count, and which purchases actually get marked paid) must
+  // only ever touch the ones that genuinely still owe something, regardless of which filter is on
+  // screen.
+  const outstandingPurchases = useMemo(() => (vm ? vm.purchases.filter((p) => p.balanceDueCents > 0) : []), [vm]);
 
   async function handlePrint(): Promise<void> {
     if (!vm) return;
@@ -157,7 +202,7 @@ export function SupplierStatementModal({
     setActionError(null);
     setNotice(null);
     try {
-      const result = await window.blueLedger.printer.printSupplierStatementDocument(vm.supplierId);
+      const result = await window.blueLedger.printer.printSupplierStatementDocument(vm.supplierId, vm.filters);
       if (result.success) {
         setNotice(result.message);
         showSuccessToast(result.message);
@@ -180,7 +225,7 @@ export function SupplierStatementModal({
     setActionError(null);
     setNotice(null);
     try {
-      await window.blueLedger.printer.previewSupplierStatementPdf(vm.supplierId);
+      await window.blueLedger.printer.previewSupplierStatementPdf(vm.supplierId, vm.filters);
     } catch (err) {
       const message = getErrorMessage(err, "Failed to open preview");
       setActionError(message);
@@ -242,7 +287,7 @@ export function SupplierStatementModal({
         open={open && vm !== null}
         onClose={handleClose}
         title={vm ? `Statement — ${vm.supplierName}` : "Statement"}
-        description="Print or download this supplier's outstanding balance."
+        description="Print, download, or filter this supplier's statement."
         widthClassName="max-w-3xl"
       >
         {vm && (
@@ -254,7 +299,54 @@ export function SupplierStatementModal({
               <div className="mb-3 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2 text-xs font-bold text-danger">{actionError}</div>
             )}
 
-            <div className="rounded-lg border border-dashed border-line bg-soft/40 p-5">
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="block">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Show</span>
+                <select
+                  value={statusFilter}
+                  onChange={(event) => handleStatusFilterChange(event.target.value as "pending" | "paid" | "all")}
+                  className="mt-1.5 h-9 rounded-lg border border-line bg-white px-3 text-xs font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+                >
+                  <option value="pending">Pending only</option>
+                  <option value="paid">Paid only</option>
+                  <option value="all">All</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">From</span>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(event) => handleDateFromChange(event.target.value)}
+                  className="mt-1.5 h-9 rounded-lg border border-line bg-white px-3 text-xs font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+                />
+              </label>
+              <label className="block">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">To</span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(event) => handleDateToChange(event.target.value)}
+                  className="mt-1.5 h-9 rounded-lg border border-line bg-white px-3 text-xs font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+                />
+              </label>
+              {(dateFrom || dateTo) && (
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setDateFrom("");
+                    setDateTo("");
+                    void openStatement(vm.supplierId, { dateFrom: "", dateTo: "" });
+                  }}
+                  className="h-9 border border-line bg-white px-3 text-[11px] text-ink shadow-none hover:bg-soft"
+                >
+                  Clear dates
+                </Button>
+              )}
+              {loading && <Loader2 className="size-4 animate-spin text-muted" aria-hidden="true" />}
+            </div>
+
+            <div className="mt-4 rounded-lg border border-dashed border-line bg-soft/40 p-5">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-sm font-extrabold text-ink">{vm.businessName}</p>
@@ -299,7 +391,7 @@ export function SupplierStatementModal({
                     {vm.purchases.length === 0 ? (
                       <tr>
                         <td colSpan={5} className="px-2.5 py-4 text-center font-semibold text-muted">
-                          No outstanding purchases
+                          {statusFilter === "pending" ? "No outstanding purchases" : "No purchases match this filter"}
                         </td>
                       </tr>
                     ) : (
@@ -337,7 +429,7 @@ export function SupplierStatementModal({
               </div>
             </div>
 
-            {vm.purchases.length > 0 && (
+            {outstandingPurchases.length > 0 && (
               <Button
                 type="button"
                 onClick={openBulkPayment}
@@ -377,7 +469,7 @@ export function SupplierStatementModal({
           open={bulkPaymentOpen}
           onClose={() => setBulkPaymentOpen(false)}
           title="Record Payment"
-          description={`Settles all ${vm.purchases.length} outstanding purchase${vm.purchases.length === 1 ? "" : "s"} for ${vm.supplierName} at once.`}
+          description={`Settles all ${outstandingPurchases.length} outstanding purchase${outstandingPurchases.length === 1 ? "" : "s"} for ${vm.supplierName} at once.`}
           widthClassName="max-w-sm"
         >
           <form onSubmit={submitBulkPayment}>

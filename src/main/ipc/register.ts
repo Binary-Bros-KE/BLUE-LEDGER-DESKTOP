@@ -829,23 +829,23 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.printerPreviewDeliveryNotePdf, (_event, deliveryNoteId: string) =>
     previewDeliveryNotePdf(deliveryNoteId)
   );
-  ipcMain.handle(ipcChannels.printerGenerateStatementPdf, (_event, customerId: string) =>
-    generateStatementPdf(customerId)
+  ipcMain.handle(ipcChannels.printerGenerateStatementPdf, (_event, customerId: string, filters?: unknown) =>
+    generateStatementPdf(customerId, filters)
   );
-  ipcMain.handle(ipcChannels.printerPreviewStatementPdf, (_event, customerId: string) =>
-    previewStatementPdf(customerId)
+  ipcMain.handle(ipcChannels.printerPreviewStatementPdf, (_event, customerId: string, filters?: unknown) =>
+    previewStatementPdf(customerId, filters)
   );
-  ipcMain.handle(ipcChannels.printerPrintStatementDocument, (_event, customerId: string) =>
-    printStatementDocument(customerId)
+  ipcMain.handle(ipcChannels.printerPrintStatementDocument, (_event, customerId: string, filters?: unknown) =>
+    printStatementDocument(customerId, filters)
   );
-  ipcMain.handle(ipcChannels.printerGenerateSupplierStatementPdf, (_event, supplierId: string) =>
-    generateSupplierStatementPdf(supplierId)
+  ipcMain.handle(ipcChannels.printerGenerateSupplierStatementPdf, (_event, supplierId: string, filters?: unknown) =>
+    generateSupplierStatementPdf(supplierId, filters)
   );
-  ipcMain.handle(ipcChannels.printerPreviewSupplierStatementPdf, (_event, supplierId: string) =>
-    previewSupplierStatementPdf(supplierId)
+  ipcMain.handle(ipcChannels.printerPreviewSupplierStatementPdf, (_event, supplierId: string, filters?: unknown) =>
+    previewSupplierStatementPdf(supplierId, filters)
   );
-  ipcMain.handle(ipcChannels.printerPrintSupplierStatementDocument, (_event, supplierId: string) =>
-    printSupplierStatementDocument(supplierId)
+  ipcMain.handle(ipcChannels.printerPrintSupplierStatementDocument, (_event, supplierId: string, filters?: unknown) =>
+    printSupplierStatementDocument(supplierId, filters)
   );
   ipcMain.handle(ipcChannels.printerGenerateStockReceiptPdf, (_event, stockReceiptId: string) =>
     generateStockReceiptPdf(stockReceiptId)
@@ -868,8 +868,12 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.printerGetPdfPreviewData, (_event, previewId: string) => getPdfPreviewData(previewId));
   ipcMain.handle(ipcChannels.printerPrintPdfPreview, (_event, previewId: string) => printPdfPreview(previewId));
   ipcMain.handle(ipcChannels.printerDownloadPdfPreview, (_event, previewId: string) => downloadPdfPreview(previewId));
-  ipcMain.handle(ipcChannels.statementGetForCustomer, (_event, customerId: string) => getCustomerStatement(customerId));
-  ipcMain.handle(ipcChannels.supplierStatementGetForSupplier, (_event, supplierId: string) => getSupplierStatement(supplierId));
+  ipcMain.handle(ipcChannels.statementGetForCustomer, (_event, customerId: string, filters?: unknown) =>
+    getCustomerStatement(customerId, filters)
+  );
+  ipcMain.handle(ipcChannels.supplierStatementGetForSupplier, (_event, supplierId: string, filters?: unknown) =>
+    getSupplierStatement(supplierId, filters)
+  );
   ipcMain.handle(ipcChannels.deliveryNoteGet, (_event, id: string) => getDeliveryNote(id));
   ipcMain.handle(ipcChannels.deliveryNoteGetForSale, (_event, saleId: string) => getDeliveryNoteForSale(saleId));
   ipcMain.handle(ipcChannels.deliveryNoteGetForQuotation, (_event, quotationId: string) =>

@@ -20,11 +20,38 @@ function statusLabel(status: PaymentStatus): string {
   return PAYMENT_STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status;
 }
 
-/** Statement of Account for one customer — every invoice they haven't fully paid off yet, across
- * every storefront, with running totals. Purely a read-only summary (no "mark paid" actions here —
- * that stays on the Invoices tab, this is just the shareable rollup). Mirrors ReceiptPreview's
- * Print/Download/Share trio. */
-export function StatementPreview({ vm }: { vm: CustomerStatementViewModel }): React.JSX.Element {
+type StatementStatusFilter = "pending" | "paid" | "all";
+
+/** Statement of Account for one customer — by default, every invoice they haven't fully paid off
+ * yet, across every storefront, with running totals. Purely a read-only summary (no "mark paid"
+ * actions here — that stays on the Invoices tab, this is just the shareable rollup). Mirrors
+ * ReceiptPreview's Print/Download/Share trio.
+ *
+ * Client request: also needs to show paid/historical invoices and an optional date range — the
+ * filter state itself is owned by InvoicesRoute.tsx (which already owns statementVm/openStatement),
+ * passed down here as controlled props so a filter change can re-fetch through the same
+ * openStatement this component doesn't otherwise need to know about. `filtering` is true while a
+ * refetch triggered by a filter change is in flight — `vm` still shows the PREVIOUS result during
+ * that instant rather than the whole modal blanking to a spinner. */
+export function StatementPreview({
+  vm,
+  statusFilter,
+  dateFrom,
+  dateTo,
+  onStatusFilterChange,
+  onDateFromChange,
+  onDateToChange,
+  filtering
+}: {
+  vm: CustomerStatementViewModel;
+  statusFilter: StatementStatusFilter;
+  dateFrom: string;
+  dateTo: string;
+  onStatusFilterChange: (value: StatementStatusFilter) => void;
+  onDateFromChange: (value: string) => void;
+  onDateToChange: (value: string) => void;
+  filtering: boolean;
+}): React.JSX.Element {
   const [printing, setPrinting] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [sharing, setSharing] = useState(false);
@@ -33,13 +60,18 @@ export function StatementPreview({ vm }: { vm: CustomerStatementViewModel }): Re
 
   const money = (cents: number): string => `${vm.currency} ${(cents / 100).toFixed(2)}`;
   const availableCreditCents = vm.creditLimitCents !== null ? Math.max(0, vm.creditLimitCents - vm.totalOutstandingCents) : null;
+  // Share always regenerates fresh from the cloud's own "what's still outstanding" query (see
+  // SERVER's buildSharedStatement) — it has no way to carry a "Paid"/"All"/date-range choice yet.
+  // Rather than let Share silently send something different from what's on screen, it's only
+  // enabled for the exact filter state Share itself supports.
+  const isShareableFilter = vm.filters.status === "pending" && !vm.filters.dateFrom && !vm.filters.dateTo;
 
   async function handlePrint(): Promise<void> {
     setPrinting(true);
     setError(null);
     setNotice(null);
     try {
-      const result = await window.blueLedger.printer.printStatementDocument(vm.customerId);
+      const result = await window.blueLedger.printer.printStatementDocument(vm.customerId, vm.filters);
       if (result.success) {
         setNotice(result.message);
         showSuccessToast(result.message);
@@ -61,7 +93,7 @@ export function StatementPreview({ vm }: { vm: CustomerStatementViewModel }): Re
     setError(null);
     setNotice(null);
     try {
-      await window.blueLedger.printer.previewStatementPdf(vm.customerId);
+      await window.blueLedger.printer.previewStatementPdf(vm.customerId, vm.filters);
     } catch (err) {
       const message = getErrorMessage(err, "Failed to open preview");
       setError(message);
@@ -83,6 +115,52 @@ export function StatementPreview({ vm }: { vm: CustomerStatementViewModel }): Re
           {error}
         </div>
       )}
+
+      <div className="mb-4 flex flex-wrap items-end gap-3">
+        <label className="block">
+          <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Show</span>
+          <select
+            value={statusFilter}
+            onChange={(event) => onStatusFilterChange(event.target.value as StatementStatusFilter)}
+            className="mt-1.5 h-9 rounded-lg border border-line bg-white px-3 text-xs font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+          >
+            <option value="pending">Pending only</option>
+            <option value="paid">Paid only</option>
+            <option value="all">All</option>
+          </select>
+        </label>
+        <label className="block">
+          <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">From</span>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(event) => onDateFromChange(event.target.value)}
+            className="mt-1.5 h-9 rounded-lg border border-line bg-white px-3 text-xs font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+          />
+        </label>
+        <label className="block">
+          <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">To</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(event) => onDateToChange(event.target.value)}
+            className="mt-1.5 h-9 rounded-lg border border-line bg-white px-3 text-xs font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+          />
+        </label>
+        {(dateFrom || dateTo) && (
+          <Button
+            type="button"
+            onClick={() => {
+              onDateFromChange("");
+              onDateToChange("");
+            }}
+            className="h-9 border border-line bg-white px-3 text-[11px] text-ink shadow-none hover:bg-soft"
+          >
+            Clear dates
+          </Button>
+        )}
+        {filtering && <Loader2 className="size-4 animate-spin text-muted" aria-hidden="true" />}
+      </div>
 
       <div className="rounded-lg border border-dashed border-line bg-soft/40 p-5">
         <div className="flex items-start justify-between gap-3">
@@ -129,7 +207,7 @@ export function StatementPreview({ vm }: { vm: CustomerStatementViewModel }): Re
               {vm.invoices.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-2.5 py-4 text-center font-semibold text-muted">
-                    No outstanding invoices
+                    {vm.filters.status === "pending" ? "No outstanding invoices" : "No invoices match this filter"}
                   </td>
                 </tr>
               ) : (
@@ -197,7 +275,13 @@ export function StatementPreview({ vm }: { vm: CustomerStatementViewModel }): Re
         <Button
           type="button"
           onClick={() => setSharing(true)}
-          className="h-9 border border-line bg-white text-[11px] text-ink shadow-none hover:bg-soft"
+          disabled={!isShareableFilter}
+          title={
+            isShareableFilter
+              ? undefined
+              : "Share sends the customer's current outstanding balance — switch back to \"Pending only\" with no date range to share."
+          }
+          className="h-9 border border-line bg-white text-[11px] text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Share2 className="mr-1.5 size-3.5" aria-hidden="true" />
           Share

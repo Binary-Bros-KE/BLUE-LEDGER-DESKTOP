@@ -265,7 +265,30 @@ export function findAllInvoiceRows(tenantId: string, locationId: string | null):
  * Statement of Account. Oldest due date first, matching how a real statement reads. Same row shape
  * as findAllInvoiceRows (reuses mapInvoiceListRow) — just scoped to one customer and pre-filtered to
  * outstanding balances instead of covering every invoice tenant-wide. */
-export function findOutstandingInvoiceRowsForCustomer(tenantId: string, customerId: string): InvoiceRow[] {
+/** Client request: a Statement used to always mean "what's still owed", with no way to see paid or
+ * historical invoices. `filters.status` picks the slice — "pending" (default, unchanged behavior)
+ * keeps today's NOT IN ('paid','cancelled') + oldest-due-first ordering (actionable collections
+ * order); "paid" and "all" are a history view, so they sort newest-first instead. dateFromIso/
+ * dateToExclusiveIso bound the invoice's own invoice_date (a full ISO instant, e.g.
+ * `new Date().toISOString()` at creation, NOT a plain calendar date) — the caller converts a plain
+ * YYYY-MM-DD into the device-local-timezone-correct instant bound (see statement-service.ts's own
+ * startOfDayIso/addDaysIso, ported from report-service.ts) and passes the upper bound EXCLUSIVE
+ * (start of the day AFTER dateTo), same convention as every other date-range query in this app.
+ * Pass null for either to skip that bound entirely. See statementFiltersSchema (shared/schemas/
+ * statement.ts) for the filter shape this ultimately comes from. */
+export function findInvoiceRowsForCustomer(
+  tenantId: string,
+  customerId: string,
+  filters: { status: "pending" | "paid" | "all"; dateFromIso: string | null; dateToExclusiveIso: string | null }
+): InvoiceRow[] {
+  const statusClause =
+    filters.status === "paid"
+      ? "s.payment_status = 'paid'"
+      : filters.status === "all"
+        ? "1 = 1"
+        : "s.payment_status NOT IN ('paid', 'cancelled')";
+  const orderClause = filters.status === "pending" ? "COALESCE(s.due_date, s.invoice_date) ASC" : "s.invoice_date DESC";
+
   return getDatabase()
     .prepare(
       `
@@ -289,11 +312,20 @@ export function findOutstandingInvoiceRowsForCustomer(tenantId: string, customer
       JOIN locations l ON l.id = s.location_id
       LEFT JOIN customers c ON c.id = s.customer_id
       WHERE s.tenant_id = ? AND s.customer_id = ? AND s.invoice_number IS NOT NULL
-        AND s.payment_status NOT IN ('paid', 'cancelled')
-      ORDER BY COALESCE(s.due_date, s.invoice_date) ASC
+        AND ${statusClause}
+        AND (? IS NULL OR s.invoice_date >= ?)
+        AND (? IS NULL OR s.invoice_date < ?)
+      ORDER BY ${orderClause}
     `
     )
-    .all(tenantId, customerId) as InvoiceRow[];
+    .all(
+      tenantId,
+      customerId,
+      filters.dateFromIso,
+      filters.dateFromIso,
+      filters.dateToExclusiveIso,
+      filters.dateToExclusiveIso
+    ) as InvoiceRow[];
 }
 
 export function mapInvoiceListRow(row: InvoiceRow): InvoiceListItem {

@@ -246,6 +246,11 @@ export function InvoicesRoute(): React.JSX.Element {
   const [statementSearch, setStatementSearch] = useState("");
   const [statementVm, setStatementVm] = useState<CustomerStatementViewModel | null>(null);
   const [statementLoading, setStatementLoading] = useState(false);
+  // Client request: a Statement used to always mean "what's still owed" — these let the user pull up
+  // paid or full history too. "pending" (default) matches today's behavior exactly.
+  const [statementStatusFilter, setStatementStatusFilter] = useState<"pending" | "paid" | "all">("pending");
+  const [statementDateFrom, setStatementDateFrom] = useState("");
+  const [statementDateTo, setStatementDateTo] = useState("");
 
   const [recordPaymentOpen, setRecordPaymentOpen] = useState(false);
   const [paymentMethodId, setPaymentMethodId] = useState("");
@@ -519,18 +524,45 @@ export function InvoicesRoute(): React.JSX.Element {
     setViewingSale(sale);
   }
 
-  async function openStatement(customerId: string): Promise<void> {
+  /** `overrides` lets a filter control pass its OWN fresh value in the same call that sets its own
+   * state — see SupplierStatementModal.tsx's identical openStatement for the full reasoning. */
+  async function openStatement(
+    customerId: string,
+    overrides?: { status?: "pending" | "paid" | "all"; dateFrom?: string; dateTo?: string }
+  ): Promise<void> {
+    const status = overrides?.status ?? statementStatusFilter;
+    const from = overrides?.dateFrom ?? statementDateFrom;
+    const to = overrides?.dateTo ?? statementDateTo;
     setStatementPickerOpen(false);
     setStatementLoading(true);
     setActionError(null);
     try {
-      const vm = await window.blueLedger.statement.getForCustomer(customerId);
+      const vm = await window.blueLedger.statement.getForCustomer(customerId, {
+        status,
+        dateFrom: from || null,
+        dateTo: to || null
+      });
       setStatementVm(vm);
     } catch (err) {
       setActionError(getErrorMessage(err, "Failed to generate statement"));
     } finally {
       setStatementLoading(false);
     }
+  }
+
+  function handleStatementStatusFilterChange(value: "pending" | "paid" | "all"): void {
+    setStatementStatusFilter(value);
+    if (statementVm) void openStatement(statementVm.customerId, { status: value });
+  }
+
+  function handleStatementDateFromChange(value: string): void {
+    setStatementDateFrom(value);
+    if (statementVm) void openStatement(statementVm.customerId, { dateFrom: value });
+  }
+
+  function handleStatementDateToChange(value: string): void {
+    setStatementDateTo(value);
+    if (statementVm) void openStatement(statementVm.customerId, { dateTo: value });
   }
 
   function openRecordPayment(): void {
@@ -2079,17 +2111,31 @@ export function InvoicesRoute(): React.JSX.Element {
 
       <Modal
         open={statementVm !== null || statementLoading}
-        onClose={() => setStatementVm(null)}
+        onClose={() => {
+          setStatementVm(null);
+          setStatementStatusFilter("pending");
+          setStatementDateFrom("");
+          setStatementDateTo("");
+        }}
         title={statementVm ? `Statement — ${statementVm.customerName}` : "Statement"}
-        description="Print, download, or share this customer's outstanding balance."
-        widthClassName="max-w-lg"
+        description="Print, download, share, or filter this customer's statement."
+        widthClassName="max-w-3xl"
       >
-        {statementLoading ? (
+        {statementLoading && !statementVm ? (
           <div className="flex min-h-[160px] items-center justify-center text-muted">
             <Loader2 className="size-6 animate-spin" aria-hidden="true" />
           </div>
         ) : statementVm ? (
-          <StatementPreview vm={statementVm} />
+          <StatementPreview
+            vm={statementVm}
+            statusFilter={statementStatusFilter}
+            dateFrom={statementDateFrom}
+            dateTo={statementDateTo}
+            onStatusFilterChange={handleStatementStatusFilterChange}
+            onDateFromChange={handleStatementDateFromChange}
+            onDateToChange={handleStatementDateToChange}
+            filtering={statementLoading}
+          />
         ) : null}
       </Modal>
 

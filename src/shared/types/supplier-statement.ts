@@ -1,4 +1,5 @@
 import type { PurchasePaymentStatus } from "./purchase";
+import type { StatementFilters } from "./statement";
 
 export type StatementPurchaseLine = {
   id: string;
@@ -29,6 +30,8 @@ export type SupplierStatementViewModel = {
   /** Null when the supplier has no credit limit set on file — the statement simply omits the block. */
   creditLimitCents: number | null;
   generatedAt: string;
+  /** What was actually requested — see StatementFilters' own doc comment (shared/types/statement.ts). */
+  filters: StatementFilters;
   purchases: StatementPurchaseLine[];
   totalOrderedCents: number;
   totalPaidCents: number;
