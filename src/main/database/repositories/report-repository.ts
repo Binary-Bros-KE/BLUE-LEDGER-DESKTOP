@@ -41,6 +41,17 @@ export type CompletedSaleRow = {
   payment_status: string;
   completed_at: string;
   payments: string;
+  /** SUM(sale_return_items.line_total_cents) across every APPROVED return against this sale — each
+   * return item's line_total is already unit_price x returned_quantity, so a partial return (2 of
+   * 10) only ever counts those 2 units. Purely additive: grand_total_cents itself is untouched, so
+   * every existing consumer that wants the sale's own face value (Receipts' per-row list, the Sales
+   * Report's transaction detail, per-method collections) is unaffected. A consumer that wants this
+   * sale's revenue net of what came back — By Employee/By Storefront/My Sales — should use
+   * `grand_total_cents - returned_value_cents` instead. Client-reported bug: a Cashier's "My Sales
+   * Today" and the Dashboard's By Employee/By Storefront breakdowns kept counting a fully-returned
+   * sale forever, while the Sales Report's own headline Total Revenue (a different code path,
+   * computeCashRevenue) already netted it correctly — the two disagreed. */
+  returned_value_cents: number;
 };
 
 /**
@@ -76,7 +87,13 @@ export function findCompletedSaleRows(
         s.amount_paid_cents,
         s.payment_status,
         s.completed_at,
-        s.payments
+        s.payments,
+        COALESCE((
+          SELECT SUM(sri.line_total_cents)
+          FROM sale_return_items sri
+          JOIN sale_returns sr ON sr.id = sri.sale_return_id
+          WHERE sr.sale_id = s.id AND sr.status = 'approved'
+        ), 0) AS returned_value_cents
       FROM sales s
       JOIN locations l ON l.id = s.location_id
       JOIN employees e ON e.id = s.employee_id

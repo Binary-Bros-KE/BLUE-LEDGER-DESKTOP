@@ -873,7 +873,9 @@ export function getMySales(input: unknown): MySaleEntry[] {
       id: row.id,
       documentNumber: row.invoice_number ?? row.receipt_number,
       occurredAt: row.completed_at,
-      amountCents: row.grand_total_cents,
+      // Net of any approved return against this sale — a fully-returned sale otherwise kept
+      // inflating "My Sales Today" forever. See CompletedSaleRow["returned_value_cents"].
+      amountCents: row.grand_total_cents - row.returned_value_cents,
       paymentStatus: row.payment_status,
     }));
 }
@@ -885,12 +887,15 @@ export function getSalesByStorefront(input: unknown): SalesByStorefrontRow[] {
   const locationId = resolveReportLocationScope(explicitLocationId);
 
   const rows = reportRepository.findCompletedSaleRows(tenantId, locationId, startOfDayIso(startDate), startOfDayIso(addDaysIso(endDate, 1)));
-  const totalRevenueCents = rows.reduce((sum, row) => sum + row.grand_total_cents, 0);
+  // Net of approved returns — see CompletedSaleRow["returned_value_cents"]. Matches the Total
+  // Revenue tile above this breakdown (getSalesFinancialOverview), which was already netted; this
+  // table used to disagree with it whenever a return existed.
+  const totalRevenueCents = rows.reduce((sum, row) => sum + (row.grand_total_cents - row.returned_value_cents), 0);
 
   const buckets = new Map<string, { name: string; revenueCents: number; transactionCount: number }>();
   for (const row of rows) {
     const bucket = buckets.get(row.location_id) ?? { name: row.location_name, revenueCents: 0, transactionCount: 0 };
-    bucket.revenueCents += row.grand_total_cents;
+    bucket.revenueCents += row.grand_total_cents - row.returned_value_cents;
     bucket.transactionCount += 1;
     buckets.set(row.location_id, bucket);
   }
@@ -917,12 +922,16 @@ export function getSalesByEmployee(input: unknown): SalesByEmployeeRow[] {
   const locationId = resolveReportLocationScope(explicitLocationId);
 
   const rows = reportRepository.findCompletedSaleRows(tenantId, locationId, startOfDayIso(startDate), startOfDayIso(addDaysIso(endDate, 1)));
-  const totalRevenueCents = rows.reduce((sum, row) => sum + row.grand_total_cents, 0);
+  // Net of approved returns — see CompletedSaleRow["returned_value_cents"] and getSalesByStorefront's
+  // own identical comment. Also what CashierDashboard's "My Sales Today"/"My Average Sale" read
+  // (this function, filtered to the signed-in employee), so a Cashier's own return-affected sale
+  // stops overstating their day too.
+  const totalRevenueCents = rows.reduce((sum, row) => sum + (row.grand_total_cents - row.returned_value_cents), 0);
 
   const buckets = new Map<string, { name: string; revenueCents: number; transactionCount: number; branches: Set<string> }>();
   for (const row of rows) {
     const bucket = buckets.get(row.employee_id) ?? { name: row.employee_name, revenueCents: 0, transactionCount: 0, branches: new Set<string>() };
-    bucket.revenueCents += row.grand_total_cents;
+    bucket.revenueCents += row.grand_total_cents - row.returned_value_cents;
     bucket.transactionCount += 1;
     bucket.branches.add(row.location_name);
     buckets.set(row.employee_id, bucket);
