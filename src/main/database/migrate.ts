@@ -3091,194 +3091,31 @@ const migrations = [
         FROM purchase_items pi WHERE pi.purchase_id = purchases.id
       );
 
-      -- Correct any supplier balance over/under-booked under the old model: for every purchase
-      -- whose already-recorded purchase_ordered/purchase_cancelled entries — PLUS any
-      -- manual_adjustment entry updatePurchase's old repricing hook recorded against that specific
-      -- purchase (identifiable unambiguously: the person-facing "Record Balance Adjustment" action,
-      -- adjustSupplierBalance in supplier-balance-service.ts, always writes referenceId NULL — the
-      -- only other source of a purchase-referenced manual_adjustment was that now-removed hook) —
-      -- don't match its freshly backfilled received_value_cents, insert ONE correcting
-      -- manual_adjustment entry for the delta. The "System correction:" notes prefix is excluded
-      -- from this same sum so the check (and this migration) stays idempotent if ever re-run.
-      -- Self-healing and generic — a no-op wherever the two already match.
-      INSERT INTO supplier_balance_entries (
-        id, tenant_id, supplier_id, entry_type, amount_cents, reference_type, reference_id, notes,
-        performed_by, created_at, sync_status
-      )
-      SELECT
-        lower(hex(randomblob(16))),
-        p.tenant_id,
-        p.supplier_id,
-        'manual_adjustment',
-        p.received_value_cents - COALESCE((
-          SELECT SUM(sbe.amount_cents) FROM supplier_balance_entries sbe
-          WHERE sbe.reference_type = 'purchase' AND sbe.reference_id = p.id
-            AND sbe.entry_type IN ('purchase_ordered', 'purchase_cancelled', 'manual_adjustment')
-            AND (sbe.notes IS NULL OR sbe.notes NOT LIKE 'System correction:%')
-        ), 0),
-        'purchase',
-        p.id,
-        'System correction: this purchase''s balance now reflects only received goods (previously booked at the full order total when placed).',
-        NULL,
-        datetime('now'),
-        'pending'
-      FROM purchases p
-      WHERE p.received_value_cents - COALESCE((
-          SELECT SUM(sbe.amount_cents) FROM supplier_balance_entries sbe
-          WHERE sbe.reference_type = 'purchase' AND sbe.reference_id = p.id
-            AND sbe.entry_type IN ('purchase_ordered', 'purchase_cancelled', 'manual_adjustment')
-            AND (sbe.notes IS NULL OR sbe.notes NOT LIKE 'System correction:%')
-        ), 0) != 0;
-
-      UPDATE suppliers SET balance_cents = balance_cents + (
-        SELECT COALESCE(SUM(
-          p.received_value_cents - COALESCE((
-            SELECT SUM(sbe.amount_cents) FROM supplier_balance_entries sbe
-            WHERE sbe.reference_type = 'purchase' AND sbe.reference_id = p.id
-              AND sbe.entry_type IN ('purchase_ordered', 'purchase_cancelled', 'manual_adjustment')
-            AND (sbe.notes IS NULL OR sbe.notes NOT LIKE 'System correction:%')
-          ), 0)
-        ), 0)
-        FROM purchases p
-        WHERE p.supplier_id = suppliers.id
-          AND p.received_value_cents - COALESCE((
-            SELECT SUM(sbe.amount_cents) FROM supplier_balance_entries sbe
-            WHERE sbe.reference_type = 'purchase' AND sbe.reference_id = p.id
-              AND sbe.entry_type IN ('purchase_ordered', 'purchase_cancelled', 'manual_adjustment')
-            AND (sbe.notes IS NULL OR sbe.notes NOT LIKE 'System correction:%')
-          ), 0) != 0
-      )
-      WHERE EXISTS (
-        SELECT 1 FROM purchases p
-        WHERE p.supplier_id = suppliers.id
-          AND p.received_value_cents - COALESCE((
-            SELECT SUM(sbe.amount_cents) FROM supplier_balance_entries sbe
-            WHERE sbe.reference_type = 'purchase' AND sbe.reference_id = p.id
-              AND sbe.entry_type IN ('purchase_ordered', 'purchase_cancelled', 'manual_adjustment')
-            AND (sbe.notes IS NULL OR sbe.notes NOT LIKE 'System correction:%')
-          ), 0) != 0
-      );
+      -- REMOVED 2026-09-22 (incident): this migration used to also insert a correcting
+      -- manual_adjustment entry per purchase here, deciding "does this purchase still need a
+      -- correction" by summing its ORIGINAL booking entries and explicitly EXCLUDING any existing
+      -- 'System correction:' entry from that sum. That guarded against a re-run on the SAME device,
+      -- but never checked whether ANOTHER device had already synced in its own correction for the
+      -- same purchase — and migrations run at boot, before the first sync cycle, so a device can't
+      -- see a sibling device's correction even if it wanted to. Result, confirmed live against a
+      -- real 10-device tenant: every device that applied this migration for the first time inserted
+      -- its OWN full duplicate correction, so a purchase ended up with up to N copies (N = however
+      -- many devices had updated so far) — one tenant had 13 duplicate entries on a single purchase.
+      -- See migration 93 for the cleanup and the actual (race-free) recompute this was replaced
+      -- with. Left as a no-op here (rather than deleted outright) so the historical record of what
+      -- this migration version used to do stays in the file for anyone investigating later.
     `
   },
   {
     version: 90,
     name: "supplier_balance_receiving_correction_followup",
     sql: `
-      -- Follow-up fix for a real bug in migration 89's own correction step, caught live: that
-      -- migration's "what was this purchase's old net balance impact" sum only looked at
-      -- purchase_ordered/purchase_cancelled entries, missing manual_adjustment entries the OLD
-      -- updatePurchase's repricing hook used to record against a specific purchase (referenceId
-      -- set — the person-facing "Record Balance Adjustment" action always writes referenceId NULL,
-      -- so any purchase-referenced manual_adjustment can only have come from that now-removed hook,
-      -- never a genuine person-entered correction). Any purchase that was ever repriced after being
-      -- placed as "ordered" got the WRONG correction amount out of migration 89 as a result. This
-      -- recomputes the correction properly (now including those manual_adjustment entries) and
-      -- applies whatever ADDITIONAL delta is still needed on top of what migration 89 already
-      -- applied — self-healing and generic, not tied to specific purchase ids, and a safe no-op on
-      -- any device where migration 89's corrected logic (see its own updated SQL above) already got
-      -- it right the first time. Uses the same "System correction:" notes prefix as migration 89's
-      -- own entries so a hypothetical future re-run stays idempotent.
-      --
-      -- UPDATE suppliers runs BEFORE the INSERT below on purpose — caught live, the two used to run
-      -- in the opposite order, and by the time UPDATE's own subquery ran it already counted the
-      -- INSERT's brand-new rows as "already applied" (same 'System correction:' prefix, inserted
-      -- moments earlier in the same script), computing every delta as 0 and silently updating
-      -- nothing while the audit-trail entries themselves still went in correctly. Running UPDATE
-      -- first means its subquery only ever sees supplier_balance_entries as it stood BEFORE this
-      -- migration touched it, giving the real delta every time.
-      UPDATE suppliers SET balance_cents = balance_cents + (
-        SELECT COALESCE(SUM(
-          p.received_value_cents
-            - COALESCE((
-                SELECT SUM(sbe.amount_cents) FROM supplier_balance_entries sbe
-                WHERE sbe.reference_type = 'purchase' AND sbe.reference_id = p.id
-                  AND sbe.entry_type IN ('purchase_ordered', 'purchase_cancelled', 'manual_adjustment')
-                  AND (sbe.notes IS NULL OR sbe.notes NOT LIKE 'System correction:%')
-              ), 0)
-            - COALESCE((
-                SELECT SUM(sbe.amount_cents) FROM supplier_balance_entries sbe
-                WHERE sbe.reference_type = 'purchase' AND sbe.reference_id = p.id
-                  AND sbe.notes LIKE 'System correction:%'
-              ), 0)
-        ), 0)
-        FROM purchases p
-        WHERE p.supplier_id = suppliers.id
-          AND (
-            p.received_value_cents
-              - COALESCE((
-                  SELECT SUM(sbe.amount_cents) FROM supplier_balance_entries sbe
-                  WHERE sbe.reference_type = 'purchase' AND sbe.reference_id = p.id
-                    AND sbe.entry_type IN ('purchase_ordered', 'purchase_cancelled', 'manual_adjustment')
-                    AND (sbe.notes IS NULL OR sbe.notes NOT LIKE 'System correction:%')
-                ), 0)
-              - COALESCE((
-                  SELECT SUM(sbe.amount_cents) FROM supplier_balance_entries sbe
-                  WHERE sbe.reference_type = 'purchase' AND sbe.reference_id = p.id
-                    AND sbe.notes LIKE 'System correction:%'
-                ), 0)
-          ) != 0
-      )
-      WHERE EXISTS (
-        SELECT 1 FROM purchases p
-        WHERE p.supplier_id = suppliers.id
-          AND (
-            p.received_value_cents
-              - COALESCE((
-                  SELECT SUM(sbe.amount_cents) FROM supplier_balance_entries sbe
-                  WHERE sbe.reference_type = 'purchase' AND sbe.reference_id = p.id
-                    AND sbe.entry_type IN ('purchase_ordered', 'purchase_cancelled', 'manual_adjustment')
-                    AND (sbe.notes IS NULL OR sbe.notes NOT LIKE 'System correction:%')
-                ), 0)
-              - COALESCE((
-                  SELECT SUM(sbe.amount_cents) FROM supplier_balance_entries sbe
-                  WHERE sbe.reference_type = 'purchase' AND sbe.reference_id = p.id
-                    AND sbe.notes LIKE 'System correction:%'
-                ), 0)
-          ) != 0
-      );
-
-      INSERT INTO supplier_balance_entries (
-        id, tenant_id, supplier_id, entry_type, amount_cents, reference_type, reference_id, notes,
-        performed_by, created_at, sync_status
-      )
-      SELECT
-        lower(hex(randomblob(16))),
-        p.tenant_id,
-        p.supplier_id,
-        'manual_adjustment',
-        p.received_value_cents
-          - COALESCE((
-              SELECT SUM(sbe.amount_cents) FROM supplier_balance_entries sbe
-              WHERE sbe.reference_type = 'purchase' AND sbe.reference_id = p.id
-                AND sbe.entry_type IN ('purchase_ordered', 'purchase_cancelled', 'manual_adjustment')
-                AND (sbe.notes IS NULL OR sbe.notes NOT LIKE 'System correction:%')
-            ), 0)
-          - COALESCE((
-              SELECT SUM(sbe.amount_cents) FROM supplier_balance_entries sbe
-              WHERE sbe.reference_type = 'purchase' AND sbe.reference_id = p.id
-                AND sbe.notes LIKE 'System correction:%'
-            ), 0),
-        'purchase',
-        p.id,
-        'System correction: fixes a bug in this purchase''s earlier received-goods balance correction (a repricing adjustment had been missed).',
-        NULL,
-        datetime('now'),
-        'pending'
-      FROM purchases p
-      WHERE (
-        p.received_value_cents
-          - COALESCE((
-              SELECT SUM(sbe.amount_cents) FROM supplier_balance_entries sbe
-              WHERE sbe.reference_type = 'purchase' AND sbe.reference_id = p.id
-                AND sbe.entry_type IN ('purchase_ordered', 'purchase_cancelled', 'manual_adjustment')
-                AND (sbe.notes IS NULL OR sbe.notes NOT LIKE 'System correction:%')
-            ), 0)
-          - COALESCE((
-              SELECT SUM(sbe.amount_cents) FROM supplier_balance_entries sbe
-              WHERE sbe.reference_type = 'purchase' AND sbe.reference_id = p.id
-                AND sbe.notes LIKE 'System correction:%'
-            ), 0)
-      ) != 0;
+      -- REMOVED 2026-09-22 (incident): this migration's entire body was the same
+      -- exclude-prior-corrections INSERT/UPDATE pattern as migration 89 above, with the identical
+      -- multi-device duplication flaw — see migration 89's own removal note for the full mechanism.
+      -- No schema work lived in this migration (it only ever inserted/updated data), so it is now a
+      -- complete no-op; any device that hasn't yet applied this version will just record it as
+      -- applied and move on, generating nothing. See migration 93 for the real, race-free fix.
     `
   },
   {
@@ -3410,6 +3247,74 @@ const migrations = [
         SELECT COALESCE(SUM(CAST(ROUND(pi.line_total_cents * 1.0 * pi.received_quantity / pi.ordered_quantity) AS INTEGER)), 0)
         FROM purchase_items pi WHERE pi.purchase_id = purchases.id
       );
+    `
+  },
+  {
+    version: 93,
+    name: "supplier_balance_multidevice_duplication_fix",
+    sql: `
+      -- Emergency fix for the multi-device duplication bug in migrations 89/90 (see their own
+      -- removal notes above) — discovered live on 2026-09-22 against a real 10-device tenant, where
+      -- one purchase had accumulated 13 duplicate "System correction" entries.
+      --
+      -- Two independent fixes, deliberately NOT chained together:
+      --
+      -- (1) Directly SETS suppliers.balance_cents from ground truth: SUM across this supplier's own
+      -- purchases of (received_value_cents - amount_paid_cents) — both already-synced, stable
+      -- columns on purchases that are NOT subject to the multi-device ledger race the bug lived in —
+      -- plus any genuine non-purchase manual_adjustment entries (reference_id IS NULL, e.g. an
+      -- opening balance carried forward from a previous system). balance_cents is a purely LOCAL,
+      -- never-synced cache column, so this direct absolute recompute is safe to run independently,
+      -- in any order, on any number of devices, regardless of how far each has gotten through
+      -- syncing in the other devices' duplicate entries — there is no race here. This is what
+      -- actually fixes the number a client sees and acts on, immediately, on every device.
+      --
+      -- (2) Ledger cleanup: for every purchase whose current booked net (every entry tied to it,
+      -- any type) doesn't match its correct net (received_value_cents - amount_paid_cents), inserts
+      -- ONE reversing manual_adjustment entry for the difference — using a notes prefix
+      -- ("Balance correction:") distinct from the buggy entries' own ("System correction:") so it's
+      -- never mistaken for one of them. Uses a DETERMINISTIC id derived from the purchase id (not
+      -- randomblob) so that even if several of this tenant's other devices independently compute
+      -- this before they've all finished syncing with each other, they converge on the SAME row
+      -- (upserted server-side, not duplicated) instead of creating yet more copies — INSERT OR
+      -- IGNORE additionally skips it outright wherever this device has already synced in another
+      -- device's version of that same row. Purely for Balance History readability — it does not feed
+      -- back into (1)'s computation, which is already correct independent of it.
+      UPDATE suppliers SET balance_cents = (
+        COALESCE((
+          SELECT SUM(p.received_value_cents - p.amount_paid_cents)
+          FROM purchases p WHERE p.supplier_id = suppliers.id
+        ), 0)
+        + COALESCE((
+          SELECT SUM(sbe.amount_cents) FROM supplier_balance_entries sbe
+          WHERE sbe.supplier_id = suppliers.id AND sbe.reference_id IS NULL
+        ), 0)
+      );
+
+      INSERT OR IGNORE INTO supplier_balance_entries (
+        id, tenant_id, supplier_id, entry_type, amount_cents, reference_type, reference_id, notes,
+        performed_by, created_at, sync_status
+      )
+      SELECT
+        'balcorr_' || substr(p.id, 10),
+        p.tenant_id,
+        p.supplier_id,
+        'manual_adjustment',
+        (p.received_value_cents - p.amount_paid_cents) - COALESCE((
+          SELECT SUM(sbe.amount_cents) FROM supplier_balance_entries sbe
+          WHERE sbe.reference_type = 'purchase' AND sbe.reference_id = p.id
+        ), 0),
+        'purchase',
+        p.id,
+        'Balance correction: reverses duplicate balance corrections that migrations 89/90 mistakenly applied once per device (bug, fixed 2026-09-22) on a multi-device tenant.',
+        NULL,
+        datetime('now'),
+        'pending'
+      FROM purchases p
+      WHERE (p.received_value_cents - p.amount_paid_cents) - COALESCE((
+          SELECT SUM(sbe.amount_cents) FROM supplier_balance_entries sbe
+          WHERE sbe.reference_type = 'purchase' AND sbe.reference_id = p.id
+        ), 0) != 0;
     `
   }
 ] as const;
