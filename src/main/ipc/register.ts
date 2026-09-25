@@ -147,6 +147,7 @@ import {
   approveStockRequest,
   createStockRequest,
   getStockRequest,
+  listPendingStockRequests,
   listStockRequests,
   rejectStockRequest
 } from "@main/services/stock-request-service";
@@ -899,6 +900,7 @@ export function registerIpcHandlers(): void {
     exportReportToExcel(request)
   );
   ipcMain.handle(ipcChannels.stockRequestList, () => listStockRequests());
+  ipcMain.handle(ipcChannels.stockRequestListPending, () => listPendingStockRequests());
   ipcMain.handle(ipcChannels.stockRequestGet, (_event, id: string) => getStockRequest(id));
   ipcMain.handle(ipcChannels.stockRequestCreate, (_event, input: unknown) => createStockRequest(input));
   ipcMain.handle(ipcChannels.stockRequestApprove, (_event, id: string) => approveStockRequest(id));

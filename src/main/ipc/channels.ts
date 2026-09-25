@@ -269,6 +269,7 @@ export const ipcChannels = {
   reportExportToPdf: "report-export:to-pdf",
   reportExportToExcel: "report-export:to-excel",
   stockRequestList: "stock-request:list",
+  stockRequestListPending: "stock-request:list-pending",
   stockRequestGet: "stock-request:get",
   stockRequestCreate: "stock-request:create",
   stockRequestApprove: "stock-request:approve",

@@ -62,6 +62,8 @@ export type BusinessProfile = {
   ownerEmail: string | null;
   vatRatePercent: number;
   pricesTaxInclusive: boolean;
+  /** Business Profile "Disable invoice edits" — synced to every device/mobile; see invoice-service.ts's updateInvoice. */
+  invoiceEditsDisabled: boolean;
   receiptHeader: string | null;
   receiptFooter: string | null;
 };
@@ -123,6 +125,7 @@ export type TenantContext = {
    * shape satisfies directly. */
   vatRatePercent: number;
   pricesTaxInclusive: boolean;
+  invoiceEditsDisabled: boolean;
   /** True once this install has a real license key from the cloud registry — App.tsx gates the
    * entire app on this, before even the employee login screen. False means "freshly installed,
    * never activated" (licenseKey is still null). */

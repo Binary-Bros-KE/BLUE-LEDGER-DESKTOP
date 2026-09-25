@@ -27,7 +27,7 @@ import {
   type DeliveryDraft,
   type ServiceChargeDraft
 } from "@renderer/shared/components/ExtraChargesSection";
-import { CheckboxField, Field, TextAreaField } from "@renderer/shared/components/form-fields";
+import { CheckboxField, Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { ProductInfoModal } from "@renderer/shared/components/ProductInfoModal";
 import { QuickCreateCustomerModal } from "@renderer/shared/components/QuickCreateCustomerModal";
@@ -87,6 +87,8 @@ type CartLine = {
 
 type DraftStatus = "draft" | "suspended";
 
+type SplitPaymentDraft = { key: string; methodId: string; amount: string; reference: string };
+
 type OpenSaleDraft = {
   key: string;
   dbSaleId: string | null;
@@ -106,6 +108,11 @@ type OpenSaleDraft = {
   paymentMethodId: string;
   paymentReference: string;
   amountReceived: string;
+  /** Extra payments when the customer splits the bill across methods (e.g. M-Pesa + cash). The
+   * fields above are the FIRST payment (its amountReceived is then "amount paid with this method");
+   * these are payments 2, 3, ... Empty means an ordinary single-method sale. Not saved when a sale
+   * is suspended: saved as heldPayments and restored on resume. */
+  splitPayments: SplitPaymentDraft[];
   // Per-draft, same reasoning as paymentMethodId above — carried through suspend/resume so a cashier
   // who already unchecked this before holding the sale doesn't have to redo it.
   includeTaxBreakdown: boolean;
@@ -354,6 +361,12 @@ export function CheckoutRoute(): React.JSX.Element {
               paymentMethodId: full.paymentMethodId ?? "",
               paymentReference: full.paymentReference ?? "",
               amountReceived: full.amountReceivedCents !== null ? fromCents(full.amountReceivedCents) : "",
+              splitPayments: full.payments.map((payment) => ({
+                key: `split_${crypto.randomUUID()}`,
+                methodId: payment.paymentMethodId,
+                amount: payment.amountCents > 0 ? fromCents(payment.amountCents) : "",
+                reference: payment.reference ?? ""
+              })),
               includeTaxBreakdown: full.includeTaxBreakdown,
               includeBusinessInfo: full.includeBusinessInfo,
               createdAt: new Date(full.createdAt).getTime()
@@ -518,6 +531,12 @@ export function CheckoutRoute(): React.JSX.Element {
     [paymentMethods]
   );
   const selectedPaymentMethod = activePaymentMethods.find((method) => method.id === activeDraft?.paymentMethodId) ?? null;
+  // Starts on the placeholder (never auto-picks a method) so a cashier can't charge without having
+  // consciously chosen one — the Charge button also stays disabled until one is selected.
+  const paymentMethodOptions = [
+    { value: "", label: "Please select payment method" },
+    ...activePaymentMethods.map((method) => ({ value: method.id, label: method.name }))
+  ];
 
   // Resets the STK flow every time the payment method (or active draft) changes, so switching away
   // from M-Pesa and back never carries over a stale checkoutRequestId from a previous attempt.
@@ -609,7 +628,12 @@ export function CheckoutRoute(): React.JSX.Element {
       const result = await window.blueLedger.mpesa.sendStkPush({
         locationId: effectiveLocationId,
         phone,
-        amountCents: activeTotals.grandTotalCents
+        // When the bill is split, the STK push is only for the first payment's amount (the one
+        // entered next to the M-Pesa method), not the whole total.
+        amountCents:
+          isSplit && amountReceivedCents !== null && amountReceivedCents > 0
+            ? Math.min(amountReceivedCents, activeTotals.grandTotalCents)
+            : activeTotals.grandTotalCents
       });
       setMpesaCheckoutRequestId(result.checkoutRequestId);
       setMpesaState("awaiting");
@@ -651,6 +675,7 @@ export function CheckoutRoute(): React.JSX.Element {
       paymentMethodId: "",
       paymentReference: "",
       amountReceived: "",
+      splitPayments: [],
       includeTaxBreakdown: true,
       includeBusinessInfo: defaultIncludeBusinessInfoRef.current,
       createdAt: Date.now()
@@ -829,6 +854,43 @@ export function CheckoutRoute(): React.JSX.Element {
     setOpenSales((prev) => prev.map((draft) => (draft.key === activeKey ? { ...draft, amountReceived: value } : draft)));
   }
 
+  function addSplitPayment(): void {
+    if (!activeKey) return;
+    // Pre-fills whatever is still unpaid so the cashier usually only has to pick the method.
+    // Only when the first payment's amount was actually entered — otherwise "remaining" is just the
+    // whole total, which would wrongly claim the new payment covers everything.
+    const remainingCents = amountReceivedCents !== null && splitRemainingCents > 0 ? splitRemainingCents : 0;
+    const row: SplitPaymentDraft = {
+      key: `split_${crypto.randomUUID()}`,
+      methodId: "",
+      amount: remainingCents > 0 ? fromCents(remainingCents) : "",
+      reference: ""
+    };
+    setOpenSales((prev) =>
+      prev.map((draft) => (draft.key === activeKey ? { ...draft, splitPayments: [...draft.splitPayments, row] } : draft))
+    );
+  }
+
+  function updateSplitPayment(rowKey: string, patch: Partial<SplitPaymentDraft>): void {
+    if (!activeKey) return;
+    setOpenSales((prev) =>
+      prev.map((draft) =>
+        draft.key === activeKey
+          ? { ...draft, splitPayments: draft.splitPayments.map((row) => (row.key === rowKey ? { ...row, ...patch } : row)) }
+          : draft
+      )
+    );
+  }
+
+  function removeSplitPayment(rowKey: string): void {
+    if (!activeKey) return;
+    setOpenSales((prev) =>
+      prev.map((draft) =>
+        draft.key === activeKey ? { ...draft, splitPayments: draft.splitPayments.filter((row) => row.key !== rowKey) } : draft
+      )
+    );
+  }
+
   function updateActiveIncludeTaxBreakdown(value: boolean): void {
     if (!activeKey) return;
     setOpenSales((prev) => prev.map((draft) => (draft.key === activeKey ? { ...draft, includeTaxBreakdown: value } : draft)));
@@ -954,6 +1016,11 @@ export function CheckoutRoute(): React.JSX.Element {
       paymentMethodId: draft.paymentMethodId || undefined,
       paymentReference: draft.paymentReference || undefined,
       amountReceivedCents: draft.amountReceived.trim() === "" ? null : toCents(draft.amountReceived),
+      heldPayments: draft.splitPayments.map((row) => ({
+        paymentMethodId: row.methodId,
+        amountCents: row.amount.trim() ? toCents(row.amount) : 0,
+        reference: row.reference.trim() || undefined
+      })),
       includeTaxBreakdown: draft.includeTaxBreakdown,
       includeBusinessInfo: draft.includeBusinessInfo,
       locationId
@@ -1011,6 +1078,30 @@ export function CheckoutRoute(): React.JSX.Element {
       showErrorToast(message);
       return;
     }
+    let splitPaymentsPayload: Array<{ paymentMethodId: string; amountCents: number; reference: string | undefined }> | undefined;
+    if (activeDraft.splitPayments.length > 0) {
+      const rows = [
+        { methodId: activeDraft.paymentMethodId, amount: activeDraft.amountReceived, reference: activeDraft.paymentReference },
+        ...activeDraft.splitPayments
+      ];
+      if (rows.some((row) => !row.methodId || !row.amount.trim() || toCents(row.amount) <= 0)) {
+        const message = "Choose a payment method and enter an amount for every payment.";
+        setActionError(message);
+        showErrorToast(message);
+        return;
+      }
+      if (splitRemainingCents > 0) {
+        const message = `The payments cover ${formatCents(splitPaidCents)} — ${formatCents(splitRemainingCents)} is still unpaid.`;
+        setActionError(message);
+        showErrorToast(message);
+        return;
+      }
+      splitPaymentsPayload = rows.map((row) => ({
+        paymentMethodId: row.methodId,
+        amountCents: toCents(row.amount),
+        reference: row.reference.trim() || undefined
+      }));
+    }
     setCompleting(true);
     setActionError(null);
     try {
@@ -1037,6 +1128,7 @@ export function CheckoutRoute(): React.JSX.Element {
         paymentMethodId: activeDraft.paymentMethodId,
         paymentReference: activeDraft.paymentReference,
         amountReceivedCents: activeDraft.amountReceived.trim() === "" ? null : toCents(activeDraft.amountReceived),
+        payments: splitPaymentsPayload,
         includeTaxBreakdown: activeDraft.includeTaxBreakdown,
         includeBusinessInfo: activeDraft.includeBusinessInfo,
         locationId: session && !session.branch ? storefrontId : undefined
@@ -1066,6 +1158,15 @@ export function CheckoutRoute(): React.JSX.Element {
     activeDraft && activeDraft.amountReceived.trim() !== "" ? toCents(activeDraft.amountReceived) : null;
   const changeDueCents =
     activeTotals && amountReceivedCents !== null ? amountReceivedCents - activeTotals.grandTotalCents : null;
+
+  // Split payment: the first payment (amountReceived above) plus every extra row. Remaining > 0 means
+  // the bill isn't covered yet; < 0 means change is due (which the server only allows out of a payment
+  // that needs no reference, e.g. cash).
+  const isSplit = (activeDraft?.splitPayments.length ?? 0) > 0;
+  const splitPaidCents =
+    (amountReceivedCents ?? 0) +
+    (activeDraft?.splitPayments ?? []).reduce((sum, row) => sum + (row.amount.trim() ? toCents(row.amount) : 0), 0);
+  const splitRemainingCents = activeTotals ? activeTotals.grandTotalCents - splitPaidCents : 0;
 
   return (
     <motion.div
@@ -1538,28 +1639,13 @@ export function CheckoutRoute(): React.JSX.Element {
                     />
                   </div>
 
-                  <div className="mt-3">
-                    <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">
-                      Payment Method
-                    </p>
-                    <div className="mt-1.5 flex flex-wrap gap-2">
-                      {activePaymentMethods.map((method) => (
-                        <button
-                          key={method.id}
-                          type="button"
-                          onClick={() => updateActivePaymentMethod(method.id)}
-                          className={cn(
-                            "h-9 rounded-lg border px-3.5 text-xs font-extrabold transition cursor-pointer",
-                            activeDraft?.paymentMethodId === method.id
-                              ? "border-teal bg-teal text-white"
-                              : "border-line bg-white text-ink hover:bg-soft"
-                          )}
-                        >
-                          {method.name}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  <SelectField
+                    label="Payment Method"
+                    value={activeDraft?.paymentMethodId ?? ""}
+                    onChange={updateActivePaymentMethod}
+                    options={paymentMethodOptions}
+                    className="mt-3"
+                  />
 
                   {selectedPaymentMethod?.code === "MPESA" && mpesaConfigured && (
                     <div className="mt-3 rounded-lg border border-line bg-soft/60 p-3">
@@ -1639,28 +1725,83 @@ export function CheckoutRoute(): React.JSX.Element {
                     />
                   )}
 
-                  <div className="mt-3 grid grid-cols-2 gap-3">
+                  <div className={cn("mt-3 grid gap-3", isSplit ? "grid-cols-1" : "grid-cols-2")}>
                     <Field
-                      label="Amount Received"
+                      label={isSplit ? `Amount paid by ${selectedPaymentMethod?.name ?? "this method"}` : "Amount Received"}
                       type="number"
                       value={activeDraft?.amountReceived ?? ""}
                       onChange={updateActiveAmountReceived}
-                      placeholder={fromCents(totals.grandTotalCents)}
+                      placeholder={isSplit ? "0.00" : fromCents(totals.grandTotalCents)}
                     />
-                    <div>
-                      <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
-                        Change Due
-                      </span>
-                      <div
-                        className={cn(
-                          "mt-1.5 flex h-10 items-center rounded-lg border border-line bg-soft px-3 text-sm font-bold",
-                          changeDueCents !== null && changeDueCents < 0 ? "text-danger" : "text-ink"
-                        )}
-                      >
-                        {changeDueCents === null ? "—" : formatCents(changeDueCents)}
+                    {!isSplit && (
+                      <div>
+                        <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Change Due</span>
+                        <div
+                          className={cn(
+                            "mt-1.5 flex h-10 items-center rounded-lg border border-line bg-soft px-3 text-sm font-bold",
+                            changeDueCents !== null && changeDueCents < 0 ? "text-danger" : "text-ink"
+                          )}
+                        >
+                          {changeDueCents === null ? "—" : formatCents(changeDueCents)}
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
+
+                  {(activeDraft?.splitPayments ?? []).map((row, index) => {
+                    const rowMethod = activePaymentMethods.find((method) => method.id === row.methodId) ?? null;
+                    return (
+                      <div key={row.key} className="mt-3 rounded-lg border border-line p-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">
+                            Payment {index + 2}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => removeSplitPayment(row.key)}
+                            className="text-[11px] font-extrabold uppercase text-danger hover:underline cursor-pointer"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <SelectField
+                          label="Payment Method"
+                          value={row.methodId}
+                          onChange={(value) => updateSplitPayment(row.key, { methodId: value })}
+                          options={paymentMethodOptions}
+                          className="mt-1.5"
+                        />
+                        <div className={cn("mt-2 grid gap-3", rowMethod?.requiresReference ? "grid-cols-2" : "grid-cols-1")}>
+                          <Field
+                            label="Amount"
+                            type="number"
+                            value={row.amount}
+                            onChange={(value) => updateSplitPayment(row.key, { amount: value })}
+                            placeholder="0.00"
+                          />
+                          {rowMethod?.requiresReference && (
+                            <Field
+                              label="Reference"
+                              value={row.reference}
+                              onChange={(value) => updateSplitPayment(row.key, { reference: value })}
+                              placeholder="e.g. M-Pesa code"
+                              required
+                            />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  <button
+                    type="button"
+                    onClick={addSplitPayment}
+                    disabled={totals.lines.length === 0}
+                    className="mt-3 flex items-center gap-1 text-[11px] font-extrabold uppercase text-accent hover:underline disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+                  >
+                    <Plus className="size-3" aria-hidden="true" />
+                    Split payment
+                  </button>
 
                   <div className="mt-4 flex items-center justify-between rounded-lg bg-ink px-4 py-3">
                     <span className="text-xs font-extrabold uppercase tracking-wide text-white/70">
@@ -1670,6 +1811,27 @@ export function CheckoutRoute(): React.JSX.Element {
                       {formatCents(totals.grandTotalCents)}
                     </span>
                   </div>
+
+                  {isSplit && splitRemainingCents !== 0 && (
+                    <div
+                      className={cn(
+                        "mt-2 flex items-center justify-between rounded-lg border px-4 py-2.5",
+                        splitRemainingCents > 0 ? "border-danger/30 bg-danger-soft" : "border-line bg-soft"
+                      )}
+                    >
+                      <span className="text-xs font-extrabold uppercase tracking-wide text-muted">
+                        {splitRemainingCents > 0 ? "Still to pay" : "Change due"}
+                      </span>
+                      <span
+                        className={cn(
+                          "text-base font-extrabold tabular-nums",
+                          splitRemainingCents > 0 ? "text-danger" : "text-ink"
+                        )}
+                      >
+                        {formatCents(Math.abs(splitRemainingCents))}
+                      </span>
+                    </div>
+                  )}
 
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     <Button
@@ -1687,7 +1849,12 @@ export function CheckoutRoute(): React.JSX.Element {
                     </Button>
                     <Button
                       type="submit"
-                      disabled={totals.lines.length === 0 || completing || !activeDraft?.paymentMethodId}
+                      disabled={
+                        totals.lines.length === 0 ||
+                        completing ||
+                        !activeDraft?.paymentMethodId ||
+                        (isSplit && splitRemainingCents > 0)
+                      }
                       className="h-10 bg-teal text-xs hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {completing ? (

@@ -23,6 +23,12 @@ export function showSuccessToast(message: string): void {
   });
 }
 
+/** A neutral heads-up that wasn't triggered by the user's own action (e.g. a new stock request
+ * arriving from another device) — stays on screen longer than a success toast. */
+export function showInfoToast(message: string): void {
+  toast(message, { style: baseStyle, duration: 10000 });
+}
+
 export function showErrorToast(message: string): void {
   toast.error(message, {
     style: { ...baseStyle, border: "1px solid #ad3a29" },

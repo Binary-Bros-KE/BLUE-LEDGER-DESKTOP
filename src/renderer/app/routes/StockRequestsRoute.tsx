@@ -21,6 +21,7 @@ import { Modal } from "@renderer/shared/components/Modal";
 import { StatTile } from "@renderer/shared/components/StatTile";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
+import { useStockRequestAlertsStore } from "@renderer/shared/stores/stock-request-alerts-store";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { buildAvailableYears, currentYear, matchesYearFilter, yearFilterOptions } from "@renderer/shared/lib/year-filter";
@@ -135,8 +136,17 @@ export function StockRequestsRoute(): React.JSX.Element {
     }
   }, []);
 
+  // Reloads immediately when the approver alerts (useStockRequestAlerts) see the pending set change,
+  // and on a light timer for everyone else (e.g. a requester watching for their request to be
+  // decided) — both are just local-database reads; new requests from other devices land via sync.
+  const pendingKey = useStockRequestAlertsStore((state) => state.pending.map((request) => request.id).join(","));
   useEffect(() => {
     void loadRequests();
+  }, [loadRequests, pendingKey]);
+
+  useEffect(() => {
+    const interval = setInterval(() => void loadRequests(), 15 * 1000);
+    return () => clearInterval(interval);
   }, [loadRequests]);
 
   useEffect(() => {
@@ -175,9 +185,10 @@ export function StockRequestsRoute(): React.JSX.Element {
       .catch(() => undefined);
   }, [createOpen, needsStorefrontPicker, createStorefrontId]);
 
-  /** How much could actually ship to this storefront right now, purely as a hint — never enforced.
-   * See StockRequestAvailability's own doc comment (shared/types/main-store.ts) for the exact
-   * formula and why over-requesting is still allowed to submit. */
+  /** How much could actually ship to this storefront right now. Rows asking for more than this are
+   * highlighted below, but the real block is server-side (createStockRequest refuses the whole
+   * request) — this list can be stale if stock moves while the form is open. See
+   * StockRequestAvailability's own doc comment (shared/types/main-store.ts). */
   function getAvailableAtMainStore(productId: string): number {
     return availability.find((row) => row.productId === productId)?.availableQuantity ?? 0;
   }
@@ -757,14 +768,27 @@ export function StockRequestsRoute(): React.JSX.Element {
                           onChange={(event) => updateDraftItemQuantityDraft(item.productId, event.target.value)}
                           onBlur={() => updateDraftItemQuantity(item.productId, item.quantity)}
                           aria-label={`Quantity for ${item.productName}`}
-                          className="h-8 w-16 rounded-md border border-line px-2 text-center text-sm font-extrabold tabular-nums text-ink outline-none focus:border-accent"
+                          className={cn(
+                            "h-8 w-16 rounded-md border px-2 text-center text-sm font-extrabold tabular-nums outline-none focus:border-accent",
+                            item.quantity > getAvailableAtMainStore(item.productId)
+                              ? "border-danger text-danger"
+                              : "border-line text-ink"
+                          )}
                         />
                       </td>
                       <td
-                        className="px-3 py-2 text-right font-bold tabular-nums text-muted"
-                        title="How much could ship right now — just a hint, requesting more is still allowed"
+                        className={cn(
+                          "px-3 py-2 text-right font-bold tabular-nums",
+                          item.quantity > getAvailableAtMainStore(item.productId) ? "text-danger" : "text-muted"
+                        )}
+                        title="How much could ship right now — a request for more than this can't be submitted"
                       >
                         {getAvailableAtMainStore(item.productId)}
+                        {item.quantity > getAvailableAtMainStore(item.productId) && (
+                          <span className="block text-[10px] font-extrabold uppercase">
+                            {getAvailableAtMainStore(item.productId) === 0 ? "Not available" : "Not enough"}
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-right">
                         <button

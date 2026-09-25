@@ -42,6 +42,7 @@ type CloudBusinessProfileFields = {
   ownerEmail: string | null;
   vatRatePercent: number;
   pricesTaxInclusive: boolean;
+  invoiceEditsDisabled: boolean;
   /** When the CLOUD last received a business-profile push, from any device — compared against this
    * device's own local `business_profile_updated_at` before ever overwriting anything, so a
    * dashboard-side (or another device's) edit only wins if it's genuinely newer. */
@@ -286,6 +287,9 @@ export async function checkInWithServer(): Promise<void> {
         });
       }
     }
+    // Set from the admin dashboard only — applied on every check-in, not gated on the profile
+    // timestamp above (an older server that doesn't send it yet just means "editing allowed").
+    tenantRepository.setInvoiceEditsDisabledRow(result.invoiceEditsDisabled ?? false);
   } catch {
     // No internet / server unreachable / timed out — exactly the case this app must keep working
     // through. Silently skip; last cached state stands until the next successful check-in.

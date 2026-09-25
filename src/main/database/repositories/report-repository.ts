@@ -227,6 +227,9 @@ export type ApprovedReturnTransactionRow = {
   sale_employee_name: string;
   document_number: string | null;
   payment_method_name: string | null;
+  /** The original sale's raw payments JSON — a split sale (or an invoice paid in several methods)
+   * shows its refund as "Multiple" rather than guessing which method it went back through. */
+  sale_payments: string;
   /** SUM(sale_return_items.line_total_cents) for this return — each item's line_total is already
    * unit_price x returned_quantity, so a partial return only ever counts the units actually sent
    * back. */
@@ -256,6 +259,7 @@ export function findApprovedReturnTransactionRows(
         (e.first_name || ' ' || e.last_name) AS sale_employee_name,
         COALESCE(s.invoice_number, s.receipt_number) AS document_number,
         pm.name AS payment_method_name,
+        s.payments AS sale_payments,
         COALESCE((SELECT SUM(sri.line_total_cents) FROM sale_return_items sri WHERE sri.sale_return_id = sr.id), 0)
           AS returned_value_cents
       FROM sale_returns sr

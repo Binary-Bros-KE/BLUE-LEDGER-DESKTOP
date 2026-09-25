@@ -248,11 +248,26 @@ export function ReceiptPreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
 
         <div className="my-2 border-t border-dashed border-line" />
         <p className="text-[10px] leading-relaxed text-muted">
-          Payment: {vm.paymentMethodName ?? "-"}
-          {vm.paymentReference && (
+          {vm.splitPayments.length > 0 ? (
             <>
-              <br />
-              Ref: {vm.paymentReference}
+              Payment:
+              {vm.splitPayments.map((payment, index) => (
+                <span key={index}>
+                  <br />
+                  {payment.paymentMethodName}: {money(payment.amountCents)}
+                  {payment.reference ? ` (Ref: ${payment.reference})` : ""}
+                </span>
+              ))}
+            </>
+          ) : (
+            <>
+              Payment: {vm.paymentMethodName ?? "-"}
+              {vm.paymentReference && (
+                <>
+                  <br />
+                  Ref: {vm.paymentReference}
+                </>
+              )}
             </>
           )}
           {vm.amountReceivedCents !== null && (

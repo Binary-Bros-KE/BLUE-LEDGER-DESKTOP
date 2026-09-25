@@ -280,6 +280,15 @@ export function getMainStoreAvailabilityForStockRequest(storefrontId: string | n
   if (!location || location.tenant_id !== tenantId || !isStorefrontType(location.location_type as LocationType)) {
     return [];
   }
+  return computeStockRequestAvailability(tenantId, target);
+}
+
+/** The actual availability computation, shared by the read above (the form's "Available at Main
+ * Store" column) and stock-request-service.ts's createStockRequest (which now refuses to create a
+ * request for more than this). No permission check of its own — callers gate it. `target` must
+ * already be a validated storefront id. A product with no Main Store inventory row at all is simply
+ * absent from the result, which callers must treat as 0 available. */
+export function computeStockRequestAvailability(tenantId: string, target: string): StockRequestAvailability[] {
   const mainStore = requireMainStoreLocation(tenantId);
 
   // Per product: this target storefront's own named earmark, plus the derived unallocated pool —

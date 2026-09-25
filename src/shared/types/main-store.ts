@@ -40,11 +40,11 @@ export type MainStoreAllocationSummary = {
   allocatedByStorefront: Record<string, number>;
 };
 
-/** Purely informational — "how much could actually ship to my storefront if I asked" (unallocated +
- * this storefront's own earmark, the exact same formula distributeMainStoreStockCore itself draws
- * from), shown as a hint on the New Stock Request form so a requester isn't guessing blind. Never
- * enforced: a request for more than this is still allowed to submit, and still allowed to be
- * approved as long as stock is actually there BY THE TIME it's reviewed. Deliberately scoped to one
+/** "How much could actually ship to my storefront if I asked" (unallocated + this storefront's own
+ * earmark, the exact same formula distributeMainStoreStockCore itself draws from), shown on the New
+ * Stock Request form — and, per client request, enforced: createStockRequest refuses to create a
+ * request for more than this (see stock-request-service.ts). Approval still re-checks at review
+ * time since stock can move in between. Deliberately scoped to one
  * storefront rather than the whole allocation breakdown (MainStoreAllocationSummary) — a branch-scoped
  * Cashier/Manager creating a request has no "main_store" permission and must never see another
  * storefront's own earmarked stock. */

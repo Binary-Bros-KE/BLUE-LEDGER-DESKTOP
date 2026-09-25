@@ -23,6 +23,7 @@ import {
   requireActiveSession,
   type PreparedCart
 } from "@main/services/sale-service";
+import * as tenantRepository from "@main/database/repositories/tenant-repository";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import type { NotesSection } from "@shared/lib/document-sections";
 import { computePaymentStatus } from "@shared/lib/invoice";
@@ -371,6 +372,9 @@ export function updateInvoice(id: string, input: unknown): Sale {
   requirePermission("sales", "edit");
   const parsed: UpdateInvoiceInput = updateInvoiceSchema.parse(input);
   const { tenantId } = getCurrentTenant();
+  if (tenantRepository.findTenantRow()?.invoice_edits_disabled) {
+    throw new Error("Invoice editing is disabled for this business (Business Profile setting)");
+  }
   const row = requireEditableUnpaidInvoice(id, tenantId);
 
   const customer = customerRepository.findCustomerRowById(parsed.customerId);

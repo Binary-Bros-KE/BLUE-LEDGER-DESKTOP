@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import {
   CheckCircle2,
   Eye,
+  FileBarChart,
   Loader2,
   Pencil,
   Plus,
@@ -25,6 +26,8 @@ import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { ExportListRequest } from "@shared/types/export";
+import type { PaymentMethod } from "@shared/types/payment-method";
+import { SupplierStatementModal } from "./purchases/SupplierStatementModal";
 import {
   SUPPLIER_PAYMENT_OPTION_OPTIONS,
   type Supplier,
@@ -126,6 +129,8 @@ export function SuppliersRoute(): React.JSX.Element {
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [viewingSupplier, setViewingSupplier] = useState<Supplier | null>(null);
   const [showBalanceAdjustModal, setShowBalanceAdjustModal] = useState(false);
+  const [statementOpen, setStatementOpen] = useState(false);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [form, setForm] = useState<FormState>(() => emptyForm());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -137,8 +142,12 @@ export function SuppliersRoute(): React.JSX.Element {
   const loadSuppliers = useCallback(async () => {
     setLoadError(null);
     try {
-      const list = await window.blueLedger.supplier.list();
+      const [list, methodList] = await Promise.all([
+        window.blueLedger.supplier.list(),
+        window.blueLedger.paymentMethod.list()
+      ]);
       setSuppliers(list);
+      setPaymentMethods(methodList);
     } catch (err) {
       const message = getErrorMessage(err, "Failed to load suppliers");
       setLoadError(message);
@@ -353,6 +362,14 @@ export function SuppliersRoute(): React.JSX.Element {
           </div>
           <div className="flex items-center gap-2">
             {canExport && exportRequest && <ExportMenu request={exportRequest} />}
+            <Button
+              type="button"
+              onClick={() => setStatementOpen(true)}
+              className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+            >
+              <FileBarChart className="mr-1.5 size-4" aria-hidden="true" />
+              Statement
+            </Button>
             {canCreate && (
               <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
                 <Plus className="mr-1.5 size-4" aria-hidden="true" />
@@ -830,6 +847,14 @@ export function SuppliersRoute(): React.JSX.Element {
           }}
         />
       )}
+
+      <SupplierStatementModal
+        open={statementOpen}
+        onClose={() => setStatementOpen(false)}
+        suppliers={suppliers ?? []}
+        paymentMethods={paymentMethods}
+        onPaid={() => void loadSuppliers()}
+      />
     </motion.div>
   );
 }

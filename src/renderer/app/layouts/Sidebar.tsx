@@ -6,6 +6,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { useAuthStore } from "@renderer/shared/stores/auth-store";
 import { useUiStore } from "@renderer/shared/stores/ui-store";
+import { useStockRequestAlertsStore } from "@renderer/shared/stores/stock-request-alerts-store";
 import { cn } from "@renderer/shared/lib/cn";
 import { smallLogoBoxClassName } from "@renderer/shared/lib/logo";
 import { navGroups, type NavItem } from "./navigation";
@@ -26,6 +27,7 @@ export function Sidebar(): React.JSX.Element {
   // being on an e-commerce plan (Tenant.ecommerceEnabled OR Plan.featureEcommerce, cached from the
   // last activation/heartbeat). Without the plan, the tab stays hidden even for a Super Admin.
   const ecommerceEnabled = useAppStore((state) => state.context?.tenant.ecommerceEnabled ?? false);
+  const pendingStockRequestCount = useStockRequestAlertsStore((state) => state.pending.length);
 
   const visibleGroups = useMemo(
     () =>
@@ -157,6 +159,7 @@ export function Sidebar(): React.JSX.Element {
                       item={item}
                       active={item.key === activeNavKey}
                       collapsed={collapsed}
+                      badgeCount={item.key === "stock-requests" ? pendingStockRequestCount : 0}
                       onSelect={() => setActiveNavKey(item.key)}
                     />
                   </div>
@@ -254,11 +257,14 @@ function NavButton({
   item,
   active,
   collapsed,
+  badgeCount = 0,
   onSelect
 }: {
   item: NavItem;
   active: boolean;
   collapsed: boolean;
+  /** Live count shown as a pill (a dot when the sidebar is collapsed) — 0 hides it. */
+  badgeCount?: number;
   onSelect: () => void;
 }): React.JSX.Element {
   const [tooltipAnchor, setTooltipAnchor] = useState<DOMRect | null>(null);
@@ -297,6 +303,17 @@ function NavButton({
             </motion.span>
           )}
         </AnimatePresence>
+        {badgeCount > 0 &&
+          (collapsed ? (
+            <span className="absolute right-2 top-1.5 z-10 size-2.5 rounded-full bg-danger ring-2 ring-primary" aria-hidden="true" />
+          ) : (
+            <span
+              className="relative z-10 ml-auto grid min-w-5 place-items-center rounded-full bg-danger px-1.5 text-[10px] font-extrabold leading-5 text-white"
+              aria-label={`${badgeCount} pending`}
+            >
+              {badgeCount > 99 ? "99+" : badgeCount}
+            </span>
+          ))}
       </button>
 
       {tooltipAnchor &&

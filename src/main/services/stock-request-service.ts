@@ -1,10 +1,11 @@
 import { runInTransaction } from "@main/database/connection";
 import * as inventoryRepository from "@main/database/repositories/inventory-repository";
 import * as locationRepository from "@main/database/repositories/location-repository";
+import * as productRepository from "@main/database/repositories/product-repository";
 import * as stockRequestRepository from "@main/database/repositories/stock-request-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
-import { distributeMainStoreStockCore } from "@main/services/main-store-service";
+import { computeStockRequestAvailability, distributeMainStoreStockCore } from "@main/services/main-store-service";
 import { assertNotAlreadyDecidedRemotely } from "@main/services/sync-engine";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import {
@@ -83,6 +84,19 @@ export function listStockRequests(): StockRequestListItem[] {
   return stockRequestRepository.findAllStockRequestRows(tenantId, locationId).map(mapListRow);
 }
 
+/** Powers the approver alerts (sidebar badge, toast, Windows notification, dashboard card) — polled
+ * every few seconds by the renderer, so it returns only the pending requests, not the whole history.
+ * Gated on "approve" (not "view"): only someone who can act on a request should be alerted to it. */
+export function listPendingStockRequests(): StockRequestListItem[] {
+  requirePermission("stock_requests", "approve");
+  const { tenantId } = getCurrentTenant();
+  const locationId = getCurrentBranchScope();
+  return stockRequestRepository
+    .findAllStockRequestRows(tenantId, locationId)
+    .filter((row) => row.status === "pending")
+    .map(mapListRow);
+}
+
 export function getStockRequest(id: string): StockRequest {
   requirePermission("stock_requests", "view");
   return buildStockRequest(id);
@@ -108,6 +122,33 @@ export function createStockRequest(input: unknown): StockRequest {
   const location = locationRepository.findLocationRowById(storefrontId);
   if (!location || location.tenant_id !== tenantId || !isStorefrontType(location.location_type as LocationType)) {
     throw new Error("Storefront not found");
+  }
+
+  // Client request: a request can no longer be created for stock Main Store doesn't have — checked
+  // against the exact same "could ship right now" number the form's Available column shows (this
+  // storefront's own earmark + the unallocated pool), nothing is inserted if any line is short.
+  // Approval still re-checks at review time, since stock can move between request and review.
+  const availableByProduct = new Map(
+    computeStockRequestAvailability(tenantId, storefrontId).map((row) => [row.productId, row.availableQuantity])
+  );
+  const requestedByProduct = new Map<string, number>();
+  for (const item of parsed.items) {
+    requestedByProduct.set(item.productId, (requestedByProduct.get(item.productId) ?? 0) + item.quantity);
+  }
+  const shortages: string[] = [];
+  for (const [productId, requested] of requestedByProduct) {
+    const available = availableByProduct.get(productId) ?? 0;
+    if (requested > available) {
+      const name = productRepository.findProductRowById(productId)?.name ?? productId;
+      shortages.push(
+        available <= 0
+          ? `"${name}" is not available at Main Store`
+          : `"${name}": requested ${requested}, only ${available} available`
+      );
+    }
+  }
+  if (shortages.length > 0) {
+    throw new Error(`Not enough stock at Main Store — ${shortages.join("; ")}. Reduce the quantity or remove the item.`);
   }
 
   const requestNumber = generateStockRequestNumber(tenantId);

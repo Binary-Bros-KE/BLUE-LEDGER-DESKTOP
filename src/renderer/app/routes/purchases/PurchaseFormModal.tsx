@@ -314,9 +314,11 @@ export function PurchaseFormModal({
         onClose={onClose}
         title={editingPurchase ? `Edit ${editingPurchase.purchaseNumber}` : "New Purchase Order"}
         description="Record inventory you're buying from a supplier — stock only enters once goods are received."
-        widthClassName="max-w-2xl"
+        widthClassName="max-w-7xl"
       >
         <div>
+          <div className="grid gap-6 lg:h-[calc(88vh-9rem)] lg:grid-cols-[minmax(0,4fr)_minmax(0,6fr)] lg:grid-rows-1">
+            <div className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:pr-2">
           {error && (
             <div className="mb-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
               {error}
@@ -442,118 +444,7 @@ export function PurchaseFormModal({
                 </div>
               )}
             </div>
-
-            <div className="mt-3 space-y-2">
-              {items.length === 0 ? (
-                <p className="text-xs font-semibold text-muted">No products added yet.</p>
-              ) : (
-                items.map((line) => (
-                  <div key={line.productId} className="rounded-lg border border-line p-2.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="line-clamp-2 text-sm font-extrabold leading-snug text-ink" title={line.name}>
-                          {line.name}
-                        </p>
-                        <p className="text-[11px] font-semibold text-muted">{line.sku}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => removeItemLine(line.productId)}
-                        className="text-[11px] font-extrabold uppercase text-danger hover:underline cursor-pointer"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                    <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
-                      <label className="block">
-                        <span className="text-[10px] font-bold uppercase text-muted">Qty</span>
-                        <input
-                          type="number"
-                          min={1}
-                          // Renders "" instead of 0 while the field is mid-edit (cleared to type a new
-                          // number) — a controlled input forced back to a number on every keystroke
-                          // fights the user's own deletion, making it impossible to clear "1" and type
-                          // "80" (see money.ts's own fromCents/toCents split for the same lesson
-                          // applied to price fields). The clamp back to a minimum of 1 only happens on
-                          // blur, once the user is done typing.
-                          value={line.orderedQuantity === 0 ? "" : line.orderedQuantity}
-                          onChange={(event) => {
-                            const raw = event.target.value;
-                            const parsed = raw === "" ? 0 : Math.floor(Number(raw));
-                            updateItemLine(line.productId, {
-                              orderedQuantity: Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
-                            });
-                          }}
-                          onBlur={() => {
-                            if (line.orderedQuantity <= 0) updateItemLine(line.productId, { orderedQuantity: 1 });
-                          }}
-                          className="mt-1 h-8 w-full rounded-md border border-line px-1.5 text-center text-xs font-bold outline-none focus:border-accent"
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="text-[10px] font-bold uppercase text-muted">Unit Cost</span>
-                        <input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={line.unitCost}
-                          onChange={(event) => updateItemLine(line.productId, { unitCost: event.target.value })}
-                          className="mt-1 h-8 w-full rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="text-[10px] font-bold uppercase text-muted" title="Saved as this product's new selling price when this purchase is saved as Ordered">
-                          Selling Price
-                        </span>
-                        <input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={line.sellingPrice}
-                          onChange={(event) => updateItemLine(line.productId, { sellingPrice: event.target.value })}
-                          className="mt-1 h-8 w-full rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="text-[10px] font-bold uppercase text-muted">Discount</span>
-                        <input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={line.discount}
-                          onChange={(event) => updateItemLine(line.productId, { discount: event.target.value })}
-                          className="mt-1 h-8 w-full rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="text-[10px] font-bold uppercase text-muted">Tax</span>
-                        <select
-                          value={line.taxType}
-                          onChange={(event) =>
-                            updateItemLine(line.productId, { taxType: event.target.value as ProductTaxType })
-                          }
-                          className="mt-1 h-8 w-full rounded-md border border-line px-1 text-center text-xs font-bold outline-none focus:border-accent"
-                        >
-                          {TAX_TYPE_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.value === "vat" ? `VAT (${tenantTaxConfig.vatRatePercent}%)` : option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-                    <div className="mt-2 flex items-center justify-between text-xs font-semibold text-muted">
-                      <span>Tax: {formatCents(lineTaxCents(line, productById.get(line.productId), tenantTaxConfig))}</span>
-                      <span className="text-sm font-extrabold text-ink">
-                        {formatCents(lineGrossCents(line, productById.get(line.productId), tenantTaxConfig))}
-                      </span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
           </div>
-
           <Field
             label="Shipping Cost"
             type="number"
@@ -605,7 +496,127 @@ export function PurchaseFormModal({
             </div>
           </div>
 
-          <div className="mt-4 space-y-1 border-t border-line pt-4 text-sm">
+          <p className="mt-6 text-[11px] font-semibold text-muted">
+            Saving as Ordered updates each product&apos;s buying and selling price to what&apos;s entered above
+            (its minimum price moves with the new buying price too, so a sale can never go below it).
+          </p>
+            </div>
+
+          <div className="flex min-h-0 flex-col rounded-lg border border-line lg:h-full">
+            <div className="flex flex-none items-center justify-between border-b border-line bg-soft/60 px-3 py-1.5">
+              <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Items ({items.length})</p>
+            </div>
+            <div className="max-h-[24rem] min-h-[8rem] flex-1 overflow-y-auto lg:max-h-none">
+              {items.length === 0 ? (
+                <p className="p-3 text-xs font-semibold text-muted">No products added yet.</p>
+              ) : (
+                items.map((line) => (
+                  <div key={line.productId} className="border-b border-line px-3 py-1.5 last:border-b-0">
+                    <div className="flex items-start gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="line-clamp-2 text-xs font-extrabold leading-tight text-ink" title={line.name}>
+                          {line.name}
+                        </p>
+                        <p className="text-[10px] font-semibold text-muted">
+                          {line.sku} · Tax {formatCents(lineTaxCents(line, productById.get(line.productId), tenantTaxConfig))}
+                        </p>
+                      </div>
+                      <span className="flex-none text-sm font-extrabold tabular-nums text-ink">
+                        {formatCents(lineGrossCents(line, productById.get(line.productId), tenantTaxConfig))}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeItemLine(line.productId)}
+                        aria-label="Remove item"
+                        title="Remove"
+                        className="grid size-6 flex-none place-items-center rounded-md text-danger transition hover:bg-danger-soft cursor-pointer"
+                      >
+                        <X className="size-4" aria-hidden="true" />
+                      </button>
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <label className="flex items-center gap-1 text-[10px] font-bold text-muted">
+                        Qty
+                        <input
+                          type="number"
+                          min={1}
+                          // Renders "" instead of 0 while the field is mid-edit (cleared to type a new
+                          // number) — a controlled input forced back to a number on every keystroke
+                          // fights the user's own deletion, making it impossible to clear "1" and type
+                          // "80" (see money.ts's own fromCents/toCents split for the same lesson
+                          // applied to price fields). The clamp back to a minimum of 1 only happens on
+                          // blur, once the user is done typing.
+                          value={line.orderedQuantity === 0 ? "" : line.orderedQuantity}
+                          onChange={(event) => {
+                            const raw = event.target.value;
+                            const parsed = raw === "" ? 0 : Math.floor(Number(raw));
+                            updateItemLine(line.productId, {
+                              orderedQuantity: Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
+                            });
+                          }}
+                          onBlur={() => {
+                            if (line.orderedQuantity <= 0) updateItemLine(line.productId, { orderedQuantity: 1 });
+                          }}
+                          className="h-7 w-14 rounded-md border border-line px-1 text-center text-xs font-bold outline-none focus:border-accent"
+                        />
+                      </label>
+                      <label className="flex items-center gap-1 text-[10px] font-bold text-muted">
+                        Unit Cost
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={line.unitCost}
+                          onChange={(event) => updateItemLine(line.productId, { unitCost: event.target.value })}
+                          className="h-7 w-24 rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
+                        />
+                      </label>
+                      <label
+                        className="flex items-center gap-1 text-[10px] font-bold text-muted"
+                        title="Saved as this product's new selling price when this purchase is saved as Ordered"
+                      >
+                        Selling
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={line.sellingPrice}
+                          onChange={(event) => updateItemLine(line.productId, { sellingPrice: event.target.value })}
+                          className="h-7 w-24 rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
+                        />
+                      </label>
+                      <label className="flex items-center gap-1 text-[10px] font-bold text-muted">
+                        Disc.
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={line.discount}
+                          onChange={(event) => updateItemLine(line.productId, { discount: event.target.value })}
+                          className="h-7 w-16 rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
+                        />
+                      </label>
+                      <label className="flex items-center gap-1 text-[10px] font-bold text-muted">
+                        Tax
+                        <select
+                          value={line.taxType}
+                          onChange={(event) => updateItemLine(line.productId, { taxType: event.target.value as ProductTaxType })}
+                          className="h-7 w-28 rounded-md border border-line px-1 text-center text-[11px] font-bold outline-none focus:border-accent"
+                        >
+                          {TAX_TYPE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.value === "vat" ? `VAT (${tenantTaxConfig.vatRatePercent}%)` : option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="flex-none border-t border-line bg-soft/40 px-3 py-2">
+              <div className="space-y-0.5 text-xs">
             <div className="flex justify-between text-muted">
               <span className="font-semibold">Subtotal</span>
               <span className="font-bold tabular-nums">{formatCents(totals.subtotalCents)}</span>
@@ -629,13 +640,7 @@ export function PurchaseFormModal({
               <span>{formatCents(totals.grandTotalCents)}</span>
             </div>
           </div>
-
-          <p className="mt-6 text-[11px] font-semibold text-muted">
-            Saving as Ordered updates each product&apos;s buying and selling price to what&apos;s entered above
-            (its minimum price moves with the new buying price too, so a sale can never go below it).
-          </p>
-
-          <div className="mt-2 flex items-center justify-end gap-3 border-t border-line pt-5">
+              <div className="mt-3 flex items-center justify-end gap-3">
             <Button
               type="button"
               onClick={onClose}
@@ -678,6 +683,9 @@ export function PurchaseFormModal({
                 </Button>
               </>
             )}
+              </div>
+            </div>
+          </div>
           </div>
         </div>
       </Modal>

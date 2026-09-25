@@ -219,8 +219,16 @@ function writeReceiptToPrinter(printerInstance: ThermalPrinter, vm: ReceiptViewM
     printerInstance.drawLine();
   }
 
-  printerInstance.println(`Payment: ${vm.paymentMethodName ?? "-"}`);
-  if (vm.paymentReference) printerInstance.println(`Ref: ${vm.paymentReference}`);
+  if (vm.splitPayments.length > 0) {
+    printerInstance.println("Payment:");
+    for (const payment of vm.splitPayments) {
+      printerInstance.leftRight(payment.paymentMethodName, money(payment.amountCents));
+      if (payment.reference) printerInstance.println(`  Ref: ${payment.reference}`);
+    }
+  } else {
+    printerInstance.println(`Payment: ${vm.paymentMethodName ?? "-"}`);
+    if (vm.paymentReference) printerInstance.println(`Ref: ${vm.paymentReference}`);
+  }
   if (vm.amountReceivedCents !== null) printerInstance.leftRight("Received", money(vm.amountReceivedCents));
   if (vm.changeGivenCents !== null && vm.changeGivenCents > 0) {
     printerInstance.leftRight("Change", money(vm.changeGivenCents));
@@ -475,8 +483,16 @@ function buildReceiptHtml(vm: ReceiptViewModel): string {
     ${vm.includeTaxBreakdown ? buildTaxBreakdownHtml(vm.taxBreakdown, vm.vatRatePercent, (cents) => money(cents), "items") : ""}
     <hr/>
     <p class="muted">
-      Payment: ${escapeHtml(vm.paymentMethodName ?? "-")}
-      ${vm.paymentReference ? `<br/>Ref: ${escapeHtml(vm.paymentReference)}` : ""}
+      ${
+        vm.splitPayments.length > 0
+          ? `Payment:${vm.splitPayments
+              .map(
+                (payment) =>
+                  `<br/>${escapeHtml(payment.paymentMethodName)}: ${money(payment.amountCents)}${payment.reference ? ` (Ref: ${escapeHtml(payment.reference)})` : ""}`
+              )
+              .join("")}`
+          : `Payment: ${escapeHtml(vm.paymentMethodName ?? "-")}${vm.paymentReference ? `<br/>Ref: ${escapeHtml(vm.paymentReference)}` : ""}`
+      }
       ${vm.amountReceivedCents !== null ? `<br/>Received: ${money(vm.amountReceivedCents)}` : ""}
       ${vm.changeGivenCents !== null && vm.changeGivenCents > 0 ? `<br/>Change: ${money(vm.changeGivenCents)}` : ""}
     </p>
@@ -707,8 +723,16 @@ function buildReceiptLetterheadHtml(vm: ReceiptViewModel, logo: DocumentLogo): s
 
     <div class="payment">
       <p class="label" style="font-size:10px;text-transform:uppercase;color:#83795f;font-weight:bold;">Payment</p>
-      <p>${escapeHtml(vm.paymentMethodName ?? "-")}</p>
-      ${vm.paymentReference ? `<p>Ref: ${escapeHtml(vm.paymentReference)}</p>` : ""}
+      ${
+        vm.splitPayments.length > 0
+          ? vm.splitPayments
+              .map(
+                (payment) =>
+                  `<p>${escapeHtml(payment.paymentMethodName)}: ${money(payment.amountCents)}${payment.reference ? ` (Ref: ${escapeHtml(payment.reference)})` : ""}</p>`
+              )
+              .join("")
+          : `<p>${escapeHtml(vm.paymentMethodName ?? "-")}</p>${vm.paymentReference ? `<p>Ref: ${escapeHtml(vm.paymentReference)}</p>` : ""}`
+      }
       ${vm.amountReceivedCents !== null ? `<p>Received: ${money(vm.amountReceivedCents)}</p>` : ""}
       ${vm.changeGivenCents !== null && vm.changeGivenCents > 0 ? `<p>Change: ${money(vm.changeGivenCents)}</p>` : ""}
     </div>

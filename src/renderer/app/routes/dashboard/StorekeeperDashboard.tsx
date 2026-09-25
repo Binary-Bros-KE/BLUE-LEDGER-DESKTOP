@@ -10,6 +10,7 @@ import { showErrorToast } from "@renderer/shared/lib/toast";
 import { useUiStore } from "@renderer/shared/stores/ui-store";
 import { DashboardActionCard } from "@renderer/app/routes/dashboard/DashboardActionCard";
 import { DashboardShell } from "@renderer/app/routes/dashboard/DashboardShell";
+import { PendingStockRequestsCard } from "@renderer/app/routes/dashboard/PendingStockRequestsCard";
 import { SyncStatusCard } from "@renderer/app/routes/dashboard/SyncStatusCard";
 import { OverviewCard } from "@renderer/app/routes/reports/FinancialOverviewCards";
 import type { InventoryReportData } from "@shared/types/inventory-report";
@@ -299,6 +300,7 @@ export function StorekeeperDashboard(): React.JSX.Element {
       }
       aside={
         <>
+          <PendingStockRequestsCard />
           <DashboardActionCard
             tone="warning"
             label="Low Stock"

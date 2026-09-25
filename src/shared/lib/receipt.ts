@@ -49,6 +49,10 @@ export type ReceiptViewModel = {
   grandTotalCents: number;
   paymentMethodName: string | null;
   paymentReference: string | null;
+  /** Filled ONLY when the customer paid with more than one method (split payment at checkout) — one
+   * entry per payment, amounts adding up to the grand total. Empty for a single-method sale, which
+   * is fully described by paymentMethodName/paymentReference above. */
+  splitPayments: Array<{ paymentMethodName: string; amountCents: number; reference: string | null }>;
   amountReceivedCents: number | null;
   changeGivenCents: number | null;
 };
@@ -123,6 +127,14 @@ export function buildReceiptViewModel(sale: Sale, business: ReceiptBusinessInfo)
     grandTotalCents: sale.grandTotalCents,
     paymentMethodName: sale.paymentMethodName,
     paymentReference: sale.paymentReference,
+    splitPayments:
+      sale.payments.length > 1
+        ? sale.payments.map((payment) => ({
+            paymentMethodName: payment.paymentMethodName,
+            amountCents: payment.amountCents,
+            reference: payment.reference
+          }))
+        : [],
     amountReceivedCents: sale.amountReceivedCents,
     changeGivenCents: sale.changeGivenCents
   };

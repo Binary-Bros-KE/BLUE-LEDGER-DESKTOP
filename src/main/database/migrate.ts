@@ -3316,6 +3316,16 @@ const migrations = [
           WHERE sbe.reference_type = 'purchase' AND sbe.reference_id = p.id
         ), 0) != 0;
     `
+  },
+  {
+    version: 94,
+    name: "tenant_invoice_edits_disabled",
+    sql: `
+      -- Client request: a business can turn invoice editing off entirely (Business Profile toggle,
+      -- synced to every device and the mobile app like the other profile fields). Default 0 keeps
+      -- editing enabled for every existing tenant.
+      ALTER TABLE tenant ADD COLUMN invoice_edits_disabled INTEGER NOT NULL DEFAULT 0;
+    `
   }
 ] as const;
 

@@ -192,7 +192,17 @@ function computeCashRevenue(
 
   let retailWholesaleCents = 0;
   for (const row of retailWholesaleRows) {
-    addToBucket(row.payment_method_id ?? "other", row.payment_method_name || "Other", row.grand_total_cents);
+    // A split-payment checkout sale (paid with 2+ methods) keeps every payment in `payments`, whose
+    // amounts add up to exactly the grand total — count each under its own method. A single-method
+    // sale has none, and is still fully described by payment_method_id.
+    const splitPayments = parseSalePayments(row.payments);
+    if (splitPayments.length > 0) {
+      for (const payment of splitPayments) {
+        addToBucket(payment.paymentMethodId ?? "other", payment.paymentMethodName || "Other", payment.amountCents);
+      }
+    } else {
+      addToBucket(row.payment_method_id ?? "other", row.payment_method_name || "Other", row.grand_total_cents);
+    }
     retailWholesaleCents += row.grand_total_cents;
   }
 
@@ -634,7 +644,10 @@ export function getSalesTransactions(input: unknown): SalesTransactionRow[] {
     locationName: row.location_name,
     employeeName: row.employee_name,
     customerName: row.customer_name,
-    paymentMethodName: row.invoice_number !== null ? paymentMethodSummaryForInvoice(row) : row.payment_method_name,
+    paymentMethodName:
+      row.invoice_number !== null
+        ? paymentMethodSummaryForInvoice(row)
+        : (paymentMethodSummaryForInvoice(row) ?? row.payment_method_name),
     amountCents: row.grand_total_cents,
     amountPaidCents: row.amount_paid_cents,
     paymentStatus: row.payment_status,
@@ -757,21 +770,43 @@ export function getPaymentTransactions(input: unknown): PaymentTransactionRow[] 
         });
       }
     } else {
-      results.push({
-        id: row.id,
-        transactionCode: row.payment_reference ?? row.receipt_number ?? row.id,
-        occurredAt: row.completed_at,
-        locationName: row.location_name,
-        paymentMethodName: row.payment_method_name,
-        processedByName: row.employee_name,
-        performedByEmployeeId: row.employee_id,
-        partyName,
-        partyLabel: "Customer",
-        sourceType: "sale",
-        direction: "in",
-        amountCents: row.grand_total_cents,
-        status
-      });
+      const splitPayments = parseSalePaymentsJson(row.payments);
+      if (splitPayments.length > 0) {
+        // Split-payment checkout sale — one transaction per payment, like an invoice's payments.
+        for (const payment of splitPayments) {
+          results.push({
+            id: `${row.id}:${payment.id}`,
+            transactionCode: payment.reference ?? row.receipt_number ?? row.id,
+            occurredAt: row.completed_at,
+            locationName: row.location_name,
+            paymentMethodName: payment.paymentMethodName,
+            processedByName: row.employee_name,
+            performedByEmployeeId: row.employee_id,
+            partyName,
+            partyLabel: "Customer",
+            sourceType: "sale",
+            direction: "in",
+            amountCents: payment.amountCents,
+            status
+          });
+        }
+      } else {
+        results.push({
+          id: row.id,
+          transactionCode: row.payment_reference ?? row.receipt_number ?? row.id,
+          occurredAt: row.completed_at,
+          locationName: row.location_name,
+          paymentMethodName: row.payment_method_name,
+          processedByName: row.employee_name,
+          performedByEmployeeId: row.employee_id,
+          partyName,
+          partyLabel: "Customer",
+          sourceType: "sale",
+          direction: "in",
+          amountCents: row.grand_total_cents,
+          status
+        });
+      }
     }
   }
 
@@ -822,7 +857,12 @@ export function getPaymentTransactions(input: unknown): PaymentTransactionRow[] 
       transactionCode: row.document_number ?? row.return_id,
       occurredAt: row.approved_at,
       locationName: row.location_name,
-      paymentMethodName: row.payment_method_name,
+      // The app never records which method a refund actually goes back through, so a sale that was
+      // paid with more than one method reads "Multiple" instead of picking one at random.
+      paymentMethodName:
+        new Set(parseSalePayments(row.sale_payments).map((payment) => payment.paymentMethodName)).size > 1
+          ? "Multiple"
+          : row.payment_method_name,
       processedByName: row.sale_employee_name,
       performedByEmployeeId: row.sale_employee_id,
       partyName: row.customer_name ?? "Walk-in customer",

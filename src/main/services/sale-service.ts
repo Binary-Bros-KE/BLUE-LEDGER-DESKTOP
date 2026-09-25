@@ -24,7 +24,7 @@ import {
 import { computeLineTax, resolveProductTaxConfig, type TenantTaxConfig } from "@shared/lib/tax-calculation";
 import { isStorefrontType, type LocationType } from "@shared/types/location";
 import type { ProductTaxType } from "@shared/types/product";
-import type { PendingSaleListItem, Sale, SaleListItem, SaleServiceCharge } from "@shared/types/sale";
+import type { PendingSaleListItem, Sale, SaleListItem, SalePayment, SaleServiceCharge } from "@shared/types/sale";
 import type { ProductRow } from "@main/database/repositories/product-repository";
 
 export type PreparedItem = {
@@ -476,7 +476,26 @@ export function suspendSale(input: unknown): { id: string } {
       // No delivery_notes row (and no number allocated) while merely held — see persistCartExtras'
       // own doc comment for why. Just the raw cart input, stashed for the Checkout screen to
       // restore on resume.
-      deliveryDraftJson: cart.delivery ? JSON.stringify(cart.delivery) : null
+      deliveryDraftJson: cart.delivery ? JSON.stringify(cart.delivery) : null,
+      // The extra rows of a split bill, kept in the same list a completed split sale uses — as-is
+      // (possibly half-filled), since nothing has been paid yet. Only ever read back on resume.
+      ...(parsed.heldPayments && parsed.heldPayments.length > 0
+        ? {
+            payments: parsed.heldPayments.map(
+              (row): SalePayment => ({
+                id: `held_payment_${randomUUID()}`,
+                paymentMethodId: row.paymentMethodId,
+                paymentMethodName: "",
+                amountCents: row.amountCents,
+                reference: row.reference,
+                receivedBy: employeeId,
+                receivedByName: "",
+                receivedAt: new Date().toISOString(),
+                notes: null
+              })
+            )
+          }
+        : {})
     });
 
     for (const item of cart.items) {
@@ -559,6 +578,76 @@ export function setSaleIncludeBusinessInfo(id: string, includeBusinessInfo: bool
  * prices instead of re-quoting). Always re-validates stock at insert time via applyValidatedStockMovement,
  * regardless of where the cart's prices came from.
  */
+/**
+ * Turns a split-payment request (2+ methods) into the stored SalePayment list. Rules: every method
+ * must exist, be active, and carry a reference if it needs one; together the payments must cover the
+ * grand total; anything tendered above the total is change, which can only come back out of a payment
+ * whose method needs no reference (cash) — so the stored amounts always add up to EXACTLY the total,
+ * which is what revenue reports, receipts and the Transactions tab then read. The largest payment is
+ * returned first (it becomes the sale's primary payment method for anything still reading that column).
+ */
+function buildSplitPayments(
+  tenantId: string,
+  employeeId: string,
+  requested: Array<{ paymentMethodId: string; amountCents: number; reference: string | null }>,
+  grandTotalCents: number
+): { payments: SalePayment[]; tenderedCents: number } {
+  const session = getSession();
+  const receivedByName = session ? `${session.employee.firstName} ${session.employee.lastName}` : "Unknown";
+  const now = new Date().toISOString();
+
+  const rows = requested.map((entry) => {
+    const method = paymentMethodRepository.findPaymentMethodRowById(entry.paymentMethodId);
+    if (!method || method.tenant_id !== tenantId) {
+      throw new Error("Payment method not found");
+    }
+    if (!method.is_active) {
+      throw new Error(`"${method.name}" is not active`);
+    }
+    if (method.requires_reference && !entry.reference) {
+      throw new Error(`${method.name} requires a reference number`);
+    }
+    return { method, amountCents: entry.amountCents, reference: entry.reference };
+  });
+
+  const tenderedCents = rows.reduce((sum, row) => sum + row.amountCents, 0);
+  if (tenderedCents < grandTotalCents) {
+    throw new Error(
+      `Payments add up to ${(tenderedCents / 100).toFixed(2)} but the total is ${(grandTotalCents / 100).toFixed(2)}`
+    );
+  }
+
+  const changeCents = tenderedCents - grandTotalCents;
+  if (changeCents > 0) {
+    const cashLike = rows
+      .filter((row) => !row.method.requires_reference)
+      .sort((a, b) => b.amountCents - a.amountCents)[0];
+    if (!cashLike || cashLike.amountCents < changeCents) {
+      throw new Error(
+        "Payments add up to more than the total, and the extra can only be given back as change from a cash-type payment"
+      );
+    }
+    cashLike.amountCents -= changeCents;
+  }
+
+  const payments: SalePayment[] = rows
+    .filter((row) => row.amountCents > 0)
+    .sort((a, b) => b.amountCents - a.amountCents)
+    .map((row) => ({
+      id: `payment_${randomUUID()}`,
+      paymentMethodId: row.method.id,
+      paymentMethodName: row.method.name,
+      amountCents: row.amountCents,
+      reference: row.reference,
+      receivedBy: employeeId,
+      receivedByName,
+      receivedAt: now,
+      notes: null
+    }));
+
+  return { payments, tenderedCents };
+}
+
 export function insertCompletedSaleFromCart(input: {
   tenantId: string;
   employeeId: string;
@@ -579,6 +668,10 @@ export function insertCompletedSaleFromCart(input: {
   includeTaxBreakdown?: boolean;
   /** See includeTaxBreakdown above — same defaulting/quotation-conversion-passthrough rule. */
   includeBusinessInfo?: boolean;
+  /** Set only for a split-payment sale (see buildSplitPayments) — the full list of payments, whose
+   * amounts already add up to exactly the grand total. paymentMethodId/paymentReference above are
+   * then the largest of them, kept so everything reading the single-method columns still works. */
+  payments?: SalePayment[];
 }): Sale {
   const { tenantId, employeeId, locationId, cart } = input;
 
@@ -616,7 +709,8 @@ export function insertCompletedSaleFromCart(input: {
       notes: input.notes,
       includeTaxBreakdown: input.includeTaxBreakdown,
       includeBusinessInfo: input.includeBusinessInfo,
-      completedAt: now
+      completedAt: now,
+      ...(input.payments ? { payments: input.payments } : {})
     });
 
     for (const item of cart.items) {
@@ -687,6 +781,32 @@ export function completeSale(input: unknown): Sale {
   requirePermission("sales", "create");
   const parsed: CheckoutInput = checkoutInputSchema.parse(input);
   const { tenantId, employeeId, locationId } = requireActiveSession(parsed.locationId);
+
+  if (parsed.payments && parsed.payments.length > 1) {
+    assertCustomerExists(tenantId, parsed.customerId);
+    const splitCart = prepareCart(tenantId, parsed.items, {
+      serviceCharges: parsed.serviceCharges,
+      delivery: parsed.delivery
+    });
+    const split = buildSplitPayments(tenantId, employeeId, parsed.payments, splitCart.grandTotalCents);
+    const primary = split.payments[0]!;
+    return insertCompletedSaleFromCart({
+      tenantId,
+      employeeId,
+      locationId,
+      customerId: parsed.customerId,
+      walkInName: parsed.customerId ? null : parsed.walkInName,
+      cart: splitCart,
+      paymentMethodId: primary.paymentMethodId,
+      paymentReference: primary.reference,
+      amountReceivedCents: split.tenderedCents,
+      notes: parsed.notes,
+      resumeSaleId: parsed.resumeSaleId,
+      includeTaxBreakdown: parsed.includeTaxBreakdown,
+      includeBusinessInfo: parsed.includeBusinessInfo,
+      payments: split.payments
+    });
+  }
 
   const paymentMethod = paymentMethodRepository.findPaymentMethodRowById(parsed.paymentMethodId);
   if (!paymentMethod || paymentMethod.tenant_id !== tenantId) {

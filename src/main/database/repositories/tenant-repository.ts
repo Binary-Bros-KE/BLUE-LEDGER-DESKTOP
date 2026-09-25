@@ -34,6 +34,7 @@ export type TenantRow = {
   owner_email: string | null;
   vat_rate_percent: number;
   prices_tax_inclusive: number;
+  invoice_edits_disabled: number;
   receipt_header: string | null;
   receipt_footer: string | null;
   // Fallback-only, like receipt_header/receipt_footer above — no Business Profile UI sets these,
@@ -281,6 +282,7 @@ export function mapTenantRow(row: TenantRow, appVersion: string): TenantRecord {
     ownerEmail: row.owner_email,
     vatRatePercent: row.vat_rate_percent,
     pricesTaxInclusive: Boolean(row.prices_tax_inclusive),
+    invoiceEditsDisabled: Boolean(row.invoice_edits_disabled),
     receiptHeader: row.receipt_header,
     receiptFooter: row.receipt_footer,
     licenseKey: row.license_key,
@@ -551,4 +553,13 @@ export function applyBusinessProfileFromCloudRow(input: {
       input.pricesTaxInclusive ? 1 : 0,
       input.businessProfileUpdatedAt
     );
+}
+
+/** Admin-dashboard-controlled (see SERVER's Tenant.invoiceEditsDisabled) — applied straight from
+ * every heartbeat, deliberately outside applyBusinessProfileFromCloudRow's "only if the cloud copy
+ * is newer than a local profile edit" guard, since no local edit can ever exist for this field. */
+export function setInvoiceEditsDisabledRow(disabled: boolean): void {
+  getDatabase()
+    .prepare("UPDATE tenant SET invoice_edits_disabled = ? WHERE id = (SELECT id FROM tenant ORDER BY created_at LIMIT 1)")
+    .run(disabled ? 1 : 0);
 }

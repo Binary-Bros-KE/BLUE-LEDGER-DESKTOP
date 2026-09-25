@@ -67,7 +67,20 @@ export const saleCartInputSchema = z.object({
     .max(100_000_000_000)
     .nullable()
     .optional()
-    .transform((value) => (value === undefined ? null : value))
+    .transform((value) => (value === undefined ? null : value)),
+  /** Only meaningful for a merely-held sale: the EXTRA payment rows of a split bill (payments 2, 3,
+   * ...) exactly as the cashier had them, half-filled or not — an empty method or a 0 amount is fine
+   * here, unlike checkoutInputSchema's `payments` which must be complete. Restored on resume. */
+  heldPayments: z
+    .array(
+      z.object({
+        paymentMethodId: z.string().trim().max(64),
+        amountCents: z.coerce.number().int().min(0).max(100_000_000_000),
+        reference: optionalText(120)
+      })
+    )
+    .max(10)
+    .optional()
 });
 
 export type SaleCartInput = z.infer<typeof saleCartInputSchema>;
@@ -83,7 +96,25 @@ export const checkoutInputSchema = saleCartInputSchema
       .max(100_000_000_000)
       .nullable()
       .optional()
-      .transform((value) => (value === undefined ? null : value))
+      .transform((value) => (value === undefined ? null : value)),
+    /** Split payment — sent only when the customer pays with more than one method (2+ entries, which
+     * then REPLACE paymentMethodId/paymentReference/amountReceivedCents above; those are still sent
+     * for the first entry). See completeSale in sale-service.ts for the rules (must cover the total,
+     * change only comes back out of a payment that needs no reference, e.g. cash). */
+    payments: z
+      .array(
+        z.object({
+          paymentMethodId: z.string().trim().min(1, "Select a payment method"),
+          amountCents: z.coerce
+            .number()
+            .int()
+            .min(1, "Enter an amount for every payment")
+            .max(100_000_000_000),
+          reference: optionalText(120)
+        })
+      )
+      .max(10)
+      .optional()
   })
   // Only enforced here, not on saleCartItemSchema itself — see that field's own doc comment for why
   // holding a sale must stay exempt.

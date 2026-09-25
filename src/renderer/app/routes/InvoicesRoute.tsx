@@ -196,6 +196,7 @@ export function InvoicesRoute(): React.JSX.Element {
   const showStorefrontFilter = session?.branch == null;
   const canCreate = can("sales", "create");
   const canEdit = can("sales", "edit");
+  const canEditInvoice = canEdit && !tenantContext?.invoiceEditsDisabled;
   const canExport = can("sales", "export");
   // Cancelling outright (no approval step) is gated the same as approving one — whoever can approve
   // someone else's cancellation request can just as well skip the request step themselves. Matches
@@ -1914,9 +1915,9 @@ export function InvoicesRoute(): React.JSX.Element {
               hasDeliveryNote={viewingSale.delivery !== null}
             />
 
-            {(canEdit && viewingSale.amountPaidCents === 0 && viewingSale.paymentStatus !== "cancelled") || canCreate ? (
-              <div className={cn("mt-2 grid gap-2", canEdit && viewingSale.amountPaidCents === 0 && viewingSale.paymentStatus !== "cancelled" && canCreate ? "grid-cols-2" : "grid-cols-1")}>
-                {canEdit && viewingSale.amountPaidCents === 0 && viewingSale.paymentStatus !== "cancelled" && (
+            {(canEditInvoice && viewingSale.amountPaidCents === 0 && viewingSale.paymentStatus !== "cancelled") || canCreate ? (
+              <div className={cn("mt-2 grid gap-2", canEditInvoice && viewingSale.amountPaidCents === 0 && viewingSale.paymentStatus !== "cancelled" && canCreate ? "grid-cols-2" : "grid-cols-1")}>
+                {canEditInvoice && viewingSale.amountPaidCents === 0 && viewingSale.paymentStatus !== "cancelled" && (
                   <Button
                     type="button"
                     onClick={() => openEditInvoice(viewingSale)}
@@ -2264,9 +2265,11 @@ export function InvoicesRoute(): React.JSX.Element {
             ? "Only available while nothing has been paid yet — the storefront and items are re-priced from scratch on save."
             : "Goods are considered delivered now — payment can be collected in full or over time."
         }
-        widthClassName="max-w-2xl"
+        widthClassName="max-w-7xl"
       >
         <form onSubmit={submitCreateInvoice}>
+          <div className="grid gap-6 lg:h-[calc(88vh-9rem)] lg:grid-cols-[minmax(0,4fr)_minmax(0,6fr)] lg:grid-rows-1">
+            <div className="min-w-0 lg:min-h-0 lg:overflow-y-auto lg:pr-2">
           {createError && (
             <div className="mb-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
               {createError}
@@ -2451,185 +2454,7 @@ export function InvoicesRoute(): React.JSX.Element {
                 </div>
               )}
             </div>
-
-            <div className="mt-3 space-y-3">
-              {createLinePricing.length === 0 ? (
-                <p className="text-xs font-semibold text-muted">No products added yet.</p>
-              ) : (
-                groupedCreateLines.map((group) => (
-                  <div key={group.label ?? "__ungrouped"}>
-                    {group.label && (
-                      <p className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wide text-muted">{group.label}</p>
-                    )}
-                    <div className="space-y-2">
-                      {group.items.map(({ line, product, pricing }) => (
-                  <div key={line.key} className="rounded-lg border border-line p-2.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="line-clamp-2 text-sm font-extrabold leading-snug text-ink" title={line.name}>
-                          {line.name}
-                        </p>
-                        <p className="text-[11px] font-semibold text-muted">@ {formatCents(pricing.unitPriceCents)}</p>
-                        <StockByLocationRow balances={createLineStock.get(line.productId)} locationId={effectiveCreateLocationId} />
-                      </div>
-                      <div className="flex flex-none flex-col items-end gap-1">
-                        {(() => {
-                          const config = {
-                            vatRatePercent: tenantContext?.vatRatePercent ?? 16,
-                            pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true
-                          };
-                          // Client request: let a user switch this ONE line between inclusive/
-                          // exclusive VAT for this invoice only — see toggleCreateTaxInclusiveOverride's
-                          // own doc comment. Non-vat products keep the plain static badge.
-                          if (product.taxType !== "vat") {
-                            const badge = taxModeBadgeLabel(product, config);
-                            return <DashedPill tone={badge.tone}>{badge.label}</DashedPill>;
-                          }
-                          const effectiveInclusive =
-                            line.taxInclusiveOverride ?? resolveProductTaxConfig(product, config).pricesTaxInclusive;
-                          const badge = taxModeBadgeLabel({ ...product, pricesTaxInclusive: effectiveInclusive }, config);
-                          return (
-                            <button
-                              type="button"
-                              onClick={() => toggleCreateTaxInclusiveOverride(line.key, effectiveInclusive)}
-                              title="Switch this line's VAT pricing for this invoice only"
-                              className="cursor-pointer"
-                            >
-                              <DashedPill tone={badge.tone}>{badge.label}</DashedPill>
-                            </button>
-                          );
-                        })()}
-                        <button
-                          type="button"
-                          onClick={() => removeCreateLine(line.key)}
-                          className="text-[11px] font-extrabold uppercase text-danger hover:underline cursor-pointer"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                    <div className="mt-2 flex items-center justify-between gap-2">
-                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted">
-                        Qty
-                        <input
-                          type="number"
-                          min={1}
-                          value={line.quantity === 0 ? "" : line.quantity}
-                          onChange={(event) => updateCreateQuantityDraft(line.key, event.target.value)}
-                          onBlur={() => updateCreateQuantity(line.key, line.quantity)}
-                          className="h-8 w-16 rounded-md border border-line text-center text-xs font-bold outline-none focus:border-accent"
-                        />
-                      </label>
-                      <label
-                        className="flex items-center gap-1.5 text-[11px] font-bold text-muted"
-                        title="Override this line's unit price for this document only — the product's own price is never changed"
-                      >
-                        Price
-                        <input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={line.priceOverride}
-                          onChange={(event) => updateCreatePriceOverride(line.key, event.target.value)}
-                          placeholder={fromCents(pricing.unitPriceCents)}
-                          className={cn(
-                            "h-8 w-20 rounded-md border px-1.5 text-right text-xs font-semibold outline-none focus:border-accent",
-                            line.priceOverride.trim() && isPriceBelowMinimum(toCents(line.priceOverride), product.minimumPriceCents)
-                              ? "border-danger text-danger"
-                              : "border-line"
-                          )}
-                        />
-                      </label>
-                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-muted">
-                        Discount
-                        <input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={line.discount}
-                          onChange={(event) => updateCreateDiscount(line.key, event.target.value)}
-                          className="h-8 w-20 rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
-                        />
-                      </label>
-                      <span className="text-sm font-extrabold text-ink">{formatCents(pricing.lineTotalCents)}</span>
-                    </div>
-
-                    {line.priceOverride.trim() && isPriceBelowMinimum(toCents(line.priceOverride), product.minimumPriceCents) && (
-                      <p className="mt-1 text-right text-[10px] font-bold text-danger">
-                        Below minimum price of {fromCents(product.minimumPriceCents)}
-                      </p>
-                    )}
-
-                    <label className="mt-2 flex items-center gap-1.5 text-[10px] font-bold text-muted cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={line.isLocallySourced}
-                        onChange={() => toggleCreateLocallySourced(line.key)}
-                        className="size-3.5 accent-accent"
-                      />
-                      Sourced from another shop
-                    </label>
-
-                    {line.isLocallySourced && (
-                      <div className="mt-2 flex flex-col gap-2.5 rounded-md bg-soft/60 p-2.5">
-                        <label className="block text-sm font-extrabold text-ink">
-                          Unit Cost
-                          <input
-                            type="number"
-                            min={0}
-                            step="0.01"
-                            value={line.localCost}
-                            onChange={(event) => updateCreateLocalCost(line.key, event.target.value)}
-                            placeholder="0.00"
-                            className="mt-1 h-10 w-full rounded-md border border-line px-3 text-sm font-semibold outline-none focus:border-accent"
-                          />
-                        </label>
-                        {line.localCost.trim() && (
-                          <p className="text-[10px] font-semibold text-muted">
-                            Total for {line.quantity}: {formatCents(unitCostToTotalCents(line.localCost, line.quantity))}
-                          </p>
-                        )}
-                        <div>
-                          <p className="text-sm font-extrabold text-ink">Local supplier</p>
-                          <SupplierPicker
-                            suppliers={suppliers}
-                            value={line.localSupplierId}
-                            onChange={(supplierId) => updateCreateLocalSupplier(line.key, supplierId)}
-                            onSupplierCreated={(supplier) => setSuppliers((prev) => [...prev, supplier])}
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    <label className="mt-2 flex items-center gap-1.5 text-[10px] font-bold text-muted">
-                      Section
-                      <select
-                        value={line.sectionLabel ?? ""}
-                        onChange={(event) => updateCreateSectionLabel(line.key, event.target.value || null)}
-                        className="h-7 flex-1 rounded-md border border-line px-2 text-xs font-semibold outline-none focus:border-accent"
-                      >
-                        <option value="">No section</option>
-                        {existingSectionLabels.map((label) => (
-                          <option key={label} value={label}>
-                            {label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                      ))}
-                    </div>
-                    {group.label && (
-                      <p className="mt-1.5 text-right text-xs font-extrabold text-ink">
-                        {group.label} Subtotal: {formatCents(group.subtotalCents)}
-                      </p>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
           </div>
-
           <TextAreaField label="Invoice Notes" value={createNotes} onChange={setCreateNotes} className="mt-4" rows={2} />
 
           <div className="mt-4 space-y-2.5">
@@ -2738,7 +2563,200 @@ export function InvoicesRoute(): React.JSX.Element {
             </div>
           )}
 
-          <div className="mt-4 space-y-1 border-t border-line pt-4 text-sm">
+          <TaxBreakdownTable
+            breakdown={computeTaxBreakdown(
+              withTaxableServiceCharges(
+                createLinePricing.map((entry) => ({
+                  unitPriceCents: entry.pricing.unitPriceCents,
+                  quantity: entry.line.quantity,
+                  discountAmountCents: entry.pricing.discountAmountCents,
+                  taxType: entry.product.taxType,
+                  taxAmountCents: entry.pricing.taxCents,
+                  lineTotalCents: entry.pricing.lineTotalCents
+                })),
+                createTotals.preparedCharges
+              )
+            )}
+            tenantTaxConfig={{ vatRatePercent: tenantContext?.vatRatePercent ?? 16, pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true }}
+          />
+            </div>
+
+          <div className="flex min-h-0 flex-col rounded-lg border border-line lg:h-full">
+            <div className="flex flex-none items-center justify-between border-b border-line bg-soft/60 px-3 py-1.5">
+              <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Items ({createLinePricing.length})</p>
+            </div>
+            <div className="max-h-[24rem] min-h-[8rem] flex-1 overflow-y-auto lg:max-h-none">
+              {createLinePricing.length === 0 ? (
+                <p className="p-3 text-xs font-semibold text-muted">No products added yet.</p>
+              ) : (
+                groupedCreateLines.map((group) => (
+                  <div key={group.label ?? "__ungrouped"}>
+                    {group.label && (
+                      <p className="bg-soft/40 px-3 py-1 text-[10px] font-extrabold uppercase tracking-wide text-muted">
+                        {group.label} — Subtotal {formatCents(group.subtotalCents)}
+                      </p>
+                    )}
+                    {group.items.map(({ line, product, pricing }) => {
+                      const belowMinimum =
+                        line.priceOverride.trim() !== "" && isPriceBelowMinimum(toCents(line.priceOverride), product.minimumPriceCents);
+                      const taxConfig = {
+                        vatRatePercent: tenantContext?.vatRatePercent ?? 16,
+                        pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true
+                      };
+                      return (
+                        <div key={line.key} className="border-b border-line px-3 py-1.5 last:border-b-0">
+                          <div className="flex items-start gap-2">
+                            <div className="min-w-0 flex-1">
+                              <p className="line-clamp-2 text-xs font-extrabold leading-tight text-ink" title={line.name}>
+                                {line.name}
+                              </p>
+                              <div className="flex flex-wrap items-center gap-x-2 text-[10px] font-semibold text-muted">
+                                <span>@ {formatCents(pricing.unitPriceCents)}</span>
+                                <div className="min-w-0 [&>p]:mt-0">
+                                  <StockByLocationRow balances={createLineStock.get(line.productId)} locationId={effectiveCreateLocationId} />
+                                </div>
+                                {belowMinimum && <span className="font-bold text-danger">Below min {fromCents(product.minimumPriceCents)}</span>}
+                              </div>
+                            </div>
+                            <span className="flex-none text-sm font-extrabold tabular-nums text-ink">{formatCents(pricing.lineTotalCents)}</span>
+                            <button
+                              type="button"
+                              onClick={() => removeCreateLine(line.key)}
+                              aria-label="Remove item"
+                              title="Remove"
+                              className="grid size-6 flex-none place-items-center rounded-md text-danger transition hover:bg-danger-soft cursor-pointer"
+                            >
+                              <X className="size-4" aria-hidden="true" />
+                            </button>
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <label className="flex items-center gap-1 text-[10px] font-bold text-muted">
+                              Qty
+                              <input
+                                type="number"
+                                min={1}
+                                value={line.quantity === 0 ? "" : line.quantity}
+                                onChange={(event) => updateCreateQuantityDraft(line.key, event.target.value)}
+                                onBlur={() => updateCreateQuantity(line.key, line.quantity)}
+                                className="h-7 w-14 rounded-md border border-line text-center text-xs font-bold outline-none focus:border-accent"
+                              />
+                            </label>
+                            <label
+                              className="flex items-center gap-1 text-[10px] font-bold text-muted"
+                              title="Override this line's unit price for this document only — the product's own price is never changed"
+                            >
+                              Price
+                              <input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={line.priceOverride}
+                                onChange={(event) => updateCreatePriceOverride(line.key, event.target.value)}
+                                placeholder={fromCents(pricing.unitPriceCents)}
+                                className={cn(
+                                  "h-7 w-24 rounded-md border px-1.5 text-right text-xs font-semibold outline-none focus:border-accent",
+                                  belowMinimum ? "border-danger text-danger" : "border-line"
+                                )}
+                              />
+                            </label>
+                            <label className="flex items-center gap-1 text-[10px] font-bold text-muted">
+                              Disc.
+                              <input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={line.discount}
+                                onChange={(event) => updateCreateDiscount(line.key, event.target.value)}
+                                className="h-7 w-16 rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
+                              />
+                            </label>
+                            {product.taxType !== "vat" ? (
+                              (() => {
+                                const badge = taxModeBadgeLabel(product, taxConfig);
+                                return <DashedPill tone={badge.tone}>{badge.label}</DashedPill>;
+                              })()
+                            ) : (
+                              (() => {
+                                const effectiveInclusive =
+                                  line.taxInclusiveOverride ?? resolveProductTaxConfig(product, taxConfig).pricesTaxInclusive;
+                                const badge = taxModeBadgeLabel({ ...product, pricesTaxInclusive: effectiveInclusive }, taxConfig);
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleCreateTaxInclusiveOverride(line.key, effectiveInclusive)}
+                                    title="Switch this line's VAT pricing for this invoice only"
+                                    className="cursor-pointer"
+                                  >
+                                    <DashedPill tone={badge.tone}>{badge.label}</DashedPill>
+                                  </button>
+                                );
+                              })()
+                            )}
+                            <label className="flex cursor-pointer items-center gap-1 text-[10px] font-bold text-muted">
+                              <input
+                                type="checkbox"
+                                checked={line.isLocallySourced}
+                                onChange={() => toggleCreateLocallySourced(line.key)}
+                                className="size-3.5 accent-accent"
+                              />
+                              Sourced from another shop
+                            </label>
+                            <label className="flex items-center gap-1 text-[10px] font-bold text-muted">
+                              Section
+                              <select
+                                value={line.sectionLabel ?? ""}
+                                onChange={(event) => updateCreateSectionLabel(line.key, event.target.value || null)}
+                                className="h-7 w-28 rounded-md border border-line px-1 text-[11px] font-semibold outline-none focus:border-accent"
+                              >
+                                <option value="">No section</option>
+                                {existingSectionLabels.map((label) => (
+                                  <option key={label} value={label}>
+                                    {label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+
+                          {line.isLocallySourced && (
+                            <div className="mt-1.5 grid gap-2 rounded-md bg-soft/60 p-2 sm:grid-cols-2">
+                              <label className="block text-xs font-extrabold text-ink">
+                                Unit Cost
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={line.localCost}
+                                  onChange={(event) => updateCreateLocalCost(line.key, event.target.value)}
+                                  placeholder="0.00"
+                                  className="mt-1 h-8 w-full rounded-md border border-line px-2 text-xs font-semibold outline-none focus:border-accent"
+                                />
+                                {line.localCost.trim() && (
+                                  <span className="mt-0.5 block text-[10px] font-semibold text-muted">
+                                    Total for {line.quantity}: {formatCents(unitCostToTotalCents(line.localCost, line.quantity))}
+                                  </span>
+                                )}
+                              </label>
+                              <div>
+                                <p className="text-xs font-extrabold text-ink">Local supplier</p>
+                                <SupplierPicker
+                                  suppliers={suppliers}
+                                  value={line.localSupplierId}
+                                  onChange={(supplierId) => updateCreateLocalSupplier(line.key, supplierId)}
+                                  onSupplierCreated={(supplier) => setSuppliers((prev) => [...prev, supplier])}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="flex-none border-t border-line bg-soft/40 px-3 py-2">
+              <div className="space-y-0.5 text-xs">
             <div className="flex justify-between text-muted">
               <span className="font-semibold">Subtotal</span>
               <span className="font-bold tabular-nums">{formatCents(createTotals.subtotalCents)}</span>
@@ -2782,25 +2800,7 @@ export function InvoicesRoute(): React.JSX.Element {
               </>
             )}
           </div>
-
-          <TaxBreakdownTable
-            breakdown={computeTaxBreakdown(
-              withTaxableServiceCharges(
-                createLinePricing.map((entry) => ({
-                  unitPriceCents: entry.pricing.unitPriceCents,
-                  quantity: entry.line.quantity,
-                  discountAmountCents: entry.pricing.discountAmountCents,
-                  taxType: entry.product.taxType,
-                  taxAmountCents: entry.pricing.taxCents,
-                  lineTotalCents: entry.pricing.lineTotalCents
-                })),
-                createTotals.preparedCharges
-              )
-            )}
-            tenantTaxConfig={{ vatRatePercent: tenantContext?.vatRatePercent ?? 16, pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true }}
-          />
-
-          <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
+              <div className="mt-3 flex items-center justify-end gap-3">
             <Button
               type="button"
               onClick={() => setCreateOpen(false)}
@@ -2812,6 +2812,9 @@ export function InvoicesRoute(): React.JSX.Element {
               {createSaving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
               {editingInvoiceId ? (createSaving ? "Saving..." : "Save Changes") : createSaving ? "Creating..." : "Create Invoice"}
             </Button>
+              </div>
+            </div>
+          </div>
           </div>
         </form>
       </Modal>

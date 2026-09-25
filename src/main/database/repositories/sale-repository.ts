@@ -494,6 +494,10 @@ export function insertSaleRow(input: {
    * Sale["deliveryDraft"]'s own doc comment. Always null for a completed sale (its delivery, if
    * any, is a real numbered row instead — see persistCartExtras). */
   deliveryDraftJson?: string | null;
+  /** Every payment that made up this sale, when it was paid with more than one method (split
+   * payment at checkout) — the same list invoices already keep. Omitted for a single-method sale,
+   * which is fully described by paymentMethodId/paymentReference above. */
+  payments?: SalePayment[];
 }): SaleRow {
   const now = new Date().toISOString();
 
@@ -510,9 +514,9 @@ export function insertSaleRow(input: {
         subtotal_cents, discount_amount_cents, tax_amount_cents, grand_total_cents,
         payment_method_id, payment_reference, amount_received_cents, change_given_cents,
         notes, completed_at, created_at, updated_at, sync_status, amount_paid_cents, balance_due_cents,
-        delivery_draft_json, include_tax_breakdown, include_business_info
+        delivery_draft_json, include_tax_breakdown, include_business_info, payments
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
     `
     )
     .run(
@@ -540,7 +544,8 @@ export function insertSaleRow(input: {
       balanceDueCents,
       input.deliveryDraftJson ?? null,
       input.includeTaxBreakdown === false ? 0 : 1,
-      input.includeBusinessInfo === false ? 0 : 1
+      input.includeBusinessInfo === false ? 0 : 1,
+      JSON.stringify(input.payments ?? [])
     );
 
   const row = findSaleRowById(input.id);
