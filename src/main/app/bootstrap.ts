@@ -4,6 +4,7 @@ import electron from "electron";
 import { migrateDatabase, type MigrationFailure } from "@main/database/migrate";
 import { ensureDefaultExpenseCategories } from "@main/services/expense-category-service";
 import { ensureExpensesHaveStorefront } from "@main/services/expense-service";
+import { reconcileAllSupplierBalances } from "@main/database/repositories/supplier-balance-repository";
 import { registerIpcHandlers } from "@main/ipc/register";
 import { ensureDefaultSystemEmployee } from "@main/services/employee-service";
 import { ensureMainStoreLocation } from "@main/services/location-service";
@@ -146,6 +147,9 @@ export async function bootstrap(): Promise<void> {
   ensureCreditPaymentMethodDeactivated(tenant.tenantId);
   ensureDefaultExpenseCategories(tenant.tenantId);
   ensureExpensesHaveStorefront(tenant.tenantId);
+  // Self-heals suppliers.balance_cents from ground truth on every boot too, not just every sync
+  // cycle — see reconcileAllSupplierBalances's own doc comment.
+  reconcileAllSupplierBalances(tenant.tenantId);
 
   if (process.env.BLUE_LEDGER_SEED_DEMO === "1") {
     try {

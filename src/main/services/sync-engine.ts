@@ -4068,6 +4068,14 @@ async function runSyncCycle(): Promise<void> {
   } catch (err) {
     console.error("[sync] autoRepairStuckEntities failed:", err);
   }
+  // Self-heals suppliers.balance_cents from ground truth every cycle — see
+  // reconcileAllSupplierBalances's own doc comment for why this can't be a one-time migration.
+  try {
+    const tenantRow = tenantRepository.findTenantRow();
+    if (tenantRow) supplierBalanceRepository.reconcileAllSupplierBalances(tenantRow.id);
+  } catch (err) {
+    console.error("[sync] reconcileAllSupplierBalances failed:", err);
+  }
 
   finalizeRunReport();
 }

@@ -3326,6 +3326,37 @@ const migrations = [
       -- editing enabled for every existing tenant.
       ALTER TABLE tenant ADD COLUMN invoice_edits_disabled INTEGER NOT NULL DEFAULT 0;
     `
+  },
+  {
+    version: 95,
+    name: "supplier_balance_reconcile_20260926",
+    sql: `
+      -- One-time cleanup for drift discovered live on 2026-09-26, on top of migration 93's own
+      -- 2026-09-22 fix: migration 93's Phase 2 (the "Balance correction" ledger entries it inserted
+      -- for audit-trail readability) turned out to be unsafe across devices too. Any OTHER device
+      -- pulling one of those entries via normal sync applies it as an ordinary delta (see
+      -- applySupplierBalanceEntryPulledRow, sync-engine.ts) — indistinguishable from a real payment
+      -- or purchase — so a device that was already correct got re-broken the moment it synced in a
+      -- straggler device's own correction. Confirmed live: a fresh full sync of a real 10-device
+      -- tenant showed roughly KES 44.7M of fresh drift on top of the already-corrected balances.
+      --
+      -- This migration ONLY does the safe half (a direct recompute of balance_cents from ground
+      -- truth, exactly like migration 93's own Phase 1) and deliberately inserts NO new ledger
+      -- entries — see reconcileAllSupplierBalances (supplier-balance-repository.ts), now also run on
+      -- every boot and every sync cycle, which is what actually stops this recurring: any future
+      -- drift, from this cause or any other, self-heals within about one sync cycle on every device,
+      -- so this one-time cleanup is the last migration this specific class of bug should ever need.
+      UPDATE suppliers SET balance_cents = (
+        COALESCE((
+          SELECT SUM(p.received_value_cents - p.amount_paid_cents)
+          FROM purchases p WHERE p.supplier_id = suppliers.id
+        ), 0)
+        + COALESCE((
+          SELECT SUM(sbe.amount_cents) FROM supplier_balance_entries sbe
+          WHERE sbe.supplier_id = suppliers.id AND sbe.reference_id IS NULL
+        ), 0)
+      );
+    `
   }
 ] as const;
 
