@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import {
   CheckCircle2,
   Eye,
+  History,
   FileBarChart,
   Loader2,
   Pencil,
@@ -34,6 +35,7 @@ import {
   type SupplierPaymentOption
 } from "@shared/types/supplier";
 import { SupplierBalanceAdjustmentModal } from "./suppliers/SupplierBalanceAdjustmentModal";
+import { SupplierBalanceHistoryModal } from "./suppliers/SupplierBalanceHistoryModal";
 import { SupplierDetailModal } from "./suppliers/SupplierDetailModal";
 
 type StatusFilter = "all" | "active" | "inactive";
@@ -128,6 +130,7 @@ export function SuppliersRoute(): React.JSX.Element {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [viewingSupplier, setViewingSupplier] = useState<Supplier | null>(null);
+  const [balanceHistorySupplier, setBalanceHistorySupplier] = useState<Supplier | null>(null);
   const [showBalanceAdjustModal, setShowBalanceAdjustModal] = useState(false);
   const [statementOpen, setStatementOpen] = useState(false);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
@@ -545,6 +548,15 @@ export function SuppliersRoute(): React.JSX.Element {
                           >
                             <Eye className="size-3.5" aria-hidden="true" />
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => setBalanceHistorySupplier(supplier)}
+                            aria-label={`Balance history for ${supplier.businessName}`}
+                            title="Balance History"
+                            className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-ink cursor-pointer"
+                          >
+                            <History className="size-3.5" aria-hidden="true" />
+                          </button>
                           {canEdit && (
                             <button
                               type="button"
@@ -833,6 +845,10 @@ export function SuppliersRoute(): React.JSX.Element {
 
       {viewingSupplier && (
         <SupplierDetailModal supplier={viewingSupplier} onClose={() => setViewingSupplier(null)} />
+      )}
+
+      {balanceHistorySupplier && (
+        <SupplierBalanceHistoryModal supplier={balanceHistorySupplier} onClose={() => setBalanceHistorySupplier(null)} />
       )}
 
       {showBalanceAdjustModal && editingSupplier && (

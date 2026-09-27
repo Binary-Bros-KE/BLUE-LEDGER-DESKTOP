@@ -560,11 +560,16 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(
     ipcChannels.stockMovementList,
-    (_event, productId: string, input?: { limit?: number; startDate?: string; endDate?: string }) =>
-      listStockMovements(productId, input?.limit, input?.startDate, input?.endDate)
+    (
+      _event,
+      productId: string,
+      input?: { limit?: number; startDate?: string; endDate?: string; locationId?: string | null }
+    ) => listStockMovements(productId, input?.limit, input?.startDate, input?.endDate, input?.locationId)
   );
-  ipcMain.handle(ipcChannels.stockMovementListAll, (_event, input?: { startDate?: string; endDate?: string; limit?: number }) =>
-    listAllStockMovements(input?.startDate, input?.endDate, input?.limit)
+  ipcMain.handle(
+    ipcChannels.stockMovementListAll,
+    (_event, input?: { startDate?: string; endDate?: string; limit?: number; locationId?: string | null }) =>
+      listAllStockMovements(input?.startDate, input?.endDate, input?.limit, input?.locationId)
   );
   ipcMain.handle(ipcChannels.stockMovementCreate, (_event, input: unknown) => recordStockMovement(input));
   ipcMain.handle(ipcChannels.stockMovementTransfer, (_event, input: unknown) => recordStockTransfer(input));

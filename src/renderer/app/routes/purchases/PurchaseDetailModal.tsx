@@ -6,10 +6,12 @@ import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import { Field, SelectField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
+import { ShipmentProgressBar } from "@renderer/shared/components/ShipmentProgressBar";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
+import { computePurchasePayableCents } from "@shared/lib/purchase";
 import type { ExportListRequest } from "@shared/types/export";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import { TAX_TYPE_OPTIONS } from "@shared/types/product";
@@ -94,9 +96,12 @@ export function PurchaseDetailModal({
   const selectedRecordMethod = activePaymentMethods.find((method) => method.id === paymentMethodId) ?? null;
   const selectedMarkPaidMethod = activePaymentMethods.find((method) => method.id === markPaidMethodId) ?? null;
 
-  // Client request: only ever the received-goods balance, never the full order total — this
-  // decides both when "Record Payment"/"Mark as Paid" show up and what they'll actually let you pay.
-  const balanceDueCents = purchase.receivedValueCents - purchase.amountPaidCents;
+  // Client request: only ever the received-goods balance, plus the shipping fee once anything's
+  // arrived (see computePurchasePayableCents), never the full order total — this decides both when
+  // "Record Payment"/"Mark as Paid" show up and what they'll actually let you pay.
+  const balanceDueCents =
+    computePurchasePayableCents({ receivedValueCents: purchase.receivedValueCents, shippingFeeCents: purchase.shippingCostCents }) -
+    purchase.amountPaidCents;
   const canReceive = purchase.status === "ordered" || purchase.status === "partially_received";
   // Mirrors purchase-service.ts's own requireEditablePurchase exactly: a draft is always editable;
   // an "ordered" purchase stays editable right up until either goods start arriving (it would
@@ -210,7 +215,10 @@ export function PurchaseDetailModal({
         { label: "Subtotal", value: formatCents(purchase.subtotalCents) },
         { label: "Discount", value: formatCents(purchase.discountAmountCents) },
         { label: "Tax", value: formatCents(purchase.taxAmountCents) },
-        ...(purchase.shippingCostCents > 0 ? [{ label: "Shipping", value: formatCents(purchase.shippingCostCents) }] : []),
+        ...(purchase.shippingCostCents > 0 ? [{ label: "Shipping Fee", value: formatCents(purchase.shippingCostCents) }] : []),
+        ...(purchase.shippingExpenseCents > 0
+          ? [{ label: "Shipping Cost", value: formatCents(purchase.shippingExpenseCents) }]
+          : []),
         { label: "Total", value: formatCents(purchase.grandTotalCents) },
         { label: "Amount Paid", value: formatCents(purchase.amountPaidCents) }
       ],
@@ -571,7 +579,7 @@ export function PurchaseDetailModal({
           </div>
           {purchase.shippingCostCents > 0 && (
             <div className="flex justify-between text-muted">
-              <span className="font-semibold">Shipping</span>
+              <span className="font-semibold">Shipping Fee</span>
               <span className="font-bold tabular-nums">+{formatCents(purchase.shippingCostCents)}</span>
             </div>
           )}
@@ -579,7 +587,29 @@ export function PurchaseDetailModal({
             <span>Total</span>
             <span>{formatCents(purchase.grandTotalCents)}</span>
           </div>
+          {purchase.shippingExpenseCents > 0 && (
+            <p className="pt-1 text-[11px] font-semibold text-muted">
+              Shipping Cost of {formatCents(purchase.shippingExpenseCents)} booked separately as a "Shipping
+              Costs" expense — not included in the total above.
+            </p>
+          )}
         </div>
+
+        {purchase.shipmentDepartedAt && (
+          <div className="mt-4">
+            <ShipmentProgressBar
+              shipmentDepartedAt={purchase.shipmentDepartedAt}
+              shipmentEta={purchase.shipmentEta}
+              isFullyReceived={purchase.status === "received"}
+            />
+            {(purchase.shipmentCourierName || purchase.shipmentTrackingNumber) && (
+              <p className="mt-1.5 text-[11px] font-semibold text-muted">
+                {purchase.shipmentCourierName ?? "—"}
+                {purchase.shipmentTrackingNumber ? ` · Tracking # ${purchase.shipmentTrackingNumber}` : ""}
+              </p>
+            )}
+          </div>
+        )}
 
         <div className="mt-4 rounded-lg border border-line bg-soft p-3">
           <div className="flex items-center justify-between">

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { motion } from "framer-motion";
-import { ArrowDownCircle, ArrowUpCircle, Loader2, Search, Warehouse } from "lucide-react";
+import { ArrowDownCircle, ArrowUpCircle, Layers, Loader2, PackageCheck, Search, Warehouse } from "lucide-react";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import { SelectField } from "@renderer/shared/components/form-fields";
@@ -11,11 +11,12 @@ import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import { showErrorToast } from "@renderer/shared/lib/toast";
-import { todayIso } from "@renderer/app/routes/reports/salesReportDate";
-import { ALL_YEARS_VALUE, currentYear, yearFilterOptions } from "@renderer/shared/lib/year-filter";
+import { SalesModeSelector } from "@renderer/app/routes/reports/SalesModeSelector";
+import { defaultAnchorForMode, periodLabelForAnchor, rangeForAnchor, todayIso } from "@renderer/app/routes/reports/salesReportDate";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import type { ExportListRequest } from "@shared/types/export";
 import type { Location } from "@shared/types/location";
+import type { DateRangeInput, SalesReportMode } from "@shared/types/report";
 import { STOCK_MOVEMENT_TYPE_OPTIONS, type StockMovementFeedItem, type StockMovementType } from "@shared/types/stock-movement";
 
 const INCREASING_TYPES = new Set<StockMovementType>([
@@ -26,17 +27,6 @@ const INCREASING_TYPES = new Set<StockMovementType>([
   "borrow_in",
   "loan_return_in"
 ]);
-const EARLIEST_DATE = "2000-01-01";
-const YEAR_LOOKBACK = 5;
-
-/** Stock movements now fetch scoped to [dateFrom, dateTo] (see loadMovements) rather than an
- * over-fetch-then-filter-client-side cap — same lever TransactionsRoute's own boundsForYear uses,
- * just a one-click preset for the common case; From/To below can still narrow it further. */
-function boundsForYear(value: string): { from: string; to: string } {
-  if (value === ALL_YEARS_VALUE) return { from: EARLIEST_DATE, to: todayIso() };
-  const year = Number(value);
-  return { from: `${year}-01-01`, to: year === currentYear() ? todayIso() : `${year}-12-31` };
-}
 
 function movementTone(type: StockMovementType): "success" | "danger" | "neutral" {
   if (INCREASING_TYPES.has(type)) return "success";
@@ -63,32 +53,46 @@ export function StockLedgerRoute(): React.JSX.Element {
   const showStorefrontFilter = session?.branch == null;
 
   const [movements, setMovements] = useState<StockMovementFeedItem[] | null>(null);
+  const [openingValueCents, setOpeningValueCents] = useState(0);
+  const [closingValueCents, setClosingValueCents] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [typeFilter, setTypeFilter] = useState<StockMovementType | "all">("all");
-  const [yearFilter, setYearFilter] = useState<string>(String(currentYear()));
-  const [dateFrom, setDateFrom] = useState(() => boundsForYear(String(currentYear())).from);
-  const [dateTo, setDateTo] = useState(() => boundsForYear(String(currentYear())).to);
   const [locations, setLocations] = useState<Location[]>([]);
   const [locationFilter, setLocationFilter] = useState("");
 
-  const yearOptions = useMemo(
-    () => yearFilterOptions(Array.from({ length: YEAR_LOOKBACK + 1 }, (_, index) => currentYear() - index)),
-    []
-  );
+  // Client request: same Daily/Weekly/Monthly/Yearly/Custom period control Sales already uses — see
+  // SalesReportRoute.tsx's identical wiring of these three pieces of state.
+  const [mode, setMode] = useState<SalesReportMode>("monthly");
+  const [anchor, setAnchor] = useState<string>(() => defaultAnchorForMode("monthly"));
+  const [customRange, setCustomRange] = useState<DateRangeInput>(() => ({
+    startDate: todayIso(),
+    endDate: todayIso()
+  }));
 
-  function handleYearFilterChange(value: string): void {
-    setYearFilter(value);
-    const bounds = boundsForYear(value);
-    setDateFrom(bounds.from);
-    setDateTo(bounds.to);
+  function handleModeChange(nextMode: SalesReportMode): void {
+    setMode(nextMode);
+    if (nextMode !== "custom") setAnchor(defaultAnchorForMode(nextMode));
   }
 
-  const loadMovements = useCallback(async (startDate: string, endDate: string) => {
+  const resolvedRange = useMemo<DateRangeInput>(
+    () => (mode === "custom" ? customRange : rangeForAnchor(mode, anchor)),
+    [mode, anchor, customRange]
+  );
+  const dateFrom = resolvedRange.startDate;
+  const dateTo = resolvedRange.endDate;
+
+  // Client request: filtering to one storefront still shows Main Store's own movements too, resolved
+  // server-side (see inventory-service.ts's resolveLocationFilterIds) — no client-side re-filtering
+  // needed here anymore, and this also fixes a latent gap where the old client-side filter ran after
+  // the 5000-row cap, which could silently miss real rows for a busy multi-location tenant.
+  const loadMovements = useCallback(async (startDate: string, endDate: string, locationId: string) => {
     setLoadError(null);
     try {
-      const result = await window.blueLedger.stockMovement.listAll({ startDate, endDate });
-      setMovements(result);
+      const result = await window.blueLedger.stockMovement.listAll({ startDate, endDate, locationId: locationId || null });
+      setMovements(result.movements);
+      setOpeningValueCents(result.openingValueCents);
+      setClosingValueCents(result.closingValueCents);
     } catch (err) {
       const message = getErrorMessage(err, "Failed to load stock movements");
       setLoadError(message);
@@ -97,8 +101,8 @@ export function StockLedgerRoute(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    void loadMovements(dateFrom, dateTo);
-  }, [loadMovements, dateFrom, dateTo]);
+    void loadMovements(dateFrom, dateTo, locationFilter);
+  }, [loadMovements, dateFrom, dateTo, locationFilter]);
 
   useEffect(() => {
     if (!showStorefrontFilter) return;
@@ -118,9 +122,8 @@ export function StockLedgerRoute(): React.JSX.Element {
       list = list.filter((movement) => movement.movementType === typeFilter);
     }
 
-    if (locationFilter) {
-      list = list.filter((movement) => movement.locationId === locationFilter);
-    }
+    // Storefront filtering is now server-side (see loadMovements) — the fetched set already reflects
+    // it (plus Main Store), so no client-side re-filter by location is needed here anymore.
 
     const term = searchTerm.trim().toLowerCase();
     if (term) {
@@ -130,7 +133,7 @@ export function StockLedgerRoute(): React.JSX.Element {
     }
 
     return list;
-  }, [movements, searchTerm, typeFilter, locationFilter]);
+  }, [movements, searchTerm, typeFilter]);
 
   const summary = useMemo(() => {
     if (!movements) return null;
@@ -143,9 +146,11 @@ export function StockLedgerRoute(): React.JSX.Element {
     return { totalMovements: movements.length, stockInValueCents, stockOutValueCents };
   }, [movements]);
 
+  const periodLabel = mode === "custom" ? `${dateFrom} to ${dateTo}` : periodLabelForAnchor(mode, anchor);
+
   const exportRequest = useMemo<ExportListRequest | null>(() => {
     if (!filteredMovements) return null;
-    const filterParts: string[] = [`Date: ${dateFrom} to ${dateTo}`];
+    const filterParts: string[] = [`Period: ${periodLabel}`];
     if (typeFilter !== "all") filterParts.push(`Type: ${movementTypeLabel(typeFilter)}`);
     if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
     if (locationFilter) {
@@ -180,21 +185,36 @@ export function StockLedgerRoute(): React.JSX.Element {
         stockAfter: movement.newQuantity === null ? "—" : String(movement.newQuantity),
         recordedBy: movement.performedByName ?? "—",
         // Client request: the unit price this product actually sold at (honors any Checkout/Invoice
-        // price override), not the total cost value moved — see StockMovementFeedItem's own doc
-        // comment. The Stock In/Out Value stat tiles below are untouched, still cost-based.
+        // price override) — see StockMovementFeedItem's own doc comment. All four stat tiles below
+        // now share this same selling-price basis (client-confirmed).
         unitPrice: `${currency} ${formatCents(movement.unitPriceCents)}`,
         notes: movement.notes ?? "—"
       })),
       stats: summary
         ? [
             { label: "Total Movements", value: String(summary.totalMovements) },
+            { label: "Opening Stock Value", value: `${currency} ${formatCents(openingValueCents)}` },
             { label: "Stock In Value", value: `${currency} ${formatCents(summary.stockInValueCents)}` },
-            { label: "Stock Out Value", value: `${currency} ${formatCents(summary.stockOutValueCents)}` }
+            { label: "Stock Out Value", value: `${currency} ${formatCents(summary.stockOutValueCents)}` },
+            { label: "Closing Stock Value", value: `${currency} ${formatCents(closingValueCents)}` }
           ]
         : [],
       fileBaseName: `StockLedger_${dateFrom}_to_${dateTo}`
     };
-  }, [filteredMovements, summary, typeFilter, searchTerm, dateFrom, dateTo, locationFilter, locations, currency]);
+  }, [
+    filteredMovements,
+    summary,
+    typeFilter,
+    searchTerm,
+    dateFrom,
+    dateTo,
+    periodLabel,
+    locationFilter,
+    locations,
+    openingValueCents,
+    closingValueCents,
+    currency
+  ]);
 
   return (
     <motion.div
@@ -238,8 +258,14 @@ export function StockLedgerRoute(): React.JSX.Element {
         )}
 
         {summary && (
-          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <StatTile icon={Warehouse} label="Total Movements" value={String(summary.totalMovements)} tone="primary" />
+            <StatTile
+              icon={Layers}
+              label="Opening Stock Value"
+              value={`${currency} ${formatCents(openingValueCents)}`}
+              tone="warning"
+            />
             <StatTile
               icon={ArrowUpCircle}
               label="Stock In Value"
@@ -251,6 +277,12 @@ export function StockLedgerRoute(): React.JSX.Element {
               label="Stock Out Value"
               value={`${currency} ${formatCents(summary.stockOutValueCents)}`}
               tone="danger"
+            />
+            <StatTile
+              icon={PackageCheck}
+              label="Closing Stock Value"
+              value={`${currency} ${formatCents(closingValueCents)}`}
+              tone="accent"
             />
           </div>
         )}
@@ -281,6 +313,17 @@ export function StockLedgerRoute(): React.JSX.Element {
           ))}
         </div>
 
+        <div className="mt-4">
+          <SalesModeSelector
+            mode={mode}
+            onModeChange={handleModeChange}
+            anchor={anchor}
+            onAnchorChange={setAnchor}
+            customRange={customRange}
+            onCustomRangeChange={setCustomRange}
+          />
+        </div>
+
         <div className="mt-4 flex flex-wrap items-end gap-3">
           <label className="block sm:max-w-xs sm:flex-1">
             <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Search</span>
@@ -297,25 +340,6 @@ export function StockLedgerRoute(): React.JSX.Element {
                 className="h-10 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm font-semibold text-ink outline-none transition placeholder:font-normal placeholder:text-muted/60 focus:border-accent focus:ring-4 focus:ring-accent/15"
               />
             </div>
-          </label>
-          <SelectField label="Year" value={yearFilter} onChange={handleYearFilterChange} options={yearOptions} className="w-32" />
-          <label className="block">
-            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">From</span>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(event) => setDateFrom(event.target.value)}
-              className="mt-1.5 h-10 rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
-            />
-          </label>
-          <label className="block">
-            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">To</span>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(event) => setDateTo(event.target.value)}
-              className="mt-1.5 h-10 rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
-            />
           </label>
           {showStorefrontFilter && (
             <SelectField

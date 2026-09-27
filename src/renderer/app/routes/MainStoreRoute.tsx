@@ -547,6 +547,7 @@ export function MainStoreRoute(): React.JSX.Element {
           productId={historyProduct.productId}
           productName={historyProduct.productName}
           currency={currency}
+          locations={locations ?? []}
           onClose={() => setHistoryProduct(null)}
         />
       )}

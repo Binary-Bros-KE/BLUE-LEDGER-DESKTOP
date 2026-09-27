@@ -41,6 +41,44 @@ export type StockMovementListRow = StockMovementRow & {
   performed_by_name: string | null;
 };
 
+/** A resolved location filter for the movement feed — see inventory-service.ts's
+ * resolveMovementLocationFilter. null means "every location." */
+export type MovementLocationFilter = { locationId: string; mainStoreLocationId: string | null } | null;
+
+/** Client correction: filtering to a storefront must show that storefront's own movements PLUS ONLY
+ * the Main Store movements that actually involve it — never every Main Store movement (a purchase
+ * receipt for a different branch, a distribution to someone else, etc). A Main Store row "involves"
+ * this storefront one of two ways: it's directly tagged (allocation_storefront_id — set on a receipt/
+ * damage/adjustment against this storefront's own allocation bucket), or it shares reference_id with
+ * a row actually located at this storefront (the other leg of the same distribute/return transfer —
+ * both legs of one transfer share one reference_id, see main-store-service.ts's
+ * distributeMainStoreStockCore/returnToMainStore). Verified live against real data: a storefront with
+ * 76 raw Main Store rows in its tenant correctly narrows to 30 that are actually its own. When the
+ * filtered location IS Main Store itself (or the tenant has none), this collapses to a plain equality
+ * — nothing extra to correlate. Always references the `sm` alias both movement queries already use. */
+function movementLocationClause(filter: MovementLocationFilter): { sql: string; params: string[] } {
+  if (!filter) return { sql: "1 = 1", params: [] };
+  if (!filter.mainStoreLocationId || filter.mainStoreLocationId === filter.locationId) {
+    return { sql: "sm.location_id = ?", params: [filter.locationId] };
+  }
+  return {
+    sql: `(
+      sm.location_id = ?
+      OR (
+        sm.location_id = ?
+        AND (
+          sm.allocation_storefront_id = ?
+          OR (sm.reference_id IS NOT NULL AND EXISTS (
+            SELECT 1 FROM stock_movements sm2
+            WHERE sm2.tenant_id = sm.tenant_id AND sm2.reference_id = sm.reference_id AND sm2.location_id = ?
+          ))
+        )
+      )
+    )`,
+    params: [filter.locationId, filter.mainStoreLocationId, filter.locationId, filter.locationId]
+  };
+}
+
 export function findStockMovementRowById(id: string): StockMovementListRow | undefined {
   return getDatabase()
     .prepare(
@@ -116,13 +154,16 @@ export type StockMovementProductRow = StockMovementListRow & {
 /** Pass null for both date bounds to skip date filtering entirely (the default "recent" view) — same
  * `created_at >= ? AND created_at < ?` convention as findAllStockMovementRows/report-repository.ts's
  * own date-range queries; the caller converts a plain calendar date into the device-local-timezone-
- * correct ISO bound (inventory-service.ts's startOfDayIso/addDaysIso). */
+ * correct ISO bound (inventory-service.ts's startOfDayIso/addDaysIso). Pass null for locationFilter to
+ * see every location (default); see movementLocationClause for the storefront-plus-Main-Store rule. */
 export function findStockMovementRowsForProduct(
   productId: string,
   limit: number,
   startDateIso: string | null,
-  endDateIsoExclusive: string | null
+  endDateIsoExclusive: string | null,
+  locationFilter: MovementLocationFilter = null
 ): StockMovementProductRow[] {
+  const location = movementLocationClause(locationFilter);
   return getDatabase()
     .prepare(
       `
@@ -139,13 +180,22 @@ export function findStockMovementRowsForProduct(
         ON sm.movement_type = 'sale' AND sm.reference_type IN ('sale', 'invoice')
         AND si.sale_id = sm.reference_id AND si.product_id = sm.product_id
       WHERE sm.product_id = ?
+        AND ${location.sql}
         AND (? IS NULL OR sm.created_at >= ?)
         AND (? IS NULL OR sm.created_at < ?)
       ORDER BY sm.created_at DESC
       LIMIT ?
     `
     )
-    .all(productId, startDateIso, startDateIso, endDateIsoExclusive, endDateIsoExclusive, limit) as StockMovementProductRow[];
+    .all(
+      productId,
+      ...location.params,
+      startDateIso,
+      startDateIso,
+      endDateIsoExclusive,
+      endDateIsoExclusive,
+      limit
+    ) as StockMovementProductRow[];
 }
 
 export type StockMovementFeedRow = StockMovementListRow & {
@@ -162,19 +212,21 @@ export type StockMovementFeedRow = StockMovementListRow & {
   sale_unit_price_cents: number | null;
 };
 
-/** Pass null for locationId to see every branch's movements (e.g. a super-admin with no assigned
- * branch, or an audit view). Powers the global Stock Ledger feed. startDateIso/endDateIsoExclusive
- * (pass both null to skip date filtering entirely) mirror report-repository.ts's own
- * `created_at >= ? AND created_at < ?` convention — the caller is responsible for converting a plain
- * calendar date into the device-local-timezone-correct ISO bound (see inventory-service.ts's
- * startOfDayIso/addDaysIso, ported from report-service.ts). */
+/** Pass null for locationFilter to see every branch's movements (e.g. a super-admin with no assigned
+ * branch, or an audit view). Powers the global Stock Ledger feed — see movementLocationClause for the
+ * storefront-plus-Main-Store rule. startDateIso/endDateIsoExclusive (pass both null to skip date
+ * filtering entirely) mirror report-repository.ts's own `created_at >= ? AND created_at < ?`
+ * convention — the caller is responsible for converting a plain calendar date into the device-local-
+ * timezone-correct ISO bound (see inventory-service.ts's startOfDayIso/addDaysIso, ported from
+ * report-service.ts). */
 export function findAllStockMovementRows(
   tenantId: string,
-  locationId: string | null,
+  locationFilter: MovementLocationFilter,
   limit: number,
   startDateIso: string | null,
   endDateIsoExclusive: string | null
 ): StockMovementFeedRow[] {
+  const location = movementLocationClause(locationFilter);
   return getDatabase()
     .prepare(
       `
@@ -196,7 +248,7 @@ export function findAllStockMovementRows(
         ON sm.movement_type = 'sale' AND sm.reference_type IN ('sale', 'invoice')
         AND si.sale_id = sm.reference_id AND si.product_id = sm.product_id
       WHERE sm.tenant_id = ?
-        AND (? IS NULL OR sm.location_id = ?)
+        AND ${location.sql}
         AND (? IS NULL OR sm.created_at >= ?)
         AND (? IS NULL OR sm.created_at < ?)
       ORDER BY sm.created_at DESC
@@ -205,8 +257,7 @@ export function findAllStockMovementRows(
     )
     .all(
       tenantId,
-      locationId,
-      locationId,
+      ...location.params,
       startDateIso,
       startDateIso,
       endDateIsoExclusive,
@@ -247,15 +298,16 @@ export function mapStockMovementProductRow(row: StockMovementProductRow): StockM
   };
 }
 
-/** The cost value moved (quantity x the product's current buying price) — a simple, live snapshot
- * rather than a price frozen at the time of the movement. Powers the Stock In/Out Value stat tiles;
- * unrelated to unitPriceCents below (a per-unit SELLING price, not a total cost). */
+/** The value moved (quantity x the product's current SELLING price) — a simple, live snapshot rather
+ * than a price frozen at the time of the movement. Powers the Stock In/Out Value stat tiles; client
+ * request: matches the same selling-price basis as unitPriceCents below and the new Opening/Closing
+ * Stock Value cards (StockLedgerRoute.tsx), not the buying/cost price this used before. */
 export function mapStockMovementFeedRow(row: StockMovementFeedRow): StockMovementFeedItem {
   return {
     ...mapStockMovementRow(row),
     productName: row.product_name,
     sku: row.sku,
-    valueCents: Math.abs(row.quantity_change) * row.buying_price_cents,
+    valueCents: Math.abs(row.quantity_change) * row.selling_price_cents,
     // Client request: the product's own selling price by default — but for a sale, the price it
     // ACTUALLY sold at (frozen on the sale line, honors any cashier price-override), never the
     // product's live selling price which could have changed since.

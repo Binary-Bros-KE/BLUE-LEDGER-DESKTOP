@@ -3,6 +3,7 @@ import * as expenseCategoryRepository from "@main/database/repositories/expense-
 import * as expenseRepository from "@main/database/repositories/expense-repository";
 import * as locationRepository from "@main/database/repositories/location-repository";
 import * as paymentMethodRepository from "@main/database/repositories/payment-method-repository";
+import * as purchaseRepository from "@main/database/repositories/purchase-repository";
 import * as riderRepository from "@main/database/repositories/rider-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
@@ -17,6 +18,11 @@ import type { Expense, ExpenseSummary } from "@shared/types/expense";
 /** Name of the auto-created category used by createDeliveryCostExpenseIfNeeded — deliberately a
  * plain constant, not tenant-configurable, matching the client's own naming ask verbatim. */
 const DELIVERY_COST_CATEGORY_NAME = "Delivery Costs";
+
+/** Name of the auto-created category used by createShippingCostExpenseIfNeeded — the purchases-side
+ * mirror of DELIVERY_COST_CATEGORY_NAME, kept as its own category since it's an inbound/purchasing
+ * cost rather than an outbound/sales one. */
+const SHIPPING_COST_CATEGORY_NAME = "Shipping Costs";
 
 function generateExpenseNumber(tenantId: string): string {
   return generateDocumentNumber({
@@ -252,6 +258,109 @@ export function createDeliveryCostExpenseIfNeeded(params: {
     description: buildDeliveryExpenseDescription(params),
     attachmentPath: null
   });
+}
+
+/**
+ * Removes a system-created expense safely across devices. There is no /sync/delete endpoint in this
+ * app (see sync-engine.ts's pushOutbox doc comment) — a hard DELETE only ever removes THIS device's
+ * own row; the cloud keeps its copy, and every other device would pull it right back on its next
+ * cycle, resurrecting an expense the user just removed. This codebase's own established rule (see
+ * expense-service.ts's deleteExpense) is: hard-delete only while sync_status is still "pending" (the
+ * row has never left this device, so there's nothing anywhere else to leave stale); once synced,
+ * archive it instead (status = 'archived', a plain UPDATE that propagates correctly through the
+ * normal upsert-sync path) — the financial trail stays intact and every device converges cleanly. */
+function removeSystemExpense(row: expenseRepository.ExpenseRow): void {
+  if (row.sync_status === "pending") {
+    expenseRepository.deleteExpenseRow(row.id);
+  } else {
+    expenseRepository.setExpenseStatusRow(row.id, "archived");
+  }
+}
+
+/**
+ * The purchases-side mirror of createDeliveryCostExpenseIfNeeded — books the business's own
+ * out-of-pocket shipping cost (e.g. paying a courier directly) as a real, auditable "Shipping Costs"
+ * expense the moment a purchase order with a shipping cost is placed (or edited while still
+ * editable). Client-requested "fee vs cost" split: the shipping FEE (owed to the supplier) is already
+ * folded into the purchase's own grand_total_cents — nothing to do here for that. The COST is never
+ * owed to anyone but is real money out, so it's booked unconditionally once there's an amount.
+ *
+ * Unlike a sale/invoice (immutable once completed), a purchase can still be edited while in its
+ * editable window (requireEditablePurchase, purchase-service.ts) — so this is idempotent by source:
+ * an existing expense for this purchase (see expense-repository.ts's findExpenseRowBySource) gets its
+ * amount/description/date updated in place rather than duplicated (and restored to "active" if it had
+ * been archived by an earlier cost-removal — see removeSystemExpense); a cost of 0 (removed on edit)
+ * removes it via removeSystemExpense, never a raw hard delete. Bypasses requirePermission/
+ * getCurrentEmployeeId deliberately, same reasoning as createDeliveryCostExpenseIfNeeded — this is a
+ * side effect of a purchase action, not a standalone expense-management action.
+ */
+export function createShippingCostExpenseIfNeeded(params: {
+  tenantId: string;
+  purchaseId: string;
+  locationId: string;
+  employeeId: string | null;
+  costCents: number;
+  date: string;
+}): void {
+  const existing = expenseRepository.findExpenseRowBySource(params.tenantId, "purchase", params.purchaseId);
+
+  if (params.costCents <= 0) {
+    if (existing) removeSystemExpense(existing);
+    return;
+  }
+
+  const purchase = purchaseRepository.findPurchaseDetailRowById(params.purchaseId);
+  const description = purchase
+    ? `Purchase: ${purchase.purchase_number}\nSupplier: ${purchase.supplier_name}`
+    : `Purchase: ${params.purchaseId}`;
+
+  if (existing) {
+    expenseRepository.updateExpenseAmountRow(existing.id, {
+      amountCents: params.costCents,
+      description,
+      expenseDate: params.date.slice(0, 10)
+    });
+    // A cost that was previously zeroed out (and archived by removeSystemExpense) is now positive
+    // again — bring it back rather than leaving an active-again cost hidden as "archived".
+    if (existing.status === "archived") {
+      expenseRepository.setExpenseStatusRow(existing.id, "active");
+    }
+    return;
+  }
+
+  const paymentMethodId = resolveDeliveryExpensePaymentMethodId(params.tenantId, null);
+  if (!paymentMethodId) return;
+
+  const category = findOrCreateExpenseCategoryByName(params.tenantId, SHIPPING_COST_CATEGORY_NAME);
+
+  expenseRepository.insertExpenseRow({
+    id: `expense_${randomUUID()}`,
+    tenantId: params.tenantId,
+    kind: "general",
+    expenseNumber: generateExpenseNumber(params.tenantId),
+    createdBy: params.employeeId,
+    expenseDate: params.date.slice(0, 10),
+    categoryId: category.id,
+    amountCents: params.costCents,
+    paidBy: null,
+    paymentMethodId,
+    storefrontId: params.locationId,
+    reference: null,
+    description,
+    attachmentPath: null,
+    sourceType: "purchase",
+    sourceId: params.purchaseId
+  });
+}
+
+/** Removes a purchase's linked shipping-cost expense, if one exists — client-confirmed decision:
+ * cancelling a purchase (only ever possible before anything's received/paid) reverses its cost
+ * expense too, so nothing orphaned survives a cancelled PO. Goes through removeSystemExpense, never
+ * a raw hard delete — see its own doc comment for why a synced expense must be archived, not deleted,
+ * to avoid a stale cloud copy resurrecting on every other device's next sync. */
+export function deleteShippingCostExpenseIfExists(tenantId: string, purchaseId: string): void {
+  const existing = expenseRepository.findExpenseRowBySource(tenantId, "purchase", purchaseId);
+  if (existing) removeSystemExpense(existing);
 }
 
 function requireEditableExpense(id: string, tenantId: string): expenseRepository.ExpenseRow {

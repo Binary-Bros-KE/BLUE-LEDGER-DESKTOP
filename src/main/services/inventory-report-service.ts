@@ -276,7 +276,11 @@ export function getStockAsOfDateReport(input: unknown): StockAsOfDateData {
   // current total — that's precisely "undo every movement since the end of the requested day."
   const sinceIsoExclusive = startOfDayIso(addDaysIso(parsed.date, 1));
 
-  const flatRows = inventoryReportRepository.findStockAsOfDateRows(tenantId, locationId, sinceIsoExclusive);
+  const flatRows = inventoryReportRepository.findStockAsOfDateRows(
+    tenantId,
+    locationId ? [locationId] : null,
+    sinceIsoExclusive
+  );
 
   // Every active location in scope becomes a column — seeded up front (same "show every location
   // even at zero" convention as the live report's own sections) so a product that never moved at a

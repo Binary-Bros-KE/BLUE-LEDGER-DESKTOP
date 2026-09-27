@@ -118,14 +118,33 @@ export type Purchase = {
    * (it's a whole-order cost, not attributable to one product), and deliberately excluded from each
    * item's own unitCostCents/COGS. Part of "capital" (see report-service.ts's
    * getSalesFinancialOverview) — informational in the "Total Capital Invested" report figure, never
-   * deducted from profit. */
+   * deducted from profit.
+   *
+   * UI label is "Shipping Fee" as of the fee/cost split, but the field itself is deliberately never
+   * renamed — it's synced, and reusing its exact name for a different meaning mid-rollout (an older
+   * device still pushing the old semantics under the same key while a newer device interprets it
+   * differently) is the exact class of bug that's bitten this codebase before. Owed to the supplier,
+   * payable once anything's been received — see computePurchasePayableCents (shared/lib/purchase.ts).
+   * See shippingExpenseCents below for the separate, never-owed-to-anyone "Shipping Cost" concept. */
   shippingCostCents: number;
+  /** The business's OWN out-of-pocket shipping cost (e.g. paying a courier directly) — labeled
+   * "Shipping Cost" in the UI. Never added to grandTotalCents, never owed to the supplier; booked as
+   * an Expense instead (see purchase-service.ts's createShippingCostExpenseIfNeeded, expense-
+   * service.ts). Mirrors DeliveryInput's own feeCents/costCents split on the sales side exactly. */
+  shippingExpenseCents: number;
   grandTotalCents: number;
   /** Client request: how much of grandTotalCents has actually arrived, in currency terms — the
-   * supplier balance and payment recording are based on THIS, not grandTotalCents. Maintained
-   * incrementally by receivePurchaseGoods; never includes shippingCostCents (built purely from each
-   * item's own lineTotalCents). See supplier-balance-service.ts's own doc comment. */
+   * supplier balance and payment recording are based on THIS plus the shipping fee (see
+   * computePurchasePayableCents), not grandTotalCents. Maintained incrementally by
+   * receivePurchaseGoods; never includes shippingCostCents (built purely from each item's own
+   * lineTotalCents). See supplier-balance-service.ts's own doc comment. */
   receivedValueCents: number;
+  /** Optional shipment tracking (mainly for overseas/China suppliers) — see computeShipmentStage
+   * (shared/lib/purchase.ts) for how these drive the progress indicator. All null until set. */
+  shipmentCourierName: string | null;
+  shipmentTrackingNumber: string | null;
+  shipmentDepartedAt: string | null;
+  shipmentEta: string | null;
   paymentMethodId: string | null;
   paymentMethodName: string | null;
   paymentReference: string | null;
@@ -159,11 +178,16 @@ export type PurchaseListItem = {
   taxType: PurchaseTaxType;
   grandTotalCents: number;
   receivedValueCents: number;
+  /** Needed here (not just on the full Purchase) so list/statement consumers can derive
+   * computePurchasePayableCents without a second lookup — see supplier-statement-service.ts. */
+  shippingCostCents: number;
   paymentStatus: PurchasePaymentStatus;
   amountPaidCents: number;
   orderedAt: string | null;
   receivedAt: string | null;
   createdAt: string;
+  shipmentDepartedAt: string | null;
+  shipmentEta: string | null;
 };
 
 export type PurchaseSummary = {

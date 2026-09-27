@@ -970,6 +970,8 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       reference: row.reference,
       description: row.description,
       // attachmentPath deliberately NOT sent — local file path, no shared cloud storage yet.
+      sourceType: row.source_type,
+      sourceId: row.source_id,
       status: row.status,
       isRecurring: Boolean(row.is_recurring),
       recurrenceFrequency: row.recurrence_frequency,
@@ -1251,10 +1253,15 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       discountAmountCents: row.discount_amount_cents,
       taxAmountCents: row.tax_amount_cents,
       shippingCostCents: row.shipping_cost_cents,
+      shippingExpenseCents: row.shipping_expense_cents,
       grandTotalCents: row.grand_total_cents,
       // Client request: how much of grandTotalCents has actually been received — see migrate.ts's
       // migration 89 doc comment for the full design.
       receivedValueCents: row.received_value_cents,
+      shipmentCourierName: row.shipment_courier_name,
+      shipmentTrackingNumber: row.shipment_tracking_number,
+      shipmentDepartedAt: row.shipment_departed_at,
+      shipmentEta: row.shipment_eta,
       paymentMethodId: row.payment_method_id,
       paymentReference: row.payment_reference,
       paymentStatus: row.payment_status,
@@ -1948,6 +1955,8 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       { local: "storefront_id", cloud: "storefrontId", refEntity: "locations" },
       { local: "reference", cloud: "reference" },
       { local: "description", cloud: "description" },
+      { local: "source_type", cloud: "sourceType" },
+      { local: "source_id", cloud: "sourceId" },
       { local: "status", cloud: "status" },
       { local: "is_recurring", cloud: "isRecurring", type: "bool" },
       { local: "recurrence_frequency", cloud: "recurrenceFrequency" },
@@ -2863,8 +2872,24 @@ function applyPurchasePulledRow(row: Record<string, unknown>, force: boolean): v
     // with no fallback, and a payload from a device that predates this field simply won't have
     // receivedValueCents at all (undefined binds to nothing better-sqlite3 will accept). Same
     // "older payload predates this field" ?? fallback already used for embedded JSON items elsewhere.
-    db.prepare("UPDATE purchases SET received_value_cents = ? WHERE id = ?").run(
+    // shippingExpenseCents/shipment* fields are newer still (fee/cost split + shipment tracking) —
+    // same reasoning, same treatment.
+    db.prepare(
+      `UPDATE purchases SET
+        received_value_cents = ?,
+        shipping_expense_cents = ?,
+        shipment_courier_name = ?,
+        shipment_tracking_number = ?,
+        shipment_departed_at = ?,
+        shipment_eta = ?
+      WHERE id = ?`
+    ).run(
       (row.receivedValueCents as number | undefined) ?? 0,
+      (row.shippingExpenseCents as number | undefined) ?? 0,
+      (row.shipmentCourierName as string | undefined) ?? null,
+      (row.shipmentTrackingNumber as string | undefined) ?? null,
+      (row.shipmentDepartedAt as string | undefined) ?? null,
+      (row.shipmentEta as string | undefined) ?? null,
       id
     );
 

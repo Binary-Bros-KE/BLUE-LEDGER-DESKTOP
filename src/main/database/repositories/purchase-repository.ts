@@ -26,12 +26,19 @@ export type PurchaseRow = {
   discount_amount_cents: number;
   tax_amount_cents: number;
   shipping_cost_cents: number;
+  // The business's own out-of-pocket shipping cost ("Shipping Cost" in the UI) — see
+  // Purchase.shippingExpenseCents' own doc comment (shared/types/purchase.ts).
+  shipping_expense_cents: number;
   grand_total_cents: number;
   // Client request: how much of grand_total_cents has actually arrived, in currency terms —
   // maintained incrementally by receivePurchaseGoods, never includes shipping (built purely from
   // purchase_items.line_total_cents). This, not grand_total_cents, is what the supplier balance and
   // payment recording are now based on — see supplier-balance-service.ts's own doc comment.
   received_value_cents: number;
+  shipment_courier_name: string | null;
+  shipment_tracking_number: string | null;
+  shipment_departed_at: string | null;
+  shipment_eta: string | null;
   payment_method_id: string | null;
   payment_reference: string | null;
   payment_status: string;
@@ -69,11 +76,14 @@ export type PurchaseListRow = {
   tax_type: string;
   grand_total_cents: number;
   received_value_cents: number;
+  shipping_cost_cents: number;
   payment_status: string;
   amount_paid_cents: number;
   ordered_at: string | null;
   received_at: string | null;
   created_at: string;
+  shipment_departed_at: string | null;
+  shipment_eta: string | null;
 };
 
 export type PurchaseItemRow = {
@@ -115,11 +125,14 @@ export function findAllPurchaseListRows(tenantId: string, locationId: string | n
         p.tax_type,
         p.grand_total_cents,
         p.received_value_cents,
+        p.shipping_cost_cents,
         p.payment_status,
         p.amount_paid_cents,
         p.ordered_at,
         p.received_at,
-        p.created_at
+        p.created_at,
+        p.shipment_departed_at,
+        p.shipment_eta
       FROM purchases p
       JOIN suppliers s ON s.id = p.supplier_id
       JOIN locations l ON l.id = p.location_id
@@ -202,12 +215,16 @@ export function findPurchaseRowsForSupplier(
   supplierId: string,
   filters: { status: "pending" | "paid" | "all"; dateFromIso: string | null; dateToExclusiveIso: string | null }
 ): PurchaseListRowWithPayments[] {
+  // "pending" — genuinely outstanding, using the same payable basis as computePurchasePayableCents
+  // (shared/lib/purchase.ts): received value, plus the full shipping fee once anything's arrived.
+  const payableExpr =
+    "(CASE WHEN p.received_value_cents > 0 THEN p.received_value_cents + p.shipping_cost_cents ELSE p.received_value_cents END)";
   const statusClause =
     filters.status === "paid"
       ? "p.status NOT IN ('draft', 'cancelled') AND p.payment_status = 'paid'"
       : filters.status === "all"
         ? "p.status != 'draft'"
-        : "p.status NOT IN ('draft', 'cancelled') AND p.received_value_cents > p.amount_paid_cents";
+        : `p.status NOT IN ('draft', 'cancelled') AND ${payableExpr} > p.amount_paid_cents`;
   const orderClause =
     filters.status === "pending" ? "COALESCE(p.ordered_at, p.created_at) ASC" : "COALESCE(p.ordered_at, p.created_at) DESC";
 
@@ -226,11 +243,14 @@ export function findPurchaseRowsForSupplier(
         p.tax_type,
         p.grand_total_cents,
         p.received_value_cents,
+        p.shipping_cost_cents,
         p.payment_status,
         p.amount_paid_cents,
         p.ordered_at,
         p.received_at,
         p.created_at,
+        p.shipment_departed_at,
+        p.shipment_eta,
         p.payments
       FROM purchases p
       JOIN suppliers s ON s.id = p.supplier_id
@@ -265,11 +285,14 @@ export function mapPurchaseListRow(row: PurchaseListRow): PurchaseListItem {
     taxType: row.tax_type as PurchaseTaxType,
     grandTotalCents: row.grand_total_cents,
     receivedValueCents: row.received_value_cents,
+    shippingCostCents: row.shipping_cost_cents,
     paymentStatus: row.payment_status as PurchasePaymentStatus,
     amountPaidCents: row.amount_paid_cents,
     orderedAt: row.ordered_at,
     receivedAt: row.received_at,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    shipmentDepartedAt: row.shipment_departed_at,
+    shipmentEta: row.shipment_eta
   };
 }
 
@@ -292,10 +315,12 @@ export function findPurchaseSummaryRow(tenantId: string, locationId: string | nu
         COALESCE(SUM(CASE WHEN status = 'ordered' THEN 1 ELSE 0 END), 0) AS ordered_count,
         COALESCE(SUM(CASE WHEN status = 'partially_received' THEN 1 ELSE 0 END), 0) AS partially_received_count,
         COALESCE(SUM(CASE WHEN status = 'received' THEN 1 ELSE 0 END), 0) AS received_count,
-        -- Client request: "outstanding" is what's owed for received goods only, not the full order
-        -- — an "ordered, nothing received" purchase naturally contributes 0 here now.
-        COALESCE(SUM(CASE WHEN status != 'cancelled' THEN received_value_cents - amount_paid_cents ELSE 0 END), 0)
-          AS outstanding_supplier_payments_cents
+        -- Client request: "outstanding" is what's owed for received goods only (plus the shipping
+        -- fee once anything's arrived — see computePurchasePayableCents), not the full order — an
+        -- "ordered, nothing received" purchase naturally contributes 0 here now.
+        COALESCE(SUM(CASE WHEN status != 'cancelled' THEN
+          (CASE WHEN received_value_cents > 0 THEN received_value_cents + shipping_cost_cents ELSE received_value_cents END) - amount_paid_cents
+          ELSE 0 END), 0) AS outstanding_supplier_payments_cents
       FROM purchases
       WHERE tenant_id = ? AND (? IS NULL OR location_id = ?)
     `
@@ -404,11 +429,16 @@ export function insertPurchaseRow(input: {
   discountAmountCents: number;
   taxAmountCents: number;
   shippingCostCents: number;
+  shippingExpenseCents: number;
   grandTotalCents: number;
   notes: string | null;
   attachmentPath: string | null;
   orderedAt: string | null;
   createdBy: string | null;
+  shipmentCourierName: string | null;
+  shipmentTrackingNumber: string | null;
+  shipmentDepartedAt: string | null;
+  shipmentEta: string | null;
 }): PurchaseRow {
   const now = new Date().toISOString();
 
@@ -417,10 +447,12 @@ export function insertPurchaseRow(input: {
       `
       INSERT INTO purchases (
         id, tenant_id, purchase_number, supplier_id, supplier_invoice_number, location_id, status,
-        tax_type, subtotal_cents, discount_amount_cents, tax_amount_cents, shipping_cost_cents, grand_total_cents,
-        notes, attachment_path, ordered_at, created_by, created_at, updated_at, sync_status
+        tax_type, subtotal_cents, discount_amount_cents, tax_amount_cents, shipping_cost_cents,
+        shipping_expense_cents, grand_total_cents, notes, attachment_path, ordered_at, created_by,
+        shipment_courier_name, shipment_tracking_number, shipment_departed_at, shipment_eta,
+        created_at, updated_at, sync_status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
     `
     )
     .run(
@@ -436,11 +468,16 @@ export function insertPurchaseRow(input: {
       input.discountAmountCents,
       input.taxAmountCents,
       input.shippingCostCents,
+      input.shippingExpenseCents,
       input.grandTotalCents,
       input.notes,
       input.attachmentPath,
       input.orderedAt,
       input.createdBy,
+      input.shipmentCourierName,
+      input.shipmentTrackingNumber,
+      input.shipmentDepartedAt,
+      input.shipmentEta,
       now,
       now
     );
@@ -463,9 +500,14 @@ export function updatePurchaseRow(
     discountAmountCents: number;
     taxAmountCents: number;
     shippingCostCents: number;
+    shippingExpenseCents: number;
     grandTotalCents: number;
     notes: string | null;
     attachmentPath: string | null;
+    shipmentCourierName: string | null;
+    shipmentTrackingNumber: string | null;
+    shipmentDepartedAt: string | null;
+    shipmentEta: string | null;
   }
 ): PurchaseRow {
   const now = new Date().toISOString();
@@ -482,9 +524,14 @@ export function updatePurchaseRow(
         discount_amount_cents = ?,
         tax_amount_cents = ?,
         shipping_cost_cents = ?,
+        shipping_expense_cents = ?,
         grand_total_cents = ?,
         notes = ?,
         attachment_path = ?,
+        shipment_courier_name = ?,
+        shipment_tracking_number = ?,
+        shipment_departed_at = ?,
+        shipment_eta = ?,
         sync_status = 'pending',
         updated_at = ?
       WHERE id = ?
@@ -499,9 +546,14 @@ export function updatePurchaseRow(
       input.discountAmountCents,
       input.taxAmountCents,
       input.shippingCostCents,
+      input.shippingExpenseCents,
       input.grandTotalCents,
       input.notes,
       input.attachmentPath,
+      input.shipmentCourierName,
+      input.shipmentTrackingNumber,
+      input.shipmentDepartedAt,
+      input.shipmentEta,
       now,
       id
     );
@@ -772,13 +824,19 @@ export function mapPurchaseDetailRow(row: PurchaseDetailRow, items: PurchaseItem
     discountAmountCents: row.discount_amount_cents,
     taxAmountCents: row.tax_amount_cents,
     shippingCostCents: row.shipping_cost_cents,
+    shippingExpenseCents: row.shipping_expense_cents,
     grandTotalCents: row.grand_total_cents,
     receivedValueCents: row.received_value_cents,
+    shipmentCourierName: row.shipment_courier_name,
+    shipmentTrackingNumber: row.shipment_tracking_number,
+    shipmentDepartedAt: row.shipment_departed_at,
+    shipmentEta: row.shipment_eta,
     paymentMethodId: row.payment_method_id,
     paymentMethodName: row.payment_method_name,
     paymentReference: row.payment_reference,
     paymentStatus: computePurchasePaymentStatus({
       receivedValueCents: row.received_value_cents,
+      shippingFeeCents: row.shipping_cost_cents,
       amountPaidCents: row.amount_paid_cents
     }),
     amountPaidCents: row.amount_paid_cents,

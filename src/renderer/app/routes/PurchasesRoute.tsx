@@ -18,11 +18,13 @@ import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import { SelectField } from "@renderer/shared/components/form-fields";
+import { ShipmentProgressBar } from "@renderer/shared/components/ShipmentProgressBar";
 import { StatTile } from "@renderer/shared/components/StatTile";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
+import { computeShipmentStage } from "@shared/lib/purchase";
 import { showErrorToast } from "@renderer/shared/lib/toast";
 import {
   ALL_YEARS_VALUE,
@@ -52,6 +54,17 @@ import { SupplierStatementModal } from "./purchases/SupplierStatementModal";
 
 type StatusFilter = "all" | PurchaseStatus;
 type PaymentStatusFilter = "all" | PurchasePaymentStatus;
+type ShipmentFilter = "all" | "overdue";
+
+function isShipmentOverdue(purchase: PurchaseListItem): boolean {
+  return (
+    computeShipmentStage({
+      shipmentDepartedAt: purchase.shipmentDepartedAt,
+      shipmentEta: purchase.shipmentEta,
+      isFullyReceived: purchase.status === "received"
+    }).stage === "overdue"
+  );
+}
 
 function statusLabel(status: PurchaseStatus): string {
   return PURCHASE_STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status;
@@ -111,6 +124,7 @@ export function PurchasesRoute(): React.JSX.Element {
   const [supplierFilter, setSupplierFilter] = useState("");
   const [locationFilter, setLocationFilter] = useState("");
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<PaymentStatusFilter>("all");
+  const [shipmentFilter, setShipmentFilter] = useState<ShipmentFilter>("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [yearFilter, setYearFilter] = useState<string>(String(currentYear()));
@@ -182,6 +196,9 @@ export function PurchasesRoute(): React.JSX.Element {
     if (paymentStatusFilter !== "all") {
       list = list.filter((purchase) => purchase.paymentStatus === paymentStatusFilter);
     }
+    if (shipmentFilter === "overdue") {
+      list = list.filter((purchase) => isShipmentOverdue(purchase));
+    }
     if (dateFrom) {
       const fromTime = new Date(dateFrom).getTime();
       list = list.filter((purchase) => new Date(purchase.createdAt).getTime() >= fromTime);
@@ -209,6 +226,7 @@ export function PurchasesRoute(): React.JSX.Element {
     supplierFilter,
     locationFilter,
     paymentStatusFilter,
+    shipmentFilter,
     dateFrom,
     dateTo,
     yearFilter,
@@ -289,6 +307,7 @@ export function PurchasesRoute(): React.JSX.Element {
     setSupplierFilter("");
     setLocationFilter("");
     setPaymentStatusFilter("all");
+    setShipmentFilter("all");
     setDateFrom("");
     setDateTo("");
   }
@@ -448,6 +467,15 @@ export function PurchasesRoute(): React.JSX.Element {
             options={[{ value: "all", label: "All Payment Statuses" }, ...PURCHASE_PAYMENT_STATUS_OPTIONS]}
           />
           <SelectField
+            label="Shipment"
+            value={shipmentFilter}
+            onChange={(value) => setShipmentFilter(value as ShipmentFilter)}
+            options={[
+              { value: "all", label: "All Shipments" },
+              { value: "overdue", label: "Overdue Shipments" }
+            ]}
+          />
+          <SelectField
             label="Supplier"
             value={supplierFilter}
             onChange={setSupplierFilter}
@@ -523,13 +551,14 @@ export function PurchasesRoute(): React.JSX.Element {
             <div className="overflow-x-auto rounded-lg border border-line">
               <table className="w-full table-fixed border-collapse text-sm">
                 <colgroup>
-                  <col className="w-[10%]" />
-                  <col className="w-[20%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[10%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[17%]" />
                   <col className="w-[9%]" />
                   <col className="w-[9%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[8%]" />
                   <col className="w-[10%]" />
                 </colgroup>
                 <thead>
@@ -539,6 +568,7 @@ export function PurchasesRoute(): React.JSX.Element {
                     <Th>Status</Th>
                     <Th className="text-right">Total Amount</Th>
                     <Th>Payment Status</Th>
+                    <Th>Shipment</Th>
                     <Th>Ordered</Th>
                     <Th>Received</Th>
                     <Th className="text-right">Actions</Th>
@@ -574,6 +604,18 @@ export function PurchasesRoute(): React.JSX.Element {
                         <DashedPill tone={paymentStatusTone(purchase.paymentStatus)}>
                           {purchase.paymentStatus === "partially_paid" ? "Partially Paid" : purchase.paymentStatus}
                         </DashedPill>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        {purchase.shipmentDepartedAt ? (
+                          <ShipmentProgressBar
+                            shipmentDepartedAt={purchase.shipmentDepartedAt}
+                            shipmentEta={purchase.shipmentEta}
+                            isFullyReceived={purchase.status === "received"}
+                            compact
+                          />
+                        ) : (
+                          <span className="text-xs font-semibold text-muted">—</span>
+                        )}
                       </td>
                       <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">
                         {formatDate(purchase.orderedAt)}

@@ -53,17 +53,30 @@ export function getCustomerStatement(customerId: string, filtersInput: unknown =
     throw new Error("Customer not found");
   }
 
-  const rawInvoiceRows = saleRepository.findInvoiceRowsForCustomer(tenant.tenantId, customerId, {
-    status: filters.status,
+  const dateFilters = {
     dateFromIso: filters.dateFrom ? startOfDayIso(filters.dateFrom) : null,
     dateToExclusiveIso: filters.dateTo ? addDaysIso(filters.dateTo, 1) : null
+  };
+
+  const rawInvoiceRows = saleRepository.findInvoiceRowsForCustomer(tenant.tenantId, customerId, {
+    status: filters.status,
+    ...dateFilters
   });
   const invoices = rawInvoiceRows.map(saleRepository.mapInvoiceListRow);
   const paymentsByInvoiceId = new Map(rawInvoiceRows.map((row) => [row.id, toStatementPayments(row.payments)]));
 
-  const totalInvoicedCents = invoices.reduce((sum, invoice) => sum + invoice.grandTotalCents, 0);
-  const totalPaidCents = invoices.reduce((sum, invoice) => sum + invoice.amountPaidCents, 0);
-  const totalOutstandingCents = invoices.reduce((sum, invoice) => sum + invoice.balanceDueCents, 0);
+  // Header totals must stay a stable, filter-independent fact ("what is genuinely still owed"), not
+  // a sum over whatever the "Show" dropdown happens to be displaying — see the identical fix (and its
+  // reasoning) in supplier-statement-service.ts's getSupplierStatement.
+  const outstandingInvoices =
+    filters.status === "pending"
+      ? invoices
+      : saleRepository
+          .findInvoiceRowsForCustomer(tenant.tenantId, customerId, { status: "pending", ...dateFilters })
+          .map(saleRepository.mapInvoiceListRow);
+  const totalInvoicedCents = outstandingInvoices.reduce((sum, invoice) => sum + invoice.grandTotalCents, 0);
+  const totalPaidCents = outstandingInvoices.reduce((sum, invoice) => sum + invoice.amountPaidCents, 0);
+  const totalOutstandingCents = outstandingInvoices.reduce((sum, invoice) => sum + invoice.balanceDueCents, 0);
 
   return {
     businessName: tenant.businessName,

@@ -2120,7 +2120,7 @@ export function InvoicesRoute(): React.JSX.Element {
         }}
         title={statementVm ? `Statement — ${statementVm.customerName}` : "Statement"}
         description="Print, download, share, or filter this customer's statement."
-        widthClassName="max-w-3xl"
+        widthClassName="max-w-5xl"
       >
         {statementLoading && !statementVm ? (
           <div className="flex min-h-[160px] items-center justify-center text-muted">
@@ -2136,6 +2136,11 @@ export function InvoicesRoute(): React.JSX.Element {
             onDateFromChange={handleStatementDateFromChange}
             onDateToChange={handleStatementDateToChange}
             filtering={statementLoading}
+            paymentMethods={paymentMethods}
+            onPaid={(customerId) => {
+              void loadAll();
+              void openStatement(customerId);
+            }}
           />
         ) : null}
       </Modal>

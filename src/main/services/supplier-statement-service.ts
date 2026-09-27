@@ -2,6 +2,7 @@ import * as purchaseRepository from "@main/database/repositories/purchase-reposi
 import * as supplierRepository from "@main/database/repositories/supplier-repository";
 import { requirePermission } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
+import { computePurchasePayableCents } from "@shared/lib/purchase";
 import { statementFiltersSchema } from "@shared/schemas/statement";
 import type { StatementPaymentEntry } from "@shared/types/statement";
 import type { SupplierStatementViewModel } from "@shared/types/supplier-statement";
@@ -54,22 +55,42 @@ export function getSupplierStatement(supplierId: string, filtersInput: unknown =
     throw new Error("Supplier not found");
   }
 
-  const rawPurchaseRows = purchaseRepository.findPurchaseRowsForSupplier(tenant.tenantId, supplierId, {
-    status: filters.status,
+  const dateFilters = {
     dateFromIso: filters.dateFrom ? startOfDayIso(filters.dateFrom) : null,
     dateToExclusiveIso: filters.dateTo ? addDaysIso(filters.dateTo, 1) : null
+  };
+
+  const rawPurchaseRows = purchaseRepository.findPurchaseRowsForSupplier(tenant.tenantId, supplierId, {
+    status: filters.status,
+    ...dateFilters
   });
   const purchases = rawPurchaseRows.map(purchaseRepository.mapPurchaseListRow);
   const paymentsByPurchaseId = new Map(rawPurchaseRows.map((row) => [row.id, toStatementPayments(row.payments)]));
 
-  // Client request: "outstanding" is what's owed for received goods only — totalOrderedCents/
-  // totalPaidCents stay as full-order-value context (still genuinely useful figures), but
-  // totalOutstandingCents is the SUM of the same per-purchase balanceDueCents below, so the
-  // statement's own total always matches the sum of the rows it shows.
-  const totalOrderedCents = purchases.reduce((sum, purchase) => sum + purchase.grandTotalCents, 0);
-  const totalPaidCents = purchases.reduce((sum, purchase) => sum + purchase.amountPaidCents, 0);
-  const totalOutstandingCents = purchases.reduce(
-    (sum, purchase) => sum + (purchase.receivedValueCents - purchase.amountPaidCents),
+  // The header totals must stay a stable, filter-independent fact ("what is genuinely still owed"),
+  // not a sum over whatever the "Show" dropdown happens to be displaying. Under "all"/"paid", the
+  // listed rows can include paid/overpaid purchases whose balanceDueCents is negative (amount_paid
+  // exceeds received_value on that one purchase) — summing those into the total lets them cancel out
+  // real debt owed on OTHER purchases, producing a wrong, filter-dependent figure (confirmed live:
+  // "all" showed a total smaller than a single genuinely-outstanding purchase's own balance). So the
+  // totals are always computed from the same "pending" set findPurchaseRowsForSupplier already uses
+  // (received_value_cents > amount_paid_cents), independent of filters.status — mirrors the client-
+  // side outstandingPurchases filter SupplierStatementModal.tsx already applies for its bulk-pay flow.
+  const outstandingRows =
+    filters.status === "pending"
+      ? rawPurchaseRows
+      : purchaseRepository.findPurchaseRowsForSupplier(tenant.tenantId, supplierId, {
+          status: "pending",
+          ...dateFilters
+        });
+  const outstandingPurchases = outstandingRows.map(purchaseRepository.mapPurchaseListRow);
+  const totalOrderedCents = outstandingPurchases.reduce((sum, purchase) => sum + purchase.grandTotalCents, 0);
+  const totalPaidCents = outstandingPurchases.reduce((sum, purchase) => sum + purchase.amountPaidCents, 0);
+  const totalOutstandingCents = outstandingPurchases.reduce(
+    (sum, purchase) =>
+      sum +
+      (computePurchasePayableCents({ receivedValueCents: purchase.receivedValueCents, shippingFeeCents: purchase.shippingCostCents }) -
+        purchase.amountPaidCents),
     0
   );
 
@@ -91,8 +112,11 @@ export function getSupplierStatement(supplierId: string, filtersInput: unknown =
       orderedAt: purchase.orderedAt,
       grandTotalCents: purchase.grandTotalCents,
       amountPaidCents: purchase.amountPaidCents,
-      // Client request: only ever the received-goods balance, never the full order total.
-      balanceDueCents: purchase.receivedValueCents - purchase.amountPaidCents,
+      // Client request: only ever the received-goods balance (plus the shipping fee once anything's
+      // arrived — see computePurchasePayableCents), never the full order total.
+      balanceDueCents:
+        computePurchasePayableCents({ receivedValueCents: purchase.receivedValueCents, shippingFeeCents: purchase.shippingCostCents }) -
+        purchase.amountPaidCents,
       paymentStatus: purchase.paymentStatus,
       payments: paymentsByPurchaseId.get(purchase.id) ?? []
     })),

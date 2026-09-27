@@ -723,6 +723,7 @@ export function ProductsRoute(): React.JSX.Element {
           product={detailProduct}
           currency={currency}
           locations={locations}
+          initialLocationId={storefrontFilter || undefined}
           onClose={() => setDetailProduct(null)}
         />
       )}

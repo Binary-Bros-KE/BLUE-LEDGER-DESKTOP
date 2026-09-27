@@ -106,6 +106,11 @@ export function PurchaseFormModal({
   const [locationId, setLocationId] = useState("");
   const [supplierInvoiceNumber, setSupplierInvoiceNumber] = useState("");
   const [shippingCost, setShippingCost] = useState("");
+  const [shippingExpense, setShippingExpense] = useState("");
+  const [shipmentCourierName, setShipmentCourierName] = useState("");
+  const [shipmentTrackingNumber, setShipmentTrackingNumber] = useState("");
+  const [shipmentDepartedAt, setShipmentDepartedAt] = useState("");
+  const [shipmentEta, setShipmentEta] = useState("");
   const [notes, setNotes] = useState("");
   const [attachmentPath, setAttachmentPath] = useState<string | null>(null);
   const [attachmentBusy, setAttachmentBusy] = useState(false);
@@ -125,6 +130,11 @@ export function PurchaseFormModal({
       setLocationId(editingPurchase.locationId);
       setSupplierInvoiceNumber(editingPurchase.supplierInvoiceNumber ?? "");
       setShippingCost(editingPurchase.shippingCostCents > 0 ? fromCents(editingPurchase.shippingCostCents) : "");
+      setShippingExpense(editingPurchase.shippingExpenseCents > 0 ? fromCents(editingPurchase.shippingExpenseCents) : "");
+      setShipmentCourierName(editingPurchase.shipmentCourierName ?? "");
+      setShipmentTrackingNumber(editingPurchase.shipmentTrackingNumber ?? "");
+      setShipmentDepartedAt(editingPurchase.shipmentDepartedAt ?? "");
+      setShipmentEta(editingPurchase.shipmentEta ?? "");
       setNotes(editingPurchase.notes ?? "");
       setAttachmentPath(editingPurchase.attachmentPath);
       setItems(
@@ -146,6 +156,11 @@ export function PurchaseFormModal({
       setLocationId("");
       setSupplierInvoiceNumber("");
       setShippingCost("");
+      setShippingExpense("");
+      setShipmentCourierName("");
+      setShipmentTrackingNumber("");
+      setShipmentDepartedAt("");
+      setShipmentEta("");
       setNotes("");
       setAttachmentPath(null);
       setItems([]);
@@ -195,18 +210,22 @@ export function PurchaseFormModal({
       lineGrossCentsSum += lineGrossCents(item, product, tenantTaxConfig);
     }
     const shippingCostCents = shippingCost.trim() ? toCents(shippingCost) : 0;
+    const shippingExpenseCents = shippingExpense.trim() ? toCents(shippingExpense) : 0;
     // Sums each line's own gross amount (already resolved per-product) rather than branching off
     // one global toggle — an order's lines can mix inclusive and exclusive products via their own
-    // overrides. Shipping is added on top either way, unlike discount — it increases the total.
+    // overrides. Shipping FEE is added on top either way, unlike discount — it increases the total.
+    // Shipping COST is never added here — it's the business's own internal cost, booked as an
+    // Expense instead (see purchase-service.ts's createShippingCostExpenseIfNeeded).
     const grandTotalCents = lineGrossCentsSum + shippingCostCents;
     return {
       subtotalCents,
       discountAmountCents,
       taxAmountCents,
       shippingCostCents,
+      shippingExpenseCents,
       grandTotalCents
     };
-  }, [items, shippingCost, tenantTaxConfig, productById]);
+  }, [items, shippingCost, shippingExpense, tenantTaxConfig, productById]);
 
   function addItemLine(product: ProductListItem): void {
     setItems((prev) => {
@@ -275,6 +294,11 @@ export function PurchaseFormModal({
       supplierInvoiceNumber,
       locationId,
       shippingCostCents: shippingCost.trim() ? toCents(shippingCost) : 0,
+      shippingExpenseCents: shippingExpense.trim() ? toCents(shippingExpense) : 0,
+      shipmentCourierName,
+      shipmentTrackingNumber,
+      shipmentDepartedAt,
+      shipmentEta,
       notes,
       attachmentPath,
       items: items.map((item) => ({
@@ -445,14 +469,54 @@ export function PurchaseFormModal({
               )}
             </div>
           </div>
-          <Field
-            label="Shipping Cost"
-            type="number"
-            value={shippingCost}
-            onChange={setShippingCost}
-            placeholder="0.00"
-            className="mt-4 max-w-xs"
-          />
+          <div className="mt-4 grid grid-cols-2 gap-3 max-w-md">
+            <Field
+              label="Shipping Fee"
+              type="number"
+              value={shippingCost}
+              onChange={setShippingCost}
+              placeholder="0.00"
+            />
+            <Field
+              label="Shipping Cost"
+              type="number"
+              value={shippingExpense}
+              onChange={setShippingExpense}
+              placeholder="0.00"
+            />
+          </div>
+          <p className="mt-1 max-w-md text-[11px] font-semibold text-muted">
+            Fee is owed to the supplier and added to the total. Cost is your own out-of-pocket cost
+            (e.g. paying a courier) — booked separately as a "Shipping Costs" expense, never added to
+            the total.
+          </p>
+
+          <div className="mt-4">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
+              Shipment Tracking (optional)
+            </span>
+            <div className="mt-1.5 grid grid-cols-2 gap-3">
+              <Field
+                label="Courier / Shipping Company"
+                value={shipmentCourierName}
+                onChange={setShipmentCourierName}
+                placeholder="e.g. DHL, Sea Freight Co."
+              />
+              <Field
+                label="Tracking Number"
+                value={shipmentTrackingNumber}
+                onChange={setShipmentTrackingNumber}
+                placeholder="Optional"
+              />
+              <Field
+                label="Departed On"
+                type="date"
+                value={shipmentDepartedAt}
+                onChange={setShipmentDepartedAt}
+              />
+              <Field label="Estimated Arrival" type="date" value={shipmentEta} onChange={setShipmentEta} />
+            </div>
+          </div>
 
           <TextAreaField label="Notes" value={notes} onChange={setNotes} className="mt-4" rows={2} />
 
@@ -631,7 +695,7 @@ export function PurchaseFormModal({
             </div>
             {totals.shippingCostCents > 0 && (
               <div className="flex justify-between text-muted">
-                <span className="font-semibold">Shipping</span>
+                <span className="font-semibold">Shipping Fee</span>
                 <span className="font-bold tabular-nums">+{formatCents(totals.shippingCostCents)}</span>
               </div>
             )}
@@ -639,6 +703,12 @@ export function PurchaseFormModal({
               <span>Total</span>
               <span>{formatCents(totals.grandTotalCents)}</span>
             </div>
+            {totals.shippingExpenseCents > 0 && (
+              <div className="flex justify-between text-muted">
+                <span className="font-semibold">Shipping Cost (booked as expense)</span>
+                <span className="font-bold tabular-nums">{formatCents(totals.shippingExpenseCents)}</span>
+              </div>
+            )}
           </div>
               <div className="mt-3 flex items-center justify-end gap-3">
             <Button

@@ -99,3 +99,14 @@ export type StockMovementFeedItem = StockMovement & {
    * could have changed since. See stock-movement-repository.ts's mapStockMovementFeedRow. */
   unitPriceCents: number;
 };
+
+/** Stock Ledger feed + its two point-in-time valuation cards, all resolved together from the same
+ * filters (date range + optional storefront) in one round trip — see inventory-service.ts's
+ * listAllStockMovements. Both value figures use the same selling-price basis as valueCents/
+ * unitPriceCents above (client request), computed via inventory-report-repository.ts's
+ * findStockAsOfDateRows at the period's own start/end bounds. */
+export type StockLedgerFeed = {
+  movements: StockMovementFeedItem[];
+  openingValueCents: number;
+  closingValueCents: number;
+};

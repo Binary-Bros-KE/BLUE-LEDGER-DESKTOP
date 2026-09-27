@@ -9,11 +9,12 @@ import type { PurchaseRow } from "@main/database/repositories/purchase-repositor
 import * as supplierRepository from "@main/database/repositories/supplier-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, getSession, requirePermission } from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
+import { createShippingCostExpenseIfNeeded, deleteShippingCostExpenseIfExists } from "@main/services/expense-service";
 import { deleteManagedPurchaseAttachment } from "@main/services/image-service";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
 import { recordSupplierBalanceEntry } from "@main/services/supplier-balance-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
-import { computePurchasePaymentStatus, computePurchaseReceivingStatus } from "@shared/lib/purchase";
+import { computePurchasePayableCents, computePurchasePaymentStatus, computePurchaseReceivingStatus } from "@shared/lib/purchase";
 import {
   markPurchasePaidSchema,
   purchaseCreateSchema,
@@ -58,6 +59,7 @@ type PreparedPurchaseCart = {
   discountAmountCents: number;
   taxAmountCents: number;
   shippingCostCents: number;
+  shippingExpenseCents: number;
   grandTotalCents: number;
 };
 
@@ -102,7 +104,12 @@ function assertUniqueSupplierInvoiceNumber(
   }
 }
 
-function prepareCart(tenantId: string, items: PurchaseItemInput[], shippingCostCents: number): PreparedPurchaseCart {
+function prepareCart(
+  tenantId: string,
+  items: PurchaseItemInput[],
+  shippingCostCents: number,
+  shippingExpenseCents: number
+): PreparedPurchaseCart {
   const tenantTaxConfig = getCurrentTenant();
 
   const preparedItems: PreparedPurchaseItem[] = items.map((item) => {
@@ -156,6 +163,7 @@ function prepareCart(tenantId: string, items: PurchaseItemInput[], shippingCostC
     discountAmountCents,
     taxAmountCents,
     shippingCostCents,
+    shippingExpenseCents,
     grandTotalCents
   };
 }
@@ -216,7 +224,7 @@ export function createPurchase(input: unknown): Purchase {
   assertLocationBelongsToTenant(tenantId, parsed.locationId);
   assertUniqueSupplierInvoiceNumber(tenantId, parsed.supplierId, parsed.supplierInvoiceNumber);
 
-  const cart = prepareCart(tenantId, parsed.items, parsed.shippingCostCents);
+  const cart = prepareCart(tenantId, parsed.items, parsed.shippingCostCents, parsed.shippingExpenseCents);
   const purchaseId = `purchase_${randomUUID()}`;
   const now = new Date().toISOString();
 
@@ -234,11 +242,16 @@ export function createPurchase(input: unknown): Purchase {
       discountAmountCents: cart.discountAmountCents,
       taxAmountCents: cart.taxAmountCents,
       shippingCostCents: cart.shippingCostCents,
+      shippingExpenseCents: cart.shippingExpenseCents,
       grandTotalCents: cart.grandTotalCents,
       notes: parsed.notes,
       attachmentPath: parsed.attachmentPath,
       orderedAt: parsed.intent === "ordered" ? now : null,
-      createdBy: employeeId
+      createdBy: employeeId,
+      shipmentCourierName: parsed.shipmentCourierName,
+      shipmentTrackingNumber: parsed.shipmentTrackingNumber,
+      shipmentDepartedAt: parsed.shipmentDepartedAt,
+      shipmentEta: parsed.shipmentEta
     });
 
     for (const item of cart.items) {
@@ -261,6 +274,14 @@ export function createPurchase(input: unknown): Purchase {
       // Client request: placing an order no longer touches the supplier balance at all — it only
       // grows as goods are actually received (see receivePurchaseGoods's own "purchase_received"
       // hook below), never at order time, and never including shippingCostCents.
+      createShippingCostExpenseIfNeeded({
+        tenantId,
+        purchaseId,
+        locationId: parsed.locationId,
+        employeeId,
+        costCents: cart.shippingExpenseCents,
+        date: now
+      });
     }
 
     return getPurchaseDetail(purchaseId);
@@ -301,6 +322,7 @@ export function updatePurchase(id: string, input: unknown): Purchase {
   requirePermission("purchases", "edit");
   const parsed: PurchaseUpdateInput = purchaseUpdateSchema.parse(input);
   const { tenantId } = getCurrentTenant();
+  const employeeId = getCurrentEmployeeId();
   const existing = requireEditablePurchase(id, tenantId);
   const wasOrdered = existing.status === "ordered";
 
@@ -308,7 +330,7 @@ export function updatePurchase(id: string, input: unknown): Purchase {
   assertLocationBelongsToTenant(tenantId, parsed.locationId);
   assertUniqueSupplierInvoiceNumber(tenantId, parsed.supplierId, parsed.supplierInvoiceNumber, id);
 
-  const cart = prepareCart(tenantId, parsed.items, parsed.shippingCostCents);
+  const cart = prepareCart(tenantId, parsed.items, parsed.shippingCostCents, parsed.shippingExpenseCents);
   const now = new Date().toISOString();
 
   if (existing.attachment_path && existing.attachment_path !== parsed.attachmentPath) {
@@ -325,9 +347,14 @@ export function updatePurchase(id: string, input: unknown): Purchase {
       discountAmountCents: cart.discountAmountCents,
       taxAmountCents: cart.taxAmountCents,
       shippingCostCents: cart.shippingCostCents,
+      shippingExpenseCents: cart.shippingExpenseCents,
       grandTotalCents: cart.grandTotalCents,
       notes: parsed.notes,
-      attachmentPath: parsed.attachmentPath
+      attachmentPath: parsed.attachmentPath,
+      shipmentCourierName: parsed.shipmentCourierName,
+      shipmentTrackingNumber: parsed.shipmentTrackingNumber,
+      shipmentDepartedAt: parsed.shipmentDepartedAt,
+      shipmentEta: parsed.shipmentEta
     });
 
     purchaseRepository.deletePurchaseItemsForPurchaseRow(id);
@@ -351,9 +378,25 @@ export function updatePurchase(id: string, input: unknown): Purchase {
       // fresh items, same as the draft→ordered transition below does. Nothing to correct on the
       // supplier balance — see this function's own doc comment above.
       syncProductPricingFromOrder(cart.items);
+      createShippingCostExpenseIfNeeded({
+        tenantId,
+        purchaseId: id,
+        locationId: parsed.locationId,
+        employeeId,
+        costCents: cart.shippingExpenseCents,
+        date: now
+      });
     } else if (parsed.intent === "ordered") {
       purchaseRepository.updatePurchaseStatusRow(id, "ordered", { orderedAt: now });
       syncProductPricingFromOrder(cart.items);
+      createShippingCostExpenseIfNeeded({
+        tenantId,
+        purchaseId: id,
+        locationId: parsed.locationId,
+        employeeId,
+        costCents: cart.shippingExpenseCents,
+        date: now
+      });
     }
 
     return getPurchaseDetail(id);
@@ -365,6 +408,7 @@ export function updatePurchase(id: string, input: unknown): Purchase {
 export function markPurchaseOrdered(id: string): Purchase {
   requirePermission("purchases", "edit");
   const { tenantId } = getCurrentTenant();
+  const employeeId = getCurrentEmployeeId();
   const row = purchaseRepository.findPurchaseRowById(id);
   if (!row || row.tenant_id !== tenantId) {
     throw new Error("Purchase not found");
@@ -374,7 +418,8 @@ export function markPurchaseOrdered(id: string): Purchase {
   }
 
   return runInTransaction(() => {
-    purchaseRepository.updatePurchaseStatusRow(id, "ordered", { orderedAt: new Date().toISOString() });
+    const now = new Date().toISOString();
+    purchaseRepository.updatePurchaseStatusRow(id, "ordered", { orderedAt: now });
 
     // No items are resubmitted on this path (it's a status-only flip on an already-saved draft) —
     // read back what's already stored, same syncProductPricingFromOrder every other "save as
@@ -390,6 +435,14 @@ export function markPurchaseOrdered(id: string): Purchase {
 
     // Client request: no supplier-balance hook here anymore — placing an order never touches the
     // balance, only receiving does (see receivePurchaseGoods).
+    createShippingCostExpenseIfNeeded({
+      tenantId,
+      purchaseId: id,
+      locationId: row.location_id,
+      employeeId,
+      costCents: row.shipping_expense_cents,
+      date: now
+    });
 
     return getPurchaseDetail(id);
   });
@@ -419,6 +472,10 @@ export function cancelPurchase(id: string): Purchase {
     // cancelling is only ever reachable before anything's received (the guard above), which under
     // the new model also guarantees amount_paid_cents is still 0 here (applyPayment now refuses a
     // payment against a purchase with nothing received — see its own balanceDueCents check).
+
+    // Client-confirmed decision: cancelling deletes its linked shipping-cost expense too, so nothing
+    // orphaned survives a cancelled PO — this is only ever reachable before anything's received/paid.
+    deleteShippingCostExpenseIfExists(tenantId, id);
 
     return getPurchaseDetail(id);
   });
@@ -529,14 +586,19 @@ export function receivePurchaseGoods(id: string, input: unknown): Purchase {
       const newReceivedValueCents = purchase.received_value_cents + batchValueCents;
       const newPaymentStatus = computePurchasePaymentStatus({
         receivedValueCents: newReceivedValueCents,
+        shippingFeeCents: purchase.shipping_cost_cents,
         amountPaidCents: purchase.amount_paid_cents
       });
       purchaseRepository.incrementPurchaseReceivedValueRow(id, batchValueCents, newPaymentStatus);
+      // Client-confirmed decision: the shipping fee becomes fully due the moment ANYTHING has been
+      // received — not gated further by how much — so the FIRST batch (purchase.received_value_cents
+      // was still 0 going in) also pulls the full fee onto the supplier balance in the same entry.
+      const feeNowDueCents = purchase.received_value_cents === 0 ? purchase.shipping_cost_cents : 0;
       recordSupplierBalanceEntry({
         tenantId,
         supplierId: purchase.supplier_id,
         entryType: "purchase_received",
-        amountCents: batchValueCents,
+        amountCents: batchValueCents + feeNowDueCents,
         referenceType: "purchase",
         referenceId: id,
         notes: null,
@@ -600,10 +662,11 @@ function applyPayment(
   if (row.status === "draft") {
     throw new Error("This purchase hasn't been ordered yet — place the order before recording a payment");
   }
-  // Client request: you can only pay for what's actually arrived — balanceDueCents is now the
-  // received value minus what's already paid, never the full order total (see
-  // receivePurchaseGoods's own "purchase_received" hook, the only thing that grows this).
-  const balanceDueCents = row.received_value_cents - row.amount_paid_cents;
+  // Client request: you can only pay for what's actually arrived, plus the shipping fee once
+  // anything has (see computePurchasePayableCents) — never the full order total up front.
+  const balanceDueCents =
+    computePurchasePayableCents({ receivedValueCents: row.received_value_cents, shippingFeeCents: row.shipping_cost_cents }) -
+    row.amount_paid_cents;
   if (balanceDueCents <= 0) {
     throw new Error(
       row.received_value_cents === 0
@@ -637,6 +700,7 @@ function applyPayment(
   const amountPaidCents = payments.reduce((sum, entry) => sum + entry.amountCents, 0);
   const paymentStatus = computePurchasePaymentStatus({
     receivedValueCents: row.received_value_cents,
+    shippingFeeCents: row.shipping_cost_cents,
     amountPaidCents
   });
 
@@ -688,11 +752,13 @@ export function markPurchasePaid(purchaseId: string, input: unknown): Purchase {
     throw new Error("Purchase not found");
   }
 
-  // Client request: "pay it off" now means paying off what's actually been received, not the full
-  // order total — applyPayment's own balanceDueCents guard would reject anything larger anyway.
+  // Client request: "pay it off" now means paying off what's actually been received plus the
+  // shipping fee once anything has (see computePurchasePayableCents) — not the full order total.
   return applyPayment(tenantId, purchaseId, {
     paymentMethodId: parsed.paymentMethodId,
-    amountCents: row.received_value_cents - row.amount_paid_cents,
+    amountCents:
+      computePurchasePayableCents({ receivedValueCents: row.received_value_cents, shippingFeeCents: row.shipping_cost_cents }) -
+      row.amount_paid_cents,
     reference: parsed.reference,
     notes: parsed.notes
   });

@@ -23,6 +23,11 @@ export type ExpenseRow = {
   reference: string | null;
   description: string | null;
   attachment_path: string | null;
+  // Generic, nullable system-link back to whatever created this expense automatically (e.g. a
+  // purchase's shipping cost) — see purchase-service.ts's createShippingCostExpenseIfNeeded. Never
+  // set by the user-facing create/edit form; the free-text "reference" column above is for that.
+  source_type: string | null;
+  source_id: string | null;
   status: string;
   is_recurring: number;
   recurrence_frequency: string | null;
@@ -164,6 +169,15 @@ export function findExpenseRowById(id: string): ExpenseRow | undefined {
   return getDatabase().prepare("SELECT * FROM expenses WHERE id = ?").get(id) as ExpenseRow | undefined;
 }
 
+/** Finds the one expense a system process (not the user-facing form) previously auto-created for a
+ * given source record — e.g. a purchase's shipping cost — so it can be updated in place instead of
+ * duplicated on a later edit. See source_type/source_id's own doc comment above. */
+export function findExpenseRowBySource(tenantId: string, sourceType: string, sourceId: string): ExpenseRow | undefined {
+  return getDatabase()
+    .prepare("SELECT * FROM expenses WHERE tenant_id = ? AND source_type = ? AND source_id = ?")
+    .get(tenantId, sourceType, sourceId) as ExpenseRow | undefined;
+}
+
 export function findExpenseDetailRowById(id: string): ExpenseDetailRow | undefined {
   return getDatabase()
     .prepare(
@@ -192,6 +206,8 @@ export function insertExpenseRow(
     kind: ExpenseKind;
     expenseNumber: string;
     createdBy: string | null;
+    sourceType?: string | null;
+    sourceId?: string | null;
   }
 ): ExpenseRow {
   const now = new Date().toISOString();
@@ -201,10 +217,10 @@ export function insertExpenseRow(
       `
       INSERT INTO expenses (
         id, tenant_id, kind, expense_number, expense_date, category_id, amount_cents, paid_by,
-        payment_method_id, storefront_id, reference, description, attachment_path, status,
-        created_by, created_at, updated_at, sync_status
+        payment_method_id, storefront_id, reference, description, attachment_path, source_type,
+        source_id, status, created_by, created_at, updated_at, sync_status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
     `
     )
     .run(
@@ -221,6 +237,8 @@ export function insertExpenseRow(
       input.reference,
       input.description,
       input.attachmentPath,
+      input.sourceType ?? null,
+      input.sourceId ?? null,
       input.createdBy,
       now,
       now
@@ -229,6 +247,26 @@ export function insertExpenseRow(
   const row = findExpenseRowById(input.id);
   if (!row) {
     throw new Error("Failed to create expense record");
+  }
+  return row;
+}
+
+/** Updates just the amount (+ description/date, kept in sync with the source) of a system-created
+ * expense — e.g. a purchase's shipping cost being re-edited while the PO is still in its editable
+ * window. Deliberately narrower than updateExpenseRow (which is the full user-facing edit form) since
+ * a system-created expense's category/payment method/storefront were never user choices to begin with. */
+export function updateExpenseAmountRow(id: string, input: { amountCents: number; description: string | null; expenseDate: string }): ExpenseRow {
+  const now = new Date().toISOString();
+
+  getDatabase()
+    .prepare(
+      "UPDATE expenses SET amount_cents = ?, description = ?, expense_date = ?, sync_status = 'pending', updated_at = ? WHERE id = ?"
+    )
+    .run(input.amountCents, input.description, input.expenseDate, now, id);
+
+  const row = findExpenseRowById(id);
+  if (!row) {
+    throw new Error("Expense not found after amount update");
   }
   return row;
 }

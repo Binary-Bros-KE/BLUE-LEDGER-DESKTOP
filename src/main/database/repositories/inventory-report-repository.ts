@@ -50,26 +50,41 @@ export type StockAsOfDateRowRaw = {
   location_id: string;
   location_name: string;
   quantity: number;
+  selling_price_cents: number;
 };
+
+/** Same variable-length location filter as stock-movement-repository.ts's own locationIdsClause —
+ * duplicated locally rather than shared/imported, matching this codebase's existing convention for
+ * small per-file SQL helpers (e.g. startOfDayIso/addDaysIso). */
+function locationIdsClause(column: string, locationIds: string[] | null): { sql: string; params: string[] } {
+  if (!locationIds || locationIds.length === 0) return { sql: "1 = 1", params: [] };
+  const placeholders = locationIds.map(() => "?").join(", ");
+  return { sql: `${column} IN (${placeholders})`, params: locationIds };
+}
 
 /** Every product's balance at one (or every) location, as of a chosen moment — computed backward
  * from the CURRENT `inventory` total (always correct, since stock_movements is append-only) minus
  * every movement that happened at or after `sinceIsoExclusive`. Pass the START of the day AFTER the
  * date being asked about (see getStockAsOfDateReport's own doc comment) — everything from that
  * point forward gets subtracted back out, leaving exactly what was on hand at the end of the
- * requested day. One indexed query, no per-product round trips. */
+ * requested day. One indexed query, no per-product round trips. Pass null for locationIds to see
+ * every location; a non-empty array (a selected storefront plus Main Store — see inventory-
+ * service.ts's resolveLocationFilterIds) filters to exactly those — used by getStockAsOfDateReport
+ * (single location or all) and the Stock Ledger's Opening/Closing Stock Value cards alike. */
 export function findStockAsOfDateRows(
   tenantId: string,
-  locationId: string | null,
+  locationIds: string[] | null,
   sinceIsoExclusive: string
 ): StockAsOfDateRowRaw[] {
+  const location = locationIdsClause("i.location_id", locationIds);
   return getDatabase()
     .prepare(
       `
       SELECT
         i.product_id, p.name AS product_name, p.sku, c.name AS category_name,
         i.location_id, l.location_name,
-        i.quantity - COALESCE(later.sum_change, 0) AS quantity
+        i.quantity - COALESCE(later.sum_change, 0) AS quantity,
+        p.selling_price_cents AS selling_price_cents
       FROM inventory i
       JOIN products p ON p.id = i.product_id
       JOIN locations l ON l.id = i.location_id
@@ -81,11 +96,11 @@ export function findStockAsOfDateRows(
         GROUP BY product_id, location_id
       ) later ON later.product_id = i.product_id AND later.location_id = i.location_id
       WHERE i.tenant_id = ? AND p.track_stock = 1 AND p.status = 'active' AND l.status = 'active'
-        AND (? IS NULL OR i.location_id = ?)
+        AND ${location.sql}
       ORDER BY p.name, l.location_name
     `
     )
-    .all(tenantId, sinceIsoExclusive, tenantId, locationId, locationId) as StockAsOfDateRowRaw[];
+    .all(tenantId, sinceIsoExclusive, tenantId, ...location.params) as StockAsOfDateRowRaw[];
 }
 
 export type LocationRow = { id: string; location_name: string; location_type: string };

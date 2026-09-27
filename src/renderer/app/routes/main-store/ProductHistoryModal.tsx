@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { ExportMenu } from "@renderer/shared/components/ExportMenu";
+import { SelectField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
@@ -11,6 +12,7 @@ import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import { showErrorToast } from "@renderer/shared/lib/toast";
 import type { ExportListRequest } from "@shared/types/export";
+import type { Location } from "@shared/types/location";
 import {
   STOCK_MOVEMENT_TYPE_OPTIONS,
   type StockMovementType,
@@ -40,11 +42,13 @@ export function ProductHistoryModal({
   productId,
   productName,
   currency,
+  locations,
   onClose
 }: {
   productId: string;
   productName: string;
   currency: string;
+  locations: Location[];
   onClose: () => void;
 }): React.JSX.Element {
   const { can } = usePermissions();
@@ -55,6 +59,9 @@ export function ProductHistoryModal({
   // Empty string on either end means "no bound" — the default view (most recent 150, any date).
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  // Client request: filtering to one storefront still shows Main Store's own movements for this
+  // product too — resolved server-side (see inventory-service.ts's resolveLocationFilterIds).
+  const [locationFilter, setLocationFilter] = useState("");
 
   const loadMovements = useCallback(async () => {
     setError(null);
@@ -62,7 +69,8 @@ export function ProductHistoryModal({
       const result = await window.blueLedger.stockMovement.list(productId, {
         limit: 500,
         ...(dateFrom ? { startDate: dateFrom } : {}),
-        ...(dateTo ? { endDate: dateTo } : {})
+        ...(dateTo ? { endDate: dateTo } : {}),
+        locationId: locationFilter || null
       });
       setMovements(result);
     } catch (err) {
@@ -70,7 +78,7 @@ export function ProductHistoryModal({
       setError(message);
       showErrorToast(message);
     }
-  }, [productId, dateFrom, dateTo]);
+  }, [productId, dateFrom, dateTo, locationFilter]);
 
   useEffect(() => {
     void loadMovements();
@@ -81,6 +89,10 @@ export function ProductHistoryModal({
     const filterParts: string[] = [];
     if (dateFrom || dateTo) {
       filterParts.push(`Date: ${dateFrom || "earliest"} to ${dateTo || "today"}`);
+    }
+    if (locationFilter) {
+      const name = locations.find((l) => l.id === locationFilter)?.locationName ?? locationFilter;
+      filterParts.push(`Storefront: ${name} (+ Main Store)`);
     }
 
     return {
@@ -110,7 +122,7 @@ export function ProductHistoryModal({
       stats: [{ label: "Total Movements", value: String(movements.length) }],
       fileBaseName: `${productName.replace(/\s+/g, "_")}_StockMovements`
     };
-  }, [movements, dateFrom, dateTo, productName, currency]);
+  }, [movements, dateFrom, dateTo, locationFilter, locations, productName, currency]);
 
   return (
     <Modal
@@ -140,12 +152,23 @@ export function ProductHistoryModal({
               className="mt-1.5 h-9 rounded-lg border border-line bg-white px-3 text-xs font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
             />
           </label>
-          {(dateFrom || dateTo) && (
+          <SelectField
+            label="Storefront"
+            value={locationFilter}
+            onChange={setLocationFilter}
+            options={[
+              { value: "", label: "All Locations" },
+              ...locations.map((location) => ({ value: location.id, label: location.locationName }))
+            ]}
+            className="w-44"
+          />
+          {(dateFrom || dateTo || locationFilter) && (
             <Button
               type="button"
               onClick={() => {
                 setDateFrom("");
                 setDateTo("");
+                setLocationFilter("");
               }}
               className="h-9 border border-line bg-white px-3 text-[11px] text-ink shadow-none hover:bg-soft"
             >
@@ -166,7 +189,9 @@ export function ProductHistoryModal({
         </div>
       ) : movements.length === 0 ? (
         <p className="mt-4 p-4 text-sm font-semibold text-muted">
-          {dateFrom || dateTo ? "No stock movements in this date range." : "No stock movements recorded yet."}
+          {dateFrom || dateTo || locationFilter
+            ? "No stock movements match these filters."
+            : "No stock movements recorded yet."}
         </p>
       ) : (
         <div className="mt-4 max-h-[60vh] overflow-x-auto overflow-y-auto rounded-lg border border-line">

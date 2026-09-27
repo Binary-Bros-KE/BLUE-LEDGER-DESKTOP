@@ -73,8 +73,8 @@ import type { SaleVoid } from "./sale-void";
 import type { InvoiceCancellation } from "./invoice-cancellation";
 import type { RecurringBill } from "./recurring-bill";
 import type {
+  StockLedgerFeed,
   StockMovement,
-  StockMovementFeedItem,
   StockMovementWithUnitPrice,
   StockTransferResult
 } from "./stock-movement";
@@ -416,12 +416,12 @@ export type IpcInvokeMap = {
     result: LocationStockLevel[];
   };
   "stock-movement:list": {
-    args: [string, { limit?: number; startDate?: string; endDate?: string }];
+    args: [string, { limit?: number; startDate?: string; endDate?: string; locationId?: string | null }];
     result: StockMovementWithUnitPrice[];
   };
   "stock-movement:list-all": {
-    args: [{ startDate?: string; endDate?: string; limit?: number }];
-    result: StockMovementFeedItem[];
+    args: [{ startDate?: string; endDate?: string; limit?: number; locationId?: string | null }];
+    result: StockLedgerFeed;
   };
   "stock-movement:create": {
     args: [Record<string, unknown>];
@@ -1573,10 +1573,10 @@ export type BlueLedgerApi = {
   stockMovement: {
     list: (
       productId: string,
-      input?: { limit?: number; startDate?: string; endDate?: string }
+      input?: { limit?: number; startDate?: string; endDate?: string; locationId?: string | null }
     ) => Promise<IpcInvokeMap["stock-movement:list"]["result"]>;
     listAll: (
-      input?: { startDate?: string; endDate?: string; limit?: number }
+      input?: { startDate?: string; endDate?: string; limit?: number; locationId?: string | null }
     ) => Promise<IpcInvokeMap["stock-movement:list-all"]["result"]>;
     create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["stock-movement:create"]["result"]>;
     transfer: (

@@ -100,6 +100,10 @@ export function adjustSupplierBalanceCents(supplierId: string, deltaCents: numbe
  * recording a payment updates the screen instantly, no restart needed), but this recompute bounds how
  * long any drift — from this bug, a future one, or anything else — can last to about one sync cycle,
  * on every device, forever. No future corrective migration should ever be needed for this again.
+ *
+ * Per-purchase contribution mirrors computePurchasePayableCents (shared/lib/purchase.ts) exactly:
+ * received value, plus the full shipping fee once anything's arrived — never shipping_expense_cents
+ * (that's the business's own internal cost, booked as an Expense, never owed to the supplier).
  */
 export function reconcileAllSupplierBalances(tenantId: string): void {
   getDatabase()
@@ -107,7 +111,10 @@ export function reconcileAllSupplierBalances(tenantId: string): void {
       `
       UPDATE suppliers SET balance_cents = (
         COALESCE((
-          SELECT SUM(p.received_value_cents - p.amount_paid_cents)
+          SELECT SUM(
+            (CASE WHEN p.received_value_cents > 0 THEN p.received_value_cents + p.shipping_cost_cents ELSE p.received_value_cents END)
+            - p.amount_paid_cents
+          )
           FROM purchases p WHERE p.supplier_id = suppliers.id
         ), 0)
         + COALESCE((

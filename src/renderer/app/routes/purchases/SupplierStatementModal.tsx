@@ -5,6 +5,7 @@ import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { Field, SelectField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { fromCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { formatDocumentDate } from "@shared/lib/date";
 import type { PaymentMethod } from "@shared/types/payment-method";
@@ -63,22 +64,34 @@ export function SupplierStatementModal({
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // Client request: five-plus pending purchases from the same supplier used to mean finding and
-  // marking each one paid individually. This records ONE payment for the supplier's WHOLE
-  // outstanding balance (never a user-typed amount — see submitBulkPayment) via the same
-  // per-purchase markPaid mechanism PurchaseDetailModal already uses, once per outstanding purchase,
-  // all sharing this one reference — exactly what the client described.
+  // Client request: a bulk payment used to always clear the WHOLE outstanding balance, in full, no
+  // other option. Now takes any amount up to that total, and a priority ("Oldest first"/"Newest
+  // first") deciding which purchases it gets applied to first — see submitBulkPayment. Sequential,
+  // real payments (recordPurchasePayment) against each purchase in that order, not a single lump
+  // entry, so each purchase's own payment history stays accurate.
   const [bulkPaymentOpen, setBulkPaymentOpen] = useState(false);
+  const [bulkAmount, setBulkAmount] = useState("");
+  const [bulkPriority, setBulkPriority] = useState<"oldest" | "newest">("oldest");
   const [bulkPaymentMethodId, setBulkPaymentMethodId] = useState("");
   const [bulkReference, setBulkReference] = useState("");
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
+
+  // Client request: previously there was no way to pay a single purchase from the statement itself —
+  // only "pay everything." Opens a small modal scoped to just this one purchase.
+  const [payingPurchase, setPayingPurchase] = useState<SupplierStatementViewModel["purchases"][number] | null>(null);
+  const [payAmount, setPayAmount] = useState("");
+  const [payMethodId, setPayMethodId] = useState("");
+  const [payReference, setPayReference] = useState("");
+  const [paySaving, setPaySaving] = useState(false);
+  const [payError, setPayError] = useState<string | null>(null);
 
   const activePaymentMethods = useMemo(
     () => paymentMethods.filter((method) => method.isActive).sort((a, b) => a.sortOrder - b.sortOrder),
     [paymentMethods]
   );
   const selectedBulkMethod = activePaymentMethods.find((method) => method.id === bulkPaymentMethodId) ?? null;
+  const selectedPayMethod = activePaymentMethods.find((method) => method.id === payMethodId) ?? null;
 
   const filteredSuppliers = useMemo(() => {
     const active = suppliers.filter((supplier) => supplier.status === "active");
@@ -101,6 +114,9 @@ export function SupplierStatementModal({
   }
 
   function openBulkPayment(): void {
+    if (!vm) return;
+    setBulkAmount(fromCents(vm.totalOutstandingCents));
+    setBulkPriority("oldest");
     setBulkPaymentMethodId("");
     setBulkReference("");
     setBulkError(null);
@@ -110,38 +126,108 @@ export function SupplierStatementModal({
   async function submitBulkPayment(event: React.FormEvent): Promise<void> {
     event.preventDefault();
     if (!vm || outstandingPurchases.length === 0) return;
+
+    const totalCents = toCents(bulkAmount);
+    if (!Number.isFinite(totalCents) || totalCents <= 0) {
+      setBulkError("Enter an amount greater than 0");
+      return;
+    }
+    if (totalCents > vm.totalOutstandingCents) {
+      setBulkError(`Amount exceeds the total outstanding balance of ${money(vm.totalOutstandingCents)}`);
+      return;
+    }
+
+    // Oldest first clears the longest-standing debt before anything newer; newest first is the
+    // reverse — client-chosen priority for which purchase(s) this amount actually lands on when it
+    // doesn't cover everything owed.
+    const ordered = [...outstandingPurchases].sort((a, b) => {
+      const at = a.orderedAt ? new Date(a.orderedAt).getTime() : 0;
+      const bt = b.orderedAt ? new Date(b.orderedAt).getTime() : 0;
+      return bulkPriority === "oldest" ? at - bt : bt - at;
+    });
+
     setBulkSaving(true);
     setBulkError(null);
-    // Sequential, not Promise.all — these are real money-recording writes against the same
-    // supplier's balance; running them one at a time keeps the outcome predictable (a failure
-    // partway through leaves a clean "N of M paid" result instead of an unordered race) and lets
-    // this report exactly which purchase(s) failed rather than an all-or-nothing outcome.
+    // Sequential, not Promise.all — each purchase's share depends on how much of the total is left
+    // after the ones before it, and these are real money-recording writes. Stops at the first
+    // failure rather than continuing to spend the remaining amount on later purchases, so nothing
+    // gets silently skipped while its share of the money still goes elsewhere.
+    let remainingCents = totalCents;
     let paidCount = 0;
-    const failures: string[] = [];
-    for (const purchase of outstandingPurchases) {
+    let failure: string | null = null;
+    for (const purchase of ordered) {
+      if (remainingCents <= 0) break;
+      const amountCents = Math.min(remainingCents, purchase.balanceDueCents);
       try {
-        await window.blueLedger.purchase.markPaid(purchase.id, {
+        await window.blueLedger.purchase.recordPayment(purchase.id, {
           paymentMethodId: bulkPaymentMethodId,
+          amountCents,
           reference: bulkReference,
           notes: null
         });
+        remainingCents -= amountCents;
         paidCount += 1;
       } catch (err) {
-        failures.push(`${purchase.purchaseNumber}: ${getErrorMessage(err, "Failed to record payment")}`);
+        failure = `${purchase.purchaseNumber}: ${getErrorMessage(err, "Failed to record payment")}`;
+        break;
       }
     }
     setBulkSaving(false);
     if (paidCount > 0) {
-      showSuccessToast(`Recorded payment for ${paidCount} purchase${paidCount === 1 ? "" : "s"}`);
+      showSuccessToast(`Recorded payment across ${paidCount} purchase${paidCount === 1 ? "" : "s"}`);
       onPaid();
       await openStatement(vm.supplierId);
     }
-    if (failures.length > 0) {
-      const message = `${failures.length} purchase${failures.length === 1 ? "" : "s"} could not be marked paid: ${failures.join("; ")}`;
+    if (failure) {
+      const message = `Stopped after a failure: ${failure}`;
       setBulkError(message);
       showErrorToast(message);
     } else {
       setBulkPaymentOpen(false);
+    }
+  }
+
+  function openPayPurchase(purchase: SupplierStatementViewModel["purchases"][number]): void {
+    setPayingPurchase(purchase);
+    setPayAmount(fromCents(purchase.balanceDueCents));
+    setPayMethodId("");
+    setPayReference("");
+    setPayError(null);
+  }
+
+  async function submitPayPurchase(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    if (!vm || !payingPurchase) return;
+
+    const amountCents = toCents(payAmount);
+    if (!Number.isFinite(amountCents) || amountCents <= 0) {
+      setPayError("Enter an amount greater than 0");
+      return;
+    }
+    if (amountCents > payingPurchase.balanceDueCents) {
+      setPayError(`Amount exceeds this purchase's balance of ${money(payingPurchase.balanceDueCents)}`);
+      return;
+    }
+
+    setPaySaving(true);
+    setPayError(null);
+    try {
+      await window.blueLedger.purchase.recordPayment(payingPurchase.id, {
+        paymentMethodId: payMethodId,
+        amountCents,
+        reference: payReference,
+        notes: null
+      });
+      showSuccessToast(`Payment recorded for ${payingPurchase.purchaseNumber}`);
+      onPaid();
+      setPayingPurchase(null);
+      await openStatement(vm.supplierId);
+    } catch (err) {
+      const message = getErrorMessage(err, "Failed to record payment");
+      setPayError(message);
+      showErrorToast(message);
+    } finally {
+      setPaySaving(false);
     }
   }
 
@@ -301,7 +387,7 @@ export function SupplierStatementModal({
         onClose={handleClose}
         title={vm ? `Statement — ${vm.supplierName}` : "Statement"}
         description="Print, download, or filter this supplier's statement."
-        widthClassName="max-w-3xl"
+        widthClassName="max-w-5xl"
       >
         {vm && (
           <div>
@@ -399,12 +485,13 @@ export function SupplierStatementModal({
                       <th className="px-2.5 py-2 text-right">Due Balance</th>
                       <th className="px-2.5 py-2 text-left">Status</th>
                       <th className="px-2.5 py-2 text-left">Payments</th>
+                      <th className="px-2.5 py-2 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {vm.purchases.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-2.5 py-4 text-center font-semibold text-muted">
+                        <td colSpan={7} className="px-2.5 py-4 text-center font-semibold text-muted">
                           {statusFilter === "pending" ? "No outstanding purchases" : "No purchases match this filter"}
                         </td>
                       </tr>
@@ -441,10 +528,25 @@ export function SupplierStatementModal({
                                   </button>
                                 )}
                               </td>
+                              <td className="px-2.5 py-2 text-right">
+                                {purchase.balanceDueCents > 0 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => openPayPurchase(purchase)}
+                                    aria-label={`Record payment for ${purchase.purchaseNumber}`}
+                                    title="Record Payment"
+                                    className="grid size-7 place-items-center rounded-lg border border-line text-muted transition hover:bg-success/15 hover:text-success cursor-pointer"
+                                  >
+                                    <Wallet className="size-3.5" aria-hidden="true" />
+                                  </button>
+                                ) : (
+                                  <span className="text-muted">—</span>
+                                )}
+                              </td>
                             </tr>
                             {expanded && purchase.payments.length > 0 && (
                               <tr className="border-b border-line bg-soft/60 last:border-0">
-                                <td colSpan={6} className="px-2.5 py-2">
+                                <td colSpan={7} className="px-2.5 py-2">
                                   <table className="w-full text-[11px]">
                                     <thead>
                                       <tr className="text-[9px] font-extrabold uppercase tracking-wide text-muted">
@@ -501,7 +603,7 @@ export function SupplierStatementModal({
                 className="mt-4 h-10 w-full bg-success text-xs hover:brightness-110"
               >
                 <Wallet className="mr-1.5 size-4" aria-hidden="true" />
-                Record Payment — Clear {money(vm.totalOutstandingCents)}
+                Record Payment
               </Button>
             )}
 
@@ -534,7 +636,7 @@ export function SupplierStatementModal({
           open={bulkPaymentOpen}
           onClose={() => setBulkPaymentOpen(false)}
           title="Record Payment"
-          description={`Settles all ${outstandingPurchases.length} outstanding purchase${outstandingPurchases.length === 1 ? "" : "s"} for ${vm.supplierName} at once.`}
+          description={`Applies one payment across ${vm.supplierName}'s outstanding purchases, oldest or newest first.`}
           widthClassName="max-w-sm"
         >
           <form onSubmit={submitBulkPayment}>
@@ -543,14 +645,22 @@ export function SupplierStatementModal({
                 {bulkError}
               </div>
             )}
-            {/* Client request: only ever the FULL outstanding total — never a user-typed amount —
-                since this pays off every listed purchase for its own individual balance, not one
-                arbitrary lump sum split across them. */}
             <p className="mb-4 text-xs font-semibold text-muted">
-              This will record a payment of{" "}
-              <span className="font-extrabold text-ink">{money(vm.totalOutstandingCents)}</span>, marking every
-              purchase below as paid in full with the same reference.
+              Total outstanding: <span className="font-extrabold text-ink">{money(vm.totalOutstandingCents)}</span>.
+              If this amount doesn't cover everything, whichever purchases come first in the priority below get
+              paid off first — the rest stay outstanding.
             </p>
+            <Field label="Amount" type="number" value={bulkAmount} onChange={setBulkAmount} placeholder="0.00" />
+            <SelectField
+              label="Priority"
+              value={bulkPriority}
+              onChange={(value) => setBulkPriority(value as "oldest" | "newest")}
+              options={[
+                { value: "oldest", label: "Oldest purchases first" },
+                { value: "newest", label: "Newest purchases first" }
+              ]}
+              className="mt-4"
+            />
             <SelectField
               label="Payment Method"
               value={bulkPaymentMethodId}
@@ -559,6 +669,7 @@ export function SupplierStatementModal({
                 { value: "", label: "Select payment method" },
                 ...activePaymentMethods.map((method) => ({ value: method.id, label: method.name }))
               ]}
+              className="mt-4"
             />
             {selectedBulkMethod?.requiresReference && (
               <Field
@@ -584,7 +695,66 @@ export function SupplierStatementModal({
                 className="h-9 bg-success text-xs hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {bulkSaving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
-                {bulkSaving ? "Saving..." : "Confirm Paid"}
+                {bulkSaving ? "Saving..." : "Record Payment"}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {vm && payingPurchase && (
+        <Modal
+          open
+          onClose={() => setPayingPurchase(null)}
+          title="Record Payment"
+          description={`Applies a payment to purchase ${payingPurchase.purchaseNumber} only.`}
+          widthClassName="max-w-sm"
+        >
+          <form onSubmit={submitPayPurchase}>
+            {payError && (
+              <div className="mb-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
+                {payError}
+              </div>
+            )}
+            <p className="mb-4 text-xs font-semibold text-muted">
+              Balance due: <span className="font-extrabold text-ink">{money(payingPurchase.balanceDueCents)}</span>
+            </p>
+            <Field label="Amount" type="number" value={payAmount} onChange={setPayAmount} placeholder="0.00" />
+            <SelectField
+              label="Payment Method"
+              value={payMethodId}
+              onChange={setPayMethodId}
+              options={[
+                { value: "", label: "Select payment method" },
+                ...activePaymentMethods.map((method) => ({ value: method.id, label: method.name }))
+              ]}
+              className="mt-4"
+            />
+            {selectedPayMethod?.requiresReference && (
+              <Field
+                label="Reference"
+                value={payReference}
+                onChange={setPayReference}
+                placeholder="e.g. M-Pesa code, transaction ID"
+                required
+                className="mt-4"
+              />
+            )}
+            <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
+              <Button
+                type="button"
+                onClick={() => setPayingPurchase(null)}
+                className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={paySaving || !payMethodId}
+                className="h-9 bg-success text-xs hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {paySaving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
+                {paySaving ? "Saving..." : "Record Payment"}
               </Button>
             </div>
           </form>

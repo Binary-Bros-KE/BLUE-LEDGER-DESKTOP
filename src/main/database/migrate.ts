@@ -3357,6 +3357,37 @@ const migrations = [
         ), 0)
       );
     `
+  },
+  {
+    version: 96,
+    name: "purchase_shipping_split_and_shipment_tracking",
+    sql: `
+      -- Client request: shipping_cost_cents (kept exactly as-is — see its own doc comment in
+      -- shared/types/purchase.ts for why it's never renamed) now means "Shipping Fee" in the UI,
+      -- owed to the supplier. This new column is the separate "Shipping Cost" concept — the
+      -- business's own out-of-pocket cost (e.g. paying a courier directly), booked as an Expense,
+      -- never added to grand_total_cents and never owed to the supplier. Defaults to 0 for every
+      -- existing purchase (no historical row had this concept before today).
+      ALTER TABLE purchases ADD COLUMN shipping_expense_cents INTEGER NOT NULL DEFAULT 0;
+
+      -- Client request: track a shipment's journey (mainly for China/overseas suppliers) — courier,
+      -- tracking number, departure date, estimated arrival. All nullable/optional; a purchase with
+      -- none of these set shows no tracking UI at all.
+      ALTER TABLE purchases ADD COLUMN shipment_courier_name TEXT;
+      ALTER TABLE purchases ADD COLUMN shipment_tracking_number TEXT;
+      ALTER TABLE purchases ADD COLUMN shipment_departed_at TEXT;
+      ALTER TABLE purchases ADD COLUMN shipment_eta TEXT;
+
+      -- Generic, nullable system-link back to whatever created an expense automatically (mirrors the
+      -- reference_type/reference_id pattern already used on stock_movements/supplier_balance_entries).
+      -- Needed because, unlike a sale (immutable once completed), a purchase can still be edited while
+      -- in its editable window — so a shipping-cost expense created from a purchase must be
+      -- find-and-updateable by that purchase's id, not just write-once. The existing free-text
+      -- "reference" column stays untouched — it's user-facing (shown in expense lists/reports), so an
+      -- internal purchase id doesn't belong there.
+      ALTER TABLE expenses ADD COLUMN source_type TEXT;
+      ALTER TABLE expenses ADD COLUMN source_id TEXT;
+    `
   }
 ] as const;
 

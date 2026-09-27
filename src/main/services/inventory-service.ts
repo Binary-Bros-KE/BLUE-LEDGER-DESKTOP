@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { runInTransaction } from "@main/database/connection";
 import * as inventoryRepository from "@main/database/repositories/inventory-repository";
+import * as inventoryReportRepository from "@main/database/repositories/inventory-report-repository";
 import * as locationRepository from "@main/database/repositories/location-repository";
 import * as mainStoreAllocationRepository from "@main/database/repositories/main-store-allocation-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
@@ -14,8 +15,8 @@ import {
 } from "@shared/schemas/stock-movement";
 import type { InventoryBalance, LocationStockLevel } from "@shared/types/inventory";
 import type {
+  StockLedgerFeed,
   StockMovement,
-  StockMovementFeedItem,
   StockMovementType,
   StockMovementWithUnitPrice,
   StockTransferResult
@@ -255,20 +256,40 @@ export function getInventoryOverview(productId: string): InventoryBalance[] {
     .map((row) => inventoryRepository.mapInventoryOverviewRow(row, tenantId, productId));
 }
 
+/** Client correction: filtering to one storefront must show that storefront's own movements PLUS
+ * ONLY the Main Store movements that actually involve it — never every Main Store movement tenant-
+ * wide (a purchase receipt for a different branch, a distribution to someone else, etc). See
+ * stock-movement-repository.ts's movementLocationClause for exactly how "involves" is decided
+ * (allocation_storefront_id or a shared reference_id with a row at this storefront). Returns null (no
+ * filter — every location) when requestedLocationId itself is null/empty. Shared by both per-product
+ * history modals and the Stock Ledger's own storefront filter. */
+function resolveMovementLocationFilter(
+  tenantId: string,
+  requestedLocationId: string | null | undefined
+): stockMovementRepository.MovementLocationFilter {
+  if (!requestedLocationId) return null;
+  const mainStore = locationRepository.findMainStoreLocationRow(tenantId);
+  return { locationId: requestedLocationId, mainStoreLocationId: mainStore?.id ?? null };
+}
+
 /** startDate/endDate are plain YYYY-MM-DD (inclusive) — pass neither to skip date filtering entirely
  * (the default "recent" view both ProductDetailModal and Main Store's ProductHistoryModal open with).
- * Same convention as listAllStockMovements just below. */
+ * Same convention as listAllStockMovements just below. locationId is optional — see
+ * resolveMovementLocationFilter for the storefront-plus-Main-Store-involvement filtering rule. */
 export function listStockMovements(
   productId: string,
   limit = 100,
   startDate?: string,
-  endDate?: string
+  endDate?: string,
+  locationId?: string | null
 ): StockMovementWithUnitPrice[] {
   requirePermission("inventory", "view");
+  const { tenantId } = getCurrentTenant();
   const startIso = startDate ? startOfDayIso(startDate) : null;
   const endIsoExclusive = endDate ? startOfDayIso(addDaysIso(endDate, 1)) : null;
+  const locationFilter = resolveMovementLocationFilter(tenantId, locationId);
   return stockMovementRepository
-    .findStockMovementRowsForProduct(productId, limit, startIso, endIsoExclusive)
+    .findStockMovementRowsForProduct(productId, limit, startIso, endIsoExclusive, locationFilter)
     .map(stockMovementRepository.mapStockMovementProductRow);
 }
 
@@ -292,16 +313,51 @@ function addDaysIso(dateStr: string, days: number): string {
 
 /** startDate/endDate are plain YYYY-MM-DD (inclusive) — pass neither to skip date filtering
  * entirely. limit stays as a safety cap even with a date range (e.g. a genuinely huge storefront
- * picking "All Years"), same as every other capped feed in this app. */
-export function listAllStockMovements(startDate?: string, endDate?: string, limit = 5000): StockMovementFeedItem[] {
+ * picking "All Years"), same as every other capped feed in this app. locationId is optional — see
+ * resolveMovementLocationFilter for the storefront-plus-Main-Store-involvement filtering rule; a
+ * branch-scoped caller's own assigned location always wins over any requested filter, unchanged from
+ * before (and gets the same Main-Store-involvement treatment, not just a bare single-location match).
+ *
+ * Also resolves the Stock Ledger's Opening/Closing Stock Value cards in the same round trip (client
+ * request), computed via findStockAsOfDateRows (inventory-report-repository.ts, already built for the
+ * separate "Stock As Of Date" report) at the period's own start/end bounds, valued the same selling-
+ * price basis as valueCents/unitPriceCents above. Unlike the movement feed, this deliberately does
+ * NOT fold in Main Store when a storefront is selected — "Opening/Closing Stock Value" means this
+ * location's own on-hand valuation; Main Store's entire unrelated warehouse total has no business
+ * being folded into one storefront's figure just because a couple of its movements touched Main
+ * Store. Falls back to "all history"/"right now" when a bound is omitted (skip-date-filtering), so
+ * the figures stay meaningful even unfiltered. */
+export function listAllStockMovements(
+  startDate?: string,
+  endDate?: string,
+  limit = 5000,
+  locationId?: string | null
+): StockLedgerFeed {
   requirePermission("inventory", "view");
   const { tenantId } = getCurrentTenant();
-  const locationId = getCurrentBranchScope();
+  const branchScope = getCurrentBranchScope();
+  const effectiveLocationId = branchScope ?? locationId ?? null;
+  const locationFilter = resolveMovementLocationFilter(tenantId, effectiveLocationId);
+  const valuationLocationIds = effectiveLocationId ? [effectiveLocationId] : null;
   const startIso = startDate ? startOfDayIso(startDate) : null;
   const endIsoExclusive = endDate ? startOfDayIso(addDaysIso(endDate, 1)) : null;
-  return stockMovementRepository
-    .findAllStockMovementRows(tenantId, locationId, limit, startIso, endIsoExclusive)
+
+  const movements = stockMovementRepository
+    .findAllStockMovementRows(tenantId, locationFilter, limit, startIso, endIsoExclusive)
     .map(stockMovementRepository.mapStockMovementFeedRow);
+
+  const valueOfStockAsOf = (sinceIsoExclusive: string): number =>
+    inventoryReportRepository
+      .findStockAsOfDateRows(tenantId, valuationLocationIds, sinceIsoExclusive)
+      .reduce((sum, row) => sum + row.quantity * row.selling_price_cents, 0);
+
+  // No start date given ("all time") means "opening" is before any history — effectively 0 for every
+  // product. No end date given means "closing" is right now — a date far enough in the future that
+  // nothing gets subtracted back out of the current inventory total.
+  const openingValueCents = valueOfStockAsOf(startIso ?? "1970-01-01T00:00:00.000Z");
+  const closingValueCents = valueOfStockAsOf(endIsoExclusive ?? "9999-12-31T00:00:00.000Z");
+
+  return { movements, openingValueCents, closingValueCents };
 }
 
 /** Every stocked product's balance at one location — feeds the POS screen's available-stock display. */

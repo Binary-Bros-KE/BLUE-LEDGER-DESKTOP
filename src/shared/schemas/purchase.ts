@@ -26,10 +26,19 @@ export const purchaseCreateSchema = z.object({
   supplierId: z.string().trim().min(1, "Select a supplier"),
   supplierInvoiceNumber: optionalText(100),
   locationId: z.string().trim().min(1, "Select a destination location"),
-  // Whole-order freight cost, not per-line — see Purchase.shippingCostCents' own doc comment.
+  // Whole-order freight cost, not per-line — see Purchase.shippingCostCents' own doc comment
+  // ("Shipping Fee" in the UI, owed to the supplier).
   shippingCostCents: cents.optional().default(0),
+  // The business's own out-of-pocket shipping cost ("Shipping Cost" in the UI) — see
+  // Purchase.shippingExpenseCents' own doc comment. Never added to the order total.
+  shippingExpenseCents: cents.optional().default(0),
   notes: optionalText(1000),
   attachmentPath: optionalText(500),
+  // Optional shipment tracking — see Purchase.shipmentCourierName's own doc comment.
+  shipmentCourierName: optionalText(150),
+  shipmentTrackingNumber: optionalText(100),
+  shipmentDepartedAt: optionalText(40),
+  shipmentEta: optionalText(40),
   items: z.array(purchaseItemInputSchema).min(1, "Add at least one product"),
   intent: z.enum(["draft", "ordered"]).optional().default("draft")
 });

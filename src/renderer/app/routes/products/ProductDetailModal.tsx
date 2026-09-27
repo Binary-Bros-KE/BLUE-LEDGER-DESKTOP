@@ -77,11 +77,15 @@ export function ProductDetailModal({
   product,
   currency,
   locations,
+  initialLocationId,
   onClose
 }: {
   product: ProductListItem;
   currency: string;
   locations: Location[];
+  /** Client request: when the Products page itself is already filtered to a storefront, this modal's
+   * own movement filter should default to that same one instead of "All Locations". */
+  initialLocationId?: string | undefined;
   onClose: () => void;
 }): React.JSX.Element {
   const { can } = usePermissions();
@@ -102,13 +106,18 @@ export function ProductDetailModal({
   // people open this modal for; From/To below narrow it.
   const [movementDateFrom, setMovementDateFrom] = useState("");
   const [movementDateTo, setMovementDateTo] = useState("");
+  // Client request: filtering to one storefront still shows Main Store's own movements for this
+  // product too (resolved server-side — see inventory-service.ts's resolveLocationFilterIds), and
+  // defaults to whatever storefront the Products page itself is already filtered to.
+  const [movementLocationFilter, setMovementLocationFilter] = useState(initialLocationId ?? "");
 
   const loadMovements = useCallback(async () => {
     try {
       const movementsResult = await window.blueLedger.stockMovement.list(product.id, {
         limit: 500,
         ...(movementDateFrom ? { startDate: movementDateFrom } : {}),
-        ...(movementDateTo ? { endDate: movementDateTo } : {})
+        ...(movementDateTo ? { endDate: movementDateTo } : {}),
+        locationId: movementLocationFilter || null
       });
       setMovements(movementsResult);
     } catch (err) {
@@ -116,7 +125,7 @@ export function ProductDetailModal({
       setLoadError(message);
       showErrorToast(message);
     }
-  }, [product.id, movementDateFrom, movementDateTo]);
+  }, [product.id, movementDateFrom, movementDateTo, movementLocationFilter]);
 
   useEffect(() => {
     void loadMovements();
@@ -251,6 +260,10 @@ export function ProductDetailModal({
     if (movementDateFrom || movementDateTo) {
       filterParts.push(`Date: ${movementDateFrom || "earliest"} to ${movementDateTo || "today"}`);
     }
+    if (movementLocationFilter) {
+      const name = locations.find((l) => l.id === movementLocationFilter)?.locationName ?? movementLocationFilter;
+      filterParts.push(`Storefront: ${name} (+ Main Store)`);
+    }
 
     return {
       module: "inventory",
@@ -279,7 +292,7 @@ export function ProductDetailModal({
       stats: [{ label: "Total Movements", value: String(movements.length) }],
       fileBaseName: `${product.sku}_StockMovements`
     };
-  }, [movements, movementDateFrom, movementDateTo, product.name, product.sku, currency]);
+  }, [movements, movementDateFrom, movementDateTo, movementLocationFilter, locations, product.name, product.sku, currency]);
 
   return (
     <Modal
@@ -518,12 +531,23 @@ export function ProductDetailModal({
                   className="mt-1.5 h-9 rounded-lg border border-line bg-white px-3 text-xs font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
                 />
               </label>
-              {(movementDateFrom || movementDateTo) && (
+              <SelectField
+                label="Storefront"
+                value={movementLocationFilter}
+                onChange={setMovementLocationFilter}
+                options={[
+                  { value: "", label: "All Locations" },
+                  ...locations.map((location) => ({ value: location.id, label: location.locationName }))
+                ]}
+                className="w-44"
+              />
+              {(movementDateFrom || movementDateTo || movementLocationFilter) && (
                 <Button
                   type="button"
                   onClick={() => {
                     setMovementDateFrom("");
                     setMovementDateTo("");
+                    setMovementLocationFilter("");
                   }}
                   className="h-9 border border-line bg-white px-3 text-[11px] text-ink shadow-none hover:bg-soft"
                 >
@@ -535,8 +559,8 @@ export function ProductDetailModal({
             <div className="mt-3 max-h-72 overflow-x-auto overflow-y-auto rounded-lg border border-line">
               {movements.length === 0 ? (
                 <p className="p-4 text-sm font-semibold text-muted">
-                  {movementDateFrom || movementDateTo
-                    ? "No stock movements in this date range."
+                  {movementDateFrom || movementDateTo || movementLocationFilter
+                    ? "No stock movements match these filters."
                     : "No stock movements recorded yet."}
                 </p>
               ) : (
