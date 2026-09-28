@@ -104,7 +104,8 @@ const api: BlueLedgerApi = {
     list: (status, page) => invoke("online-orders:list", status, page),
     summary: () => invoke("online-orders:summary"),
     setStatus: (id, status) => invoke("online-orders:set-status", id, status),
-    markSeen: (ids) => invoke("online-orders:mark-seen", ids)
+    markSeen: (ids) => invoke("online-orders:mark-seen", ids),
+    convertToSale: (input) => invoke("online-orders:convert-to-sale", input)
   },
   mainStore: {
     listProducts: (locationId) => invoke("main-store:product-list", locationId),

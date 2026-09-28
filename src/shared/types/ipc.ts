@@ -30,6 +30,8 @@ import type {
   StoreOwnerView,
   ThemeUpdatePatch,
   WebDeliveryMethod,
+  ConvertOnlineOrderInput,
+  ConvertOnlineOrderResult,
   OnlineOrder,
   OnlineOrderList,
   OnlineOrderStatus,
@@ -382,6 +384,10 @@ export type IpcInvokeMap = {
   "online-orders:mark-seen": {
     args: [ids?: string[]];
     result: { marked: number };
+  };
+  "online-orders:convert-to-sale": {
+    args: [input: ConvertOnlineOrderInput];
+    result: ConvertOnlineOrderResult;
   };
   "main-store:product-list": {
     args: [string | null];
@@ -1578,6 +1584,9 @@ export type BlueLedgerApi = {
       status: OnlineOrderStatus
     ) => Promise<IpcInvokeMap["online-orders:set-status"]["result"]>;
     markSeen: (ids?: string[]) => Promise<IpcInvokeMap["online-orders:mark-seen"]["result"]>;
+    convertToSale: (
+      input: ConvertOnlineOrderInput
+    ) => Promise<IpcInvokeMap["online-orders:convert-to-sale"]["result"]>;
   };
   mainStore: {
     listProducts: (

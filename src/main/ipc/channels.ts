@@ -70,6 +70,7 @@ export const ipcChannels = {
   onlineOrdersSummary: "online-orders:summary",
   onlineOrdersSetStatus: "online-orders:set-status",
   onlineOrdersMarkSeen: "online-orders:mark-seen",
+  onlineOrdersConvertToSale: "online-orders:convert-to-sale",
   mainStoreProductList: "main-store:product-list",
   mainStoreAllocationSummary: "main-store:allocation-summary",
   mainStoreAvailabilityForStockRequest: "main-store:availability-for-stock-request",

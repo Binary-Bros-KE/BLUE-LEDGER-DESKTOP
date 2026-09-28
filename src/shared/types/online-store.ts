@@ -360,10 +360,37 @@ export type OnlineOrder = {
   subtotalCents: number;
   totalCents: number;
   currency: string;
+  /** the store's fulfilment branch when the order came in (default branch for ringing it up) */
+  fulfilmentLocationId: string | null;
   /** a POS device has listed it (drives the "new" badge) */
   seen: boolean;
   createdAt: string;
   statusChangedAt: string | null;
+  /** set once the order was rung up as a sale on a POS */
+  linkedSaleId: string | null;
+  linkedReceiptNumber: string | null;
+};
+
+/** "Ring up sale" — turns a web order into a completed POS sale. */
+export type ConvertOnlineOrderInput = {
+  orderId: string;
+  paymentMethodId: string;
+  paymentReference: string | null;
+  amountReceivedCents: number | null;
+  /** only for a branch-less session (e.g. Super Admin) — see requireActiveSession */
+  storefrontId: string | null;
+  /** true (default) = charge exactly the website price, VAT extracted from it (never added on top) */
+  chargeWebPrice: boolean;
+};
+
+export type ConvertOnlineOrderResult = {
+  saleId: string;
+  receiptNumber: string | null;
+  grandTotalCents: number;
+  /** who the sale was recorded for */
+  customerLabel: string;
+  /** the sale is recorded, but the cloud order couldn't be marked (offline?) — tell the user */
+  linkWarning: string | null;
 };
 
 export type OnlineOrderList = {

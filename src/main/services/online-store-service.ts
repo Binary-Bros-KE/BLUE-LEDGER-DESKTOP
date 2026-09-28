@@ -2,11 +2,17 @@ import { statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import electron from "electron";
+import * as customerRepository from "@main/database/repositories/customer-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
+import * as saleRepository from "@main/database/repositories/sale-repository";
+import { requirePermission } from "@main/services/auth-service";
+import { insertCompletedSaleFromCart, prepareCart, requireActiveSession } from "@main/services/sale-service";
 import { API_BASE_URL } from "@main/services/license-service";
 import { getCloudIdentity } from "@main/services/sync-engine";
 import type { OnlineImageRef, Product } from "@shared/types/product";
 import type {
+  ConvertOnlineOrderInput,
+  ConvertOnlineOrderResult,
   OnlineOrder,
   OnlineOrderList,
   OnlineOrderStatus,
@@ -219,4 +225,139 @@ export function setOnlineOrderStatus(id: string, status: OnlineOrderStatus): Pro
 /** No ids = mark every unseen order as seen. */
 export function markOnlineOrdersSeen(ids?: string[]): Promise<{ marked: number }> {
   return postShopAdmin<{ marked: number }>("/shop-admin/orders/seen", ids ? { ids } : {});
+}
+
+export function getOnlineOrder(id: string): Promise<OnlineOrder> {
+  return postShopAdmin<OnlineOrder>("/shop-admin/orders/get", { id });
+}
+
+/** Every stored shape a Kenyan number might have been saved in (0712…, 712…, 254712…, +254712…). */
+function phoneCandidates(raw: string): string[] {
+  const trimmed = raw.trim();
+  const digits = trimmed.replace(/\D/g, "");
+  const last9 = digits.slice(-9);
+  const out = new Set([trimmed, digits]);
+  if (last9.length === 9) {
+    out.add(`0${last9}`);
+    out.add(`254${last9}`);
+    out.add(`+254${last9}`);
+    out.add(last9);
+  }
+  return [...out].filter(Boolean);
+}
+
+/**
+ * "Ring up sale": turns a web order into a normal completed POS sale — same cart math, tax, stock
+ * validation and receipt numbering as Checkout (prepareCart + insertCompletedSaleFromCart), so it
+ * syncs, reports and prints like any other sale. Then completes + links the cloud order.
+ *
+ * - Prices: the website's own unit prices. With chargeWebPrice (default) VAT lines are treated as
+ *   tax-INCLUSIVE, so the customer pays exactly what the website showed (tax extracted, still
+ *   reported) — never the website price plus VAT on top.
+ * - Delivery fee → a "Delivery" service charge (untaxed).
+ * - Customer: an existing customer with the same phone, else a walk-in named after the shopper.
+ * - Never twice: refused if the cloud order is already linked, or if a local sale already carries
+ *   this order's marker (covers "sale saved, cloud link failed offline").
+ */
+export async function convertOnlineOrderToSale(input: ConvertOnlineOrderInput): Promise<ConvertOnlineOrderResult> {
+  requirePermission("online_store", "edit");
+  requirePermission("sales", "create");
+
+  const order = await getOnlineOrder(input.orderId);
+  if (order.linkedSaleId) {
+    throw new Error(`${order.orderNumber} was already rung up as receipt ${order.linkedReceiptNumber ?? order.linkedSaleId}.`);
+  }
+  if (order.status === "CANCELLED") {
+    throw new Error(`${order.orderNumber} is cancelled — reopen it first if the customer still wants it.`);
+  }
+
+  const { tenantId, employeeId, locationId } = requireActiveSession(input.storefrontId ?? order.fulfilmentLocationId);
+
+  const marker = `[Web order ${order.orderNumber}]`;
+  const previous = saleRepository.findSaleByNoteMarkerRow(tenantId, marker);
+  if (previous) {
+    throw new Error(`${order.orderNumber} was already rung up as receipt ${previous.receipt_number ?? previous.id}.`);
+  }
+
+  // A product published online but not yet pulled to THIS computer can't be sold from here.
+  for (const item of order.items) {
+    const row = productRepository.findProductRowById(item.productId);
+    if (!row || row.tenant_id !== tenantId) {
+      throw new Error(`"${item.name}" isn't on this computer yet — run Cloud Sync, then try again.`);
+    }
+  }
+
+  const cart = prepareCart(
+    tenantId,
+    order.items.map((item) => ({
+      productId: item.productId,
+      quantity: item.qty,
+      discountAmountCents: 0,
+      unitPriceCents: item.unitPriceCents,
+      taxInclusiveOverride: input.chargeWebPrice ? true : undefined
+    })),
+    {
+      serviceCharges:
+        order.deliveryFeeCents > 0
+          ? [
+              {
+                name: order.deliveryMethodName ? `Delivery — ${order.deliveryMethodName}` : "Delivery",
+                feeCents: order.deliveryFeeCents,
+                costCents: 0,
+                taxType: "none",
+                taxInclusive: null
+              }
+            ]
+          : [],
+      delivery: null
+    }
+  );
+
+  let customer: { id: string; name: string } | null = null;
+  for (const candidate of phoneCandidates(order.customerPhone)) {
+    const row = customerRepository.findCustomerByPhoneRow(tenantId, candidate);
+    if (row) {
+      customer = { id: row.id, name: row.name };
+      break;
+    }
+  }
+  const walkInName = customer ? null : `${order.customerName} · ${order.orderNumber}`.slice(0, 120);
+
+  const noteParts = [marker, `Tel ${order.customerPhone}`];
+  if (order.deliveryAddress) noteParts.push(`Deliver to: ${order.deliveryAddress}`);
+  if (order.notes) noteParts.push(order.notes);
+
+  const sale = insertCompletedSaleFromCart({
+    tenantId,
+    employeeId,
+    locationId,
+    customerId: customer?.id ?? null,
+    walkInName,
+    cart,
+    paymentMethodId: input.paymentMethodId,
+    paymentReference: input.paymentReference?.trim() || null,
+    amountReceivedCents: input.amountReceivedCents,
+    notes: noteParts.join(" · ")
+  });
+
+  let linkWarning: string | null = null;
+  try {
+    await postShopAdmin<OnlineOrder>("/shop-admin/orders/link-sale", {
+      id: order.id,
+      saleId: sale.id,
+      receiptNumber: sale.receiptNumber
+    });
+  } catch (err) {
+    linkWarning = `Sale recorded, but ${order.orderNumber} couldn't be marked completed online (${
+      err instanceof Error ? err.message : "no connection"
+    }). Mark it Completed once you're back online.`;
+  }
+
+  return {
+    saleId: sale.id,
+    receiptNumber: sale.receiptNumber,
+    grandTotalCents: cart.grandTotalCents,
+    customerLabel: customer ? customer.name : `Walk-in: ${walkInName}`,
+    linkWarning
+  };
 }

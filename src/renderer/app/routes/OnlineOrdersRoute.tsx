@@ -5,6 +5,7 @@ import {
   Copy,
   Globe,
   Loader2,
+  Receipt,
   MapPin,
   MessageCircle,
   PackageCheck,
@@ -27,6 +28,7 @@ import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { useOnlineOrderAlertsStore } from "@renderer/shared/stores/online-order-alerts-store";
 import type { OnlineOrder, OnlineOrderList, OnlineOrderStatus } from "@shared/types/online-store";
+import { RingUpSaleModal } from "./online-orders/RingUpSaleModal";
 
 type Filter = OnlineOrderStatus | "ALL";
 
@@ -77,6 +79,8 @@ export function OnlineOrdersRoute(): React.JSX.Element {
   const setNewCount = useOnlineOrderAlertsStore((state) => state.setNewCount);
   const { can } = usePermissions();
   const canEdit = can("online_store", "edit");
+  const canSell = canEdit && can("sales", "create");
+  const [ringUpOpen, setRingUpOpen] = useState(false);
   const confirm = useConfirm();
 
   const [filter, setFilter] = useState<Filter>("NEW");
@@ -170,8 +174,9 @@ export function OnlineOrdersRoute(): React.JSX.Element {
         <div>
           <h1 className="text-2xl font-extrabold">Online Orders</h1>
           <p className="mt-1 max-w-[680px] text-sm font-semibold text-muted">
-            Orders placed on your website. Call or WhatsApp the customer to confirm, then ring the sale up at
-            Checkout as usual — a web order doesn&apos;t move stock or count as a sale on its own.
+            Orders placed on your website. Call or WhatsApp the customer to confirm, then use{" "}
+            <span className="font-extrabold text-ink">Ring up sale</span> to record it as a normal sale — a web order
+            doesn&apos;t move stock or count as a sale until then.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -310,6 +315,19 @@ export function OnlineOrdersRoute(): React.JSX.Element {
             )}
           </div>
 
+          {selected && (
+            <RingUpSaleModal
+              order={selected}
+              open={ringUpOpen}
+              currency={currency}
+              onClose={() => setRingUpOpen(false)}
+              onDone={() => {
+                setRingUpOpen(false);
+                void load();
+              }}
+            />
+          )}
+
           {/* detail */}
           {selected && (
             <div className="h-fit rounded-lg border border-line bg-white shadow-soft">
@@ -329,6 +347,12 @@ export function OnlineOrdersRoute(): React.JSX.Element {
                   <p className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-muted">
                     <Clock className="size-3.5" aria-hidden="true" /> Placed {fullDate(selected.createdAt)}
                   </p>
+                  {selected.linkedReceiptNumber || selected.linkedSaleId ? (
+                    <p className="mt-1 flex items-center gap-1.5 text-xs font-extrabold text-success">
+                      <Receipt className="size-3.5" aria-hidden="true" /> Rung up as receipt{" "}
+                      {selected.linkedReceiptNumber ?? selected.linkedSaleId}
+                    </p>
+                  ) : null}
                 </div>
                 <p className="text-right">
                   <span className="block text-[10px] font-extrabold uppercase tracking-wide text-muted">Total</span>
@@ -452,17 +476,22 @@ export function OnlineOrdersRoute(): React.JSX.Element {
                       Cancel order
                     </Button>
                   )}
+                  {canSell && !selected.linkedSaleId && (selected.status === "NEW" || selected.status === "CONFIRMED") && (
+                    <Button onClick={() => setRingUpOpen(true)} disabled={busy} className="gap-2 bg-success">
+                      <Receipt className="size-4" aria-hidden="true" /> Ring up sale
+                    </Button>
+                  )}
                   {selected.status === "NEW" && (
                     <Button onClick={() => void changeStatus(selected, "CONFIRMED")} disabled={busy} className="gap-2 bg-primary">
                       <CheckCircle2 className="size-4" aria-hidden="true" /> Confirm order
                     </Button>
                   )}
-                  {selected.status === "CONFIRMED" && (
+                  {selected.status === "CONFIRMED" && !canSell && (
                     <Button onClick={() => void changeStatus(selected, "COMPLETED")} disabled={busy} className="gap-2 bg-success">
                       <PackageCheck className="size-4" aria-hidden="true" /> Mark completed
                     </Button>
                   )}
-                  {(selected.status === "COMPLETED" || selected.status === "CANCELLED") && (
+                  {(selected.status === "COMPLETED" || selected.status === "CANCELLED") && !selected.linkedSaleId && (
                     <Button
                       onClick={() => void changeStatus(selected, "NEW")}
                       disabled={busy}

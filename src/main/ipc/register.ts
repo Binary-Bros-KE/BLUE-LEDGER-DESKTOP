@@ -189,6 +189,7 @@ import {
   deleteThemeImage as deleteOnlineStoreThemeImage,
   getOverview as getOnlineStoreOverview,
   listDeliveryMethods as listOnlineStoreDeliveryMethods,
+  convertOnlineOrderToSale,
   listOnlineOrders,
   markOnlineOrdersSeen,
   onlineOrderSummary,
@@ -553,6 +554,23 @@ export function registerIpcHandlers(): void {
       throw new Error("Unknown order status");
     }
     return setOnlineOrderStatus(id, status as OnlineOrderStatus);
+  });
+  ipcMain.handle(ipcChannels.onlineOrdersConvertToSale, (_event, input: unknown) => {
+    const i = (input ?? {}) as Record<string, unknown>;
+    if (typeof i.orderId !== "string" || typeof i.paymentMethodId !== "string" || !i.paymentMethodId) {
+      throw new Error("Choose a payment method");
+    }
+    return convertOnlineOrderToSale({
+      orderId: i.orderId,
+      paymentMethodId: i.paymentMethodId,
+      paymentReference: typeof i.paymentReference === "string" ? i.paymentReference : null,
+      amountReceivedCents:
+        typeof i.amountReceivedCents === "number" && Number.isFinite(i.amountReceivedCents)
+          ? Math.round(i.amountReceivedCents)
+          : null,
+      storefrontId: typeof i.storefrontId === "string" && i.storefrontId ? i.storefrontId : null,
+      chargeWebPrice: i.chargeWebPrice !== false
+    });
   });
   ipcMain.handle(ipcChannels.onlineOrdersMarkSeen, (_event, ids: unknown) =>
     markOnlineOrdersSeen(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : undefined)

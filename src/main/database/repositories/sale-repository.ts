@@ -960,3 +960,17 @@ export function mapPendingSaleListRow(row: PendingSaleListRow): PendingSaleListI
     updatedAt: row.updated_at
   };
 }
+
+/** The receipt of a sale whose notes carry `marker` (e.g. "[Web order WEB-0012]"), if any — how a web
+ * order that was already rung up (on this or any synced device) is recognised before converting it
+ * again. */
+export function findSaleByNoteMarkerRow(
+  tenantId: string,
+  marker: string
+): { id: string; receipt_number: string | null } | undefined {
+  return getDatabase()
+    .prepare(
+      "SELECT id, receipt_number FROM sales WHERE tenant_id = ? AND notes LIKE ? ORDER BY created_at DESC LIMIT 1"
+    )
+    .get(tenantId, `%${marker}%`) as { id: string; receipt_number: string | null } | undefined;
+}
