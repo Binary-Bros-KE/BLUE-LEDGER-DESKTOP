@@ -6,6 +6,7 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { useAuthStore } from "@renderer/shared/stores/auth-store";
 import { useUiStore } from "@renderer/shared/stores/ui-store";
+import { useOnlineOrderAlertsStore } from "@renderer/shared/stores/online-order-alerts-store";
 import { useStockRequestAlertsStore } from "@renderer/shared/stores/stock-request-alerts-store";
 import { cn } from "@renderer/shared/lib/cn";
 import { smallLogoBoxClassName } from "@renderer/shared/lib/logo";
@@ -28,6 +29,7 @@ export function Sidebar(): React.JSX.Element {
   // last activation/heartbeat). Without the plan, the tab stays hidden even for a Super Admin.
   const ecommerceEnabled = useAppStore((state) => state.context?.tenant.ecommerceEnabled ?? false);
   const pendingStockRequestCount = useStockRequestAlertsStore((state) => state.pending.length);
+  const newOnlineOrderCount = useOnlineOrderAlertsStore((state) => state.newCount);
 
   const visibleGroups = useMemo(
     () =>
@@ -37,7 +39,7 @@ export function Sidebar(): React.JSX.Element {
           items: group.items.filter(
             (item) =>
               can(item.permissionModule, "view") &&
-              (item.key !== "online-store" || ecommerceEnabled)
+              ((item.key !== "online-store" && item.key !== "online-orders") || ecommerceEnabled)
           )
         }))
         .filter((group) => group.items.length > 0),
@@ -159,7 +161,13 @@ export function Sidebar(): React.JSX.Element {
                       item={item}
                       active={item.key === activeNavKey}
                       collapsed={collapsed}
-                      badgeCount={item.key === "stock-requests" ? pendingStockRequestCount : 0}
+                      badgeCount={
+                        item.key === "stock-requests"
+                          ? pendingStockRequestCount
+                          : item.key === "online-orders"
+                            ? newOnlineOrderCount
+                            : 0
+                      }
                       onSelect={() => setActiveNavKey(item.key)}
                     />
                   </div>

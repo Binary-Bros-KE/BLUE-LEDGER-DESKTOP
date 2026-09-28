@@ -7,6 +7,7 @@ import { showErrorToast } from "@renderer/shared/lib/toast";
 import { useUiStore } from "@renderer/shared/stores/ui-store";
 import { DashboardActionCard } from "@renderer/app/routes/dashboard/DashboardActionCard";
 import { DashboardShell } from "@renderer/app/routes/dashboard/DashboardShell";
+import { OnlineOrdersCard } from "@renderer/app/routes/dashboard/OnlineOrdersCard";
 import { PendingStockRequestsCard } from "@renderer/app/routes/dashboard/PendingStockRequestsCard";
 import { SyncStatusCard } from "@renderer/app/routes/dashboard/SyncStatusCard";
 import { OverviewCard } from "@renderer/app/routes/reports/FinancialOverviewCards";
@@ -287,6 +288,7 @@ export function BusinessDashboard({ isBusinessWide }: { isBusinessWide: boolean 
       }
       aside={
         <>
+          <OnlineOrdersCard />
           <PendingStockRequestsCard />
           <DashboardActionCard
             tone="warning"

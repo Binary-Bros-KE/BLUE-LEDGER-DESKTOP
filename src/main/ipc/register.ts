@@ -189,6 +189,10 @@ import {
   deleteThemeImage as deleteOnlineStoreThemeImage,
   getOverview as getOnlineStoreOverview,
   listDeliveryMethods as listOnlineStoreDeliveryMethods,
+  listOnlineOrders,
+  markOnlineOrdersSeen,
+  onlineOrderSummary,
+  setOnlineOrderStatus,
   reorderDeliveryMethods as reorderOnlineStoreDeliveryMethods,
   setProductOnline as setOnlineStoreProductOnline,
   updateDeliveryMethod as updateOnlineStoreDeliveryMethod,
@@ -363,10 +367,12 @@ import type { RecurringBillStatus } from "@shared/types/recurring-bill";
 import type { EmployeeStatus } from "@shared/types/employee";
 import type { LocationStatus } from "@shared/types/location";
 import type { ProductStatus } from "@shared/types/product";
-import type {
-  DeliveryMethodInput,
-  ProductOnlinePatch,
-  StoreConfigPatch
+import {
+  ONLINE_ORDER_STATUSES,
+  type DeliveryMethodInput,
+  type OnlineOrderStatus,
+  type ProductOnlinePatch,
+  type StoreConfigPatch
 } from "@shared/types/online-store";
 import type { QuotationStatus } from "@shared/types/quotation";
 import type { ImportEntityType } from "@shared/types/import";
@@ -534,6 +540,22 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.onlineStoreDeliveryReorder, (_event, orderedIds: string[]) =>
     reorderOnlineStoreDeliveryMethods(orderedIds)
+  );
+  ipcMain.handle(ipcChannels.onlineOrdersList, (_event, status: unknown, page: unknown) =>
+    listOnlineOrders(
+      (ONLINE_ORDER_STATUSES as readonly string[]).includes(status as string) ? (status as OnlineOrderStatus) : "ALL",
+      typeof page === "number" && page >= 1 ? Math.floor(page) : 1
+    )
+  );
+  ipcMain.handle(ipcChannels.onlineOrdersSummary, () => onlineOrderSummary());
+  ipcMain.handle(ipcChannels.onlineOrdersSetStatus, (_event, id: string, status: unknown) => {
+    if (!(ONLINE_ORDER_STATUSES as readonly string[]).includes(status as string)) {
+      throw new Error("Unknown order status");
+    }
+    return setOnlineOrderStatus(id, status as OnlineOrderStatus);
+  });
+  ipcMain.handle(ipcChannels.onlineOrdersMarkSeen, (_event, ids: unknown) =>
+    markOnlineOrdersSeen(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : undefined)
   );
   ipcMain.handle(ipcChannels.mainStoreProductList, (_event, locationId: string | null) =>
     listProductsForStorefront(locationId)

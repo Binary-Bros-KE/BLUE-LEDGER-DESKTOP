@@ -9,6 +9,7 @@ import { computeGraceStatus } from "@shared/lib/grace-period";
 import { navGroups, navItemsByKey } from "./navigation";
 import { Sidebar } from "./Sidebar";
 import { useSyncStatusWidget } from "./useSyncStatusWidget";
+import { useOnlineOrderAlerts } from "./useOnlineOrderAlerts";
 import { useStockRequestAlerts } from "./useStockRequestAlerts";
 import { useUpdateStatusWidget } from "./useUpdateStatusWidget";
 
@@ -30,6 +31,7 @@ export function AppShell({ children }: PropsWithChildren): React.JSX.Element {
   const snapshot = useSyncStatusWidget();
   const updateStatus = useUpdateStatusWidget();
   useStockRequestAlerts();
+  useOnlineOrderAlerts();
 
   // A MONTHLY tenant past grace never reaches this component at all (App.tsx routes to
   // LicenseBlockedRoute first) — this only ever fires for LIFETIME/CUSTOM, matching sync-engine.ts's

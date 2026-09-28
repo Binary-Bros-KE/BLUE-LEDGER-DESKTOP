@@ -286,3 +286,59 @@ export function parseThemeConfig(raw: Record<string, unknown> | null | undefined
     }
   };
 }
+
+// --- Online orders (storefront checkout → this POS's "Online Orders" inbox) ----------------------
+// Mirrors SERVER services/shop-order-service.ts OnlineOrderView. Cloud-only: read + updated through
+// /shop-admin/orders/* while online (not a synced entity, not a Sale).
+
+export const ONLINE_ORDER_STATUSES = ["NEW", "CONFIRMED", "COMPLETED", "CANCELLED"] as const;
+export type OnlineOrderStatus = (typeof ONLINE_ORDER_STATUSES)[number];
+
+export type OnlineOrderItem = {
+  productId: string;
+  name: string;
+  unitPriceCents: number;
+  qty: number;
+  lineTotalCents: number;
+};
+
+export type OnlineOrder = {
+  id: string;
+  /** e.g. WEB-0012 */
+  orderNumber: string;
+  status: OnlineOrderStatus;
+  customerName: string;
+  customerPhone: string;
+  customerEmail: string | null;
+  deliveryAddress: string | null;
+  notes: string | null;
+  deliveryMethodName: string | null;
+  deliveryFeeCents: number;
+  /** "pay_on_delivery" for now */
+  paymentMethod: string;
+  items: OnlineOrderItem[];
+  subtotalCents: number;
+  totalCents: number;
+  currency: string;
+  /** a POS device has listed it (drives the "new" badge) */
+  seen: boolean;
+  createdAt: string;
+  statusChangedAt: string | null;
+};
+
+export type OnlineOrderList = {
+  orders: OnlineOrder[];
+  total: number;
+  page: number;
+  pageSize: number;
+  counts: Record<OnlineOrderStatus, number>;
+  unseen: number;
+};
+
+export type OnlineOrderSummary = {
+  /** orders still waiting for the shop (status NEW) */
+  newCount: number;
+  /** orders no POS has looked at yet */
+  unseen: number;
+  latestUnseen: OnlineOrder[];
+};

@@ -100,6 +100,12 @@ const api: BlueLedgerApi = {
     deliveryDelete: (id) => invoke("online-store:delivery-delete", id),
     deliveryReorder: (orderedIds) => invoke("online-store:delivery-reorder", orderedIds)
   },
+  onlineOrders: {
+    list: (status, page) => invoke("online-orders:list", status, page),
+    summary: () => invoke("online-orders:summary"),
+    setStatus: (id, status) => invoke("online-orders:set-status", id, status),
+    markSeen: (ids) => invoke("online-orders:mark-seen", ids)
+  },
   mainStore: {
     listProducts: (locationId) => invoke("main-store:product-list", locationId),
     allocationSummary: () => invoke("main-store:allocation-summary"),

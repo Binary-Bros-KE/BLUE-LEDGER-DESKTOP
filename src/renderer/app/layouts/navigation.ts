@@ -88,6 +88,13 @@ export const navGroups: NavGroup[] = [
         permissionModule: "sales"
       },
       {
+        key: "online-orders",
+        label: "Online Orders",
+        description: "Orders placed on your website",
+        icon: ShoppingBag,
+        permissionModule: "online_store"
+      },
+      {
         key: "quotations",
         label: "Quotations",
         description: "Price offers & conversions",

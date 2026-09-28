@@ -29,7 +29,11 @@ import type {
   StoreConfigPatch,
   StoreOwnerView,
   ThemeUpdatePatch,
-  WebDeliveryMethod
+  WebDeliveryMethod,
+  OnlineOrder,
+  OnlineOrderList,
+  OnlineOrderStatus,
+  OnlineOrderSummary
 } from "./online-store";
 import type { ProductSalesHistoryEntry, ProductsPerformanceReport } from "./product-report";
 import type { CustomerPurchaseHistoryEntry, OutstandingInvoicesSummary, TopCustomerRow } from "./customer-report";
@@ -362,6 +366,22 @@ export type IpcInvokeMap = {
   "online-store:delivery-reorder": {
     args: [orderedIds: string[]];
     result: WebDeliveryMethod[];
+  };
+  "online-orders:list": {
+    args: [status: OnlineOrderStatus | "ALL", page: number];
+    result: OnlineOrderList;
+  };
+  "online-orders:summary": {
+    args: [];
+    result: OnlineOrderSummary;
+  };
+  "online-orders:set-status": {
+    args: [id: string, status: OnlineOrderStatus];
+    result: OnlineOrder;
+  };
+  "online-orders:mark-seen": {
+    args: [ids?: string[]];
+    result: { marked: number };
   };
   "main-store:product-list": {
     args: [string | null];
@@ -1546,6 +1566,18 @@ export type BlueLedgerApi = {
     deliveryReorder: (
       orderedIds: string[]
     ) => Promise<IpcInvokeMap["online-store:delivery-reorder"]["result"]>;
+  };
+  onlineOrders: {
+    list: (
+      status: OnlineOrderStatus | "ALL",
+      page: number
+    ) => Promise<IpcInvokeMap["online-orders:list"]["result"]>;
+    summary: () => Promise<IpcInvokeMap["online-orders:summary"]["result"]>;
+    setStatus: (
+      id: string,
+      status: OnlineOrderStatus
+    ) => Promise<IpcInvokeMap["online-orders:set-status"]["result"]>;
+    markSeen: (ids?: string[]) => Promise<IpcInvokeMap["online-orders:mark-seen"]["result"]>;
   };
   mainStore: {
     listProducts: (

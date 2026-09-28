@@ -7,6 +7,10 @@ import { API_BASE_URL } from "@main/services/license-service";
 import { getCloudIdentity } from "@main/services/sync-engine";
 import type { OnlineImageRef, Product } from "@shared/types/product";
 import type {
+  OnlineOrder,
+  OnlineOrderList,
+  OnlineOrderStatus,
+  OnlineOrderSummary,
   DeliveryMethodInput,
   ProductOnlinePatch,
   StoreConfigPatch,
@@ -195,4 +199,24 @@ export function deleteDeliveryMethod(id: string): Promise<WebDeliveryMethod[]> {
 
 export function reorderDeliveryMethods(orderedIds: string[]): Promise<WebDeliveryMethod[]> {
   return postShopAdmin<WebDeliveryMethod[]>("/shop-admin/delivery/reorder", { orderedIds });
+}
+
+// --- Online orders inbox (online-only, like delivery methods) ------------------------------------
+
+export function listOnlineOrders(status: OnlineOrderStatus | "ALL", page: number): Promise<OnlineOrderList> {
+  return postShopAdmin<OnlineOrderList>("/shop-admin/orders", { status, page, pageSize: 30 });
+}
+
+/** Cheap poll behind the sidebar badge / new-order alerts. */
+export function onlineOrderSummary(): Promise<OnlineOrderSummary> {
+  return postShopAdmin<OnlineOrderSummary>("/shop-admin/orders/summary", {});
+}
+
+export function setOnlineOrderStatus(id: string, status: OnlineOrderStatus): Promise<OnlineOrder> {
+  return postShopAdmin<OnlineOrder>("/shop-admin/orders/status", { id, status });
+}
+
+/** No ids = mark every unseen order as seen. */
+export function markOnlineOrdersSeen(ids?: string[]): Promise<{ marked: number }> {
+  return postShopAdmin<{ marked: number }>("/shop-admin/orders/seen", ids ? { ids } : {});
 }
