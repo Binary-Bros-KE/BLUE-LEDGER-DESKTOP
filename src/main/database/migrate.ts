@@ -3388,6 +3388,29 @@ const migrations = [
       ALTER TABLE expenses ADD COLUMN source_type TEXT;
       ALTER TABLE expenses ADD COLUMN source_id TEXT;
     `
+  },
+  {
+    version: 97,
+    name: "stock_request_partial_fulfillment",
+    sql: `
+      -- Client request: a storekeeper can now dispatch less than what was requested per line (instead
+      -- of the old all-or-nothing approval) — NULL while pending/rejected (nothing shipped yet), set
+      -- once at fulfillment time to whatever was actually dispatched (0 is a real, explicit value —
+      -- distinguishes "reviewed, shipped nothing" from "not yet reviewed").
+      ALTER TABLE stock_request_items ADD COLUMN quantity_dispatched INTEGER;
+
+      -- Every historical 'approved' request only ever had one possible outcome (full dispatch) —
+      -- backfilled so existing data reads correctly as "fully dispatched" (green) under the new model,
+      -- no manual correction needed.
+      UPDATE stock_request_items
+      SET quantity_dispatched = quantity_requested
+      WHERE quantity_dispatched IS NULL
+        AND stock_request_id IN (SELECT id FROM stock_requests WHERE status = 'approved');
+
+      -- Optional storekeeper note explaining a partial/zero dispatch — same optional-supplementary
+      -- convention as stock_requests.notes, unlike the mandatory rejection_reason.
+      ALTER TABLE stock_requests ADD COLUMN fulfillment_note TEXT;
+    `
   }
 ] as const;
 

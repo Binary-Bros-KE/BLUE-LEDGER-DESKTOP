@@ -369,7 +369,7 @@ const api: BlueLedgerApi = {
     listPending: () => invoke("stock-request:list-pending"),
     get: (id) => invoke("stock-request:get", id),
     create: (input) => invoke("stock-request:create", input),
-    approve: (id) => invoke("stock-request:approve", id),
+    approve: (id, input) => invoke("stock-request:approve", id, input),
     reject: (id, input) => invoke("stock-request:reject", id, input)
   },
   stockReceipt: {

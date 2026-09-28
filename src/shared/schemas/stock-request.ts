@@ -24,3 +24,21 @@ export const stockRequestRejectSchema = z.object({
 });
 
 export type StockRequestRejectInput = z.infer<typeof stockRequestRejectSchema>;
+
+/** Client request: partial fulfillment — the storekeeper names exactly how much of each line to
+ * dispatch (0 counts, for a line that can't ship at all) rather than the old implicit "always the
+ * full quantityRequested". note is optional/supplementary, unlike stockRequestRejectSchema's
+ * mandatory reason — matches this app's notes-vs-reason naming convention. */
+export const stockRequestFulfillSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        itemId: z.string().trim().min(1),
+        quantityDispatched: z.coerce.number().int().min(0)
+      })
+    )
+    .min(1),
+  note: optionalText(500)
+});
+
+export type StockRequestFulfillInput = z.infer<typeof stockRequestFulfillSchema>;

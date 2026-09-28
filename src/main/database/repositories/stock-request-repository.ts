@@ -10,6 +10,7 @@ export type StockRequestRow = {
   status: "pending" | "approved" | "rejected";
   notes: string | null;
   rejection_reason: string | null;
+  fulfillment_note: string | null;
   requested_by: string;
   requested_by_name: string;
   requested_at: string;
@@ -20,6 +21,10 @@ export type StockRequestRow = {
   updated_at: string;
   item_count: number;
   total_quantity_requested: number;
+  /** 0/1/NULL from the CASE below — NULL while pending/rejected (nothing to compute yet); otherwise 1
+   * only if every line's quantity_dispatched >= quantity_requested. Lets the list show a "Partial"
+   * badge without a second round trip for per-item data. */
+  fully_dispatched: number | null;
 };
 
 export type StockRequestItemRow = {
@@ -39,6 +44,10 @@ export type StockRequestItemRow = {
    * previous_quantity/new_quantity above. */
   main_store_previous_quantity: number | null;
   main_store_new_quantity: number | null;
+  /** Client request: partial fulfillment. NULL while pending/rejected; set once at fulfillment time to
+   * whatever was actually dispatched (0 is real/explicit, never left NULL for a reviewed-but-shipped-
+   * nothing line). */
+  quantity_dispatched: number | null;
 };
 
 const SELECT_WITH_JOINS = `
@@ -47,7 +56,12 @@ const SELECT_WITH_JOINS = `
     (req.first_name || ' ' || req.last_name) AS requested_by_name,
     CASE WHEN sr.reviewed_by IS NOT NULL THEN (rev.first_name || ' ' || rev.last_name) ELSE NULL END AS reviewed_by_name,
     (SELECT COUNT(*) FROM stock_request_items sri WHERE sri.stock_request_id = sr.id) AS item_count,
-    (SELECT COALESCE(SUM(sri.quantity_requested), 0) FROM stock_request_items sri WHERE sri.stock_request_id = sr.id) AS total_quantity_requested
+    (SELECT COALESCE(SUM(sri.quantity_requested), 0) FROM stock_request_items sri WHERE sri.stock_request_id = sr.id) AS total_quantity_requested,
+    CASE WHEN sr.status != 'approved' THEN NULL ELSE (
+      SELECT COUNT(*) = 0 FROM stock_request_items sri
+      WHERE sri.stock_request_id = sr.id
+        AND (sri.quantity_dispatched IS NULL OR sri.quantity_dispatched < sri.quantity_requested)
+    ) END AS fully_dispatched
   FROM stock_requests sr
   JOIN locations l ON l.id = sr.storefront_id
   JOIN employees req ON req.id = sr.requested_by
@@ -80,7 +94,8 @@ export function findStockRequestItemRows(stockRequestId: string): StockRequestIt
     .prepare(
       `
       SELECT sri.id, sri.stock_request_id, sri.product_id, sri.quantity_requested, sri.previous_quantity,
-        sri.new_quantity, sri.main_store_previous_quantity, sri.main_store_new_quantity, p.name AS product_name, p.sku
+        sri.new_quantity, sri.main_store_previous_quantity, sri.main_store_new_quantity,
+        sri.quantity_dispatched, p.name AS product_name, p.sku
       FROM stock_request_items sri
       JOIN products p ON p.id = sri.product_id
       WHERE sri.stock_request_id = ?
@@ -130,9 +145,11 @@ export function insertStockRequestItemRow(input: {
     .run(id, input.stockRequestId, input.productId, input.quantityRequested, now);
 }
 
-/** Called once per item, at approval time, immediately after distributeMainStoreStockCore ships it —
- * see stock-request-service.ts's approveStockRequest for where the before/after values themselves are
- * captured. Never called for a rejected request's items (they stay NULL forever). */
+/** Called once per item, at fulfillment time — for a line with quantityDispatched > 0, immediately
+ * after distributeMainStoreStockCore ships it (see stock-request-service.ts's approveStockRequest);
+ * for a line dispatched at 0, the caller passes matching before/after pairs (nothing moved) rather
+ * than leaving these NULL, so a reviewed-but-unshipped line still shows a real, non-null before/after
+ * like every other line. Never called for a rejected request's items (they stay NULL forever). */
 export function updateStockRequestItemFulfillmentRow(
   id: string,
   input: {
@@ -140,26 +157,42 @@ export function updateStockRequestItemFulfillmentRow(
     newQuantity: number;
     mainStorePreviousQuantity: number;
     mainStoreNewQuantity: number;
+    quantityDispatched: number;
   }
 ): void {
   getDatabase()
     .prepare(
       `UPDATE stock_request_items
-       SET previous_quantity = ?, new_quantity = ?, main_store_previous_quantity = ?, main_store_new_quantity = ?
+       SET previous_quantity = ?, new_quantity = ?, main_store_previous_quantity = ?, main_store_new_quantity = ?,
+         quantity_dispatched = ?
        WHERE id = ?`
     )
-    .run(input.previousQuantity, input.newQuantity, input.mainStorePreviousQuantity, input.mainStoreNewQuantity, id);
+    .run(
+      input.previousQuantity,
+      input.newQuantity,
+      input.mainStorePreviousQuantity,
+      input.mainStoreNewQuantity,
+      input.quantityDispatched,
+      id
+    );
 }
 
 export function updateStockRequestStatusRow(
   id: string,
-  input: { status: "approved" | "rejected"; rejectionReason: string | null; reviewedBy: string }
+  input: {
+    status: "approved" | "rejected";
+    rejectionReason: string | null;
+    fulfillmentNote: string | null;
+    reviewedBy: string;
+  }
 ): void {
   const now = new Date().toISOString();
 
   getDatabase()
     .prepare(
-      "UPDATE stock_requests SET status = ?, rejection_reason = ?, reviewed_by = ?, reviewed_at = ?, updated_at = ? WHERE id = ?"
+      `UPDATE stock_requests
+       SET status = ?, rejection_reason = ?, fulfillment_note = ?, reviewed_by = ?, reviewed_at = ?, updated_at = ?
+       WHERE id = ?`
     )
-    .run(input.status, input.rejectionReason, input.reviewedBy, now, now, id);
+    .run(input.status, input.rejectionReason, input.fulfillmentNote, input.reviewedBy, now, now, id);
 }

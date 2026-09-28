@@ -1188,7 +1188,7 @@ export type IpcInvokeMap = {
     result: StockRequest;
   };
   "stock-request:approve": {
-    args: [string];
+    args: [string, Record<string, unknown>];
     result: StockRequest;
   };
   "stock-request:reject": {
@@ -2008,7 +2008,10 @@ export type BlueLedgerApi = {
     listPending: () => Promise<IpcInvokeMap["stock-request:list-pending"]["result"]>;
     get: (id: string) => Promise<IpcInvokeMap["stock-request:get"]["result"]>;
     create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["stock-request:create"]["result"]>;
-    approve: (id: string) => Promise<IpcInvokeMap["stock-request:approve"]["result"]>;
+    approve: (
+      id: string,
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["stock-request:approve"]["result"]>;
     reject: (
       id: string,
       input: Record<string, unknown>

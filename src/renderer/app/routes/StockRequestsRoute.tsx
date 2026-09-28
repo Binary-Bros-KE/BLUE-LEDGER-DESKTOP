@@ -14,7 +14,6 @@ import {
   XCircle
 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
-import { useConfirm } from "@renderer/shared/components/ConfirmModal";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
@@ -25,10 +24,25 @@ import { useStockRequestAlertsStore } from "@renderer/shared/stores/stock-reques
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { buildAvailableYears, currentYear, matchesYearFilter, yearFilterOptions } from "@renderer/shared/lib/year-filter";
+import { computeStockRequestItemFulfillmentTone, type StockRequestItemFulfillmentTone } from "@shared/lib/stock-request";
 import { isStorefrontType, type Location } from "@shared/types/location";
 import type { StockRequestAvailability } from "@shared/types/main-store";
 import type { ProductListItem } from "@shared/types/product";
 import type { StockRequest, StockRequestListItem, StockRequestStatus } from "@shared/types/stock-request";
+
+const FULFILLMENT_TONE_LABEL: Record<StockRequestItemFulfillmentTone, string> = {
+  pending: "—",
+  full: "Full",
+  partial: "Partial",
+  none: "None"
+};
+
+function fulfillmentTone(tone: StockRequestItemFulfillmentTone): "success" | "warning" | "danger" | "neutral" {
+  if (tone === "full") return "success";
+  if (tone === "partial") return "warning";
+  if (tone === "none") return "danger";
+  return "neutral";
+}
 
 type FilterTab = "all" | StockRequestStatus;
 
@@ -86,7 +100,6 @@ export function StockRequestsRoute(): React.JSX.Element {
   const { can, session } = usePermissions();
   const canCreate = can("stock_requests", "create");
   const canApprove = can("stock_requests", "approve");
-  const confirm = useConfirm();
 
   const needsStorefrontPicker = session?.branch == null;
 
@@ -119,7 +132,18 @@ export function StockRequestsRoute(): React.JSX.Element {
   // (a better, exact answer); a rejected one has no pending decision left to inform.
   const [viewAvailability, setViewAvailability] = useState<StockRequestAvailability[]>([]);
 
-  const [approvingId, setApprovingId] = useState<string | null>(null);
+  // Client request: partial fulfillment — a storekeeper approving a request now opens this modal
+  // instead of an instant "Approve & Ship" confirm dialog, so they can dispatch less than requested
+  // per line (0 for anything not available at all) instead of having to reject the whole request.
+  const [fulfillingRequest, setFulfillingRequest] = useState<StockRequest | null>(null);
+  const [fulfillLoading, setFulfillLoading] = useState(false);
+  const [fulfillAvailability, setFulfillAvailability] = useState<StockRequestAvailability[]>([]);
+  // Raw strings, not numbers — same money-input-style discipline as every other quantity/amount field
+  // in this app (never re-derive from a parsed number every render, or typing gets silently mangled).
+  const [fulfillQuantities, setFulfillQuantities] = useState<Record<string, string>>({});
+  const [fulfillNote, setFulfillNote] = useState("");
+  const [fulfillSaving, setFulfillSaving] = useState(false);
+  const [fulfillError, setFulfillError] = useState<string | null>(null);
 
   const [rejectingRequest, setRejectingRequest] = useState<StockRequestListItem | null>(null);
   const [rejectReason, setRejectReason] = useState("");
@@ -382,27 +406,61 @@ export function StockRequestsRoute(): React.JSX.Element {
     }
   }
 
-  async function handleApprove(request: StockRequestListItem): Promise<void> {
-    const confirmed = await confirm({
-      title: "Approve stock request?",
-      message: `This ships ${request.totalQuantityRequested} unit(s) across ${request.itemCount} product(s) from Main Store to ${request.storefrontName}, and records it in the stock ledger. This can't be undone.`,
-      tone: "primary",
-      confirmLabel: "Approve & Ship"
-    });
-    if (!confirmed) return;
-
-    setApprovingId(request.id);
-    setActionError(null);
+  async function openFulfillModal(request: StockRequestListItem): Promise<void> {
+    setFulfillLoading(true);
+    setFulfillError(null);
+    setFulfillAvailability([]);
+    setFulfillNote("");
     try {
-      await window.blueLedger.stockRequest.approve(request.id);
-      await loadRequests();
-      showSuccessToast(`${request.requestNumber} approved and shipped`);
+      const [full, availability] = await Promise.all([
+        window.blueLedger.stockRequest.get(request.id),
+        window.blueLedger.mainStore.availabilityForStockRequest(request.storefrontId)
+      ]);
+      setFulfillingRequest(full);
+      setFulfillAvailability(availability);
+      const defaults: Record<string, string> = {};
+      for (const item of full.items) {
+        const available = availability.find((row) => row.productId === item.productId)?.availableQuantity ?? 0;
+        defaults[item.id] = String(Math.max(0, Math.min(item.quantityRequested, available)));
+      }
+      setFulfillQuantities(defaults);
     } catch (err) {
-      const message = getErrorMessage(err, "Failed to approve stock request");
-      setActionError(message);
+      setActionError(getErrorMessage(err, "Failed to load stock request"));
+    } finally {
+      setFulfillLoading(false);
+    }
+  }
+
+  function updateFulfillQuantity(itemId: string, value: string): void {
+    setFulfillQuantities((prev) => ({ ...prev, [itemId]: value }));
+  }
+
+  function getFulfillAvailability(productId: string): number {
+    return fulfillAvailability.find((row) => row.productId === productId)?.availableQuantity ?? 0;
+  }
+
+  async function submitFulfill(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    if (!fulfillingRequest) return;
+    setFulfillSaving(true);
+    setFulfillError(null);
+    try {
+      await window.blueLedger.stockRequest.approve(fulfillingRequest.id, {
+        items: fulfillingRequest.items.map((item) => ({
+          itemId: item.id,
+          quantityDispatched: Math.max(0, Math.floor(Number(fulfillQuantities[item.id]) || 0))
+        })),
+        note: fulfillNote
+      });
+      setFulfillingRequest(null);
+      await loadRequests();
+      showSuccessToast(`${fulfillingRequest.requestNumber} fulfilled`);
+    } catch (err) {
+      const message = getErrorMessage(err, "Failed to fulfil stock request");
+      setFulfillError(message);
       showErrorToast(message);
     } finally {
-      setApprovingId(null);
+      setFulfillSaving(false);
     }
   }
 
@@ -633,7 +691,12 @@ export function StockRequestsRoute(): React.JSX.Element {
                         {request.totalQuantityRequested} unit{request.totalQuantityRequested === 1 ? "" : "s"}
                       </td>
                       <td className="px-4 py-3">
-                        <DashedPill tone={statusTone(request.status)}>{request.status}</DashedPill>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <DashedPill tone={statusTone(request.status)}>{request.status}</DashedPill>
+                          {request.status === "approved" && request.fullyDispatched === false && (
+                            <DashedPill tone="warning">Partial</DashedPill>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-2">
@@ -650,13 +713,13 @@ export function StockRequestsRoute(): React.JSX.Element {
                             <>
                               <button
                                 type="button"
-                                onClick={() => void handleApprove(request)}
-                                disabled={approvingId === request.id}
-                                aria-label={`Approve ${request.requestNumber}`}
-                                title="Approve & ship"
+                                onClick={() => void openFulfillModal(request)}
+                                disabled={fulfillLoading}
+                                aria-label={`Fulfil ${request.requestNumber}`}
+                                title="Review & dispatch"
                                 className="grid size-8 place-items-center rounded-lg border border-success/30 text-success transition hover:bg-success/15 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                               >
-                                {approvingId === request.id ? (
+                                {fulfillLoading ? (
                                   <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
                                 ) : (
                                   <CheckCircle2 className="size-3.5" aria-hidden="true" />
@@ -665,7 +728,7 @@ export function StockRequestsRoute(): React.JSX.Element {
                               <button
                                 type="button"
                                 onClick={() => openRejectModal(request)}
-                                disabled={approvingId === request.id}
+                                disabled={fulfillLoading}
                                 aria-label={`Reject ${request.requestNumber}`}
                                 title="Reject"
                                 className="grid size-8 place-items-center rounded-lg border border-danger/30 text-danger transition hover:bg-danger-soft cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
@@ -845,7 +908,7 @@ export function StockRequestsRoute(): React.JSX.Element {
             ? "Frozen at the moment of approval — reflects exactly what was true then, even if stock has moved since."
             : "Full detail of this stock request."
         }
-        widthClassName="max-w-3xl"
+        widthClassName="max-w-6xl"
       >
         {viewLoading ? (
           <div className="flex min-h-[160px] items-center justify-center text-muted">
@@ -878,6 +941,9 @@ export function StockRequestsRoute(): React.JSX.Element {
                     )}
                     {viewingRequest.status === "approved" && (
                       <>
+                        <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider text-muted">
+                          Dispatched
+                        </th>
                         <QtyTh label="Qty Before" location="Main Store" />
                         <QtyTh label="Qty After" location="Main Store" />
                         <QtyTh label="Qty Before" location={viewingRequest.storefrontName} />
@@ -904,6 +970,14 @@ export function StockRequestsRoute(): React.JSX.Element {
                       )}
                       {viewingRequest.status === "approved" && (
                         <>
+                          <td className="px-3 py-2 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <span className="font-extrabold tabular-nums text-ink">{item.quantityDispatched}</span>
+                              <DashedPill tone={fulfillmentTone(computeStockRequestItemFulfillmentTone(item))}>
+                                {FULFILLMENT_TONE_LABEL[computeStockRequestItemFulfillmentTone(item)]}
+                              </DashedPill>
+                            </div>
+                          </td>
                           <td className="px-3 py-2 text-right font-bold tabular-nums text-muted">{item.mainStorePreviousQuantity}</td>
                           <td className="px-3 py-2 text-right font-extrabold tabular-nums text-danger">{item.mainStoreNewQuantity}</td>
                           <td className="px-3 py-2 text-right font-bold tabular-nums text-muted">{item.previousQuantity}</td>
@@ -927,6 +1001,15 @@ export function StockRequestsRoute(): React.JSX.Element {
               <div className="rounded-lg border border-danger/30 bg-danger-soft p-3">
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-danger">Rejection Reason</p>
                 <p className="mt-1 text-sm font-bold text-danger">{viewingRequest.rejectionReason}</p>
+              </div>
+            )}
+
+            {viewingRequest.fulfillmentNote && (
+              <div className="rounded-lg border border-warning/30 bg-warning/10 p-3">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-warning">
+                  Note from Storekeeper
+                </p>
+                <p className="mt-1 text-sm font-bold text-ink">{viewingRequest.fulfillmentNote}</p>
               </div>
             )}
 
@@ -965,6 +1048,123 @@ export function StockRequestsRoute(): React.JSX.Element {
               </Button>
             </div>
           </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={fulfillingRequest !== null || fulfillLoading}
+        onClose={() => setFulfillingRequest(null)}
+        title={fulfillingRequest ? `Fulfil ${fulfillingRequest.requestNumber}` : "Fulfil Stock Request"}
+        description="Dispatch what's actually available — set a line to 0 for anything you can't ship right now."
+        widthClassName="max-w-4xl"
+      >
+        {fulfillLoading ? (
+          <div className="flex min-h-[160px] items-center justify-center text-muted">
+            <Loader2 className="size-6 animate-spin" aria-hidden="true" />
+          </div>
+        ) : fulfillingRequest ? (
+          <form onSubmit={submitFulfill}>
+            {fulfillError && (
+              <div className="mb-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
+                {fulfillError}
+              </div>
+            )}
+
+            <div className="rounded-lg border border-line bg-soft px-3.5 py-2.5">
+              <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Fulfilling</p>
+              <p className="mt-0.5 text-sm font-bold text-ink">
+                {fulfillingRequest.requestNumber} · {fulfillingRequest.storefrontName}
+              </p>
+            </div>
+
+            <div className="mt-4 overflow-x-auto rounded-lg border border-line">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="bg-soft">
+                    <th className="px-3 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-muted">
+                      Product
+                    </th>
+                    <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider text-muted">
+                      Requested
+                    </th>
+                    <th
+                      className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider text-muted"
+                      title="How much could ship right now"
+                    >
+                      Available
+                    </th>
+                    <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider text-muted">
+                      Dispatch Qty
+                    </th>
+                    <th className="px-3 py-2 text-left text-[10px] font-extrabold uppercase tracking-wider text-muted">
+                      Status
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fulfillingRequest.items.map((item) => {
+                    const dispatched = Math.max(0, Math.floor(Number(fulfillQuantities[item.id]) || 0));
+                    const tone = computeStockRequestItemFulfillmentTone({
+                      quantityRequested: item.quantityRequested,
+                      quantityDispatched: dispatched
+                    });
+                    return (
+                      <tr key={item.id} className="border-t border-line">
+                        <td className="px-3 py-2">
+                          <p className="font-extrabold text-ink">{item.productName}</p>
+                          <p className="text-[10px] font-semibold text-muted">{item.sku}</p>
+                        </td>
+                        <td className="px-3 py-2 text-right font-extrabold tabular-nums">{item.quantityRequested}</td>
+                        <td className="px-3 py-2 text-right font-bold tabular-nums text-muted">
+                          {getFulfillAvailability(item.productId)}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <input
+                            type="number"
+                            min={0}
+                            max={item.quantityRequested}
+                            value={fulfillQuantities[item.id] ?? ""}
+                            onChange={(event) => updateFulfillQuantity(item.id, event.target.value)}
+                            className="h-9 w-24 rounded-lg border border-line bg-white px-2 text-right text-sm font-bold text-ink outline-none focus:border-accent focus:ring-4 focus:ring-accent/15"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <DashedPill tone={fulfillmentTone(tone)}>{FULFILLMENT_TONE_LABEL[tone]}</DashedPill>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <TextAreaField
+              label="Note (optional)"
+              value={fulfillNote}
+              onChange={setFulfillNote}
+              placeholder="e.g. Rest is out of stock, next delivery expected Friday"
+              className="mt-4"
+              rows={2}
+            />
+
+            <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
+              <Button
+                type="button"
+                onClick={() => setFulfillingRequest(null)}
+                className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={fulfillSaving}
+                className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {fulfillSaving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
+                {fulfillSaving ? "Dispatching..." : "Confirm Dispatch"}
+              </Button>
+            </div>
+          </form>
         ) : null}
       </Modal>
 

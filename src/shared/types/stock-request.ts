@@ -16,6 +16,11 @@ export type StockRequestItem = {
    * this item was drawn out. Null under the same conditions as previousQuantity/newQuantity above. */
   mainStorePreviousQuantity: number | null;
   mainStoreNewQuantity: number | null;
+  /** Client request: partial fulfillment — how much of quantityRequested the storekeeper actually
+   * shipped. Null while pending/rejected (nothing reviewed yet); 0 is a real, explicit "reviewed, shipped
+   * nothing" value, never confused with "not yet reviewed". See computeStockRequestItemFulfillmentTone
+   * (shared/lib/stock-request.ts) for how this drives the green/yellow/red indicator. */
+  quantityDispatched: number | null;
 };
 
 /** One row for the Stock Requests list — Cashier/Manager see only their own storefront's requests
@@ -30,6 +35,14 @@ export type StockRequestListItem = {
   totalQuantityRequested: number;
   notes: string | null;
   rejectionReason: string | null;
+  /** Client request: optional storekeeper note explaining a partial/zero dispatch, so the requesting
+   * storefront understands why not everything shipped. Null unless the storekeeper left one — can be
+   * present even on a fully-dispatched request. */
+  fulfillmentNote: string | null;
+  /** Null while pending/rejected (nothing to compute yet). Once approved: true only if every line's
+   * quantityDispatched >= quantityRequested — lets the list show a "Partial" badge without a second
+   * round trip for per-item data. */
+  fullyDispatched: boolean | null;
   requestedByName: string;
   requestedAt: string;
   reviewedByName: string | null;

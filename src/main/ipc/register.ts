@@ -908,7 +908,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.stockRequestListPending, () => listPendingStockRequests());
   ipcMain.handle(ipcChannels.stockRequestGet, (_event, id: string) => getStockRequest(id));
   ipcMain.handle(ipcChannels.stockRequestCreate, (_event, input: unknown) => createStockRequest(input));
-  ipcMain.handle(ipcChannels.stockRequestApprove, (_event, id: string) => approveStockRequest(id));
+  ipcMain.handle(ipcChannels.stockRequestApprove, (_event, id: string, input: unknown) => approveStockRequest(id, input));
   ipcMain.handle(ipcChannels.stockRequestReject, (_event, id: string, input: unknown) => rejectStockRequest(id, input));
   ipcMain.handle(ipcChannels.stockReceiptList, () => listStockReceipts());
   ipcMain.handle(ipcChannels.stockReceiptGet, (_event, id: string) => getStockReceipt(id));

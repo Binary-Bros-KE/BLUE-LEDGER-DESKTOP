@@ -52,30 +52,54 @@ export type MovementLocationFilter = { locationId: string; mainStoreLocationId: 
  * damage/adjustment against this storefront's own allocation bucket), or it shares reference_id with
  * a row actually located at this storefront (the other leg of the same distribute/return transfer —
  * both legs of one transfer share one reference_id, see main-store-service.ts's
- * distributeMainStoreStockCore/returnToMainStore). Verified live against real data: a storefront with
- * 76 raw Main Store rows in its tenant correctly narrows to 30 that are actually its own. When the
- * filtered location IS Main Store itself (or the tenant has none), this collapses to a plain equality
- * — nothing extra to correlate. Always references the `sm` alias both movement queries already use. */
-function movementLocationClause(filter: MovementLocationFilter): { sql: string; params: string[] } {
-  if (!filter) return { sql: "1 = 1", params: [] };
+ * distributeMainStoreStockCore/returnToMainStore). When the filtered location IS Main Store itself
+ * (or the tenant has none), this collapses to a plain equality — nothing extra to correlate.
+ *
+ * CRITICAL PERFORMANCE NOTE: this used to check the reference_id match via a CORRELATED EXISTS
+ * subquery (re-run once per outer row). No index leads with reference_id alone (the only one on it
+ * is (reference_type, reference_id), unusable for a reference_id-only lookup), so that subquery fell
+ * back to a full linear scan of the table EVERY time — O(n²) overall. Confirmed live against a real
+ * tenant's 22,100-row stock_movements table: the query never completed in over 10 minutes and froze
+ * the whole app (the main process's better-sqlite3 calls are synchronous, blocking every IPC call
+ * too). Fixed by precomputing this storefront's own reference_ids ONCE via a CTE — SQLite materializes
+ * it a single time and builds a bloom filter for the `IN` check, turning the whole query into two
+ * linear passes instead of n². Confirmed against the same real 22,100-row dataset: 176ms, down from
+ * "never finishes." Returns an optional `cte` string the caller must prepend to its own SQL (via
+ * `WITH ...`) — empty when there's nothing to precompute. */
+/** cteParams bind to placeholders inside `cte` (which the caller must prepend at the very top of its
+ * SQL, before SELECT — a `WITH` clause can't go anywhere else); sqlParams bind to placeholders inside
+ * `sql` (spliced into the caller's own WHERE). Kept separate deliberately — a single merged params
+ * array is exactly how a caller would silently mis-bind params once other placeholders (like
+ * `product_id = ?`) sit textually between the CTE and the WHERE fragment. */
+function movementLocationClause(filter: MovementLocationFilter): {
+  cte: string;
+  cteParams: string[];
+  sql: string;
+  sqlParams: string[];
+} {
+  if (!filter) return { cte: "", cteParams: [], sql: "1 = 1", sqlParams: [] };
   if (!filter.mainStoreLocationId || filter.mainStoreLocationId === filter.locationId) {
-    return { sql: "sm.location_id = ?", params: [filter.locationId] };
+    return { cte: "", cteParams: [], sql: "sm.location_id = ?", sqlParams: [filter.locationId] };
   }
   return {
+    // location_id alone is enough to scope this correctly (a location never spans tenants) — no
+    // tenant_id needed, so this same clause works for both findAllStockMovementRows (tenant-scoped)
+    // and findStockMovementRowsForProduct (product-scoped, no tenantId in hand).
+    cte: `WITH storefront_refs(rid) AS (
+      SELECT DISTINCT reference_id FROM stock_movements WHERE location_id = ? AND reference_id IS NOT NULL
+    )`,
+    cteParams: [filter.locationId],
     sql: `(
       sm.location_id = ?
       OR (
         sm.location_id = ?
         AND (
           sm.allocation_storefront_id = ?
-          OR (sm.reference_id IS NOT NULL AND EXISTS (
-            SELECT 1 FROM stock_movements sm2
-            WHERE sm2.tenant_id = sm.tenant_id AND sm2.reference_id = sm.reference_id AND sm2.location_id = ?
-          ))
+          OR sm.reference_id IN (SELECT rid FROM storefront_refs)
         )
       )
     )`,
-    params: [filter.locationId, filter.mainStoreLocationId, filter.locationId, filter.locationId]
+    sqlParams: [filter.locationId, filter.mainStoreLocationId, filter.locationId]
   };
 }
 
@@ -167,6 +191,7 @@ export function findStockMovementRowsForProduct(
   return getDatabase()
     .prepare(
       `
+      ${location.cte}
       SELECT sm.*, l.location_name AS location_name, p.selling_price_cents AS selling_price_cents,
         si.unit_price_cents AS sale_unit_price_cents,
         (e.first_name || ' ' || e.last_name) AS performed_by_name
@@ -188,8 +213,9 @@ export function findStockMovementRowsForProduct(
     `
     )
     .all(
+      ...location.cteParams,
       productId,
-      ...location.params,
+      ...location.sqlParams,
       startDateIso,
       startDateIso,
       endDateIsoExclusive,
@@ -230,6 +256,7 @@ export function findAllStockMovementRows(
   return getDatabase()
     .prepare(
       `
+      ${location.cte}
       SELECT sm.*, l.location_name AS location_name, p.name AS product_name, p.sku AS sku,
         p.buying_price_cents AS buying_price_cents, p.selling_price_cents AS selling_price_cents,
         si.unit_price_cents AS sale_unit_price_cents,
@@ -256,8 +283,9 @@ export function findAllStockMovementRows(
     `
     )
     .all(
+      ...location.cteParams,
       tenantId,
-      ...location.params,
+      ...location.sqlParams,
       startDateIso,
       startDateIso,
       endDateIsoExclusive,

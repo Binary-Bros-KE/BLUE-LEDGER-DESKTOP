@@ -10,8 +10,10 @@ import { assertNotAlreadyDecidedRemotely } from "@main/services/sync-engine";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import {
   stockRequestCreateSchema,
+  stockRequestFulfillSchema,
   stockRequestRejectSchema,
   type StockRequestCreateInput,
+  type StockRequestFulfillInput,
   type StockRequestRejectInput
 } from "@shared/schemas/stock-request";
 import { isStorefrontType, type LocationType } from "@shared/types/location";
@@ -38,6 +40,8 @@ function mapListRow(row: stockRequestRepository.StockRequestRow): StockRequestLi
     totalQuantityRequested: row.total_quantity_requested,
     notes: row.notes,
     rejectionReason: row.rejection_reason,
+    fulfillmentNote: row.fulfillment_note,
+    fullyDispatched: row.fully_dispatched === null ? null : Boolean(row.fully_dispatched),
     requestedByName: row.requested_by_name,
     requestedAt: row.requested_at,
     reviewedByName: row.reviewed_by_name,
@@ -55,7 +59,8 @@ function mapItemRow(row: stockRequestRepository.StockRequestItemRow): StockReque
     previousQuantity: row.previous_quantity,
     newQuantity: row.new_quantity,
     mainStorePreviousQuantity: row.main_store_previous_quantity,
-    mainStoreNewQuantity: row.main_store_new_quantity
+    mainStoreNewQuantity: row.main_store_new_quantity,
+    quantityDispatched: row.quantity_dispatched
   };
 }
 
@@ -175,20 +180,30 @@ export function createStockRequest(input: unknown): StockRequest {
 }
 
 /**
- * Fulfils every item by shipping it from Main Store to the requesting storefront — reuses the exact
- * same allocation-aware logic `distributeFromMainStore` uses for a manual transfer, just looped across
- * every item under one transaction and traced back to this request via `reference_id` in the stock
- * ledger. If ANY item doesn't have enough stock at Main Store, the whole approval rolls back — nothing
- * partially fulfils, so the approver must free up stock (or reject) and try again.
+ * Fulfils each item by shipping EXACTLY as much as the storekeeper says to ship — client request:
+ * partial fulfillment. A request no longer has to be all-or-nothing: if 9 of 10 requested products
+ * are in stock, the storekeeper dispatches those 9 and names 0 for the 10th, instead of having to
+ * reject the whole request. Reuses the exact same allocation-aware logic `distributeFromMainStore`
+ * uses for a manual transfer, just looped across every item under one transaction and traced back to
+ * this request via `reference_id` in the stock ledger.
+ *
+ * Every `quantityDispatched` is validated against BOTH the line's own `quantity_requested` (can't
+ * over-dispatch) AND what's actually available at Main Store right now (same
+ * computeStockRequestAvailability check createStockRequest already enforces at request time) —
+ * collects every offending line into one consolidated error, same shape as createStockRequest's own
+ * shortages message, so a storekeeper's client-side number can never exceed real stock.
  *
  * previousQuantity/newQuantity (storefront) and mainStorePreviousQuantity/mainStoreNewQuantity (Main
  * Store) are captured HERE, immediately before/after each item's transfer applies — not recomputed
  * later — so the printed/reprinted request always shows exactly what was true at the moment of
- * approval, even if the product's stock has moved on since. Same "freeze at the moment of the action"
- * discipline as stock-receipt-service.ts's own createStockReceipt.
+ * fulfillment, even if the product's stock has moved on since. Same "freeze at the moment of the
+ * action" discipline as stock-receipt-service.ts's own createStockReceipt. A line dispatched at 0
+ * still gets a real (unchanged) before/after pair recorded — never left null — so it reads as
+ * "reviewed, nothing shipped" rather than "not yet reviewed".
  */
-export async function approveStockRequest(id: string): Promise<StockRequest> {
+export async function approveStockRequest(id: string, input: unknown): Promise<StockRequest> {
   requirePermission("stock_requests", "approve");
+  const parsed: StockRequestFulfillInput = stockRequestFulfillSchema.parse(input);
   const { tenantId } = getCurrentTenant();
   const employeeId = getCurrentEmployeeId();
   if (!employeeId) {
@@ -205,47 +220,87 @@ export async function approveStockRequest(id: string): Promise<StockRequest> {
   await assertNotAlreadyDecidedRemotely("stock_requests", id, "pending");
 
   const items = stockRequestRepository.findStockRequestItemRows(id);
+  const itemById = new Map(items.map((item) => [item.id, item]));
   const mainStore = locationRepository.findMainStoreLocationRow(tenantId);
   if (!mainStore) {
     throw new Error("No Main Store is set up for this business yet");
   }
 
+  const dispatchByItemId = new Map<string, number>();
+  for (const entry of parsed.items) {
+    const item = itemById.get(entry.itemId);
+    if (!item || item.stock_request_id !== id) {
+      throw new Error("One of the selected items was not found on this request");
+    }
+    dispatchByItemId.set(entry.itemId, entry.quantityDispatched);
+  }
+  // Any item the caller left out of parsed.items dispatches its full requested quantity — matches
+  // today's default UI (every line pre-filled with min(requested, available)) and keeps this action
+  // usable even if a caller only sends the lines it actually changed.
+  for (const item of items) {
+    if (!dispatchByItemId.has(item.id)) dispatchByItemId.set(item.id, item.quantity_requested);
+  }
+
+  const availableByProduct = new Map(
+    computeStockRequestAvailability(tenantId, row.storefront_id).map((r) => [r.productId, r.availableQuantity])
+  );
+  const problems: string[] = [];
+  for (const item of items) {
+    const dispatched = dispatchByItemId.get(item.id) ?? 0;
+    if (dispatched > item.quantity_requested) {
+      problems.push(`"${item.product_name}": can't dispatch more than the ${item.quantity_requested} requested`);
+      continue;
+    }
+    const available = availableByProduct.get(item.product_id) ?? 0;
+    if (dispatched > available) {
+      problems.push(`"${item.product_name}": only ${available} available at Main Store right now, tried to dispatch ${dispatched}`);
+    }
+  }
+  if (problems.length > 0) {
+    throw new Error(`Can't dispatch as entered — ${problems.join("; ")}. Adjust the quantities and try again.`);
+  }
+
   runInTransaction(() => {
     for (const item of items) {
+      const quantityDispatched = dispatchByItemId.get(item.id) ?? 0;
       const previousQuantity = inventoryRepository.findInventoryRow(item.product_id, row.storefront_id)?.quantity ?? 0;
       const mainStorePreviousQuantity = inventoryRepository.findInventoryRow(item.product_id, mainStore.id)?.quantity ?? 0;
 
-      try {
-        distributeMainStoreStockCore({
-          tenantId,
-          employeeId,
-          productId: item.product_id,
-          storefrontId: row.storefront_id,
-          quantity: item.quantity_requested,
-          notes: null,
-          referenceType: "stock_request_fulfillment",
-          referenceId: id
-        });
-      } catch (err) {
-        // distributeMainStoreStockCore's own error already names the product (see its own doc
-        // comment) — rethrown as-is rather than prefixed a second time, which used to read as
-        // "ProductX: Not enough stock of "ProductX" to distribute...". Only the non-Error fallback
-        // case still needs its own message.
-        if (err instanceof Error) throw err;
-        throw new Error(`${item.product_name}: Failed to fulfil item`);
+      if (quantityDispatched > 0) {
+        try {
+          distributeMainStoreStockCore({
+            tenantId,
+            employeeId,
+            productId: item.product_id,
+            storefrontId: row.storefront_id,
+            quantity: quantityDispatched,
+            notes: null,
+            referenceType: "stock_request_fulfillment",
+            referenceId: id
+          });
+        } catch (err) {
+          // distributeMainStoreStockCore's own error already names the product (see its own doc
+          // comment) — rethrown as-is rather than prefixed a second time, which used to read as
+          // "ProductX: Not enough stock of "ProductX" to distribute...". Only the non-Error fallback
+          // case still needs its own message.
+          if (err instanceof Error) throw err;
+          throw new Error(`${item.product_name}: Failed to fulfil item`);
+        }
       }
 
       stockRequestRepository.updateStockRequestItemFulfillmentRow(item.id, {
         previousQuantity,
-        newQuantity: previousQuantity + item.quantity_requested,
+        newQuantity: previousQuantity + quantityDispatched,
         mainStorePreviousQuantity,
-        mainStoreNewQuantity: mainStorePreviousQuantity - item.quantity_requested
+        mainStoreNewQuantity: mainStorePreviousQuantity - quantityDispatched,
+        quantityDispatched
       });
     }
 
     stockRequestRepository.updateStockRequestStatusRow(id, {
       status: "approved",
       rejectionReason: null,
+      fulfillmentNote: parsed.note,
       reviewedBy: employeeId
     });
   });
@@ -273,6 +328,7 @@ export async function rejectStockRequest(id: string, input: unknown): Promise<St
   stockRequestRepository.updateStockRequestStatusRow(id, {
     status: "rejected",
     rejectionReason: parsed.reason,
+    fulfillmentNote: null,
     reviewedBy: employeeId
   });
 
