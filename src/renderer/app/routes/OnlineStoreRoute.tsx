@@ -283,6 +283,7 @@ export function OnlineStoreRoute(): React.JSX.Element {
         ) : tab === "look" ? (
           <ThemePanel
             themeJson={overview.store.themeJson}
+            templateId={overview.store.templateId ?? "classic"}
             imageUploadsEnabled={overview.imageUploadsEnabled}
             onSaved={loadOverview}
           />

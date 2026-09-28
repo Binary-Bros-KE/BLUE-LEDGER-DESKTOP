@@ -21,6 +21,9 @@ export type StoreOwnerView = {
     status: OnlineStoreStatus;
     currency: string;
     fulfilmentLocationId: string | null;
+    /** Which storefront template renders the store (admin-set, read-only here) — the look editor
+     * only shows the sections that template uses. Absent on older servers → "classic". */
+    templateId?: string;
     /** Free-form config blobs owned by the storefront look/delivery/payment editors. */
     themeJson: Record<string, unknown>;
     deliveryJson: Record<string, unknown>;
@@ -107,6 +110,26 @@ export type ThemeContact = {
   facebook: string;
 };
 
+/** Trust-bar icon keys — must match SERVER schemas/shop.ts TRUST_ICONS (the storefront maps them). */
+export const TRUST_ICON_OPTIONS = [
+  { value: "truck", label: "Delivery truck" },
+  { value: "shield", label: "Shield (genuine)" },
+  { value: "phone", label: "Phone (M-Pesa)" },
+  { value: "returns", label: "Returns" },
+  { value: "card", label: "Card / payment" },
+  { value: "clock", label: "Clock (fast)" },
+  { value: "support", label: "Headset (support)" },
+  { value: "tag", label: "Price tag" },
+  { value: "zap", label: "Lightning" },
+  { value: "star", label: "Star" }
+] as const;
+export type TrustIconKey = (typeof TRUST_ICON_OPTIONS)[number]["value"];
+
+/** "Top brands" strip entry (Adia). No link → the storefront links to a search for the name. */
+export type ThemeBrandLogoRow = { name: string; logoUrl?: string | undefined; href?: string | undefined };
+/** One trust-bar cell. */
+export type ThemeTrustItemRow = { icon: TrustIconKey; title: string; subtitle?: string | undefined };
+
 /** Fully-resolved theme (every field present) — what the editor works with. */
 export type TrylistThemeConfig = {
   brand: ThemeBrand;
@@ -127,6 +150,8 @@ export type TrylistThemeConfig = {
   productSections: ThemeProductSectionRow[];
   dealTile: ThemeDealTile;
   tradeTile: ThemeTradeTile;
+  brands: ThemeBrandLogoRow[];
+  trustBar: ThemeTrustItemRow[];
 };
 
 /** Partial patch sent to POST /shop-admin/theme/update. `null` clears a field; `story` /
@@ -173,6 +198,9 @@ export type ThemeUpdatePatch = {
     ctaHref?: string | null;
     imageUrl?: string | null;
   };
+  /** replaces the whole list; [] = back to the template's defaults */
+  brands?: ThemeBrandLogoRow[];
+  trustBar?: ThemeTrustItemRow[];
 };
 
 // --- Delivery methods (storefront checkout options) -------------------------------------------
@@ -283,7 +311,19 @@ export function parseThemeConfig(raw: Record<string, unknown> | null | undefined
       ctaLabel: str(tradeTileRaw.ctaLabel) || undefined,
       ctaHref: str(tradeTileRaw.ctaHref) || undefined,
       imageUrl: str(tradeTileRaw.imageUrl) || undefined
-    }
+    },
+    brands: (Array.isArray(o.brands) ? o.brands : []).slice(0, 24).flatMap((b) => {
+      const bb = (b && typeof b === "object" ? b : {}) as Record<string, unknown>;
+      const name = str(bb.name);
+      return name ? [{ name, logoUrl: str(bb.logoUrl) || undefined, href: str(bb.href) || undefined }] : [];
+    }),
+    trustBar: (Array.isArray(o.trustBar) ? o.trustBar : []).slice(0, 4).flatMap((t) => {
+      const tt = (t && typeof t === "object" ? t : {}) as Record<string, unknown>;
+      const title = str(tt.title);
+      if (!title) return [];
+      const icon = TRUST_ICON_OPTIONS.some((x) => x.value === tt.icon) ? (tt.icon as TrustIconKey) : "star";
+      return [{ icon, title, subtitle: str(tt.subtitle) || undefined }];
+    })
   };
 }
 

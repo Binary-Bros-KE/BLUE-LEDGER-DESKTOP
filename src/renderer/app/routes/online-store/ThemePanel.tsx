@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ImagePlus, Loader2, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ImagePlus, Loader2, Plus, Trash2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { Field, TextAreaField } from "@renderer/shared/components/form-fields";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
@@ -8,7 +8,11 @@ import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { cn } from "@renderer/shared/lib/cn";
 import type { Category } from "@shared/types/category";
 import {
+  TRUST_ICON_OPTIONS,
   parseThemeConfig,
+  type ThemeBrandLogoRow,
+  type ThemeTrustItemRow,
+  type TrustIconKey,
   type ThemeDealTile,
   type ThemeProductSectionRow,
   type ThemeStoryRow,
@@ -119,13 +123,17 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 
 export function ThemePanel({
   themeJson,
+  templateId = "classic",
   imageUploadsEnabled,
   onSaved
 }: {
   themeJson: Record<string, unknown>;
+  /** the store's storefront template (admin-set) — decides which sections apply */
+  templateId?: string;
   imageUploadsEnabled: boolean;
   onSaved: () => void;
 }): React.JSX.Element {
+  const isAdia = templateId === "adia";
   const initial = useMemo(() => parseThemeConfig(themeJson), [themeJson]);
 
   // Hero + story are edited freely and persist only on their Save button, so they're seeded ONCE
@@ -161,6 +169,12 @@ export function ThemePanel({
   const [savingBrand, setSavingBrand] = useState(false);
   const [savingTopBar, setSavingTopBar] = useState(false);
   const [savingContact, setSavingContact] = useState(false);
+
+  // Trust bar + brands: edited freely, saved with their own buttons (brand LOGOS save instantly).
+  const [trustBar, setTrustBar] = useState<ThemeTrustItemRow[]>(() => parseThemeConfig(themeJson).trustBar);
+  const [brands, setBrands] = useState<ThemeBrandLogoRow[]>(() => parseThemeConfig(themeJson).brands);
+  const [savingTrust, setSavingTrust] = useState(false);
+  const [savingBrands, setSavingBrands] = useState(false);
 
   useEffect(() => {
     setCatImages(initial.categoryImages);
@@ -357,6 +371,58 @@ export function ThemePanel({
     }
   }, [apply, tradeTile]);
 
+  const saveTrustBar = useCallback(
+    async (rows: ThemeTrustItemRow[], okMsg: string) => {
+      setSavingTrust(true);
+      try {
+        const cleaned = rows
+          .map((r) => ({ icon: r.icon, title: r.title.trim(), subtitle: r.subtitle?.trim() || undefined }))
+          .filter((r) => r.title);
+        await apply({ trustBar: cleaned }, okMsg);
+        setTrustBar(cleaned);
+      } catch (err) {
+        showErrorToast(getErrorMessage(err, "Couldn't save"));
+      } finally {
+        setSavingTrust(false);
+      }
+    },
+    [apply]
+  );
+
+  const cleanBrands = (rows: ThemeBrandLogoRow[]): ThemeBrandLogoRow[] =>
+    rows
+      .map((b) => ({ name: b.name.trim(), logoUrl: b.logoUrl || undefined, href: b.href?.trim() || undefined }))
+      .filter((b) => b.name);
+
+  const saveBrands = useCallback(async () => {
+    setSavingBrands(true);
+    try {
+      await apply({ brands: cleanBrands(brands) }, "Brands saved");
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Couldn't save"));
+    } finally {
+      setSavingBrands(false);
+    }
+  }, [apply, brands]);
+
+  const setBrandLogo = useCallback(
+    async (index: number, url: string | null) => {
+      const next = brands.map((b, i) => (i === index ? { ...b, logoUrl: url ?? undefined } : b));
+      setBrands(next);
+      await apply({ brands: cleanBrands(next) });
+    },
+    [apply, brands]
+  );
+
+  const moveBrand = (index: number, dir: -1 | 1) =>
+    setBrands((list) => {
+      const j = index + dir;
+      if (j < 0 || j >= list.length) return list;
+      const next = [...list];
+      [next[index], next[j]] = [next[j]!, next[index]!];
+      return next;
+    });
+
   const setStoryImage = useCallback(
     async (index: number, url: string | null) => {
       const next = story.map((r, i) => (i === index ? { ...r, imageUrl: url ?? undefined } : r));
@@ -438,7 +504,7 @@ export function ThemePanel({
 
       <Card title="Top bar">
         <Field
-          label="Announcement (blank = default)"
+          label={isAdia ? "Announcement (blank = no top bar)" : "Announcement (blank = default)"}
           value={topBar.announcement}
           onChange={(v) => setTopBar({ announcement: v })}
           placeholder="Free Delivery within Nairobi - CBD."
@@ -512,7 +578,7 @@ export function ThemePanel({
           value={hero.headline}
           onChange={(v) => setHero((h) => ({ ...h, headline: v }))}
           rows={3}
-          placeholder={"BUILT FOR\nTHE SHOP\nFLOOR"}
+          placeholder={isAdia ? "Make Home\nBetter" : "BUILT FOR\nTHE SHOP\nFLOOR"}
         />
         <TextAreaField
           label="Sub-paragraph"
@@ -580,12 +646,21 @@ export function ThemePanel({
         </div>
       </Card>
 
-      <Card title="Deal tile (hero, red)">
-        <p className="text-xs text-muted">
-          The &ldquo;Deal of the week&rdquo; label stays fixed — everything below it is yours to set.
-          Enter both prices and the discount badge is calculated for you, so it can never drift out
-          of sync with what you typed.
-        </p>
+      <Card title={isAdia ? "Hot Deals banner" : "Deal tile (hero, red)"}>
+        {isAdia ? (
+          <p className="text-xs text-muted">
+            The red banner with the countdown (it resets every Sunday night by itself). The first
+            line of the headline is the banner heading; any further lines become its subtitle. Enter
+            both prices and &ldquo;UP TO x% OFF&rdquo; appears on the home hero, with &ldquo;From
+            price&rdquo; in the banner — calculated for you, never typed.
+          </p>
+        ) : (
+          <p className="text-xs text-muted">
+            The &ldquo;Deal of the week&rdquo; label stays fixed — everything below it is yours to set.
+            Enter both prices and the discount badge is calculated for you, so it can never drift out
+            of sync with what you typed.
+          </p>
+        )}
         <TextAreaField
           label="Headline (blank = theme default)"
           value={dealTile.title ?? ""}
@@ -650,6 +725,7 @@ export function ThemePanel({
         </div>
       </Card>
 
+      {!isAdia && (
       <Card title="Trade tile (hero, cream)">
         <p className="text-xs text-muted">
           A single featured category highlight next to the deal tile above.
@@ -708,8 +784,9 @@ export function ThemePanel({
           />
         </div>
       </Card>
+      )}
 
-      <Card title="Story blocks">
+      <Card title={isAdia ? "Promo cards" : "Story blocks"}>
         <p className="text-xs text-muted">
           Up to 3 image + text blocks shown further down the home page. Leave empty to hide the
           section entirely.
@@ -849,6 +926,164 @@ export function ThemePanel({
           </Button>
         </div>
       </Card>
+
+      <Card title="Trust bar">
+        <p className="text-xs text-muted">
+          The row of short promises under the home banner — e.g.{" "}
+          {isAdia ? "\u201cFree Delivery \u00b7 On selected items\u201d" : "\u201cGenuine stock \u00b7 Sealed boxes, real serials\u201d"}.
+          Up to 4. Leave it empty to show the template&apos;s default wording.
+        </p>
+        {trustBar.map((row, i) => (
+          <div
+            key={i}
+            className="grid gap-3 rounded-md border border-line p-3 sm:grid-cols-[170px_1fr_1fr_auto] sm:items-end"
+          >
+            <label className="block">
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Icon</span>
+              <select
+                value={row.icon}
+                onChange={(e) =>
+                  setTrustBar((t) => t.map((r, j) => (j === i ? { ...r, icon: e.target.value as TrustIconKey } : r)))
+                }
+                className="mt-1 h-10 w-full rounded-md border border-line bg-white px-2 text-sm font-semibold"
+              >
+                {TRUST_ICON_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Field
+              label="Title"
+              value={row.title}
+              onChange={(v) => setTrustBar((t) => t.map((r, j) => (j === i ? { ...r, title: v } : r)))}
+              placeholder={isAdia ? "Free Delivery" : "Genuine stock"}
+            />
+            <Field
+              label="Subtitle (optional)"
+              value={row.subtitle ?? ""}
+              onChange={(v) => setTrustBar((t) => t.map((r, j) => (j === i ? { ...r, subtitle: v } : r)))}
+              placeholder={isAdia ? "On selected items" : "Sealed boxes, real serials"}
+            />
+            <button
+              type="button"
+              onClick={() => setTrustBar((t) => t.filter((_, j) => j !== i))}
+              aria-label={`Remove item ${i + 1}`}
+              className="inline-flex h-10 items-center justify-center rounded-md border border-line px-3 text-danger transition hover:bg-danger-soft"
+            >
+              <Trash2 className="size-4" />
+            </button>
+          </div>
+        ))}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setTrustBar((t) => (t.length >= 4 ? t : [...t, { icon: "star", title: "" }]))}
+              disabled={trustBar.length >= 4}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-line px-3 text-xs font-extrabold uppercase tracking-wide text-ink transition hover:bg-soft disabled:opacity-50"
+            >
+              <Plus className="size-3.5" /> Add item
+            </button>
+            {trustBar.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => void saveTrustBar([], "Trust bar reset to the default wording")}
+                disabled={savingTrust}
+                className="inline-flex h-9 items-center rounded-md border border-line px-3 text-xs font-extrabold uppercase tracking-wide text-muted transition hover:bg-soft disabled:opacity-50"
+              >
+                Use defaults
+              </button>
+            ) : null}
+          </div>
+          <Button onClick={() => void saveTrustBar(trustBar, "Trust bar saved")} disabled={savingTrust}>
+            {savingTrust ? <Loader2 className="size-4 animate-spin" /> : "Save trust bar"}
+          </Button>
+        </div>
+      </Card>
+
+      {isAdia && (
+        <Card title="Top brands">
+          <p className="text-xs text-muted">
+            Brands you carry, shown as a strip near the bottom of the home page (up to 24). A logo is
+            optional — without one the name is shown. Leave the link blank and the brand opens a
+            search for its name. Logos save as soon as you upload; names and links with the Save button.
+          </p>
+          {brands.map((b, i) => (
+            <div key={i} className="rounded-md border border-line p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Brand {i + 1}</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => moveBrand(i, -1)}
+                    disabled={i === 0}
+                    aria-label="Move up"
+                    className="grid size-8 place-items-center rounded-md text-muted transition hover:bg-soft disabled:opacity-30"
+                  >
+                    <ArrowUp className="size-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => moveBrand(i, 1)}
+                    disabled={i === brands.length - 1}
+                    aria-label="Move down"
+                    className="grid size-8 place-items-center rounded-md text-muted transition hover:bg-soft disabled:opacity-30"
+                  >
+                    <ArrowDown className="size-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBrands((list) => list.filter((_, j) => j !== i))}
+                    className="inline-flex items-center gap-1 px-2 text-xs font-extrabold uppercase tracking-wide text-danger transition hover:opacity-70"
+                  >
+                    <Trash2 className="size-3.5" /> Remove
+                  </button>
+                </div>
+              </div>
+              <div className="mt-3 grid gap-4 sm:grid-cols-[auto_1fr]">
+                <ImageSlot
+                  label="Logo"
+                  {...(b.name.trim() ? {} : { hint: "Type the name first" })}
+                  url={b.logoUrl ?? ""}
+                  slot={`brand-logo-${i + 1}`}
+                  enabled={imageUploadsEnabled && Boolean(b.name.trim())}
+                  aspect="aspect-[3/2]"
+                  onChange={(url) => setBrandLogo(i, url)}
+                />
+                <div className="space-y-3">
+                  <Field
+                    label="Brand name"
+                    value={b.name}
+                    onChange={(v) => setBrands((list) => list.map((x, j) => (j === i ? { ...x, name: v } : x)))}
+                    placeholder="Samsung"
+                  />
+                  <Field
+                    label="Link (optional)"
+                    value={b.href ?? ""}
+                    onChange={(v) => setBrands((list) => list.map((x, j) => (j === i ? { ...x, href: v } : x)))}
+                    placeholder={`/products?q=${encodeURIComponent(b.name.trim() || "Samsung")}`}
+                  />
+                </div>
+              </div>
+            </div>
+          ))}
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => setBrands((list) => (list.length >= 24 ? list : [...list, { name: "" }]))}
+              disabled={brands.length >= 24}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-line px-3 text-xs font-extrabold uppercase tracking-wide text-ink transition hover:bg-soft disabled:opacity-50"
+            >
+              <Plus className="size-3.5" /> Add brand
+            </button>
+            <Button onClick={() => void saveBrands()} disabled={savingBrands}>
+              {savingBrands ? <Loader2 className="size-4 animate-spin" /> : "Save brands"}
+            </Button>
+          </div>
+        </Card>
+      )}
 
       <Card title="Category images">
         <p className="text-xs text-muted">
