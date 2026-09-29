@@ -83,6 +83,9 @@ export function OnlineStoreRoute({ section = "products" }: { section?: WebsiteSe
   const setTemplateId = useWebsiteStore((state) => state.setTemplateId);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<PublishFilter>("all");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -164,12 +167,67 @@ export function OnlineStoreRoute({ section = "products" }: { section?: WebsiteSe
           const haystack = `${p.name} ${p.sku} ${p.barcode ?? ""}`.toLowerCase();
           if (!haystack.includes(term)) return false;
         }
+        if (categoryFilter && (p.categoryName ?? "Uncategorised") !== categoryFilter) return false;
         if (filter === "published") return p.publishedOnline;
         if (filter === "unpublished") return !p.publishedOnline;
         return true;
       })
       .sort((a, b) => Number(b.publishedOnline) - Number(a.publishedOnline) || a.name.localeCompare(b.name));
-  }, [products, search, filter]);
+  }, [products, search, filter, categoryFilter]);
+
+  /** Category names present in the catalogue, with product counts, for the category filter. */
+  const categoryOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of products ?? []) {
+      if (p.status !== "active") continue;
+      const name = p.categoryName ?? "Uncategorised";
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [products]);
+
+  const allShownSelected = Boolean(filtered && filtered.length > 0 && filtered.every((p) => selected.has(p.id)));
+  const toggleSelected = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleAllShown = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const p of filtered ?? []) {
+        if (allShownSelected) next.delete(p.id);
+        else next.add(p.id);
+      }
+      return next;
+    });
+
+  /** One local transaction for the whole selection — sync then pushes it in batches of 200. */
+  const bulkPublish = useCallback(
+    async (published: boolean) => {
+      if (!canEdit || selected.size === 0 || bulkBusy) return;
+      setBulkBusy(true);
+      try {
+        const { changed } = await window.blueLedger.onlineStore.bulkPublish([...selected], published);
+        await loadProducts();
+        setSelected(new Set());
+        showSuccessToast(
+          changed === 0
+            ? "Nothing to change — they were already " + (published ? "published" : "unpublished")
+            : `${published ? "Published" : "Unpublished"} ${changed} product${changed === 1 ? "" : "s"} — your website updates with the next sync`
+        );
+        void window.blueLedger.sync.runNow().catch(() => undefined);
+        void loadOverview();
+      } catch (err) {
+        showErrorToast(getErrorMessage(err, "Couldn't update those products"));
+      } finally {
+        setBulkBusy(false);
+      }
+    },
+    [bulkBusy, canEdit, loadOverview, loadProducts, selected]
+  );
 
   const publishedCount = useMemo(
     () => (products ? products.filter((p) => p.publishedOnline && p.status === "active").length : 0),
@@ -313,6 +371,19 @@ export function OnlineStoreRoute({ section = "products" }: { section?: WebsiteSe
               className="h-10 w-full rounded-md border border-line bg-white px-3 text-sm font-semibold outline-none focus:ring-4 focus:ring-accent/20"
             />
           </div>
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="h-10 max-w-[260px] rounded-md border border-line bg-white px-3 text-sm font-semibold outline-none focus:ring-4 focus:ring-accent/20"
+            aria-label="Filter by category"
+          >
+            <option value="">All categories</option>
+            {categoryOptions.map(([name, count]) => (
+              <option key={name} value={name}>
+                {name} ({count})
+              </option>
+            ))}
+          </select>
           <div className="flex overflow-hidden rounded-md border border-line">
             {(["all", "published", "unpublished"] as const).map((value) => (
               <button
@@ -330,6 +401,38 @@ export function OnlineStoreRoute({ section = "products" }: { section?: WebsiteSe
           </div>
         </div>
 
+        {canEdit && filtered && filtered.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-3 border-b border-line bg-soft/50 px-4 py-2.5">
+            <label className="flex cursor-pointer items-center gap-2 text-xs font-extrabold uppercase tracking-wide text-muted">
+              <input type="checkbox" checked={allShownSelected} onChange={toggleAllShown} className="size-4 accent-primary" />
+              Select all shown ({filtered.length})
+            </label>
+            {selected.size > 0 ? (
+              <div className="ml-auto flex flex-wrap items-center gap-2">
+                <span className="text-xs font-extrabold text-ink">{selected.size} selected</span>
+                <Button className="h-8 px-3 text-xs" disabled={bulkBusy} onClick={() => void bulkPublish(true)}>
+                  {bulkBusy ? <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" /> : null}
+                  Publish
+                </Button>
+                <Button
+                  className="h-8 bg-white px-3 text-xs text-ink shadow-none ring-1 ring-line hover:bg-soft hover:text-ink"
+                  disabled={bulkBusy}
+                  onClick={() => void bulkPublish(false)}
+                >
+                  Unpublish
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => setSelected(new Set())}
+                  className="cursor-pointer text-[11px] font-extrabold uppercase tracking-wide text-muted hover:underline"
+                >
+                  Clear
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         {loadError ? (
           <p className="p-6 text-sm font-semibold text-danger">{loadError}</p>
         ) : !filtered ? (
@@ -345,7 +448,16 @@ export function OnlineStoreRoute({ section = "products" }: { section?: WebsiteSe
               const priceOverridden = product.onlinePriceCents !== null;
               const busy = busyIds.has(product.id);
               return (
-                <li key={product.id} className="flex items-center gap-3 p-4">
+                <li key={product.id} className={cn("flex items-center gap-3 p-4", selected.has(product.id) && "bg-accent/5")}>
+                  {canEdit ? (
+                    <input
+                      type="checkbox"
+                      checked={selected.has(product.id)}
+                      onChange={() => toggleSelected(product.id)}
+                      aria-label={`Select ${product.name}`}
+                      className="size-4 flex-none accent-primary"
+                    />
+                  ) : null}
                   {firstImage ? (
                     <img
                       src={firstImage.thumbUrl}

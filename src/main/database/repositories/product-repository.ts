@@ -423,6 +423,28 @@ export function bulkSetTaxTypeRows(tenantId: string, productIds: string[], taxTy
   return Number(result.changes);
 }
 
+/** Publish / unpublish many products at once (Website Products bulk action). Only rows whose value
+ * actually changes are touched — each one bumps sync_status/updated_at so the AFTER UPDATE outbox
+ * trigger queues it, and the sync engine then pushes them in batches (PUSH_BATCH_SIZE), never one
+ * request per product. Chunked to stay far under SQLite's bound-parameter limit. Returns the number
+ * of products changed. Callers wrap it in a transaction. */
+export function bulkSetPublishedOnlineRows(tenantId: string, productIds: string[], published: boolean): number {
+  const now = new Date().toISOString();
+  let changed = 0;
+  for (let i = 0; i < productIds.length; i += 500) {
+    const ids = productIds.slice(i, i + 500);
+    const marks = ids.map(() => "?").join(", ");
+    const result = getDatabase()
+      .prepare(
+        `UPDATE products SET published_online = ?, sync_status = 'pending', updated_at = ?
+         WHERE tenant_id = ? AND status = 'active' AND published_online != ? AND id IN (${marks})`
+      )
+      .run(published ? 1 : 0, now, tenantId, published ? 1 : 0, ...ids);
+    changed += Number(result.changes);
+  }
+  return changed;
+}
+
 /** The "Online Store" tab's own narrow mutation — deliberately separate from updateProductRow (the
  * full product form). Only the keys passed are touched; every call bumps sync_status/updated_at so
  * the existing AFTER UPDATE sync-outbox trigger carries it to the cloud, same shape as

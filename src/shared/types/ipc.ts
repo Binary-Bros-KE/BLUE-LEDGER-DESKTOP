@@ -366,6 +366,10 @@ export type IpcInvokeMap = {
     args: [patch: ThemeUpdatePatch];
     result: StoreOwnerView;
   };
+  "online-store:bulk-publish": {
+    args: [productIds: string[], published: boolean];
+    result: { changed: number };
+  };
   "online-store:newsletter-list": {
     args: [];
     result: NewsletterSubscriber[];
@@ -1595,6 +1599,10 @@ export type BlueLedgerApi = {
     ) => Promise<IpcInvokeMap["online-store:theme-update"]["result"]>;
     themeUpload: (slot: string) => Promise<IpcInvokeMap["online-store:theme-upload"]["result"]>;
     newsletterList: () => Promise<IpcInvokeMap["online-store:newsletter-list"]["result"]>;
+    bulkPublish: (
+      productIds: string[],
+      published: boolean
+    ) => Promise<IpcInvokeMap["online-store:bulk-publish"]["result"]>;
     themeDeleteImage: (
       url: string
     ) => Promise<IpcInvokeMap["online-store:theme-delete-image"]["result"]>;

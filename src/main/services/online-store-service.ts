@@ -2,11 +2,13 @@ import { statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import electron from "electron";
+import { runInTransaction } from "@main/database/connection";
 import * as productRepository from "@main/database/repositories/product-repository";
 import * as saleRepository from "@main/database/repositories/sale-repository";
 import { requirePermission } from "@main/services/auth-service";
 import { insertCompletedSaleFromCart, prepareCart, requireActiveSession } from "@main/services/sale-service";
 import { API_BASE_URL } from "@main/services/license-service";
+import { getCurrentTenant } from "@main/services/tenant-service";
 import { getCloudIdentity } from "@main/services/sync-engine";
 import type { OnlineImageRef, Product } from "@shared/types/product";
 import type {
@@ -93,6 +95,16 @@ export function updateStoreConfig(patch: StoreConfigPatch): Promise<StoreOwnerVi
 }
 
 /** Local write only — the sync engine propagates published_online / online_* to the cloud. */
+/** Publish / unpublish many products in one local transaction (see bulkSetPublishedOnlineRows). */
+export function bulkSetPublishedOnline(productIds: string[], published: boolean): { changed: number } {
+  requirePermission("online_store", "edit");
+  const ids = [...new Set(productIds.filter((id) => typeof id === "string" && id.length > 0))];
+  if (ids.length === 0) return { changed: 0 };
+  const { tenantId } = getCurrentTenant();
+  const changed = runInTransaction(() => productRepository.bulkSetPublishedOnlineRows(tenantId, ids, published));
+  return { changed };
+}
+
 export function setProductOnline(productId: string, patch: ProductOnlinePatch): Product {
   const row = productRepository.setProductOnlineRow(productId, patch);
   return productRepository.mapProductRow(row);

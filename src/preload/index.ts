@@ -99,6 +99,7 @@ const api: BlueLedgerApi = {
     updateConfig: (patch) => invoke("online-store:update-config", patch),
     themeUpdate: (patch) => invoke("online-store:theme-update", patch),
     newsletterList: () => invoke("online-store:newsletter-list"),
+    bulkPublish: (productIds, published) => invoke("online-store:bulk-publish", productIds, published),
     themeUpload: (slot) => invoke("online-store:theme-upload", slot),
     themeDeleteImage: (url) => invoke("online-store:theme-delete-image", url),
     deliveryList: () => invoke("online-store:delivery-list"),

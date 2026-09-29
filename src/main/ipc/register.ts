@@ -205,6 +205,7 @@ import {
   setOnlineOrderStatus,
   reorderDeliveryMethods as reorderOnlineStoreDeliveryMethods,
   setProductOnline as setOnlineStoreProductOnline,
+  bulkSetPublishedOnline,
   updateDeliveryMethod as updateOnlineStoreDeliveryMethod,
   updateStoreConfig as updateOnlineStoreConfig,
   updateTheme as updateOnlineStoreTheme,
@@ -523,6 +524,9 @@ export function registerIpcHandlers(): void {
     readManagedProductImagePreview(relativePath)
   );
   ipcMain.handle(ipcChannels.onlineStoreOverview, () => getOnlineStoreOverview());
+  ipcMain.handle(ipcChannels.onlineStoreBulkPublish, (_event, productIds: string[], published: boolean) =>
+    bulkSetPublishedOnline(productIds, published)
+  );
   ipcMain.handle(ipcChannels.onlineStoreSetProductOnline, (_event, productId: string, patch: unknown) =>
     setOnlineStoreProductOnline(productId, patch as ProductOnlinePatch)
   );

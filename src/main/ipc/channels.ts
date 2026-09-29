@@ -61,6 +61,7 @@ export const ipcChannels = {
   productReadImagePreview: "product:read-image-preview",
   onlineStoreOverview: "online-store:overview",
   onlineStoreSetProductOnline: "online-store:set-product-online",
+  onlineStoreBulkPublish: "online-store:bulk-publish",
   onlineStoreUploadImage: "online-store:upload-image",
   onlineStoreDeleteImage: "online-store:delete-image",
   onlineStoreUpdateConfig: "online-store:update-config",
