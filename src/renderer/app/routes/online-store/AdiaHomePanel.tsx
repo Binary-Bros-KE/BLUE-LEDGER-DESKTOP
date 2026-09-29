@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ChevronDown, Loader2, Plus, Save, Trash2 } from "lucide-react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, ArrowDown, ArrowUp, ChevronDown, Loader2, Plus, Save, Trash2 } from "lucide-react";
 import { CheckboxField, Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
@@ -28,6 +28,30 @@ function slugify(value: string): string {
     .trim()
     .replace(/[^\p{L}\p{N}]+/gu, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+/** Products published on the website per category (its own category + website-only extras). The
+ * website only lists categories that have some, so a tile/room/link pointing at an empty one is
+ * hidden there — the pickers + warnings below say so instead of it silently disappearing. */
+const WebCounts = createContext<Map<string, number> | null>(null);
+
+function webLabel(c: Category, counts: Map<string, number> | null): string {
+  if (!counts) return c.name;
+  const n = counts.get(c.id) ?? 0;
+  return n > 0 ? `${c.name} (${n} on website)` : `${c.name} — not on website yet`;
+}
+
+/** Warning under a tile/room whose category has nothing published online. */
+function NotOnWebsite({ categoryId, what, message }: { categoryId: string; what?: string; message?: string }): React.JSX.Element | null {
+  const counts = useContext(WebCounts);
+  if (!categoryId || !counts || (counts.get(categoryId) ?? 0) > 0) return null;
+  return (
+    <p className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs font-bold text-ink">
+      <AlertTriangle className="mt-0.5 size-3.5 flex-none text-warning" />
+      {message ??
+        `This category has no products published on the website yet, so this ${what ?? "item"} is hidden there. Publish some of its products in Website Products and it appears automatically.`}
+    </p>
+  );
 }
 
 // ------------------------------------------------------------------------------ small building blocks
@@ -95,6 +119,7 @@ function LinkField({
   onChange: (href: string) => void;
   categories: Category[];
 }): React.JSX.Element {
+  const counts = useContext(WebCounts);
   const catByHref = useMemo(() => new Map(categories.map((c) => [`/products/${slugify(c.name)}`, c])), [categories]);
   const mode = value === "" ? "" : value === "/products" ? "all" : catByHref.has(value) ? "cat" : "custom";
   const [custom, setCustom] = useState(mode === "custom");
@@ -115,7 +140,7 @@ function LinkField({
         options={[
           { value: "", label: "Default" },
           { value: "/products", label: "All products" },
-          ...categories.map((c) => ({ value: `/products/${slugify(c.name)}`, label: `Category: ${c.name}` })),
+          ...categories.map((c) => ({ value: `/products/${slugify(c.name)}`, label: `Category: ${webLabel(c, counts)}` })),
           { value: "__custom", label: "Custom link…" }
         ]}
       />
@@ -137,12 +162,13 @@ function CategoryField({
   categories: Category[];
   emptyLabel: string;
 }): React.JSX.Element {
+  const counts = useContext(WebCounts);
   return (
     <SelectField
       label={label}
       value={value}
       onChange={onChange}
-      options={[{ value: "", label: emptyLabel }, ...categories.map((c) => ({ value: c.id, label: c.name }))]}
+      options={[{ value: "", label: emptyLabel }, ...categories.map((c) => ({ value: c.id, label: webLabel(c, counts) }))]}
     />
   );
 }
@@ -251,6 +277,7 @@ export function AdiaHomePanel({
   // Seeded once — a parent reload after one card saves must not wipe another card's unsaved edits.
   const [a] = useState(() => obj(themeJson.adia));
   const [categories, setCategories] = useState<Category[]>([]);
+  const [webCounts, setWebCounts] = useState<Map<string, number> | null>(null);
   const [openKey, setOpenKey] = useState<string | null>("hero");
   const [saving, setSaving] = useState<string | null>(null);
 
@@ -347,6 +374,17 @@ export function AdiaHomePanel({
       .list()
       .then((c) => setCategories(c.filter((x) => x.status === "active").sort((p, q) => p.name.localeCompare(q.name))))
       .catch(() => setCategories([]));
+    void window.blueLedger.product
+      .list(null)
+      .then((products) => {
+        const counts = new Map<string, number>();
+        for (const p of products) {
+          if (!p.publishedOnline || p.status !== "active") continue;
+          for (const id of new Set([...(p.categoryId ? [p.categoryId] : []), ...p.onlineCategoryIds])) counts.set(id, (counts.get(id) ?? 0) + 1);
+        }
+        setWebCounts(counts);
+      })
+      .catch(() => setWebCounts(null));
   }, []);
 
   const save = useCallback(
@@ -440,6 +478,7 @@ export function AdiaHomePanel({
         <CategoryField label="Products from" value={row.categoryId} onChange={(v) => set({ ...row, categoryId: v })} categories={categories} emptyLabel={autoLabel} />
         <Field label="“View all” button text" value={row.ctaLabel} onChange={(v) => set({ ...row, ctaLabel: v })} maxLength={30} placeholder="View all" />
       </Grid>
+      <NotOnWebsite categoryId={row.categoryId} what="section" />
       <p className="text-xs font-semibold text-muted">
         Shows up to 12 products. Tip: create a category like “Best Sellers” and tag products into it from the Products list (website categories) to hand-pick them.
       </p>
@@ -480,6 +519,7 @@ export function AdiaHomePanel({
   );
 
   return (
+    <WebCounts.Provider value={webCounts}>
     <div className="space-y-3">
       <div className="rounded-lg border border-accent/30 bg-accent/5 px-4 py-3 text-sm font-semibold text-ink">
         Everything on your <span className="font-extrabold">Adia</span> home page, top to bottom. Leave any text empty to keep the default
@@ -594,6 +634,7 @@ export function AdiaHomePanel({
                 <Field label="Title" value={t.title} onChange={(v) => upd({ title: v })} maxLength={40} placeholder="Category name" />
                 <Field label="Subtitle" value={t.subtitle} onChange={(v) => upd({ subtitle: v })} maxLength={60} placeholder="e.g. Upgrade your cooking" />
               </Grid>
+              <NotOnWebsite categoryId={t.categoryId} what="tile" />
               {imageSlot(
                 "Tile image",
                 `adia-cat-${i + 1}`,
@@ -668,6 +709,7 @@ export function AdiaHomePanel({
                 <Field label="What's in it" value={x.subtitle} onChange={(v) => upd({ subtitle: v })} maxLength={80} placeholder="e.g. Cookers · Microwaves · Fridges" />
                 <CategoryField label="Opens category" value={x.categoryId} onChange={(v) => upd({ categoryId: v })} categories={categories} emptyLabel="All products" />
               </Grid>
+              <NotOnWebsite categoryId={x.categoryId} message="This category has no products published on the website yet, so this room opens all products instead. Publish some of its products in Website Products to link it properly." />
               {imageSlot(
                 "Room photo",
                 `adia-space-${i + 1}`,
@@ -803,5 +845,6 @@ export function AdiaHomePanel({
         <TextAreaField label="About text" value={footer.about} onChange={(v) => setFooter({ ...footer, about: v })} rows={3} placeholder="Genuine products, fair prices and reliable delivery — shop us online." />
       </Section>
     </div>
+    </WebCounts.Provider>
   );
 }
