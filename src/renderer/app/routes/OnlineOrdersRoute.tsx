@@ -393,6 +393,15 @@ export function OnlineOrdersRoute(): React.JSX.Element {
                   </div>
                 </div>
                 <div className="space-y-2.5">
+                  {selected.deliveryType === "pickup" ? (
+                  <div>
+                    <p className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wide text-muted">
+                      <MapPin className="size-3" aria-hidden="true" /> Pick up or delivery
+                    </p>
+                    <p className="mt-0.5 text-sm font-extrabold text-ink">Customer will pick up from the shop</p>
+                  </div>
+                  ) : (
+                  <>
                   <div>
                     <p className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wide text-muted">
                       <MapPin className="size-3" aria-hidden="true" /> Delivery address
@@ -410,9 +419,11 @@ export function OnlineOrdersRoute(): React.JSX.Element {
                       {selected.deliveryFeeCents > 0 ? ` · ${money(selected.deliveryFeeCents)}` : ""}
                     </p>
                   </div>
+                  </>
+                  )}
                   <div>
                     <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted">Payment</p>
-                    <p className="mt-0.5 text-sm font-semibold text-ink">Pay on delivery (M-Pesa or cash)</p>
+                    <p className="mt-0.5 text-sm font-semibold text-ink">To be agreed with the customer — nothing was paid online</p>
                   </div>
                 </div>
               </div>

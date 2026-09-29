@@ -360,8 +360,11 @@ export type OnlineOrder = {
   notes: string | null;
   deliveryMethodName: string | null;
   deliveryFeeCents: number;
-  /** "pay_on_delivery" for now */
+  /** "to_be_arranged" — payment is agreed between the shop and the customer after the order
+   * arrives (orders placed before 2026-09-30 say "pay_on_delivery"). */
   paymentMethod: string;
+  /** "pickup" (collects from the shop) | "delivery". Absent on orders from before it existed. */
+  deliveryType?: "pickup" | "delivery";
   items: OnlineOrderItem[];
   subtotalCents: number;
   totalCents: number;
