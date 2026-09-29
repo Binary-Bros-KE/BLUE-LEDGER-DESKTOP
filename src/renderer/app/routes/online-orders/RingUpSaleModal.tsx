@@ -131,8 +131,7 @@ export function RingUpSaleModal({
         </div>
 
         <p className="text-xs font-semibold text-muted">
-          Customer: recorded against an existing customer with phone {order.customerPhone} if there is one, otherwise
-          as a walk-in &ldquo;{order.customerName} · {order.orderNumber}&rdquo;.
+          Recorded as a walk-in sale labelled &ldquo;Web order {order.orderNumber}&rdquo;.
         </p>
 
         {needsStorefront && (

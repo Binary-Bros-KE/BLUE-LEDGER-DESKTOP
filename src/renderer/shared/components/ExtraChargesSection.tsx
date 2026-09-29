@@ -375,7 +375,7 @@ function QuickCreateRiderModal({
           </div>
         )}
         <div className="space-y-3">
-          <Field label="Name" value={name} onChange={setName} placeholder="e.g. James Otieno" required />
+          <Field label="Name" value={name} onChange={setName} placeholder="Rider's full name" required />
           <Field label="Phone" value={phone} onChange={setPhone} placeholder="e.g. 0712 345 678" required />
           <Field
             label="Vehicle"

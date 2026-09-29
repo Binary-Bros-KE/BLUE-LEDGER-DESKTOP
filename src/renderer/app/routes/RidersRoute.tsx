@@ -446,7 +446,7 @@ export function RidersRoute(): React.JSX.Element {
               label="Name"
               value={form.name}
               onChange={(value) => updateField("name", value)}
-              placeholder="e.g. James Otieno"
+              placeholder="Rider's full name"
               required
             />
             <Field

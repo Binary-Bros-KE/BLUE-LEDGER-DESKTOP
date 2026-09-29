@@ -71,7 +71,7 @@ export function QuickCreateCustomerModal({
         )}
 
         <div className="space-y-4">
-          <Field label="Name" value={name} onChange={setName} placeholder="e.g. Jane Wanjiru" required />
+          <Field label="Name" value={name} onChange={setName} placeholder="Customer's full name" required />
           <Field label="Phone" value={phone} onChange={setPhone} placeholder="e.g. 0712 345 678" required />
         </div>
 

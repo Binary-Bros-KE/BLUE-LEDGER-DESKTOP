@@ -2,7 +2,6 @@ import { statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import electron from "electron";
-import * as customerRepository from "@main/database/repositories/customer-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
 import * as saleRepository from "@main/database/repositories/sale-repository";
 import { requirePermission } from "@main/services/auth-service";
@@ -231,21 +230,6 @@ export function getOnlineOrder(id: string): Promise<OnlineOrder> {
   return postShopAdmin<OnlineOrder>("/shop-admin/orders/get", { id });
 }
 
-/** Every stored shape a Kenyan number might have been saved in (0712…, 712…, 254712…, +254712…). */
-function phoneCandidates(raw: string): string[] {
-  const trimmed = raw.trim();
-  const digits = trimmed.replace(/\D/g, "");
-  const last9 = digits.slice(-9);
-  const out = new Set([trimmed, digits]);
-  if (last9.length === 9) {
-    out.add(`0${last9}`);
-    out.add(`254${last9}`);
-    out.add(`+254${last9}`);
-    out.add(last9);
-  }
-  return [...out].filter(Boolean);
-}
-
 /**
  * "Ring up sale": turns a web order into a normal completed POS sale — same cart math, tax, stock
  * validation and receipt numbering as Checkout (prepareCart + insertCompletedSaleFromCart), so it
@@ -255,7 +239,9 @@ function phoneCandidates(raw: string): string[] {
  *   tax-INCLUSIVE, so the customer pays exactly what the website showed (tax extracted, still
  *   reported) — never the website price plus VAT on top.
  * - Delivery fee → a "Delivery" service charge (untaxed).
- * - Customer: an existing customer with the same phone, else a walk-in named after the shopper.
+ * - Customer: always a walk-in labelled "Web order WEB-0012" — never matched to (or creating) a
+ *   customer record, so a web order can't land on the wrong account. The shopper's name and phone
+ *   stay on the web order itself.
  * - Never twice: refused if the cloud order is already linked, or if a local sale already carries
  *   this order's marker (covers "sale saved, cloud link failed offline").
  */
@@ -313,25 +299,16 @@ export async function convertOnlineOrderToSale(input: ConvertOnlineOrderInput): 
     }
   );
 
-  let customer: { id: string; name: string } | null = null;
-  for (const candidate of phoneCandidates(order.customerPhone)) {
-    const row = customerRepository.findCustomerByPhoneRow(tenantId, candidate);
-    if (row) {
-      customer = { id: row.id, name: row.name };
-      break;
-    }
-  }
-  const walkInName = customer ? null : `${order.customerName} · ${order.orderNumber}`.slice(0, 120);
+  const walkInName = `Web order ${order.orderNumber}`;
 
-  const noteParts = [marker, `Tel ${order.customerPhone}`];
-  if (order.deliveryAddress) noteParts.push(`Deliver to: ${order.deliveryAddress}`);
+  const noteParts = [marker];
   if (order.notes) noteParts.push(order.notes);
 
   const sale = insertCompletedSaleFromCart({
     tenantId,
     employeeId,
     locationId,
-    customerId: customer?.id ?? null,
+    customerId: null,
     walkInName,
     cart,
     paymentMethodId: input.paymentMethodId,
@@ -357,7 +334,7 @@ export async function convertOnlineOrderToSale(input: ConvertOnlineOrderInput): 
     saleId: sale.id,
     receiptNumber: sale.receiptNumber,
     grandTotalCents: cart.grandTotalCents,
-    customerLabel: customer ? customer.name : `Walk-in: ${walkInName}`,
+    customerLabel: `Walk-in: ${walkInName}`,
     linkWarning
   };
 }

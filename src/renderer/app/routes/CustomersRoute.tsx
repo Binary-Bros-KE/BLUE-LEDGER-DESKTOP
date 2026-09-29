@@ -423,7 +423,7 @@ export function CustomersRoute(): React.JSX.Element {
               label="Name"
               value={form.name}
               onChange={(value) => updateField("name", value)}
-              placeholder="e.g. Jane Wanjiru"
+              placeholder="Customer's full name"
               required
             />
             <Field
