@@ -75,6 +75,14 @@ function currentProduct(productId: string): Product {
   return productRepository.mapProductRow(row);
 }
 
+/** The order line's variant key if this product still has it as an active shared variant here. */
+function liveVariantKey(productId: string, variantKey: string | null | undefined): string | null {
+  if (!variantKey) return null;
+  const row = productRepository.findProductRowById(productId);
+  const config = productRepository.parseVariantConfigJson(row?.variant_config_json);
+  return config?.mode === "shared" && config.variants.some((v) => v.key === variantKey && v.active) ? variantKey : null;
+}
+
 export function getOverview(): Promise<StoreOwnerView> {
   return postShopAdmin<StoreOwnerView>("/shop-admin/store", {});
 }
@@ -280,7 +288,10 @@ export async function convertOnlineOrderToSale(input: ConvertOnlineOrderInput): 
       quantity: item.qty,
       discountAmountCents: 0,
       unitPriceCents: item.unitPriceCents,
-      taxInclusiveOverride: input.chargeWebPrice ? true : undefined
+      taxInclusiveOverride: input.chargeWebPrice ? true : undefined,
+      // The shopper's variant, when it's still a live variant on this computer — a variant switched
+      // off/removed since the order still rings up (as the plain product, at the web price).
+      variantKey: liveVariantKey(item.productId, item.variantKey)
     })),
     {
       serviceCharges:

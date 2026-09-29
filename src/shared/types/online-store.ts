@@ -338,6 +338,10 @@ export type OnlineOrderStatus = (typeof ONLINE_ORDER_STATUSES)[number];
 
 export type OnlineOrderItem = {
   productId: string;
+  /** shared-stock variant the shopper chose (docs/VARIANTS.md) — absent on older orders */
+  variantKey?: string | null;
+  variantLabel?: string | null;
+  /** "Travel Mug — Red" for a variant line */
   name: string;
   unitPriceCents: number;
   qty: number;
