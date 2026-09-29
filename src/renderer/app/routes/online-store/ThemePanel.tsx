@@ -23,7 +23,7 @@ import {
 
 /** One image slot — preview (or empty state) + Upload/Replace + Remove. `slot` only names the
  * uploaded file. `onChange` receives the new URL (or null on remove). */
-function ImageSlot({
+export function ImageSlot({
   label,
   hint,
   url,
@@ -502,6 +502,9 @@ export function ThemePanel({
         </div>
       </Card>
 
+      {/* Adia: the black top strip is edited in the Home page tab */}
+      {!isAdia && (
+      <>
       <Card title="Top bar">
         <Field
           label={isAdia ? "Announcement (blank = no top bar)" : "Announcement (blank = default)"}
@@ -515,6 +518,9 @@ export function ThemePanel({
           </Button>
         </div>
       </Card>
+
+      </>
+      )}
 
       <Card title="Contact channels">
         <p className="text-xs text-muted">
@@ -572,6 +578,9 @@ export function ThemePanel({
         </div>
       </Card>
 
+      {/* Adia: hero, deals, cards, product rows, features + brands all live in the Home page tab (AdiaHomePanel) */}
+      {!isAdia && (
+      <>
       <Card title="Home hero">
         <TextAreaField
           label="Headline (blank = theme default)"
@@ -1083,6 +1092,9 @@ export function ThemePanel({
             </Button>
           </div>
         </Card>
+      )}
+
+      </>
       )}
 
       <Card title="Category images">

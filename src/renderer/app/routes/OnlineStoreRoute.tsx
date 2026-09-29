@@ -31,6 +31,8 @@ import type { StoreOwnerView } from "@shared/types/online-store";
 import type { OnlineContentBlock, Product, ProductListItem } from "@shared/types/product";
 import { DeliveryPanel } from "./online-store/DeliveryPanel";
 import { ThemePanel } from "./online-store/ThemePanel";
+import { AdiaHomePanel } from "./online-store/AdiaHomePanel";
+import { NewsletterPanel } from "./online-store/NewsletterPanel";
 
 type PublishFilter = "all" | "published" | "unpublished";
 
@@ -62,7 +64,7 @@ export function OnlineStoreRoute(): React.JSX.Element {
   const [products, setProducts] = useState<ProductListItem[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [tab, setTab] = useState<"products" | "look" | "delivery">("products");
+  const [tab, setTab] = useState<"products" | "home" | "look" | "delivery" | "subscribers">("products");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<PublishFilter>("all");
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
@@ -260,7 +262,10 @@ export function OnlineStoreRoute(): React.JSX.Element {
 
       {/* Tabs ----------------------------------------------------------------------- */}
       <div className="flex overflow-hidden rounded-md border border-line">
-        {(["products", "look", "delivery"] as const).map((t) => (
+        {(overview?.store?.templateId === "adia"
+          ? (["products", "home", "look", "delivery", "subscribers"] as const)
+          : (["products", "look", "delivery"] as const)
+        ).map((t) => (
           <button
             key={t}
             type="button"
@@ -270,16 +275,32 @@ export function OnlineStoreRoute(): React.JSX.Element {
               tab === t ? "bg-ink text-white" : "bg-white text-muted hover:bg-soft"
             )}
           >
-            {t === "products" ? "Products" : t === "look" ? "Storefront look" : "Delivery"}
+            {t === "products"
+              ? "Products"
+              : t === "home"
+                ? "Home page"
+                : t === "look"
+                  ? "Storefront look"
+                  : t === "subscribers"
+                    ? "Subscribers"
+                    : "Delivery"}
           </button>
         ))}
       </div>
 
-      {tab === "look" || tab === "delivery" ? (
+      {tab === "look" || tab === "delivery" || tab === "home" || tab === "subscribers" ? (
         !overview?.store ? (
           <p className="rounded-lg border border-line bg-white p-5 text-sm font-semibold text-muted shadow-soft">
             Your online store isn&apos;t set up yet — once Blue Ledger provisions it you can configure it here.
           </p>
+        ) : tab === "home" ? (
+          <AdiaHomePanel
+            themeJson={overview.store.themeJson}
+            imageUploadsEnabled={overview.imageUploadsEnabled}
+            onSaved={loadOverview}
+          />
+        ) : tab === "subscribers" ? (
+          <NewsletterPanel />
         ) : tab === "look" ? (
           <ThemePanel
             themeJson={overview.store.themeJson}

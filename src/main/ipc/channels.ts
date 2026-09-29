@@ -65,6 +65,7 @@ export const ipcChannels = {
   onlineStoreDeleteImage: "online-store:delete-image",
   onlineStoreUpdateConfig: "online-store:update-config",
   onlineStoreThemeUpdate: "online-store:theme-update",
+  onlineStoreNewsletterList: "online-store:newsletter-list",
   onlineStoreThemeUpload: "online-store:theme-upload",
   onlineStoreThemeDeleteImage: "online-store:theme-delete-image",
   onlineStoreDeliveryList: "online-store:delivery-list",

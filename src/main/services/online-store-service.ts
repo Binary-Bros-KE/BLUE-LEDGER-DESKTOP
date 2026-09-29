@@ -17,6 +17,7 @@ import type {
   OnlineOrderStatus,
   OnlineOrderSummary,
   DeliveryMethodInput,
+  NewsletterSubscriber,
   ProductOnlinePatch,
   StoreConfigPatch,
   StoreOwnerView,
@@ -190,6 +191,11 @@ export async function deleteThemeImage(url: string): Promise<{ ok: true }> {
 
 // --- Delivery methods (storefront checkout options) -------------------------------------------
 // Every call returns the full fresh list.
+
+/** Website newsletter sign-ups, newest first. */
+export function listNewsletterSubscribers(): Promise<NewsletterSubscriber[]> {
+  return postShopAdmin<NewsletterSubscriber[]>("/shop-admin/newsletter", {});
+}
 
 export function listDeliveryMethods(): Promise<WebDeliveryMethod[]> {
   return postShopAdmin<WebDeliveryMethod[]>("/shop-admin/delivery", {});

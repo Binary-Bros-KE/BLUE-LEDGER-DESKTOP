@@ -159,8 +159,14 @@ export type TrylistThemeConfig = {
 /** Partial patch sent to POST /shop-admin/theme/update. `null` clears a field; `story` /
  * `productSections` replace the whole array; `categoryImages` merges by key (a `null` value
  * deletes that key). */
+/** A website newsletter sign-up (Adia home "Get the Latest Deals"). */
+export type NewsletterSubscriber = { email: string; createdAt: string };
+
 export type ThemeUpdatePatch = {
   name?: "trylist";
+  /** Adia template's own home-page content (themeJson.adia) — validated by SERVER adiaThemeSchema;
+   * each key replaces/merges that one section (see AdiaHomePanel). */
+  adia?: Record<string, unknown>;
   brand?: { logoImageUrl?: string | null; nameLine1?: string | null; nameLine2?: string | null };
   topBar?: { announcement?: string | null };
   contact?: {

@@ -197,6 +197,7 @@ import {
   deleteThemeImage as deleteOnlineStoreThemeImage,
   getOverview as getOnlineStoreOverview,
   listDeliveryMethods as listOnlineStoreDeliveryMethods,
+  listNewsletterSubscribers,
   convertOnlineOrderToSale,
   listOnlineOrders,
   markOnlineOrdersSeen,
@@ -534,6 +535,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.onlineStoreUpdateConfig, (_event, patch: unknown) =>
     updateOnlineStoreConfig(patch as StoreConfigPatch)
   );
+  ipcMain.handle(ipcChannels.onlineStoreNewsletterList, () => listNewsletterSubscribers());
   ipcMain.handle(ipcChannels.onlineStoreThemeUpdate, (_event, patch: unknown) =>
     updateOnlineStoreTheme(patch as Record<string, unknown>)
   );

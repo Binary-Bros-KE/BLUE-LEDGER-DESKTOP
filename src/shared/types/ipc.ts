@@ -25,6 +25,7 @@ import type {
 import type { Product, ProductListItem, ProductStatus, ProductStockSummary, VariantGroupView } from "./product";
 import type {
   DeliveryMethodInput,
+  NewsletterSubscriber,
   ProductOnlinePatch,
   StoreConfigPatch,
   StoreOwnerView,
@@ -364,6 +365,10 @@ export type IpcInvokeMap = {
   "online-store:theme-update": {
     args: [patch: ThemeUpdatePatch];
     result: StoreOwnerView;
+  };
+  "online-store:newsletter-list": {
+    args: [];
+    result: NewsletterSubscriber[];
   };
   "online-store:theme-upload": {
     args: [slot: string];
@@ -1589,6 +1594,7 @@ export type BlueLedgerApi = {
       patch: ThemeUpdatePatch
     ) => Promise<IpcInvokeMap["online-store:theme-update"]["result"]>;
     themeUpload: (slot: string) => Promise<IpcInvokeMap["online-store:theme-upload"]["result"]>;
+    newsletterList: () => Promise<IpcInvokeMap["online-store:newsletter-list"]["result"]>;
     themeDeleteImage: (
       url: string
     ) => Promise<IpcInvokeMap["online-store:theme-delete-image"]["result"]>;
