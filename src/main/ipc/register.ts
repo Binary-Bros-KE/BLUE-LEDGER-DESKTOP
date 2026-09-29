@@ -177,6 +177,7 @@ import {
   getProduct,
   getProductStockSummary,
   listProducts,
+  listBrands as listProductBrands,
   listProductsForStorefront,
   nextProductSku,
   setProductStatus,
@@ -504,6 +505,7 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.productBulkSetTaxType, (_event, input: unknown) => bulkSetProductTaxType(input));
   ipcMain.handle(ipcChannels.productPickImage, () => pickAndStoreProductImage());
+  ipcMain.handle(ipcChannels.productBrandList, () => listProductBrands());
   ipcMain.handle(ipcChannels.productReadImagePreview, (_event, relativePath: string) =>
     readManagedProductImagePreview(relativePath)
   );

@@ -83,6 +83,7 @@ const api: BlueLedgerApi = {
     setStatus: (id, status) => invoke("product:set-status", id, status),
     bulkSetTaxType: (input) => invoke("product:bulk-set-tax-type", input),
     pickImage: () => invoke("product:pick-image"),
+    brandList: () => invoke("product:brand-list"),
     readImagePreview: (relativePath) => invoke("product:read-image-preview", relativePath)
   },
   onlineStore: {

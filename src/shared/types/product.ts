@@ -95,6 +95,34 @@ export type ProductInputFields = {
   trackStock: boolean;
   allowNegativeStock: boolean;
   imagePath: string | null;
+  /** Manufacturer / brand, free text (e.g. "Samsung") — null when not set. Drives the website's
+   * brand filter + Top Brands strip, and reports. */
+  brand: string | null;
+};
+
+/** How a product's variants keep stock — chosen per product (docs/VARIANTS.md). */
+export type VariantStockMode = "separate" | "shared";
+
+/** One option axis, e.g. { name: "Size", values: ["S", "M", "L"] }. */
+export type VariantOption = { name: string; values: string[] };
+
+/** A variant inside a SHARED-stock product: its option values, and optional overrides. A null
+ * priceCents means "same price as the product". `key` is stable (survives renames/reorders). */
+export type SharedVariant = {
+  key: string;
+  values: Record<string, string>;
+  priceCents: number | null;
+  sku: string | null;
+  barcode: string | null;
+  active: boolean;
+};
+
+/** Lives on a product that HAS variants (the main product of a group). */
+export type ProductVariantConfig = {
+  mode: VariantStockMode;
+  options: VariantOption[];
+  /** only for mode "shared" — "separate" variants are their own product rows */
+  variants: SharedVariant[];
 };
 
 /** One hosted product photo — the resized WebP plus its thumbnail (see ECOMMERCE-ARCHITECTURE.md
@@ -133,6 +161,13 @@ export type Product = ProductInputFields & {
   onlineCategoryIds: string[];
   /** Rich product-detail content (quick specs + ordered blocks) — managed from the "Online Store" tab. */
   onlineContent: ProductOnlineContent;
+  /** Online "was" price — shown struck through on the website when above the selling price. */
+  onlineCompareAtPriceCents: number | null;
+  /** VARIANTS (docs/VARIANTS.md). variantConfig is set on a product that HAS variants. A "separate"
+   * variant row points at its main product via variantGroupId and carries its own option values. */
+  variantGroupId: string | null;
+  variantOptions: Record<string, string>;
+  variantConfig: ProductVariantConfig | null;
   createdAt: string;
   updatedAt: string;
   createdBy: string | null;

@@ -55,6 +55,8 @@ const productFieldsSchema = z.object({
   categoryId: nullableId,
   storefrontId: nullableId,
   unitOfMeasure: nullableUnitOfMeasure,
+  // Optional everywhere (bulk import, quick-create) — absent/blank = no brand.
+  brand: optionalText(60),
   buyingPriceCents: priceCents,
   sellingPriceCents: priceCents,
   wholesalePriceCents: nullablePriceCents,

@@ -3411,6 +3411,30 @@ const migrations = [
       -- convention as stock_requests.notes, unlike the mandatory rejection_reason.
       ALTER TABLE stock_requests ADD COLUMN fulfillment_note TEXT;
     `
+  },
+  {
+    version: 98,
+    name: "product_brand_compare_price_variants",
+    sql: `
+      -- Brand (free text, e.g. "Samsung") — a normal product field: POS product form, reports, and the
+      -- website's brand filter / Top Brands strip.
+      ALTER TABLE products ADD COLUMN brand TEXT;
+
+      -- Online "was" price (cents): shown struck through with a "-x%" badge on the website when it's
+      -- above the price the shopper pays. NULL = no sale.
+      ALTER TABLE products ADD COLUMN online_compare_at_price_cents INTEGER;
+
+      -- Variants (docs/VARIANTS.md). variant_config_json lives on a product WITH variants:
+      --   { mode: "separate" | "shared", options: [{ name, values[] }], variants: [...] }.
+      -- "separate": each variant is its own product row (own stock/price/SKU); its variant_group_id
+      --   is the main product's id and variant_options_json its values, e.g. {"Size":"55\\""}.
+      -- "shared": one product + one stock; the variants live inside variant_config_json.
+      -- All NULL/'{}' for every existing product = no variants, behaviour unchanged.
+      ALTER TABLE products ADD COLUMN variant_group_id TEXT;
+      ALTER TABLE products ADD COLUMN variant_options_json TEXT NOT NULL DEFAULT '{}';
+      ALTER TABLE products ADD COLUMN variant_config_json TEXT;
+      CREATE INDEX IF NOT EXISTS idx_products_variant_group ON products(tenant_id, variant_group_id);
+    `
   }
 ] as const;
 

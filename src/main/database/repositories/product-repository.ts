@@ -115,6 +115,12 @@ export type ProductRow = {
   online_category_ids: string;
   /** Online store (migration v88). JSON TEXT { quickSpecs, blocks } — rich detail-page content. */
   online_content_json: string;
+  /** migration v98 — see Product["brand"] / ["onlineCompareAtPriceCents"] / variant fields. */
+  brand: string | null;
+  online_compare_at_price_cents: number | null;
+  variant_group_id: string | null;
+  variant_options_json: string;
+  variant_config_json: string | null;
   status: string;
   created_at: string;
   updated_at: string;
@@ -241,9 +247,9 @@ export function insertProductRow(
         id, tenant_id, sku, barcode, supplier_sku, name, short_name, description,
         category_id, storefront_id, unit_of_measure, buying_price_cents, selling_price_cents, wholesale_price_cents,
         wholesale_min_quantity, minimum_price_cents, tax_rate, tax_type, prices_tax_inclusive, reorder_level, track_stock,
-        allow_negative_stock, image_path, status, created_at, updated_at, created_by, sync_status
+        allow_negative_stock, image_path, brand, status, created_at, updated_at, created_by, sync_status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
     `
     )
     .run(
@@ -270,6 +276,7 @@ export function insertProductRow(
       input.trackStock ? 1 : 0,
       input.allowNegativeStock ? 1 : 0,
       input.imagePath,
+      input.brand ?? null,
       now,
       now,
       input.createdBy
@@ -313,6 +320,7 @@ export function updateProductRow(
         track_stock = ?,
         allow_negative_stock = ?,
         image_path = ?,
+        brand = ?,
         updated_by = ?,
         sync_status = 'pending',
         updated_at = ?
@@ -341,6 +349,7 @@ export function updateProductRow(
       input.trackStock ? 1 : 0,
       input.allowNegativeStock ? 1 : 0,
       input.imagePath,
+      input.brand ?? null,
       input.updatedBy,
       now,
       id
@@ -423,6 +432,7 @@ export function setProductOnlineRow(
     publishedOnline?: boolean;
     onlineDescription?: string | null;
     onlinePriceCents?: number | null;
+    onlineCompareAtPriceCents?: number | null;
     onlineImageUrls?: OnlineImageRef[];
     onlineCategoryIds?: string[];
     onlineContent?: ProductOnlineContent;
@@ -442,6 +452,10 @@ export function setProductOnlineRow(
   if (input.onlinePriceCents !== undefined) {
     sets.push("online_price_cents = ?");
     params.push(input.onlinePriceCents);
+  }
+  if (input.onlineCompareAtPriceCents !== undefined) {
+    sets.push("online_compare_at_price_cents = ?");
+    params.push(input.onlineCompareAtPriceCents);
   }
   if (input.onlineImageUrls !== undefined) {
     sets.push("online_image_urls = ?");
@@ -478,6 +492,58 @@ export function setProductOnlineRow(
   return row;
 }
 
+/** variant_options_json — {"Size":"55\""}. Defensive: anything malformed reads as no options. */
+function parseVariantOptions(raw: string | null | undefined): Record<string, string> {
+  try {
+    const v = JSON.parse(raw ?? "{}") as unknown;
+    if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+    return Object.fromEntries(
+      Object.entries(v as Record<string, unknown>).filter(
+        (e): e is [string, string] => typeof e[1] === "string" && e[0].trim().length > 0
+      )
+    );
+  } catch {
+    return {};
+  }
+}
+
+/** variant_config_json — see ProductVariantConfig. Null (or malformed) = no variants. */
+function parseVariantConfig(raw: string | null | undefined): Product["variantConfig"] {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as Record<string, unknown>;
+    const mode = v.mode === "shared" ? "shared" : v.mode === "separate" ? "separate" : null;
+    if (!mode) return null;
+    const options = (Array.isArray(v.options) ? v.options : [])
+      .map((o) => {
+        const oo = (o ?? {}) as Record<string, unknown>;
+        const name = typeof oo.name === "string" ? oo.name.trim() : "";
+        const values = Array.isArray(oo.values)
+          ? oo.values.filter((x): x is string => typeof x === "string" && x.trim().length > 0).map((x) => x.trim())
+          : [];
+        return { name, values };
+      })
+      .filter((o) => o.name && o.values.length > 0);
+    const variants = (Array.isArray(v.variants) ? v.variants : []).flatMap((x) => {
+      const xx = (x ?? {}) as Record<string, unknown>;
+      if (typeof xx.key !== "string" || !xx.key) return [];
+      return [
+        {
+          key: xx.key,
+          values: parseVariantOptions(JSON.stringify(xx.values ?? {})),
+          priceCents: typeof xx.priceCents === "number" ? xx.priceCents : null,
+          sku: typeof xx.sku === "string" && xx.sku ? xx.sku : null,
+          barcode: typeof xx.barcode === "string" && xx.barcode ? xx.barcode : null,
+          active: xx.active !== false
+        }
+      ];
+    });
+    return { mode, options, variants };
+  } catch {
+    return null;
+  }
+}
+
 export function mapProductRow(row: ProductRow): Product {
   return {
     id: row.id,
@@ -509,6 +575,11 @@ export function mapProductRow(row: ProductRow): Product {
     onlineImageUrls: parseOnlineImageUrls(row.online_image_urls),
     onlineCategoryIds: parseIdArray(row.online_category_ids),
     onlineContent: parseOnlineContent(row.online_content_json),
+    brand: row.brand?.trim() || null,
+    onlineCompareAtPriceCents: row.online_compare_at_price_cents,
+    variantGroupId: row.variant_group_id,
+    variantOptions: parseVariantOptions(row.variant_options_json),
+    variantConfig: parseVariantConfig(row.variant_config_json),
     status: row.status as ProductStatus,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -528,3 +599,21 @@ export function mapProductListRow(row: ProductListRow): ProductListItem {
   };
 }
 
+
+/** Distinct brands used on this tenant's products (case-insensitively deduped, most-used spelling
+ * wins) — suggestions for the product form's Brand field. */
+export function findDistinctBrandRows(tenantId: string): string[] {
+  const rows = getDatabase()
+    .prepare(
+      `SELECT TRIM(brand) AS brand, COUNT(*) AS n FROM products
+       WHERE tenant_id = ? AND brand IS NOT NULL AND TRIM(brand) != ''
+       GROUP BY TRIM(brand) ORDER BY n DESC`
+    )
+    .all(tenantId) as Array<{ brand: string; n: number }>;
+  const seen = new Map<string, string>();
+  for (const r of rows) {
+    const key = r.brand.toLowerCase();
+    if (!seen.has(key)) seen.set(key, r.brand);
+  }
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}

@@ -301,3 +301,10 @@ export function bulkSetProductTaxType(input: unknown): { updatedCount: number } 
   const updatedCount = productRepository.bulkSetTaxTypeRows(tenantId, parsed.productIds, parsed.taxType);
   return { updatedCount };
 }
+
+/** Brand suggestions for the product form. */
+export function listBrands(): string[] {
+  requirePermission("products", "view");
+  const { tenantId } = getCurrentTenant();
+  return productRepository.findDistinctBrandRows(tenantId);
+}

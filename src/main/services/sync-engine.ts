@@ -528,6 +528,12 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       onlineImageUrls: p.onlineImageUrls,
       onlineCategoryIds: p.onlineCategoryIds,
       onlineContentJson: p.onlineContent,
+      // migration v98 — brand, online "was" price, variants (docs/VARIANTS.md).
+      brand: p.brand,
+      onlineCompareAtPriceCents: p.onlineCompareAtPriceCents,
+      variantGroupId: p.variantGroupId,
+      variantOptionsJson: p.variantOptions,
+      variantConfigJson: p.variantConfig,
       localCreatedAt: p.createdAt,
       localUpdatedAt: p.updatedAt,
       // The optimistic-lock baseline — see CONFLICT_AWARE_ENTITIES's own comment. Null on a
@@ -1793,7 +1799,13 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       { local: "online_price_cents", cloud: "onlinePriceCents" },
       { local: "online_image_urls", cloud: "onlineImageUrls", type: "json", default: "[]" },
       { local: "online_category_ids", cloud: "onlineCategoryIds", type: "json", default: "[]" },
-      { local: "online_content_json", cloud: "onlineContentJson", type: "json", default: "{}" }
+      { local: "online_content_json", cloud: "onlineContentJson", type: "json", default: "{}" },
+      // migration v98. Defaults cover a product last pushed by an older device (keys absent).
+      { local: "brand", cloud: "brand" },
+      { local: "online_compare_at_price_cents", cloud: "onlineCompareAtPriceCents" },
+      { local: "variant_group_id", cloud: "variantGroupId" },
+      { local: "variant_options_json", cloud: "variantOptionsJson", type: "json", default: "{}" },
+      { local: "variant_config_json", cloud: "variantConfigJson", type: "json" }
     ]
   },
   employees: {

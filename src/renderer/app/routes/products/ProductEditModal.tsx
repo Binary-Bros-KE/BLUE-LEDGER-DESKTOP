@@ -1,3 +1,4 @@
+import { BrandField } from "@renderer/shared/components/BrandField";
 import { useEffect, useMemo, useState } from "react";
 import { ImagePlus, Loader2, Package, X } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
@@ -26,6 +27,7 @@ type FormState = {
   supplierSku: string;
   name: string;
   shortName: string;
+  brand: string;
   description: string;
   categoryId: string;
   storefrontId: string;
@@ -50,6 +52,7 @@ function toFormState(product: Product): FormState {
     supplierSku: product.supplierSku ?? "",
     name: product.name,
     shortName: product.shortName ?? "",
+    brand: product.brand ?? "",
     description: product.description ?? "",
     categoryId: product.categoryId ?? "",
     storefrontId: product.storefrontId ?? "",
@@ -172,6 +175,7 @@ export function ProductEditModal({
         supplierSku: form.supplierSku,
         name: form.name,
         shortName: form.shortName,
+        brand: form.brand.trim() || null,
         description: form.description,
         categoryId: form.categoryId ? form.categoryId : null,
         storefrontId: form.storefrontId ? form.storefrontId : null,
@@ -285,6 +289,7 @@ export function ProductEditModal({
             onChange={(value) => updateField("shortName", value)}
             placeholder="e.g. Coke 500ml"
           />
+          <BrandField value={form.brand} onChange={(value) => updateField("brand", value)} />
           <SelectField
             label="Category"
             value={form.categoryId}

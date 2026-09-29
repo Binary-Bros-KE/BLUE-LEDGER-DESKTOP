@@ -430,6 +430,10 @@ function OnlineProductModal({
   const [priceText, setPriceText] = useState(
     product.onlinePriceCents !== null ? fromCents(product.onlinePriceCents) : ""
   );
+  // Raw text, exactly as typed — converted to cents only on save (this app's money-input rule).
+  const [wasText, setWasText] = useState(
+    product.onlineCompareAtPriceCents !== null ? fromCents(product.onlineCompareAtPriceCents) : ""
+  );
   const [description, setDescription] = useState(product.onlineDescription ?? "");
   const [images, setImages] = useState(product.onlineImageUrls);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -475,6 +479,7 @@ function OnlineProductModal({
       const trimmed = priceText.trim();
       const updated = await window.blueLedger.onlineStore.setProductOnline(product.id, {
         onlinePriceCents: trimmed === "" ? null : toCents(trimmed),
+        onlineCompareAtPriceCents: wasText.trim() === "" ? null : toCents(wasText.trim()),
         onlineDescription: description.trim() === "" ? null : description.trim(),
         // never store the product's own primary category as an "extra"
         onlineCategoryIds: [...catIds].filter((id) => id !== product.categoryId),
@@ -508,6 +513,7 @@ function OnlineProductModal({
     onClose,
     onSaved,
     priceText,
+    wasText,
     product.categoryId,
     product.id,
     product.name,
@@ -550,6 +556,33 @@ function OnlineProductModal({
           onChange={setPriceText}
           placeholder={fromCents(product.sellingPriceCents)}
         />
+
+        <div>
+          <Field
+            label="Was price (optional) — shows a sale on the website"
+            type="text"
+            value={wasText}
+            onChange={setWasText}
+            placeholder="e.g. the old price, before the discount"
+          />
+          {(() => {
+            const was = wasText.trim() ? toCents(wasText.trim()) : 0;
+            const now = priceText.trim() ? toCents(priceText.trim()) : product.sellingPriceCents;
+            if (!was) return null;
+            if (was <= now) {
+              return (
+                <p className="mt-1 text-xs font-semibold text-danger">
+                  Must be higher than the price shoppers pay, otherwise no sale is shown.
+                </p>
+              );
+            }
+            return (
+              <p className="mt-1 text-xs font-semibold text-success">
+                Website shows {fromCents(was)} struck through and a -{Math.round((1 - now / was) * 100)}% badge.
+              </p>
+            );
+          })()}
+        </div>
 
         <TextAreaField
           label="Online description (leave blank to use the product description)"

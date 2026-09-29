@@ -52,6 +52,8 @@ export type ProductOnlinePatch = {
   publishedOnline?: boolean;
   onlineDescription?: string | null;
   onlinePriceCents?: number | null;
+  /** online "was" price; null clears it */
+  onlineCompareAtPriceCents?: number | null;
   onlineCategoryIds?: string[];
   onlineContent?: ProductOnlineContent;
 };

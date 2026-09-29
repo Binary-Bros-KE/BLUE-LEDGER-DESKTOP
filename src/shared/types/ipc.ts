@@ -313,6 +313,10 @@ export type IpcInvokeMap = {
     args: [];
     result: string | null;
   };
+  "product:brand-list": {
+    args: [];
+    result: string[];
+  };
   "product:read-image-preview": {
     args: [string];
     result: string | null;
@@ -1535,6 +1539,7 @@ export type BlueLedgerApi = {
       input: Record<string, unknown>
     ) => Promise<IpcInvokeMap["product:bulk-set-tax-type"]["result"]>;
     pickImage: () => Promise<IpcInvokeMap["product:pick-image"]["result"]>;
+    brandList: () => Promise<IpcInvokeMap["product:brand-list"]["result"]>;
     readImagePreview: (
       relativePath: string
     ) => Promise<IpcInvokeMap["product:read-image-preview"]["result"]>;
