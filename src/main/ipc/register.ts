@@ -184,6 +184,13 @@ import {
   updateProduct
 } from "@main/services/product-service";
 import {
+  getVariantGroup,
+  mergeIntoSharedVariants,
+  removeVariants,
+  saveSeparateVariants,
+  saveSharedVariants
+} from "@main/services/product-variant-service";
+import {
   createDeliveryMethod as createOnlineStoreDeliveryMethod,
   deleteDeliveryMethod as deleteOnlineStoreDeliveryMethod,
   deleteProductImage as deleteOnlineStoreProductImage,
@@ -506,6 +513,11 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.productBulkSetTaxType, (_event, input: unknown) => bulkSetProductTaxType(input));
   ipcMain.handle(ipcChannels.productPickImage, () => pickAndStoreProductImage());
   ipcMain.handle(ipcChannels.productBrandList, () => listProductBrands());
+  ipcMain.handle(ipcChannels.productVariantGet, (_event, productId: string) => getVariantGroup(productId));
+  ipcMain.handle(ipcChannels.productVariantSaveShared, (_event, input: unknown) => saveSharedVariants(input));
+  ipcMain.handle(ipcChannels.productVariantSaveSeparate, (_event, input: unknown) => saveSeparateVariants(input));
+  ipcMain.handle(ipcChannels.productVariantMerge, (_event, input: unknown) => mergeIntoSharedVariants(input));
+  ipcMain.handle(ipcChannels.productVariantRemove, (_event, productId: string) => removeVariants(productId));
   ipcMain.handle(ipcChannels.productReadImagePreview, (_event, relativePath: string) =>
     readManagedProductImagePreview(relativePath)
   );

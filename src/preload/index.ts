@@ -84,6 +84,11 @@ const api: BlueLedgerApi = {
     bulkSetTaxType: (input) => invoke("product:bulk-set-tax-type", input),
     pickImage: () => invoke("product:pick-image"),
     brandList: () => invoke("product:brand-list"),
+    variantGet: (productId) => invoke("product:variant-get", productId),
+    variantSaveShared: (input) => invoke("product:variant-save-shared", input),
+    variantSaveSeparate: (input) => invoke("product:variant-save-separate", input),
+    variantMerge: (input) => invoke("product:variant-merge", input),
+    variantRemove: (productId) => invoke("product:variant-remove", productId),
     readImagePreview: (relativePath) => invoke("product:read-image-preview", relativePath)
   },
   onlineStore: {

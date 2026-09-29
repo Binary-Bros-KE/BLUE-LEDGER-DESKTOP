@@ -5,6 +5,7 @@ import type {
   OnlineImageRef,
   Product,
   ProductListItem,
+  ProductVariantConfig,
   ProductOnlineContent,
   ProductStatus,
   ProductSyncStatus
@@ -538,7 +539,8 @@ function parseVariantConfig(raw: string | null | undefined): Product["variantCon
         }
       ];
     });
-    return { mode, options, variants };
+    const title = typeof v.title === "string" && v.title.trim() ? v.title.trim() : null;
+    return { mode, title, options, variants };
   } catch {
     return null;
   }
@@ -616,4 +618,96 @@ export function findDistinctBrandRows(tenantId: string): string[] {
     if (!seen.has(key)) seen.set(key, r.brand);
   }
   return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}
+
+/** The columns the variants feature writes — see patchProductVariantRow. */
+type VariantPatch = {
+  name?: string;
+  barcode?: string | null;
+  sellingPriceCents?: number;
+  variantGroupId?: string | null;
+  variantOptions?: Record<string, string>;
+  variantConfig?: ProductVariantConfig | null;
+};
+
+/** Narrow update for the variants feature (product-variant-service.ts) — only the keys passed are
+ * touched, and like every other narrow product write it bumps sync_status/updated_at so the AFTER
+ * UPDATE sync-outbox trigger carries it to the cloud. */
+export function patchProductVariantRow(id: string, patch: VariantPatch): ProductRow {
+  const sets: string[] = [];
+  const params: Array<string | number | null> = [];
+  if (patch.name !== undefined) {
+    sets.push("name = ?");
+    params.push(patch.name);
+  }
+  if (patch.barcode !== undefined) {
+    sets.push("barcode = ?");
+    params.push(patch.barcode);
+  }
+  if (patch.sellingPriceCents !== undefined) {
+    sets.push("selling_price_cents = ?");
+    params.push(patch.sellingPriceCents);
+  }
+  if (patch.variantGroupId !== undefined) {
+    sets.push("variant_group_id = ?");
+    params.push(patch.variantGroupId);
+  }
+  if (patch.variantOptions !== undefined) {
+    sets.push("variant_options_json = ?");
+    params.push(JSON.stringify(patch.variantOptions));
+  }
+  if (patch.variantConfig !== undefined) {
+    sets.push("variant_config_json = ?");
+    params.push(patch.variantConfig === null ? null : JSON.stringify(patch.variantConfig));
+  }
+  if (sets.length > 0) {
+    getDatabase()
+      .prepare(`UPDATE products SET ${sets.join(", ")}, sync_status = 'pending', updated_at = ? WHERE id = ?`)
+      .run(...params, new Date().toISOString(), id);
+  }
+  const row = findProductRowById(id);
+  if (!row) throw new Error("Product not found after variant update");
+  return row;
+}
+
+/** One product with its tenant-wide total stock — the list-row shape, for a single id. */
+export function findProductListRowById(id: string): ProductListRow | undefined {
+  return getDatabase()
+    .prepare(
+      `SELECT p.*, c.name AS category_name, c.color AS category_color, COALESCE(SUM(i.quantity), 0) AS total_stock
+       FROM products p
+       LEFT JOIN categories c ON c.id = p.category_id
+       LEFT JOIN inventory i ON i.product_id = p.id
+       WHERE p.id = ?
+       GROUP BY p.id`
+    )
+    .get(id) as ProductListRow | undefined;
+}
+
+/** Every product in a separate-stock variant group (the main product included — its own
+ * variant_group_id is its own id), with tenant-wide total stock. */
+export function findVariantGroupMemberRows(tenantId: string, groupId: string): ProductListRow[] {
+  return getDatabase()
+    .prepare(
+      `SELECT p.*, c.name AS category_name, c.color AS category_color, COALESCE(SUM(i.quantity), 0) AS total_stock
+       FROM products p
+       LEFT JOIN categories c ON c.id = p.category_id
+       LEFT JOIN inventory i ON i.product_id = p.id
+       WHERE p.tenant_id = ? AND p.variant_group_id = ?
+       GROUP BY p.id
+       ORDER BY p.name ASC`
+    )
+    .all(tenantId, groupId) as ProductListRow[];
+}
+
+/** Products that carry a variants config — scanned for shared-variant SKU/barcode uniqueness. */
+export function findProductsWithVariantConfigRows(tenantId: string): Array<{ id: string; name: string; variant_config_json: string }> {
+  return getDatabase()
+    .prepare(`SELECT id, name, variant_config_json FROM products WHERE tenant_id = ? AND variant_config_json IS NOT NULL`)
+    .all(tenantId) as Array<{ id: string; name: string; variant_config_json: string }>;
+}
+
+/** Exported for the variants service's shared-variant code scan. */
+export function parseVariantConfigJson(raw: string | null | undefined): Product["variantConfig"] {
+  return parseVariantConfig(raw);
 }

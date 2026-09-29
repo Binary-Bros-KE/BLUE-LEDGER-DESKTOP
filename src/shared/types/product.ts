@@ -120,8 +120,43 @@ export type SharedVariant = {
 /** Lives on a product that HAS variants (the main product of a group). */
 export type ProductVariantConfig = {
   mode: VariantStockMode;
+  /** The group's display name at checkout and on the website (e.g. "Cotton T-Shirt") — null = the
+   * main product's own name. */
+  title: string | null;
   options: VariantOption[];
   /** only for mode "shared" — "separate" variants are their own product rows */
+  variants: SharedVariant[];
+};
+
+/** One product of a SEPARATE-stock variant group (the main product included), as the variants
+ * editor shows it. */
+export type VariantGroupMember = {
+  productId: string;
+  name: string;
+  sku: string;
+  barcode: string | null;
+  sellingPriceCents: number;
+  status: ProductStatus;
+  totalStock: number;
+  values: Record<string, string>;
+  isMain: boolean;
+};
+
+/** Everything the variants editor needs for one product — resolved to the group's MAIN product even
+ * when opened from a separate-stock member. mode null = no variants yet. */
+export type VariantGroupView = {
+  mainProductId: string;
+  mainName: string;
+  mainSku: string;
+  mainBarcode: string | null;
+  mainPriceCents: number;
+  mainTotalStock: number;
+  mode: VariantStockMode | null;
+  title: string | null;
+  options: VariantOption[];
+  /** mode "separate": every product in the group, main first */
+  members: VariantGroupMember[];
+  /** mode "shared": the variants inside the one product */
   variants: SharedVariant[];
 };
 

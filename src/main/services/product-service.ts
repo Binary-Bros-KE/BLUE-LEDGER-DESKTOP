@@ -9,6 +9,7 @@ import { generateDocumentNumber } from "@main/services/document-number-service";
 import { deleteManagedProductImage, finalizeProductImagePath } from "@main/services/image-service";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
 import { deriveUnallocatedQuantity } from "@main/services/main-store-service";
+import { findSharedVariantCodeOwner } from "@main/services/product-variant-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { bulkSetTaxTypeSchema, productCreateSchema, productUpdateSchema } from "@shared/schemas/product";
 import type { Product, ProductListItem, ProductStatus, ProductStockSummary } from "@shared/types/product";
@@ -76,6 +77,15 @@ function assertUniqueFields(
   }
   if (fields.barcode && productRepository.findProductByBarcodeRow(tenantId, fields.barcode, excludeId)) {
     throw new Error(`Barcode "${fields.barcode}" is already in use`);
+  }
+  // A shared-stock variant's own SKU/barcode counts too — scanning must land on exactly one thing.
+  const skuVariantOwner = findSharedVariantCodeOwner(tenantId, "sku", fields.sku);
+  if (skuVariantOwner) {
+    throw new Error(`SKU "${fields.sku}" is already used by a variant of "${skuVariantOwner}"`);
+  }
+  const barcodeVariantOwner = fields.barcode ? findSharedVariantCodeOwner(tenantId, "barcode", fields.barcode) : null;
+  if (barcodeVariantOwner) {
+    throw new Error(`Barcode "${fields.barcode}" is already used by a variant of "${barcodeVariantOwner}"`);
   }
 }
 

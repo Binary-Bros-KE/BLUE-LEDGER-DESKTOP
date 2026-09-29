@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Boxes,
   Info,
+  Layers,
   Loader2,
   Package,
   PackageX,
@@ -18,6 +19,8 @@ import { BulkTaxCategoryModal } from "@renderer/app/routes/products/BulkTaxCateg
 import { ProductCreateModal } from "@renderer/app/routes/products/ProductCreateModal";
 import { ProductDetailModal } from "@renderer/app/routes/products/ProductDetailModal";
 import { ProductEditModal } from "@renderer/app/routes/products/ProductEditModal";
+import { GroupVariantsModal } from "@renderer/app/routes/products/variants/GroupVariantsModal";
+import { ProductVariantsModal } from "@renderer/app/routes/products/variants/ProductVariantsModal";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { ExportMenu } from "@renderer/shared/components/ExportMenu";
@@ -34,7 +37,28 @@ import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { Category } from "@shared/types/category";
 import type { ExportListRequest } from "@shared/types/export";
 import { isStorefrontType, type Location } from "@shared/types/location";
+import { variantLabel } from "@shared/lib/variants";
 import type { ProductListItem } from "@shared/types/product";
+
+/** Small tag under a product's name: "4 variants · shared stock", "Variant group (main)", "Variant: XL". */
+function VariantTag({ product, groupOptions }: { product: ProductListItem; groupOptions: ProductListItem["variantConfig"] }): React.JSX.Element | null {
+  const config = product.variantConfig;
+  let text: string | null = null;
+  if (config?.mode === "shared") {
+    const n = config.variants.filter((v) => v.active).length;
+    text = `${n} variant${n === 1 ? "" : "s"} · shared stock`;
+  } else if (product.variantGroupId) {
+    const label = variantLabel(groupOptions?.options ?? config?.options ?? [], product.variantOptions);
+    text = product.variantGroupId === product.id ? `Variant group · ${label}` : `Variant · ${label}`;
+  }
+  if (!text) return null;
+  return (
+    <span className="mt-0.5 inline-flex items-center gap-1 rounded-md bg-accent/15 px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-ink">
+      <Layers className="size-3" aria-hidden="true" />
+      {text}
+    </span>
+  );
+}
 
 function LowStockBadge(): React.JSX.Element {
   return (
@@ -109,6 +133,8 @@ export function ProductsRoute(): React.JSX.Element {
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkTaxModalOpen, setBulkTaxModalOpen] = useState(false);
+  const [variantsProductId, setVariantsProductId] = useState<string | null>(null);
+  const [groupOpen, setGroupOpen] = useState(false);
 
   // The storefront filter is resolved server-side (see product-service.ts's listProducts) — it
   // narrows down to just that storefront's tagged products AND makes totalStock reflect only that
@@ -142,6 +168,12 @@ export function ProductsRoute(): React.JSX.Element {
   }, [notice]);
 
   const categoryOptions = useMemo(() => buildCategoryOptions(categories), [categories]);
+  // separate-stock groups: a member's option names live on its main product's config
+  const groupConfigs = useMemo(() => {
+    const map = new Map<string, ProductListItem["variantConfig"]>();
+    for (const p of products ?? []) if (p.variantConfig?.mode === "separate") map.set(p.id, p.variantConfig);
+    return map;
+  }, [products]);
   const storefronts = useMemo(() => locations.filter((location) => isStorefrontType(location.locationType)), [locations]);
   const showStorefrontFilter = !isBranchScoped && storefronts.length > 0;
 
@@ -151,7 +183,9 @@ export function ProductsRoute(): React.JSX.Element {
 
     return products.filter((product) => {
       if (term) {
-        const haystack = `${product.name} ${product.sku} ${product.barcode ?? ""}`.toLowerCase();
+        const variantCodes =
+          product.variantConfig?.variants.map((v) => `${v.sku ?? ""} ${v.barcode ?? ""}`).join(" ") ?? "";
+        const haystack = `${product.name} ${product.sku} ${product.barcode ?? ""} ${variantCodes}`.toLowerCase();
         if (!haystack.includes(term)) return false;
       }
       if (categoryFilter && product.categoryId !== categoryFilter) return false;
@@ -504,6 +538,16 @@ export function ProductsRoute(): React.JSX.Element {
               >
                 Clear selection
               </button>
+              {selectedIds.size >= 2 && (
+                <Button
+                  type="button"
+                  onClick={() => setGroupOpen(true)}
+                  className="h-8 border border-accent/50 bg-white text-xs text-ink shadow-none hover:bg-accent/10"
+                >
+                  <Layers className="mr-1.5 size-3.5" aria-hidden="true" />
+                  Group as Variants
+                </Button>
+              )}
               <Button type="button" onClick={() => setBulkTaxModalOpen(true)} className="h-8 text-xs">
                 Set Tax Category
               </Button>
@@ -604,6 +648,12 @@ export function ProductsRoute(): React.JSX.Element {
                             <span className="truncate text-sm font-semibold text-muted">
                               {product.categoryName ?? "Uncategorized"}
                             </span>
+                            <div>
+                              <VariantTag
+                                product={product}
+                                groupOptions={product.variantGroupId ? groupConfigs.get(product.variantGroupId) ?? null : null}
+                              />
+                            </div>
                           </div>
                         </div>
                       </td>
@@ -656,6 +706,22 @@ export function ProductsRoute(): React.JSX.Element {
                               <Pencil className="size-3.5" aria-hidden="true" />
                             </button>
                           )} 
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={() => setVariantsProductId(product.id)}
+                              aria-label={`Variants of ${product.name}`}
+                              title="Variants (sizes, colours…)"
+                              className={cn(
+                                "grid size-8 place-items-center rounded-lg border transition cursor-pointer",
+                                product.variantConfig || product.variantGroupId
+                                  ? "border-accent/50 bg-accent/10 text-ink hover:bg-accent/20"
+                                  : "border-line text-muted hover:bg-soft hover:text-ink"
+                              )}
+                            >
+                              <Layers className="size-3.5" aria-hidden="true" />
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => setInfoProduct(product)}
@@ -728,6 +794,29 @@ export function ProductsRoute(): React.JSX.Element {
         />
       )}
       {infoProduct && <ProductInfoModal product={infoProduct} onClose={() => setInfoProduct(null)} />}
+
+      {variantsProductId && (
+        <ProductVariantsModal
+          productId={variantsProductId}
+          currency={currency}
+          allProducts={products ?? []}
+          onClose={() => setVariantsProductId(null)}
+          onChanged={() => void loadAll()}
+        />
+      )}
+      {groupOpen && (
+        <GroupVariantsModal
+          products={(products ?? []).filter((p) => selectedIds.has(p.id))}
+          currency={currency}
+          onClose={() => setGroupOpen(false)}
+          onDone={(message) => {
+            setGroupOpen(false);
+            setSelectedIds(new Set());
+            setNotice(message);
+            void loadAll();
+          }}
+        />
+      )}
 
       {canEdit && (
         <BulkTaxCategoryModal

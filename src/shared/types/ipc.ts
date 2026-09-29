@@ -22,7 +22,7 @@ import type {
   MainStoreProductRow,
   StockRequestAvailability
 } from "./main-store";
-import type { Product, ProductListItem, ProductStatus, ProductStockSummary } from "./product";
+import type { Product, ProductListItem, ProductStatus, ProductStockSummary, VariantGroupView } from "./product";
 import type {
   DeliveryMethodInput,
   ProductOnlinePatch,
@@ -316,6 +316,26 @@ export type IpcInvokeMap = {
   "product:brand-list": {
     args: [];
     result: string[];
+  };
+  "product:variant-get": {
+    args: [string];
+    result: VariantGroupView;
+  };
+  "product:variant-save-shared": {
+    args: [Record<string, unknown>];
+    result: VariantGroupView;
+  };
+  "product:variant-save-separate": {
+    args: [Record<string, unknown>];
+    result: VariantGroupView;
+  };
+  "product:variant-merge": {
+    args: [Record<string, unknown>];
+    result: VariantGroupView;
+  };
+  "product:variant-remove": {
+    args: [string];
+    result: VariantGroupView;
   };
   "product:read-image-preview": {
     args: [string];
@@ -1540,6 +1560,13 @@ export type BlueLedgerApi = {
     ) => Promise<IpcInvokeMap["product:bulk-set-tax-type"]["result"]>;
     pickImage: () => Promise<IpcInvokeMap["product:pick-image"]["result"]>;
     brandList: () => Promise<IpcInvokeMap["product:brand-list"]["result"]>;
+    variantGet: (productId: string) => Promise<IpcInvokeMap["product:variant-get"]["result"]>;
+    variantSaveShared: (input: Record<string, unknown>) => Promise<IpcInvokeMap["product:variant-save-shared"]["result"]>;
+    variantSaveSeparate: (
+      input: Record<string, unknown>
+    ) => Promise<IpcInvokeMap["product:variant-save-separate"]["result"]>;
+    variantMerge: (input: Record<string, unknown>) => Promise<IpcInvokeMap["product:variant-merge"]["result"]>;
+    variantRemove: (productId: string) => Promise<IpcInvokeMap["product:variant-remove"]["result"]>;
     readImagePreview: (
       relativePath: string
     ) => Promise<IpcInvokeMap["product:read-image-preview"]["result"]>;
