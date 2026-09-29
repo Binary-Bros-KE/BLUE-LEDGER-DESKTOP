@@ -153,7 +153,15 @@ export function App(): React.JSX.Element {
       ) : activeNavKey === "storefronts" ? (
         <StorefrontsRoute />
       ) : activeNavKey === "online-store" ? (
-        <OnlineStoreRoute />
+        <OnlineStoreRoute section="products" />
+      ) : activeNavKey === "website-home" ? (
+        <OnlineStoreRoute section="home" />
+      ) : activeNavKey === "website-look" ? (
+        <OnlineStoreRoute section="look" />
+      ) : activeNavKey === "website-delivery" ? (
+        <OnlineStoreRoute section="delivery" />
+      ) : activeNavKey === "website-subscribers" ? (
+        <OnlineStoreRoute section="subscribers" />
       ) : activeNavKey === "online-orders" ? (
         <OnlineOrdersRoute />
       ) : activeNavKey === "categories" ? (

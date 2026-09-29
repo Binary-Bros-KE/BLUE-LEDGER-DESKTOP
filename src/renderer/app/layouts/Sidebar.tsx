@@ -7,6 +7,12 @@ import { useAppStore } from "@renderer/shared/stores/app-store";
 import { useAuthStore } from "@renderer/shared/stores/auth-store";
 import { useUiStore } from "@renderer/shared/stores/ui-store";
 import { useOnlineOrderAlertsStore } from "@renderer/shared/stores/online-order-alerts-store";
+import { useWebsiteStore } from "@renderer/shared/stores/website-store";
+
+/** Website Manager entries — all need the tenant's online store to be on. */
+const WEBSITE_KEYS = new Set(["online-orders", "online-store", "website-home", "website-look", "website-delivery", "website-subscribers"]);
+/** Entries that only exist on some website templates. */
+const TEMPLATE_ONLY: Record<string, string[]> = { "website-home": ["adia"], "website-subscribers": ["adia"] };
 import { useStockRequestAlertsStore } from "@renderer/shared/stores/stock-request-alerts-store";
 import { cn } from "@renderer/shared/lib/cn";
 import { smallLogoBoxClassName } from "@renderer/shared/lib/logo";
@@ -30,6 +36,18 @@ export function Sidebar(): React.JSX.Element {
   const ecommerceEnabled = useAppStore((state) => state.context?.tenant.ecommerceEnabled ?? false);
   const pendingStockRequestCount = useStockRequestAlertsStore((state) => state.pending.length);
   const newOnlineOrderCount = useOnlineOrderAlertsStore((state) => state.newCount);
+  const templateId = useWebsiteStore((state) => state.templateId);
+  const setTemplateId = useWebsiteStore((state) => state.setTemplateId);
+  const canViewWebsite = can("online_store", "view");
+
+  // Learn the website template once, so template-only entries (the Adia Home Page) can show.
+  useEffect(() => {
+    if (!ecommerceEnabled || !canViewWebsite || templateId !== null) return;
+    void window.blueLedger.onlineStore
+      .overview()
+      .then((o) => setTemplateId(o.store?.templateId ?? "classic"))
+      .catch(() => undefined);
+  }, [ecommerceEnabled, canViewWebsite, templateId, setTemplateId]);
 
   const visibleGroups = useMemo(
     () =>
@@ -39,11 +57,12 @@ export function Sidebar(): React.JSX.Element {
           items: group.items.filter(
             (item) =>
               can(item.permissionModule, "view") &&
-              ((item.key !== "online-store" && item.key !== "online-orders") || ecommerceEnabled)
+              (!WEBSITE_KEYS.has(item.key) || ecommerceEnabled) &&
+              (!TEMPLATE_ONLY[item.key] || (templateId !== null && TEMPLATE_ONLY[item.key]!.includes(templateId)))
           )
         }))
         .filter((group) => group.items.length > 0),
-    [can, ecommerceEnabled]
+    [can, ecommerceEnabled, templateId]
   );
 
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);

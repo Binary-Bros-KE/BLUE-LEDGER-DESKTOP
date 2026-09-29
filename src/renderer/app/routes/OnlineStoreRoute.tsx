@@ -23,6 +23,7 @@ import { TextAreaField, Field } from "@renderer/shared/components/form-fields";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { cn } from "@renderer/shared/lib/cn";
+import { useWebsiteStore } from "@renderer/shared/stores/website-store";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
@@ -54,7 +55,21 @@ function effectivePriceCents(product: ProductListItem | Product): number {
   return product.onlinePriceCents ?? product.sellingPriceCents;
 }
 
-export function OnlineStoreRoute(): React.JSX.Element {
+type WebsiteSection = "products" | "home" | "look" | "delivery" | "subscribers";
+
+const SECTION_COPY: Record<WebsiteSection, { title: string; intro: string }> = {
+  products: {
+    title: "Website Products",
+    intro: "Choose which products appear on your website and set their online prices, photos and descriptions."
+  },
+  home: { title: "Home Page", intro: "Edit every section of your website home page: text, images, categories and links." },
+  look: { title: "Look & Branding", intro: "Your logo, contact channels and category images. Colours and design are set up by Blue Ledger." },
+  delivery: { title: "Delivery Options", intro: "The delivery choices and fees customers see at checkout." },
+  subscribers: { title: "Newsletter Subscribers", intro: "Everyone who signed up for your newsletter on the website." }
+};
+
+/** Website Manager screens (one per sidebar entry) — store status on every one, then the section. */
+export function OnlineStoreRoute({ section = "products" }: { section?: WebsiteSection }): React.JSX.Element {
   const currency = useAppStore((state) => state.context?.tenant.currency ?? "");
   const { can } = usePermissions();
   const canEdit = can("online_store", "edit");
@@ -64,7 +79,8 @@ export function OnlineStoreRoute(): React.JSX.Element {
   const [products, setProducts] = useState<ProductListItem[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [tab, setTab] = useState<"products" | "home" | "look" | "delivery" | "subscribers">("products");
+  const tab = section;
+  const setTemplateId = useWebsiteStore((state) => state.setTemplateId);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<PublishFilter>("all");
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
@@ -74,13 +90,15 @@ export function OnlineStoreRoute(): React.JSX.Element {
   const loadOverview = useCallback(async () => {
     setOverviewError(null);
     try {
-      setOverview(await window.blueLedger.onlineStore.overview());
+      const next = await window.blueLedger.onlineStore.overview();
+      setOverview(next);
+      setTemplateId(next.store?.templateId ?? "classic");
     } catch (err) {
       // Not fatal — the product list still works offline; the owner just can't see live store
       // status / preview URL until they reconnect.
       setOverviewError(getErrorMessage(err, "Couldn't load your online store details"));
     }
-  }, []);
+  }, [setTemplateId]);
 
   const loadProducts = useCallback(async () => {
     setLoadError(null);
@@ -175,11 +193,9 @@ export function OnlineStoreRoute(): React.JSX.Element {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-extrabold">Online Store</h1>
-        <p className="mt-1 text-sm font-semibold text-muted">
-          Choose which products appear on your website, set online prices and photos, and manage how
-          your store looks. Your domain and technical setup are handled by Blue Ledger.
-        </p>
+        <p className="text-[11px] font-extrabold uppercase tracking-wider text-accent">Website Manager</p>
+        <h1 className="mt-1 text-2xl font-extrabold">{SECTION_COPY[tab].title}</h1>
+        <p className="mt-1 text-sm font-semibold text-muted">{SECTION_COPY[tab].intro}</p>
       </div>
 
       {/* Store status ------------------------------------------------------------------ */}
@@ -244,6 +260,7 @@ export function OnlineStoreRoute(): React.JSX.Element {
       </div>
 
       {/* Stats ------------------------------------------------------------------------ */}
+      {tab === "products" ? (
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <StatTile icon={PackageCheck} label="Published online" value={String(publishedCount)} tone="primary" />
         <StatTile
@@ -259,34 +276,7 @@ export function OnlineStoreRoute(): React.JSX.Element {
           tone={overview?.store?.status === "LIVE" ? "success" : "warning"}
         />
       </div>
-
-      {/* Tabs ----------------------------------------------------------------------- */}
-      <div className="flex overflow-hidden rounded-md border border-line">
-        {(overview?.store?.templateId === "adia"
-          ? (["products", "home", "look", "delivery", "subscribers"] as const)
-          : (["products", "look", "delivery"] as const)
-        ).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setTab(t)}
-            className={cn(
-              "px-4 py-2.5 text-[11px] font-extrabold uppercase tracking-wide transition",
-              tab === t ? "bg-ink text-white" : "bg-white text-muted hover:bg-soft"
-            )}
-          >
-            {t === "products"
-              ? "Products"
-              : t === "home"
-                ? "Home page"
-                : t === "look"
-                  ? "Storefront look"
-                  : t === "subscribers"
-                    ? "Subscribers"
-                    : "Delivery"}
-          </button>
-        ))}
-      </div>
+      ) : null}
 
       {tab === "look" || tab === "delivery" || tab === "home" || tab === "subscribers" ? (
         !overview?.store ? (

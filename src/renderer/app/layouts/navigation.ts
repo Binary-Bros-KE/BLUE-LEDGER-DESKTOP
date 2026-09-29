@@ -14,10 +14,13 @@ import {
   FolderTree,
   Globe,
   Handshake,
+  House,
   LayoutDashboard,
+  Mail,
   Package,
   PackageCheck,
   PackagePlus,
+  Palette,
   Receipt,
   ReceiptText,
   RefreshCw,
@@ -86,13 +89,6 @@ export const navGroups: NavGroup[] = [
         description: "Wholesale billing & payments",
         icon: FileText,
         permissionModule: "sales"
-      },
-      {
-        key: "online-orders",
-        label: "Online Orders",
-        description: "Orders placed on your website",
-        icon: ShoppingBag,
-        permissionModule: "online_store"
       },
       {
         key: "quotations",
@@ -214,6 +210,55 @@ export const navGroups: NavGroup[] = [
     ]
   },
   {
+    // Everything about the shop's website in one place. Shown only when the tenant has the online
+    // store (Sidebar); "Home Page" + "Newsletter Subscribers" only for templates that have them.
+    title: "Website Manager",
+    items: [
+      {
+        key: "online-orders",
+        label: "Online Orders",
+        description: "Orders placed on your website",
+        icon: ShoppingBag,
+        permissionModule: "online_store"
+      },
+      {
+        key: "online-store",
+        label: "Website Products",
+        description: "Publish products, photos & online prices",
+        icon: Globe,
+        permissionModule: "online_store"
+      },
+      {
+        key: "website-home",
+        label: "Home Page",
+        description: "Every section of your home page",
+        icon: House,
+        permissionModule: "online_store"
+      },
+      {
+        key: "website-look",
+        label: "Look & Branding",
+        description: "Logo, contact details & category images",
+        icon: Palette,
+        permissionModule: "online_store"
+      },
+      {
+        key: "website-delivery",
+        label: "Delivery Options",
+        description: "Delivery choices & fees at checkout",
+        icon: Truck,
+        permissionModule: "online_store"
+      },
+      {
+        key: "website-subscribers",
+        label: "Subscribers",
+        description: "Emails signed up on your website",
+        icon: Mail,
+        permissionModule: "online_store"
+      }
+    ]
+  },
+  {
     title: "Finance",
     items: [
       {
@@ -314,13 +359,6 @@ export const navGroups: NavGroup[] = [
         description: "Branches & warehouses",
         icon: Store,
         permissionModule: "locations"
-      },
-      {
-        key: "online-store",
-        label: "Online Store",
-        description: "Publish products & manage your website",
-        icon: Globe,
-        permissionModule: "online_store"
       },
       {
         key: "data-import",
