@@ -125,6 +125,11 @@ export type SaleItem = {
    * derived at render time from this field, never stored pre-grouped. Retail Checkout sales never
    * set this (always null); only Invoices/Quotations expose the UI for it. */
   sectionLabel: string | null;
+  /** Shared-stock variant sold on this line (docs/VARIANTS.md) — the variant's stable key and a
+   * snapshot of its name ("Red / XL"). Both null for a plain line. productName already has the label
+   * appended ("Travel Mug — Red"), so every receipt/document/report shows it without extra work. */
+  variantKey: string | null;
+  variantLabel: string | null;
   createdAt: string;
 };
 

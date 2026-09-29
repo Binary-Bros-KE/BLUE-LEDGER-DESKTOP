@@ -70,6 +70,8 @@ import type { ExportListRequest } from "@shared/types/export";
 import { isStorefrontType, type Location } from "@shared/types/location";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import type { ProductListItem } from "@shared/types/product";
+import { VariantPickerModal } from "@renderer/shared/components/VariantPickerModal";
+import { lineName, needsVariantPicker, pricedForVariant, variantSearchText, type VariantPick } from "@renderer/shared/lib/variant-cart";
 import type { SaleDelivery } from "@shared/types/sale";
 import type { SupplierPickerOption } from "@shared/types/supplier";
 import {
@@ -101,6 +103,8 @@ type CartLine = {
    * this instead of productId. */
   key: string;
   productId: string;
+  /** Shared-stock variant on this line (docs/VARIANTS.md) — null for a plain product. */
+  variantKey: string | null;
   name: string;
   sku: string;
   quantity: number;
@@ -648,7 +652,7 @@ export function QuotationsRoute(): React.JSX.Element {
     if (!term) return [];
     return products
       .filter((product) => product.status === "active")
-      .filter((product) => `${product.name} ${product.sku}`.toLowerCase().includes(term))
+      .filter((product) => `${product.name} ${product.sku} ${product.barcode ?? ""} ${variantSearchText(product)}`.toLowerCase().includes(term))
       .slice(0, 8);
   }, [products, productSearch]);
 
@@ -662,8 +666,10 @@ export function QuotationsRoute(): React.JSX.Element {
     () =>
       createItems
         .map((line) => {
-          const product = productById.get(line.productId);
-          if (!product) return null;
+          const baseProduct = productById.get(line.productId);
+          if (!baseProduct) return null;
+          // a variant line prices at the variant's own price, same as prepareCart
+          const product = pricedForVariant(baseProduct, line.variantKey);
           return {
             line,
             product,
@@ -840,6 +846,7 @@ export function QuotationsRoute(): React.JSX.Element {
       quotation.items.map((item) => ({
         key: crypto.randomUUID(),
         productId: item.productId,
+        variantKey: item.variantKey,
         name: item.productName,
         sku: item.sku,
         quantity: item.quantity,
@@ -896,14 +903,29 @@ export function QuotationsRoute(): React.JSX.Element {
     setCreateOpen(true);
   }
 
+  const [variantPickerFor, setVariantPickerFor] = useState<ProductListItem | null>(null);
+
+  /** A product with variants asks which one first (VariantPickerModal). */
   function addCreateLine(product: ProductListItem): void {
+    if (needsVariantPicker(product, products)) {
+      setVariantPickerFor(product);
+      setProductSearch("");
+      return;
+    }
+    addCreateLinePick({ product, variantKey: null, variantLabel: null });
+  }
+
+  function addCreateLinePick({ product, variantKey, variantLabel }: VariantPick): void {
+    setVariantPickerFor(null);
     // Client correction: a product already in the cart under a DIFFERENT section must become its
     // own new line, not silently bump the quantity of the other section's line — the two are
     // meant to end up as separate rows with their own quantities (e.g. "TV" x2 in Bar Area AND
     // "TV" x1 in Gazebo). Only merge when both productId AND the currently-active section match.
     const targetSectionLabel = activeSectionLabel || null;
     setCreateItems((prev) => {
-      const existing = prev.find((line) => line.productId === product.id && line.sectionLabel === targetSectionLabel);
+      const existing = prev.find(
+        (line) => line.productId === product.id && line.variantKey === variantKey && line.sectionLabel === targetSectionLabel
+      );
       if (existing) {
         return prev.map((line) => (line.key === existing.key ? { ...line, quantity: line.quantity + 1 } : line));
       }
@@ -912,7 +934,8 @@ export function QuotationsRoute(): React.JSX.Element {
         {
           key: crypto.randomUUID(),
           productId: product.id,
-          name: product.name,
+          variantKey,
+          name: lineName(product, variantLabel),
           sku: product.sku,
           quantity: 1,
           discount: "0.00",
@@ -1090,7 +1113,8 @@ export function QuotationsRoute(): React.JSX.Element {
           line.isLocallySourced && line.localCost.trim() ? unitCostToTotalCents(line.localCost, line.quantity) : undefined,
         localSupplierId: line.localSupplierId,
         taxInclusiveOverride: line.taxInclusiveOverride,
-        sectionLabel: line.sectionLabel
+        sectionLabel: line.sectionLabel,
+        variantKey: line.variantKey
       })),
       serviceCharges: createServiceCharges.map((charge) => ({
         name: charge.name,
@@ -2572,6 +2596,15 @@ export function QuotationsRoute(): React.JSX.Element {
           setQuickCreateProductOpen(false);
         }}
       />
+      {variantPickerFor && (
+        <VariantPickerModal
+          product={variantPickerFor}
+          products={products}
+          currency={currency}
+          onPick={addCreateLinePick}
+          onClose={() => setVariantPickerFor(null)}
+        />
+      )}
     </motion.div>
   );
 }

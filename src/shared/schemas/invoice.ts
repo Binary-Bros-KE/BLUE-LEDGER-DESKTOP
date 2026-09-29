@@ -26,7 +26,9 @@ const invoiceCartItemSchema = z
     taxInclusiveOverride: optionalBoolean(),
     // Client request: groups this line under a named section on the invoice — see SaleItem's own
     // sectionLabel doc comment (shared/types/sale.ts). null/omitted means "no section".
-    sectionLabel: optionalText(120)
+    sectionLabel: optionalText(120),
+    /** Shared-stock variant for this line (docs/VARIANTS.md) — prepareCart resolves its price and label. */
+    variantKey: optionalText(40),
   })
   .refine(localSourcingRequiresCost, LOCAL_SOURCING_REFINEMENT_OPTS);
 

@@ -3435,6 +3435,20 @@ const migrations = [
       ALTER TABLE products ADD COLUMN variant_config_json TEXT;
       CREATE INDEX IF NOT EXISTS idx_products_variant_group ON products(tenant_id, variant_group_id);
     `
+  },
+  {
+    version: 99,
+    name: "line_item_variants",
+    sql: `
+      -- Which SHARED-stock variant a line sold (docs/VARIANTS.md): variant_key is the variant's stable
+      -- key inside the product's variant_config_json, variant_label a snapshot of its name ("Red / XL")
+      -- so the line reads the same even after the variant is renamed or removed. NULL = a plain line
+      -- (every line before this, and every separate-stock variant — that's just its own product).
+      ALTER TABLE sale_items ADD COLUMN variant_key TEXT;
+      ALTER TABLE sale_items ADD COLUMN variant_label TEXT;
+      ALTER TABLE quotation_items ADD COLUMN variant_key TEXT;
+      ALTER TABLE quotation_items ADD COLUMN variant_label TEXT;
+    `
   }
 ] as const;
 

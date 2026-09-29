@@ -854,6 +854,8 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       local_cost_cents: number | null;
       local_supplier_id: string | null;
       section_label: string | null;
+      variant_key: string | null;
+      variant_label: string | null;
       created_at: string;
     }>;
     const items = itemRows.map((i) => ({
@@ -872,6 +874,8 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       localCostCents: i.local_cost_cents,
       localSupplierId: resolveCloudRef("suppliers", i.local_supplier_id),
       sectionLabel: i.section_label,
+      variantKey: i.variant_key ?? null,
+      variantLabel: i.variant_label ?? null,
       createdAt: i.created_at
     }));
 
@@ -1128,6 +1132,8 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       local_cost_cents: number | null;
       local_supplier_id: string | null;
       section_label: string | null;
+      variant_key: string | null;
+      variant_label: string | null;
       created_at: string;
     }>;
     const items = itemRows.map((i) => ({
@@ -1146,6 +1152,8 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       localCostCents: i.local_cost_cents,
       localSupplierId: resolveCloudRef("suppliers", i.local_supplier_id),
       sectionLabel: i.section_label,
+      variantKey: i.variant_key ?? null,
+      variantLabel: i.variant_label ?? null,
       createdAt: i.created_at
     }));
 
@@ -2447,8 +2455,8 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
     const items = (row.items as Array<Record<string, unknown>>) ?? [];
     for (const item of items) {
       db.prepare(
-        `INSERT INTO sale_items (id, sale_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, is_locally_sourced, local_cost_cents, local_supplier_id, section_label, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO sale_items (id, sale_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, is_locally_sourced, local_cost_cents, local_supplier_id, section_label, variant_key, variant_label, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         item.id as string,
         id,
@@ -2478,6 +2486,9 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         // Older device's payload predates this field entirely too — same fallback reasoning as
         // localCostCents above.
         (item.sectionLabel as string | null | undefined) ?? null,
+        // Older device's payload predates variants — same fallback as sectionLabel.
+        (item.variantKey as string | null | undefined) ?? null,
+        (item.variantLabel as string | null | undefined) ?? null,
         item.createdAt as string
       );
     }
@@ -2773,8 +2784,8 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
     const items = (row.items as Array<Record<string, unknown>>) ?? [];
     for (const item of items) {
       db.prepare(
-        `INSERT INTO quotation_items (id, quotation_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, is_locally_sourced, local_cost_cents, local_supplier_id, section_label, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO quotation_items (id, quotation_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, is_locally_sourced, local_cost_cents, local_supplier_id, section_label, variant_key, variant_label, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         item.id as string,
         id,
@@ -2791,6 +2802,9 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
         (item.localCostCents as number | null | undefined) ?? null,
         resolveRefOrNull("suppliers", (item.localSupplierId as string | null | undefined) ?? null) as string | null,
         (item.sectionLabel as string | null | undefined) ?? null,
+        // Older device's payload predates variants — same fallback as sectionLabel.
+        (item.variantKey as string | null | undefined) ?? null,
+        (item.variantLabel as string | null | undefined) ?? null,
         item.createdAt as string
       );
     }

@@ -259,7 +259,9 @@ export function insertInvoiceFromCart(input: {
         isLocallySourced: item.isLocallySourced,
         localCostCents: item.localCostCents,
         localSupplierId: item.localSupplierId,
-        sectionLabel: item.sectionLabel
+        sectionLabel: item.sectionLabel,
+        variantKey: item.variantKey,
+        variantLabel: item.variantLabel
       });
 
       if (item.product.track_stock && !item.isLocallySourced) {
@@ -450,7 +452,9 @@ export function updateInvoice(id: string, input: unknown): Sale {
         isLocallySourced: item.isLocallySourced,
         localCostCents: item.localCostCents,
         localSupplierId: item.localSupplierId,
-        sectionLabel: item.sectionLabel
+        sectionLabel: item.sectionLabel,
+        variantKey: item.variantKey,
+        variantLabel: item.variantLabel
       });
 
       if (item.product.track_stock && !item.isLocallySourced) {
@@ -547,7 +551,8 @@ export function duplicateInvoice(saleId: string): Sale {
         item.taxType === "vat" ? item.lineTotalCents <= item.unitPriceCents * item.quantity - item.discountAmountCents : null,
       // Carried over, not re-decided — same "duplicate is a faithful copy" reasoning as
       // taxInclusiveOverride above.
-      sectionLabel: item.sectionLabel
+      sectionLabel: item.sectionLabel,
+      variantKey: item.variantKey
     })),
     { serviceCharges: original.serviceCharges, delivery: original.delivery }
   );

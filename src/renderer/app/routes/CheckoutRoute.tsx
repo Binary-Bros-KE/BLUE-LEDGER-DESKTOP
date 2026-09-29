@@ -56,11 +56,26 @@ import type { LocationStockLevel } from "@shared/types/inventory";
 import type { MpesaTransactionStatus } from "@shared/types/mpesa";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import type { ProductListItem } from "@shared/types/product";
+import { VariantPickerModal } from "@renderer/shared/components/VariantPickerModal";
+import {
+  cartLineId,
+  findVariantByCode,
+  lineName,
+  needsVariantPicker,
+  pricedForVariant,
+  variantSearchText,
+  type VariantPick
+} from "@renderer/shared/lib/variant-cart";
 import type { Sale } from "@shared/types/sale";
 import type { SupplierPickerOption } from "@shared/types/supplier";
 
 type CartLine = {
+  /** Line identity — the product id, or product id + variant key for a shared-stock variant (the same
+   * product in two colours is two lines). Every per-line handler matches on this. */
+  lineId: string;
   productId: string;
+  /** Shared-stock variant on this line (docs/VARIANTS.md) — null for a plain product. */
+  variantKey: string | null;
   name: string;
   sku: string;
   quantity: number;
@@ -156,6 +171,7 @@ export function CheckoutRoute(): React.JSX.Element {
   const [actionError, setActionError] = useState<string | null>(null);
 
   const [searchTerm, setSearchTerm] = useState("");
+  const [variantPickerFor, setVariantPickerFor] = useState<ProductListItem | null>(null);
 
   const [openSales, setOpenSales] = useState<OpenSaleDraft[]>([]);
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -307,7 +323,7 @@ export function CheckoutRoute(): React.JSX.Element {
                 // if the product's own price changes later, same as a brand-new cart line would.
                 const product = productList.find((candidate) => candidate.id === item.productId);
                 const naturalUnitPriceCents = product
-                  ? computeLinePricing(product, item.quantity, 0, taxConfig, null).unitPriceCents
+                  ? computeLinePricing(pricedForVariant(product, item.variantKey), item.quantity, 0, taxConfig, null).unitPriceCents
                   : item.unitPriceCents;
                 // Same "restore only if it actually diverges from today's natural default" treatment
                 // as priceOverride above — derive the frozen line's inclusive/exclusive mode the same
@@ -319,7 +335,9 @@ export function CheckoutRoute(): React.JSX.Element {
                 const currentDefaultInclusive =
                   item.taxType === "vat" && product ? resolveProductTaxConfig(product, taxConfig).pricesTaxInclusive : null;
                 return {
+                  lineId: cartLineId(item.productId, item.variantKey),
                   productId: item.productId,
+                  variantKey: item.variantKey,
                   name: item.productName,
                   sku: item.sku,
                   quantity: item.quantity,
@@ -429,7 +447,7 @@ export function CheckoutRoute(): React.JSX.Element {
     const term = searchTerm.trim().toLowerCase();
     if (!term) return active;
     return active.filter((product) => {
-      const haystack = `${product.name} ${product.sku} ${product.barcode ?? ""}`.toLowerCase();
+      const haystack = `${product.name} ${product.sku} ${product.barcode ?? ""} ${variantSearchText(product)}`.toLowerCase();
       return haystack.includes(term);
     });
   }, [products, searchTerm]);
@@ -460,8 +478,9 @@ export function CheckoutRoute(): React.JSX.Element {
     };
 
     for (const line of items) {
-      const product = productById.get(line.productId);
-      if (!product) continue;
+      const baseProduct = productById.get(line.productId);
+      if (!baseProduct) continue;
+      const product = pricedForVariant(baseProduct, line.variantKey);
       const pricing = computeLinePricing(
         product,
         line.quantity,
@@ -682,17 +701,25 @@ export function CheckoutRoute(): React.JSX.Element {
     };
   }
 
-  function withProductAdded(draft: OpenSaleDraft, product: ProductListItem): OpenSaleDraft {
-    const existing = draft.items.find((line) => line.productId === product.id);
+  function withProductAdded(
+    draft: OpenSaleDraft,
+    product: ProductListItem,
+    variantKey: string | null = null,
+    variantLabel: string | null = null
+  ): OpenSaleDraft {
+    const lineId = cartLineId(product.id, variantKey);
+    const existing = draft.items.find((line) => line.lineId === lineId);
     const items = existing
       ? draft.items.map((line) =>
-        line.productId === product.id ? { ...line, quantity: line.quantity + 1 } : line
+        line.lineId === lineId ? { ...line, quantity: line.quantity + 1 } : line
       )
       : [
         ...draft.items,
         {
+          lineId,
           productId: product.id,
-          name: product.name,
+          variantKey,
+          name: lineName(product, variantLabel),
           sku: product.sku,
           quantity: 1,
           discount: "0.00",
@@ -706,15 +733,26 @@ export function CheckoutRoute(): React.JSX.Element {
     return { ...draft, items };
   }
 
+  /** Tapping a product with variants asks which one first (VariantPickerModal); everything else
+   * goes straight into the cart. */
   function addToCart(product: ProductListItem): void {
+    if (needsVariantPicker(product, products ?? [])) {
+      setVariantPickerFor(product);
+      return;
+    }
+    addPickToCart({ product, variantKey: null, variantLabel: null });
+  }
+
+  function addPickToCart({ product, variantKey, variantLabel }: VariantPick): void {
+    setVariantPickerFor(null);
     const existingDraft = openSales.find((draft) => draft.key === activeKey);
     if (existingDraft) {
       setOpenSales((prev) =>
-        prev.map((draft) => (draft.key === activeKey ? withProductAdded(draft, product) : draft))
+        prev.map((draft) => (draft.key === activeKey ? withProductAdded(draft, product, variantKey, variantLabel) : draft))
       );
       return;
     }
-    const draft = withProductAdded(createDraft(), product);
+    const draft = withProductAdded(createDraft(), product, variantKey, variantLabel);
     setOpenSales((prev) => [draft, ...prev]);
     setActiveKey(draft.key);
   }
@@ -732,13 +770,20 @@ export function CheckoutRoute(): React.JSX.Element {
     const exactMatch = filteredProducts.find(
       (product) => product.sku.toLowerCase() === term || (product.barcode ?? "").toLowerCase() === term
     );
-    const target = exactMatch ?? (filteredProducts.length === 1 ? filteredProducts[0] : null);
+    const variantMatch = exactMatch ? null : findVariantByCode(products ?? [], term);
+    const target = exactMatch ?? (variantMatch ? null : filteredProducts.length === 1 ? filteredProducts[0] : null);
 
+    if (variantMatch) {
+      addPickToCart(variantMatch);
+      setSearchTerm("");
+      return;
+    }
     if (!target) {
       showErrorToast(`No product found for "${searchTerm.trim()}"`);
       return;
     }
-    addToCart(target);
+    if (exactMatch && exactMatch.variantConfig?.mode !== "shared") addPickToCart({ product: exactMatch, variantKey: null, variantLabel: null });
+    else addToCart(target);
     setSearchTerm("");
   }
 
@@ -749,10 +794,10 @@ export function CheckoutRoute(): React.JSX.Element {
     );
   }
 
-  function updateQuantity(productId: string, quantity: number): void {
+  function updateQuantity(lineId: string, quantity: number): void {
     const nextQuantity = Number.isFinite(quantity) && quantity > 0 ? Math.floor(quantity) : 1;
     updateActiveItems((items) =>
-      items.map((line) => (line.productId === productId ? { ...line, quantity: nextQuantity } : line))
+      items.map((line) => (line.lineId === lineId ? { ...line, quantity: nextQuantity } : line))
     );
   }
 
@@ -760,30 +805,30 @@ export function CheckoutRoute(): React.JSX.Element {
    * mid-edit (see the input's own value prop, which renders "" for 0) so clearing "1" to type "80"
    * isn't fought by an immediate re-clamp on every keystroke. updateQuantity's own clamp still
    * applies on blur and to the +/- buttons, which never need this leniency. */
-  function updateQuantityDraft(productId: string, raw: string): void {
+  function updateQuantityDraft(lineId: string, raw: string): void {
     const parsed = raw === "" ? 0 : Math.floor(Number(raw));
     const nextQuantity = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
     updateActiveItems((items) =>
-      items.map((line) => (line.productId === productId ? { ...line, quantity: nextQuantity } : line))
+      items.map((line) => (line.lineId === lineId ? { ...line, quantity: nextQuantity } : line))
     );
   }
 
-  function updateDiscount(productId: string, value: string): void {
+  function updateDiscount(lineId: string, value: string): void {
     updateActiveItems((items) =>
-      items.map((line) => (line.productId === productId ? { ...line, discount: value } : line))
+      items.map((line) => (line.lineId === lineId ? { ...line, discount: value } : line))
     );
   }
 
-  function updatePriceOverride(productId: string, value: string): void {
+  function updatePriceOverride(lineId: string, value: string): void {
     updateActiveItems((items) =>
-      items.map((line) => (line.productId === productId ? { ...line, priceOverride: value } : line))
+      items.map((line) => (line.lineId === lineId ? { ...line, priceOverride: value } : line))
     );
   }
 
-  function toggleLocallySourced(productId: string): void {
+  function toggleLocallySourced(lineId: string): void {
     updateActiveItems((items) =>
       items.map((line) =>
-        line.productId === productId
+        line.lineId === lineId
           ? {
             ...line,
             isLocallySourced: !line.isLocallySourced,
@@ -796,15 +841,15 @@ export function CheckoutRoute(): React.JSX.Element {
     );
   }
 
-  function updateLocalCost(productId: string, value: string): void {
+  function updateLocalCost(lineId: string, value: string): void {
     updateActiveItems((items) =>
-      items.map((line) => (line.productId === productId ? { ...line, localCost: value } : line))
+      items.map((line) => (line.lineId === lineId ? { ...line, localCost: value } : line))
     );
   }
 
-  function updateLocalSupplier(productId: string, supplierId: string | null): void {
+  function updateLocalSupplier(lineId: string, supplierId: string | null): void {
     updateActiveItems((items) =>
-      items.map((line) => (line.productId === productId ? { ...line, localSupplierId: supplierId } : line))
+      items.map((line) => (line.lineId === lineId ? { ...line, localSupplierId: supplierId } : line))
     );
   }
 
@@ -812,14 +857,14 @@ export function CheckoutRoute(): React.JSX.Element {
    * touching the product's own setting. `currentlyInclusive` is the badge's own effective value (line
    * override if set, else the product/tenant default) — clicking always sets the override to the
    * OPPOSITE of whatever is currently showing, so the badge always reflects what happens next. */
-  function toggleTaxInclusiveOverride(productId: string, currentlyInclusive: boolean): void {
+  function toggleTaxInclusiveOverride(lineId: string, currentlyInclusive: boolean): void {
     updateActiveItems((items) =>
-      items.map((line) => (line.productId === productId ? { ...line, taxInclusiveOverride: !currentlyInclusive } : line))
+      items.map((line) => (line.lineId === lineId ? { ...line, taxInclusiveOverride: !currentlyInclusive } : line))
     );
   }
 
-  function removeLine(productId: string): void {
-    updateActiveItems((items) => items.filter((line) => line.productId !== productId));
+  function removeLine(lineId: string): void {
+    updateActiveItems((items) => items.filter((line) => line.lineId !== lineId));
   }
 
   function updateActiveNotes(value: string): void {
@@ -1001,6 +1046,7 @@ export function CheckoutRoute(): React.JSX.Element {
       items: draft.items.map((line) => ({
         productId: line.productId,
         quantity: line.quantity,
+        variantKey: line.variantKey,
         discountAmountCents: toCents(line.discount),
         unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined,
         isLocallySourced: line.isLocallySourced,
@@ -1113,6 +1159,7 @@ export function CheckoutRoute(): React.JSX.Element {
         items: activeDraft.items.map((line) => ({
           productId: line.productId,
           quantity: line.quantity,
+          variantKey: line.variantKey,
           discountAmountCents: toCents(line.discount),
           unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined,
           isLocallySourced: line.isLocallySourced,
@@ -1388,7 +1435,7 @@ export function CheckoutRoute(): React.JSX.Element {
                       </div>
                     ) : (
                       totals.lines.map(({ line, product, pricing }) => (
-                        <div key={line.productId} className="rounded-lg border border-line p-2.5">
+                        <div key={line.lineId} className="rounded-lg border border-line p-2.5">
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
                               <p className="line-clamp-2 text-sm font-extrabold leading-snug text-ink" title={line.name}>
@@ -1427,7 +1474,7 @@ export function CheckoutRoute(): React.JSX.Element {
                                   return (
                                     <button
                                       type="button"
-                                      onClick={() => toggleTaxInclusiveOverride(line.productId, effectiveInclusive)}
+                                      onClick={() => toggleTaxInclusiveOverride(line.lineId, effectiveInclusive)}
                                       title="Switch this line's VAT pricing for this sale only"
                                       className="cursor-pointer"
                                     >
@@ -1442,7 +1489,7 @@ export function CheckoutRoute(): React.JSX.Element {
                             <div className="flex items-center gap-1">
                               <button
                                 type="button"
-                                onClick={() => updateQuantity(line.productId, line.quantity - 1)}
+                                onClick={() => updateQuantity(line.lineId, line.quantity - 1)}
                                 disabled={line.quantity <= 1}
                                 className="grid size-7 place-items-center rounded-md border border-line text-muted transition hover:bg-soft disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
                               >
@@ -1452,13 +1499,13 @@ export function CheckoutRoute(): React.JSX.Element {
                                 type="number"
                                 min={1}
                                 value={line.quantity === 0 ? "" : line.quantity}
-                                onChange={(event) => updateQuantityDraft(line.productId, event.target.value)}
-                                onBlur={() => updateQuantity(line.productId, line.quantity)}
+                                onChange={(event) => updateQuantityDraft(line.lineId, event.target.value)}
+                                onBlur={() => updateQuantity(line.lineId, line.quantity)}
                                 className="h-7 w-12 rounded-md border border-line text-center text-xs font-bold outline-none focus:border-accent"
                               />
                               <button
                                 type="button"
-                                onClick={() => updateQuantity(line.productId, line.quantity + 1)}
+                                onClick={() => updateQuantity(line.lineId, line.quantity + 1)}
                                 className="grid size-7 place-items-center rounded-md border border-line text-muted transition hover:bg-soft cursor-pointer"
                               >
                                 <Plus className="size-3" aria-hidden="true" />
@@ -1475,7 +1522,7 @@ export function CheckoutRoute(): React.JSX.Element {
                                   min={0}
                                   step="0.01"
                                   value={line.priceOverride}
-                                  onChange={(event) => updatePriceOverride(line.productId, event.target.value)}
+                                  onChange={(event) => updatePriceOverride(line.lineId, event.target.value)}
                                   placeholder={fromCents(pricing.unitPriceCents)}
                                   className={cn(
                                     "h-7 w-16 rounded-md border px-1.5 text-right text-xs font-semibold outline-none focus:border-accent",
@@ -1492,13 +1539,13 @@ export function CheckoutRoute(): React.JSX.Element {
                                   min={0}
                                   step="0.01"
                                   value={line.discount}
-                                  onChange={(event) => updateDiscount(line.productId, event.target.value)}
+                                  onChange={(event) => updateDiscount(line.lineId, event.target.value)}
                                   className="h-7 w-16 rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
                                 />
                               </label>
                               <button
                                 type="button"
-                                onClick={() => removeLine(line.productId)}
+                                onClick={() => removeLine(line.lineId)}
                                 aria-label={`Remove ${line.name}`}
                                 className="grid size-7 place-items-center rounded-md text-muted transition hover:bg-danger-soft hover:text-danger cursor-pointer"
                               >
@@ -1517,7 +1564,7 @@ export function CheckoutRoute(): React.JSX.Element {
                             <input
                               type="checkbox"
                               checked={line.isLocallySourced}
-                              onChange={() => toggleLocallySourced(line.productId)}
+                              onChange={() => toggleLocallySourced(line.lineId)}
                               className="size-3.5 accent-accent"
                             />
                             Sourced from another shop
@@ -1532,7 +1579,7 @@ export function CheckoutRoute(): React.JSX.Element {
                                   min={0}
                                   step="0.01"
                                   value={line.localCost}
-                                  onChange={(event) => updateLocalCost(line.productId, event.target.value)}
+                                  onChange={(event) => updateLocalCost(line.lineId, event.target.value)}
                                   placeholder="0.00"
                                   className="mt-1 h-10 w-full rounded-md border border-line px-3 text-sm font-semibold outline-none focus:border-accent"
                                 />
@@ -1547,7 +1594,7 @@ export function CheckoutRoute(): React.JSX.Element {
                                 <SupplierPicker
                                   suppliers={suppliers}
                                   value={line.localSupplierId}
-                                  onChange={(supplierId) => updateLocalSupplier(line.productId, supplierId)}
+                                  onChange={(supplierId) => updateLocalSupplier(line.lineId, supplierId)}
                                   onSupplierCreated={(supplier) => setSuppliers((prev) => [...prev, supplier])}
                                 />
                               </div>
@@ -2012,6 +2059,17 @@ export function CheckoutRoute(): React.JSX.Element {
           />
         )}
       </Modal>
+
+      {variantPickerFor && (
+        <VariantPickerModal
+          product={variantPickerFor}
+          products={products ?? []}
+          currency={currency}
+          stockOf={(productId) => stockByProductId.get(productId) ?? 0}
+          onPick={addPickToCart}
+          onClose={() => setVariantPickerFor(null)}
+        />
+      )}
     </motion.div>
   );
 }
@@ -2081,6 +2139,9 @@ function ProductCard({
         <div className="min-w-0 flex-1">
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] font-bold text-muted">
             <span>{product.sku}</span>
+            {(product.variantConfig?.mode === "shared" || product.variantGroupId) && (
+              <span className="text-accent">Has variants</span>
+            )}
             {product.trackStock && <span className={cn(outOfStock && "text-danger")}>Stock: {stock}</span>}
             {product.wholesalePriceCents !== null && product.wholesaleMinQuantity > 0 && (
               <span className="text-teal">

@@ -62,6 +62,8 @@ export type QuotationItemRow = {
   local_cost_cents: number | null;
   local_supplier_id: string | null;
   section_label: string | null;
+  variant_key: string | null;
+  variant_label: string | null;
   created_at: string;
 };
 
@@ -225,6 +227,8 @@ export function insertQuotationItemRow(input: {
   localCostCents: number | null;
   localSupplierId: string | null;
   sectionLabel: string | null;
+  variantKey?: string | null | undefined;
+  variantLabel?: string | null | undefined;
 }): QuotationItemRow {
   const now = new Date().toISOString();
 
@@ -234,9 +238,9 @@ export function insertQuotationItemRow(input: {
       INSERT INTO quotation_items (
         id, quotation_id, product_id, quantity, unit_price_cents,
         discount_amount_cents, tax_type, tax_amount_cents, line_total_cents,
-        is_locally_sourced, local_cost_cents, local_supplier_id, section_label, created_at
+        is_locally_sourced, local_cost_cents, local_supplier_id, section_label, variant_key, variant_label, created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
     )
     .run(
@@ -253,6 +257,8 @@ export function insertQuotationItemRow(input: {
       input.localCostCents,
       input.localSupplierId,
       input.sectionLabel,
+      input.variantKey ?? null,
+      input.variantLabel ?? null,
       now
     );
 
@@ -419,7 +425,7 @@ export function mapQuotationItemDetailRow(row: QuotationItemDetailRow): Quotatio
     id: row.id,
     quotationId: row.quotation_id,
     productId: row.product_id,
-    productName: row.product_name,
+    productName: row.variant_label ? `${row.product_name} — ${row.variant_label}` : row.product_name,
     sku: row.sku,
     quantity: row.quantity,
     unitPriceCents: row.unit_price_cents,
@@ -432,6 +438,8 @@ export function mapQuotationItemDetailRow(row: QuotationItemDetailRow): Quotatio
     localSupplierId: row.local_supplier_id,
     localSupplierName: row.local_supplier_name,
     sectionLabel: row.section_label,
+    variantKey: row.variant_key ?? null,
+    variantLabel: row.variant_label ?? null,
     createdAt: row.created_at
   };
 }

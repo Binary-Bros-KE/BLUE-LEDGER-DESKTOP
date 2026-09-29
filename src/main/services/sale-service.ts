@@ -1,3 +1,4 @@
+import { variantLabel } from "@shared/lib/variants";
 import { randomUUID } from "node:crypto";
 import * as customerRepository from "@main/database/repositories/customer-repository";
 import * as deliveryNoteRepository from "@main/database/repositories/delivery-note-repository";
@@ -39,6 +40,9 @@ export type PreparedItem = {
   localCostCents: number | null;
   localSupplierId: string | null;
   sectionLabel: string | null;
+  /** shared-stock variant (docs/VARIANTS.md) — null for a plain line */
+  variantKey: string | null;
+  variantLabel: string | null;
 };
 
 export type PreparedCartExtras = {
@@ -109,6 +113,26 @@ function assertCustomerExists(tenantId: string, customerId: string | null): void
   }
 }
 
+/** The shared-stock variant a cart line names, validated against the product's own config. A line
+ * with no key (or a product without shared variants) is a plain line. A key that no longer exists —
+ * e.g. a held sale whose variant was since removed — is an error rather than silently selling the
+ * plain product at the wrong price. */
+function resolveCartVariant(
+  product: ProductRow,
+  variantKey: string | null | undefined
+): { key: string; label: string; priceCents: number | null } | null {
+  if (!variantKey) return null;
+  const config = productRepository.parseVariantConfigJson(product.variant_config_json);
+  const variant = config?.mode === "shared" ? config.variants.find((v) => v.key === variantKey) : undefined;
+  if (!config || !variant) {
+    throw new Error(`The chosen variant of "${product.name}" no longer exists — remove the line and add it again`);
+  }
+  if (!variant.active) {
+    throw new Error(`"${product.name} — ${variantLabel(config.options, variant.values)}" is switched off and can't be sold`);
+  }
+  return { key: variant.key, label: variantLabel(config.options, variant.values), priceCents: variant.priceCents };
+}
+
 /** Prices and taxes every cart line from live product data — never trusts client-supplied money math.
  * extras (service charges + delivery) are optional so callers that never touch them (e.g. quotation
  * updateQuotation before this feature existed) don't need changes; their fees are folded straight
@@ -143,6 +167,9 @@ export function prepareCart(
      * localSupplierId — never affects pricing/tax math, only how items are grouped at render time
      * (groupItemsBySections, shared/lib/document-sections.ts). */
     sectionLabel?: string | null | undefined;
+    /** Shared-stock variant (docs/VARIANTS.md): its own price (if it has one) replaces the product's
+     * selling price as this line's starting price, and its name is snapshotted onto the line. */
+    variantKey?: string | null | undefined;
   }>,
   extras?: PreparedCartExtras
 ): PreparedCart {
@@ -169,8 +196,10 @@ export function prepareCart(
     // never written back to the product's own selling_price_cents. Everything downstream (discount
     // clamping against minimum_price_cents, tax, line total) runs off this same value either way,
     // so an override needs no special-casing beyond picking the starting number.
+    const variant = resolveCartVariant(product, item.variantKey);
     const unitPriceCents =
-      item.unitPriceCents ?? (useWholesale ? (product.wholesale_price_cents as number) : product.selling_price_cents);
+      item.unitPriceCents ??
+      (useWholesale ? (product.wholesale_price_cents as number) : (variant?.priceCents ?? product.selling_price_cents));
 
     const lineSubtotalCents = unitPriceCents * item.quantity;
     if (item.discountAmountCents > lineSubtotalCents) {
@@ -242,7 +271,9 @@ export function prepareCart(
       // figure for Reports, never folded into any total (see this file's own doc comment above).
       localCostCents: isLocallySourced ? (item.localCostCents ?? null) : null,
       localSupplierId: isLocallySourced ? localSupplierId : null,
-      sectionLabel: item.sectionLabel ?? null
+      sectionLabel: item.sectionLabel ?? null,
+      variantKey: variant?.key ?? null,
+      variantLabel: variant?.label ?? null
     };
   });
 
@@ -514,7 +545,9 @@ export function suspendSale(input: unknown): { id: string } {
         localSupplierId: item.localSupplierId,
         // Always null on the retail Checkout path — sections are Invoices/Quotations-only, see
         // SaleItem["sectionLabel"]'s own doc comment (shared/types/sale.ts).
-        sectionLabel: item.sectionLabel
+        sectionLabel: item.sectionLabel,
+        variantKey: item.variantKey,
+        variantLabel: item.variantLabel
       });
     }
 
@@ -729,7 +762,9 @@ export function insertCompletedSaleFromCart(input: {
         localSupplierId: item.localSupplierId,
         // Always null on the retail Checkout path — sections are Invoices/Quotations-only, see
         // SaleItem["sectionLabel"]'s own doc comment (shared/types/sale.ts).
-        sectionLabel: item.sectionLabel
+        sectionLabel: item.sectionLabel,
+        variantKey: item.variantKey,
+        variantLabel: item.variantLabel
       });
 
       // A locally-sourced line never touched this shop's own shelf — it went straight from the

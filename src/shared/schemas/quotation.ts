@@ -23,7 +23,9 @@ const quotationCartItemSchema = z
     taxInclusiveOverride: optionalBoolean(),
     // Same per-line section grouping as invoiceCartItemSchema's own field — see SaleItem's own
     // sectionLabel doc comment (shared/types/sale.ts).
-    sectionLabel: optionalText(120)
+    sectionLabel: optionalText(120),
+    /** Shared-stock variant for this line (docs/VARIANTS.md) — prepareCart resolves its price and label. */
+    variantKey: optionalText(40),
   })
   .refine(localSourcingRequiresCost, LOCAL_SOURCING_REFINEMENT_OPTS);
 

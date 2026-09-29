@@ -25,7 +25,9 @@ const saleCartItemSchema = z.object({
    * only — the product's own setting is never touched. null (the default) means "use this product's
    * own effective setting" exactly as before; see prepareCart's own taxInclusiveOverride doc comment
    * in sale-service.ts. Meaningless for a non-"vat" product. */
-  taxInclusiveOverride: optionalBoolean()
+  taxInclusiveOverride: optionalBoolean(),
+  /** Shared-stock variant for this line (docs/VARIANTS.md) — prepareCart resolves its price and label. */
+  variantKey: optionalText(40),
 });
 
 /** Shared by suspend (hold the cart) and checkout (hold + pay) — a resumed sale carries its id along.

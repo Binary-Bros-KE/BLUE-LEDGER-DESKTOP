@@ -96,6 +96,8 @@ export type SaleItemRow = {
   local_cost_cents: number | null;
   local_supplier_id: string | null;
   section_label: string | null;
+  variant_key: string | null;
+  variant_label: string | null;
   created_at: string;
 };
 
@@ -569,6 +571,8 @@ export function insertSaleItemRow(input: {
   localCostCents: number | null;
   localSupplierId: string | null;
   sectionLabel: string | null;
+  variantKey?: string | null | undefined;
+  variantLabel?: string | null | undefined;
 }): SaleItemRow {
   const now = new Date().toISOString();
 
@@ -578,9 +582,9 @@ export function insertSaleItemRow(input: {
       INSERT INTO sale_items (
         id, sale_id, product_id, quantity, unit_price_cents,
         discount_amount_cents, tax_type, tax_amount_cents, line_total_cents,
-        is_locally_sourced, local_cost_cents, local_supplier_id, section_label, created_at
+        is_locally_sourced, local_cost_cents, local_supplier_id, section_label, variant_key, variant_label, created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
     )
     .run(
@@ -597,6 +601,8 @@ export function insertSaleItemRow(input: {
       input.localCostCents,
       input.localSupplierId,
       input.sectionLabel,
+      input.variantKey ?? null,
+      input.variantLabel ?? null,
       now
     );
 
@@ -849,7 +855,7 @@ export function mapSaleItemDetailRow(row: SaleItemDetailRow): SaleItem {
     id: row.id,
     saleId: row.sale_id,
     productId: row.product_id,
-    productName: row.product_name,
+    productName: row.variant_label ? `${row.product_name} — ${row.variant_label}` : row.product_name,
     sku: row.sku,
     quantity: row.quantity,
     unitPriceCents: row.unit_price_cents,
@@ -862,6 +868,8 @@ export function mapSaleItemDetailRow(row: SaleItemDetailRow): SaleItem {
     localSupplierId: row.local_supplier_id,
     localSupplierName: row.local_supplier_name,
     sectionLabel: row.section_label,
+    variantKey: row.variant_key ?? null,
+    variantLabel: row.variant_label ?? null,
     createdAt: row.created_at
   };
 }

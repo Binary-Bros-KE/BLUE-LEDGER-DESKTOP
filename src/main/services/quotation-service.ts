@@ -164,7 +164,9 @@ export function createQuotation(input: unknown): Quotation {
         isLocallySourced: item.isLocallySourced,
         localCostCents: item.localCostCents,
         localSupplierId: item.localSupplierId,
-        sectionLabel: item.sectionLabel
+        sectionLabel: item.sectionLabel,
+        variantKey: item.variantKey,
+        variantLabel: item.variantLabel
       });
     }
 
@@ -246,7 +248,9 @@ export function updateQuotation(id: string, input: unknown): Quotation {
         isLocallySourced: item.isLocallySourced,
         localCostCents: item.localCostCents,
         localSupplierId: item.localSupplierId,
-        sectionLabel: item.sectionLabel
+        sectionLabel: item.sectionLabel,
+        variantKey: item.variantKey,
+        variantLabel: item.variantLabel
       });
     }
 
@@ -398,7 +402,9 @@ function repriceLineForQuantity(item: QuotationItemDetailRow, product: ProductRo
     localCostCents: item.local_cost_cents,
     localSupplierId: item.local_supplier_id,
     // Carried over unchanged, same reasoning as originalWasInclusive above.
-    sectionLabel: item.section_label
+    sectionLabel: item.section_label,
+    variantKey: item.variant_key ?? null,
+    variantLabel: item.variant_label ?? null
   };
 }
 
@@ -437,7 +443,9 @@ function buildConversionCart(
       isLocallySourced: Boolean(item.is_locally_sourced),
       localCostCents: item.local_cost_cents,
       localSupplierId: item.local_supplier_id,
-      sectionLabel: item.section_label
+      sectionLabel: item.section_label,
+      variantKey: item.variant_key ?? null,
+      variantLabel: item.variant_label ?? null
     };
   });
 

@@ -39,6 +39,11 @@ export type QuotationItem = {
   /** Same per-line section grouping as SaleItem's own field (shared/types/sale.ts) — see that
    * doc comment and groupItemsBySections (shared/lib/document-sections.ts). */
   sectionLabel: string | null;
+  /** Shared-stock variant sold on this line (docs/VARIANTS.md) — the variant's stable key and a
+   * snapshot of its name ("Red / XL"). Both null for a plain line. productName already has the label
+   * appended ("Travel Mug — Red"), so every receipt/document/report shows it without extra work. */
+  variantKey: string | null;
+  variantLabel: string | null;
   createdAt: string;
 };
 

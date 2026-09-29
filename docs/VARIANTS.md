@@ -45,7 +45,22 @@ From Products → select ≥ 2 → **Group as Variants**.
   named earmarks move bucket-for-bucket, the rest as unallocated. Its barcode moves onto its variant,
   and it is deactivated (history kept). Needs `products:edit` + `inventory:edit`. Not reversible.
 
+## Selling variants
+
+- Checkout, Invoices and Quotations: tapping a product with variants opens `VariantPickerModal`
+  (shared: pick option values, impossible combinations greyed out; separate: pick a product of the
+  group, each with its own price and stock). Scanning a shared variant's barcode/SKU adds it
+  directly; the main product's barcode opens the picker; a separate variant's barcode is simply its
+  own product's.
+- A shared variant line carries `variantKey` + a `variantLabel` snapshot (`sale_items` /
+  `quotation_items`, migration v99; synced inside the items JSON, no SERVER migration needed).
+  `prepareCart` prices it at the variant's own price (a cashier override still wins; wholesale still
+  applies) and rejects a switched-off or deleted variant. Stock always moves on the product itself.
+- `productName` on SaleItem/QuotationItem is "Product — Label", so receipts, invoices, prints,
+  exports and the SERVER share pages all show the variant with no per-screen code.
+- Reports that group by product (Products Sold, etc.) count a shared product's variants together.
+
 ## Phases
 
-A (done) schema, brand, "was" price · B (done) POS management + grouping · C checkout picker,
-barcode scan, variant labels on receipts/invoices/quotations · D website · E mobile app.
+A (done) schema, brand, "was" price · B (done) POS management + grouping · C (done) checkout
+picker, barcode scan, variant labels on receipts/invoices/quotations · D website · E mobile app.
