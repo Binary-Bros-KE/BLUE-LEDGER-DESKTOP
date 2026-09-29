@@ -76,4 +76,4 @@ From Products → select ≥ 2 → **Group as Variants**.
 ## Phases
 
 A (done) schema, brand, "was" price · B (done) POS management + grouping · C (done) checkout
-picker, barcode scan, variant labels on receipts/invoices/quotations · D (done) website · E mobile app.
+picker, barcode scan, variant labels on receipts/invoices/quotations · D (done) website · E (done) mobile app (SERVER prepareMobileCart + APP VariantPickerSheet; mobile edits also keep DESKTOP section labels).
