@@ -60,7 +60,20 @@ From Products → select ≥ 2 → **Group as Variants**.
   exports and the SERVER share pages all show the variant with no per-screen code.
 - Reports that group by product (Products Sold, etc.) count a shared product's variants together.
 
+## Website
+
+- SERVER `src/lib/variants.ts` reads the same columns. `/shop/catalog` collapses a separate-stock
+  group into ONE card (the main product, else its first published member) and prices shared-stock
+  products by their cheapest active variant; `variantSummary {count,min,max}` gives "From …".
+- `/shop/product/:id` returns `variants` (options limited to values that exist, each variant's
+  product, name, label, price and stock). Separate stock: picking a size opens that product's page.
+- `/shop/orders` takes `variantKey` per item, checks it's an active shared variant and re-prices it;
+  a product with variants can't be ordered without a choice. Items keep `variantKey`/`variantLabel`,
+  and "Ring up sale" passes the key on when the variant is still active on the POS.
+- A variant's own price is the same on the POS and the website (the online price override applies
+  to the product's base price only).
+
 ## Phases
 
 A (done) schema, brand, "was" price · B (done) POS management + grouping · C (done) checkout
-picker, barcode scan, variant labels on receipts/invoices/quotations · D website · E mobile app.
+picker, barcode scan, variant labels on receipts/invoices/quotations · D (done) website · E mobile app.
