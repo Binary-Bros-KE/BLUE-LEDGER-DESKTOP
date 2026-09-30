@@ -39,11 +39,27 @@ function diffFields(
   const rows: Array<{ key: string; local: unknown; remote: unknown }> = [];
   for (const key of keys) {
     if (DIFF_IGNORED_FIELDS.has(key)) continue;
-    if (JSON.stringify(local[key]) !== JSON.stringify(remote[key])) {
+    if (canonicalJson(local[key]) !== canonicalJson(remote[key])) {
       rows.push({ key, local: local[key], remote: remote[key] });
     }
   }
   return rows;
+}
+
+/** Key-order-insensitive JSON (mirrors sync-engine.ts's canonicalJson) — the cloud returns object
+ * keys in its own order, which is not a real difference worth showing as a diff row. */
+function canonicalJson(value: unknown): string {
+  return (
+    JSON.stringify(value ?? null, (_key, v: unknown) =>
+      v && typeof v === "object" && !Array.isArray(v)
+        ? Object.fromEntries(
+            Object.keys(v as Record<string, unknown>)
+              .sort()
+              .map((k) => [k, (v as Record<string, unknown>)[k]])
+          )
+        : v
+    ) ?? "null"
+  );
 }
 
 /** Turns a raw payload field name into something a non-technical person can read — "quantityChange"
@@ -107,6 +123,7 @@ export function CloudSyncRoute(): React.JSX.Element {
   const [snapshot, setSnapshot] = useState<SyncSnapshot | null>(null);
   const [queue, setQueue] = useState<SyncQueueItem[] | null>(null);
   const [conflicts, setConflicts] = useState<SyncConflictItem[] | null>(null);
+  const [conflictSearch, setConflictSearch] = useState("");
   const [reconciliations, setReconciliations] = useState<SyncReconciliationItem[] | null>(null);
   const [entityOverview, setEntityOverview] = useState<EntitySyncOverviewRow[] | null>(null);
   const [blocked, setBlocked] = useState<BlockedSyncRecord[]>([]);
@@ -561,8 +578,25 @@ export function CloudSyncRoute(): React.JSX.Element {
             </div>
           </div>
 
+          {conflicts.length > 3 ? (
+            <input
+              type="search"
+              value={conflictSearch}
+              onChange={(e) => setConflictSearch(e.target.value)}
+              placeholder="Search conflicts by name…"
+              aria-label="Search conflicts"
+              className="mt-4 h-10 w-full max-w-sm rounded-md border border-line bg-white px-3 text-sm font-semibold outline-none focus:ring-4 focus:ring-accent/20"
+            />
+          ) : null}
+
           <div className="mt-4 space-y-3">
-            {conflicts.map((conflict) => {
+            {conflictSearch.trim() &&
+            !conflicts.some((c) => c.label.toLowerCase().includes(conflictSearch.trim().toLowerCase())) ? (
+              <p className="text-sm font-semibold text-muted">No conflict matches “{conflictSearch.trim()}”.</p>
+            ) : null}
+            {conflicts
+              .filter((c) => !conflictSearch.trim() || c.label.toLowerCase().includes(conflictSearch.trim().toLowerCase()))
+              .map((conflict) => {
               const rows = diffFields(conflict.localSnapshot, conflict.remoteSnapshot);
               const busy = resolvingId === conflict.id;
               return (

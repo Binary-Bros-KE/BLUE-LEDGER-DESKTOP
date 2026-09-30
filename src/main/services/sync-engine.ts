@@ -1520,7 +1520,11 @@ async function pushOneBatch(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tenantId, deviceId, entity, rows: rows.map((r) => r.payload) }),
-      signal: AbortSignal.timeout(15_000)
+      // 60s, not 15s: a full 200-row batch can take the server longer than 15s to commit, and the
+      // server commits it EVEN AFTER the desktop gives up waiting — the retry then came back as a
+      // "conflict" against this device's own write (caught live 2026-09-30: 510 products stuck
+      // after one bulk publish). SERVER now also never reports a conflict against the same device.
+      signal: AbortSignal.timeout(60_000)
     });
   } catch (err) {
     // Offline/unreachable — every row stays queued/failed for the next cycle. Never throws, but
@@ -4312,11 +4316,30 @@ type ConflictRow = {
  * short, stable lists that only change if a conflict-aware payload shape itself changes). */
 const CONFLICT_IGNORED_FIELDS = new Set(["id", "tenantId", "deviceId", "syncedAt", "baseUpdatedAt", "localCreatedAt", "localUpdatedAt"]);
 
+/** JSON with object keys sorted (at every depth) and undefined treated as null — so two values that
+ * only differ in key ORDER compare equal. Postgres jsonb hands objects back with its own key order
+ * ({"blocks":[],"quickSpecs":[]}) while this device writes {"quickSpecs":[],"blocks":[]}: a plain
+ * JSON.stringify comparison called every product with online content "different", so the phantom
+ * clean-up below never cleared a single product conflict. */
+export function canonicalJson(value: unknown): string {
+  return (
+    JSON.stringify(value ?? null, (_key, v: unknown) =>
+      v && typeof v === "object" && !Array.isArray(v)
+        ? Object.fromEntries(
+            Object.keys(v as Record<string, unknown>)
+              .sort()
+              .map((k) => [k, (v as Record<string, unknown>)[k]])
+          )
+        : v
+    ) ?? "null"
+  );
+}
+
 function snapshotsEffectivelyMatch(local: Record<string, unknown>, remote: Record<string, unknown>): boolean {
   const keys = new Set([...Object.keys(local), ...Object.keys(remote)]);
   for (const key of keys) {
     if (CONFLICT_IGNORED_FIELDS.has(key)) continue;
-    if (JSON.stringify(local[key]) !== JSON.stringify(remote[key])) return false;
+    if (canonicalJson(local[key]) !== canonicalJson(remote[key])) return false;
   }
   return true;
 }
@@ -4335,24 +4358,69 @@ function snapshotsEffectivelyMatch(local: Record<string, unknown>, remote: Recor
  * after every sync cycle (see syncCycle's own call), so a phantom conflict never has to wait for a
  * person to notice and manually dismiss something there was nothing left to decide.
  */
-function clearStalePhantomConflicts(): void {
+export function clearStalePhantomConflicts(): void {
   const db = getDatabase();
   const rows = db
-    .prepare(`SELECT id, entity, entity_id, remote_snapshot_json, updated_at FROM sync_outbox WHERE status = 'conflict'`)
+    .prepare(
+      `SELECT id, entity, entity_id, remote_snapshot_json, updated_at FROM sync_outbox
+       WHERE status = 'conflict' ORDER BY updated_at, rowid`
+    )
     .all() as ConflictRow[];
+  const ownDeviceId = getCloudIdentity()?.deviceId ?? null;
 
+  // Grouped per real row: several breadcrumbs can carry snapshots taken at different times.
+  const groups = new Map<string, ConflictRow[]>();
   for (const row of rows) {
-    if (!row.remote_snapshot_json) continue;
-    const rawPayload = PAYLOAD_BUILDERS[row.entity](row.entity_id);
-    if (!rawPayload) continue;
-    const localSnapshot = resolvePayloadRefsForPush(row.entity, rawPayload) as Record<string, unknown>;
-    const remoteSnapshot = JSON.parse(row.remote_snapshot_json) as Record<string, unknown>;
-    if (!snapshotsEffectivelyMatch(localSnapshot, remoteSnapshot)) continue;
+    const key = `${row.entity}\u0000${row.entity_id}`;
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
 
-    db.prepare(
-      `UPDATE sync_outbox SET status = 'synced', remote_snapshot_json = NULL, updated_at = ?
-       WHERE entity = ? AND entity_id = ? AND status = 'conflict'`
-    ).run(new Date().toISOString(), row.entity, row.entity_id);
+  for (const group of groups.values()) {
+    const snapshots = group
+      .filter((r) => r.remote_snapshot_json)
+      .map((r) => ({ row: r, snap: JSON.parse(r.remote_snapshot_json as string) as Record<string, unknown> }));
+    const latest = snapshots[snapshots.length - 1];
+    if (!latest) continue;
+    const { entity, entity_id: entityId } = latest.row;
+    const remoteVersion = typeof latest.snap.localUpdatedAt === "string" ? latest.snap.localUpdatedAt : null;
+
+    try {
+      const rawPayload = PAYLOAD_BUILDERS[entity](entityId);
+      if (!rawPayload) continue;
+      const localSnapshot = resolvePayloadRefsForPush(entity, rawPayload) as Record<string, unknown>;
+
+      // 1) Nothing left to decide — both sides hold the same data. Clear it AND adopt the server's
+      // version as this row's baseline: without the baseline, the very next edit of this row was
+      // pushed against the old one and bounced straight back into a new conflict.
+      if (snapshotsEffectivelyMatch(localSnapshot, latest.snap)) {
+        runInTransaction(() => {
+          db.prepare(
+            `UPDATE sync_outbox SET status = 'synced', remote_snapshot_json = NULL, updated_at = ?
+             WHERE entity = ? AND entity_id = ? AND status = 'conflict'`
+          ).run(new Date().toISOString(), entity, entityId);
+          if (remoteVersion) {
+            markSyncedBaseline(entity, entityId, remoteVersion);
+            const pending = db
+              .prepare(`SELECT 1 FROM sync_outbox WHERE entity = ? AND entity_id = ? AND status IN ('queued', 'failed') LIMIT 1`)
+              .get(entity, entityId);
+            if (!pending) markSourceRowSynced(entity, entityId);
+          }
+        });
+        continue;
+      }
+
+      // 2) The server's current version is one THIS device wrote (a push that landed server-side
+      // after the desktop had already timed out waiting, then retried — or another device merely
+      // re-sent that same version unchanged). Nobody else's edit sits in between, so this device's
+      // newer local edits simply win: exactly what pressing "Keep Mine" does.
+      const selfAuthored =
+        ownDeviceId !== null &&
+        remoteVersion !== null &&
+        snapshots.some((s) => s.snap.deviceId === ownDeviceId && s.snap.localUpdatedAt === remoteVersion);
+      if (selfAuthored) resolveConflict(latest.row.id, "mine");
+    } catch (err) {
+      console.error(`[sync] Could not auto-clear conflict for ${entity}/${entityId}:`, err);
+    }
   }
 }
 
