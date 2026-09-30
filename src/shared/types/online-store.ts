@@ -28,6 +28,8 @@ export type StoreOwnerView = {
     themeJson: Record<string, unknown>;
     deliveryJson: Record<string, unknown>;
     paymentOptionsJson: Record<string, unknown>;
+    /** Website price markup — absent on older servers (= none). */
+    pricing?: WebPricing;
   } | null;
   /** Always-works subdomain URL (preview + fallback); null if no store row yet. */
   previewUrl: string | null;
@@ -39,8 +41,24 @@ export type StoreOwnerView = {
   activeProductCount: number;
 };
 
+/** Website price markup (SERVER lib/web-pricing.ts): shelf price + markupPercent, rounded to the
+ * nearest roundTo whole units. A product's own online price is never marked up. */
+export type WebPricing = { markupPercent: number; roundTo: number };
+
+export const WEB_ROUND_TO_OPTIONS = [1, 5, 10, 50, 100] as const;
+
+export const NO_WEB_MARKUP: WebPricing = { markupPercent: 0, roundTo: 1 };
+
+/** Same formula as the server — for showing website prices in the POS. */
+export function webMarkUp(cents: number, pricing: WebPricing): number {
+  if (!pricing.markupPercent) return cents;
+  const step = pricing.roundTo * 100;
+  return Math.round((cents * (1 + pricing.markupPercent / 100)) / step) * step;
+}
+
 /** Patch for POST /shop-admin/store/update — only the keys present are written. */
 export type StoreConfigPatch = {
+  pricingJson?: WebPricing;
   themeJson?: Record<string, unknown>;
   deliveryJson?: Record<string, unknown>;
   paymentOptionsJson?: Record<string, unknown>;

@@ -28,12 +28,13 @@ import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { Category } from "@shared/types/category";
-import type { StoreOwnerView } from "@shared/types/online-store";
+import { NO_WEB_MARKUP, webMarkUp, type StoreOwnerView, type WebPricing } from "@shared/types/online-store";
 import type { OnlineContentBlock, Product, ProductListItem } from "@shared/types/product";
 import { DeliveryPanel } from "./online-store/DeliveryPanel";
 import { ThemePanel } from "./online-store/ThemePanel";
 import { AdiaHomePanel } from "./online-store/AdiaHomePanel";
 import { NewsletterPanel } from "./online-store/NewsletterPanel";
+import { PricingCard } from "./online-store/PricingCard";
 
 type PublishFilter = "all" | "published" | "unpublished";
 
@@ -50,9 +51,9 @@ const STORE_STATUS_STYLE: Record<string, string> = {
   SUSPENDED: "bg-danger text-white"
 };
 
-/** Effective online price for a product — its override, or its normal selling price. */
-function effectivePriceCents(product: ProductListItem | Product): number {
-  return product.onlinePriceCents ?? product.sellingPriceCents;
+/** Effective online price for a product — its override, or its shelf price + the website markup. */
+function effectivePriceCents(product: ProductListItem | Product, pricing: WebPricing): number {
+  return product.onlinePriceCents ?? webMarkUp(product.sellingPriceCents, pricing);
 }
 
 type WebsiteSection = "products" | "home" | "look" | "delivery" | "subscribers";
@@ -89,6 +90,7 @@ export function OnlineStoreRoute({ section = "products" }: { section?: WebsiteSe
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const pricing = overview?.store?.pricing ?? NO_WEB_MARKUP;
 
   const loadOverview = useCallback(async () => {
     setOverviewError(null);
@@ -336,6 +338,10 @@ export function OnlineStoreRoute({ section = "products" }: { section?: WebsiteSe
       </div>
       ) : null}
 
+      {tab === "products" && overview?.store ? (
+        <PricingCard pricing={pricing} currency={currency} canEdit={canEdit} onSaved={setOverview} />
+      ) : null}
+
       {tab === "look" || tab === "delivery" || tab === "home" || tab === "subscribers" ? (
         !overview?.store ? (
           <p className="rounded-lg border border-line bg-white p-5 text-sm font-semibold text-muted shadow-soft">
@@ -480,10 +486,10 @@ export function OnlineStoreRoute({ section = "products" }: { section?: WebsiteSe
 
                   <div className="flex-none text-right">
                     <p className="text-sm font-extrabold tabular-nums">
-                      {formatCents(effectivePriceCents(product))}
+                      {formatCents(effectivePriceCents(product, pricing))}
                     </p>
                     <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted">
-                      {priceOverridden ? "Online price" : `${currency} shelf price`}
+                      {priceOverridden ? "Online price" : pricing.markupPercent ? `Shelf + ${pricing.markupPercent}%` : `${currency} shelf price`}
                     </p>
                   </div>
 
@@ -527,6 +533,7 @@ export function OnlineStoreRoute({ section = "products" }: { section?: WebsiteSe
           key={editingProduct.id}
           product={editingProduct}
           imageUploadsEnabled={overview?.imageUploadsEnabled ?? false}
+          pricing={pricing}
           onClose={() => setEditingId(null)}
           onSaved={(updated) => {
             mergeProduct(updated);
@@ -542,11 +549,13 @@ export function OnlineStoreRoute({ section = "products" }: { section?: WebsiteSe
 function OnlineProductModal({
   product,
   imageUploadsEnabled,
+  pricing,
   onClose,
   onSaved
 }: {
   product: ProductListItem;
   imageUploadsEnabled: boolean;
+  pricing: WebPricing;
   onClose: () => void;
   onSaved: (updated: Product) => void;
 }): React.JSX.Element {
@@ -673,11 +682,15 @@ function OnlineProductModal({
     <Modal open onClose={onClose} title={product.name} description={`SKU ${product.sku}`} widthClassName="max-w-xl">
       <div className="space-y-5">
         <Field
-          label="Online price (leave blank to use the shelf price)"
+          label={
+            pricing.markupPercent
+              ? `Online price (leave blank for shelf price + ${pricing.markupPercent}%)`
+              : "Online price (leave blank to use the shelf price)"
+          }
           type="text"
           value={priceText}
           onChange={setPriceText}
-          placeholder={fromCents(product.sellingPriceCents)}
+          placeholder={fromCents(webMarkUp(product.sellingPriceCents, pricing))}
         />
 
         <div>
@@ -690,7 +703,7 @@ function OnlineProductModal({
           />
           {(() => {
             const was = wasText.trim() ? toCents(wasText.trim()) : 0;
-            const now = priceText.trim() ? toCents(priceText.trim()) : product.sellingPriceCents;
+            const now = priceText.trim() ? toCents(priceText.trim()) : webMarkUp(product.sellingPriceCents, pricing);
             if (!was) return null;
             if (was <= now) {
               return (
