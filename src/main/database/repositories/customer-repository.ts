@@ -151,6 +151,49 @@ export function updateCustomerRow(id: string, input: CustomerInput): CustomerRow
   return row;
 }
 
+/**
+ * Self-heals customers.current_balance_cents from ground truth — mirrors
+ * supplier-balance-repository.ts's reconcileAllSupplierBalances exactly (same reasoning: run on
+ * every boot and at the end of every sync cycle, so any drift from any cause self-corrects within
+ * about one cycle). Fixes a real, long-standing bug: this column was hardcoded to 0 at customer
+ * creation (insertCustomerRow) and never written to anywhere else — every customer has always shown
+ * a balance of 0 on the Customers list/detail view, regardless of actual unpaid invoices. The real,
+ * correct balance was only ever computed live elsewhere (statement-service.ts's getCustomerStatement,
+ * report-repository.ts's findOutstandingDebtors) — this makes current_balance_cents agree with those
+ * by construction, using the exact same formula findOutstandingDebtors already uses: unpaid invoices
+ * (completed, has an invoice_number, not paid/cancelled, not voided), net of approved returns, never
+ * negative per-invoice. current_balance_cents is purely LOCAL and never synced (see sync-engine.ts's
+ * PAYLOAD_BUILDERS.customers and its pull-apply column list, both of which already exclude it) — this
+ * direct recompute is safe to run independently, in any order, on any number of devices.
+ */
+export function reconcileAllCustomerBalances(tenantId: string): void {
+  getDatabase()
+    .prepare(
+      `
+      UPDATE customers SET current_balance_cents = (
+        COALESCE((
+          SELECT SUM(MAX(0, s.grand_total_cents - s.amount_paid_cents - COALESCE(ret.returned_value_cents, 0)))
+          FROM sales s
+          LEFT JOIN (
+            SELECT si.sale_id AS sale_id, SUM(sri.line_total_cents) AS returned_value_cents
+            FROM sale_return_items sri
+            JOIN sale_returns sr ON sr.id = sri.sale_return_id AND sr.status = 'approved'
+            JOIN sale_items si ON si.id = sri.sale_item_id
+            GROUP BY si.sale_id
+          ) ret ON ret.sale_id = s.id
+          WHERE s.customer_id = customers.id
+            AND s.sale_status = 'completed'
+            AND s.invoice_number IS NOT NULL
+            AND s.payment_status NOT IN ('paid', 'cancelled')
+            AND s.id NOT IN (SELECT sale_id FROM sale_voids WHERE status = 'approved')
+        ), 0)
+      )
+      WHERE customers.tenant_id = ?
+    `
+    )
+    .run(tenantId);
+}
+
 export function setCustomerStatusRow(id: string, status: CustomerStatus): CustomerRow {
   const now = new Date().toISOString();
 

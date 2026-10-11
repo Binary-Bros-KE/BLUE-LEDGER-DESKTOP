@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.node.json",
+  "compilerOptions": {
+    "baseUrl": "..",
+    "paths": {
+      "@main/services/image-service": ["./.xxx-test/shims/main/services/image-service.ts"],
+      "electron": ["./.xxx-test/shims/electron.ts"],
+      "@main/*": ["src/main/*"],
+      "@shared/*": ["src/shared/*"]
+    },
+    "noEmit": true
+  },
+  "include": ["**/*.ts"]
+}
