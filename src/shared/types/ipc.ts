@@ -938,6 +938,10 @@ export type IpcInvokeMap = {
     args: [];
     result: InvoiceListItem[];
   };
+  "invoice:main-store-availability": {
+    args: [string | null, string[]];
+    result: StockRequestAvailability[];
+  };
   "invoice:summary": {
     args: [];
     result: InvoiceSummary;
@@ -1902,6 +1906,10 @@ export type BlueLedgerApi = {
     list: () => Promise<IpcInvokeMap["invoice:list"]["result"]>;
     summary: () => Promise<IpcInvokeMap["invoice:summary"]["result"]>;
     create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["invoice:create"]["result"]>;
+    mainStoreAvailability: (
+      storefrontId: string | null,
+      productIds: string[]
+    ) => Promise<IpcInvokeMap["invoice:main-store-availability"]["result"]>;
     update: (id: string, input: Record<string, unknown>) => Promise<IpcInvokeMap["invoice:update"]["result"]>;
     recordPayment: (
       id: string,

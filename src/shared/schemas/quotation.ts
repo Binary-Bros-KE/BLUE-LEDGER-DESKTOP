@@ -80,12 +80,28 @@ export const quotationUpdateSchema = quotationCreateSchema;
 
 export type QuotationUpdateInput = z.infer<typeof quotationUpdateSchema>;
 
+/** 0 is allowed and means "leave this line off" — what a user does with a line neither the
+ * storefront nor the Main Store can supply right now (see buildConversionCart). */
 const quotationConvertItemOverrideSchema = z.object({
   productId: z.string().trim().min(1),
-  quantity: z.coerce.number().int().positive("Quantity must be greater than 0")
+  quantity: z.coerce.number().int().min(0, "Quantity can't be negative")
 });
 
 /** Lets the user trim quantities at conversion time if the stock check comes back short. */
+/** Lines the user marked "Sourced from another shop" in the convert dialog — bought elsewhere on
+ * the spot rather than taken from stock (no stock check, no deduction). localCostCents is the line's
+ * TOTAL buying cost (see money.ts), required just like on any locally-sourced cart line. */
+const convertSourcedLinesFieldSchema = z
+  .array(
+    z.object({
+      productId: z.string().trim().min(1),
+      localCostCents: z.coerce.number().int().positive("Enter the buying price for this locally-sourced item"),
+      localSupplierId: optionalText(64)
+    })
+  )
+  .optional()
+  .default([]);
+
 export const convertToSaleSchema = z.object({
   paymentMethodId: z.string().trim().min(1, "Select a payment method"),
   paymentReference: optionalText(120),
@@ -97,7 +113,8 @@ export const convertToSaleSchema = z.object({
     .nullable()
     .optional()
     .transform((value) => (value === undefined ? null : value)),
-  quantityOverrides: z.array(quotationConvertItemOverrideSchema).optional().default([])
+  quantityOverrides: z.array(quotationConvertItemOverrideSchema).optional().default([]),
+  sourcedLines: convertSourcedLinesFieldSchema
 });
 
 export type ConvertToSaleInput = z.infer<typeof convertToSaleSchema>;
@@ -105,12 +122,16 @@ export type ConvertToSaleInput = z.infer<typeof convertToSaleSchema>;
 export const convertToInvoiceSchema = z.object({
   dueDate: z.string().trim().min(1, "Due date is required"),
   quantityOverrides: z.array(quotationConvertItemOverrideSchema).optional().default([]),
+  sourcedLines: convertSourcedLinesFieldSchema,
   /** Per-line stock source (see invoiceStockSourceSchema), keyed by productId — same keying as
    * quantityOverrides. A line not listed takes "storefront". */
   stockSources: z
     .array(z.object({ productId: z.string().trim().min(1), stockSource: invoiceStockSourceSchema }))
     .optional()
-    .default([])
+    .default([]),
+  /** Only read for a walk-in quotation (no customer of its own): an invoice needs someone real to
+   * bill, so the convert dialog asks for one. Ignored when the quotation already has a customer. */
+  customerId: optionalText(64)
 });
 
 export type ConvertToInvoiceInput = z.infer<typeof convertToInvoiceSchema>;

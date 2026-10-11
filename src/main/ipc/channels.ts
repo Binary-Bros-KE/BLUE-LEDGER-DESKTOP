@@ -210,6 +210,7 @@ export const ipcChannels = {
   invoiceList: "invoice:list",
   invoiceSummary: "invoice:summary",
   invoiceCreate: "invoice:create",
+  invoiceMainStoreAvailability: "invoice:main-store-availability",
   invoiceUpdate: "invoice:update",
   invoiceRecordPayment: "invoice:record-payment",
   invoiceCancel: "invoice:cancel",

@@ -286,6 +286,7 @@ const api: BlueLedgerApi = {
     list: () => invoke("invoice:list"),
     summary: () => invoke("invoice:summary"),
     create: (input) => invoke("invoice:create", input),
+    mainStoreAvailability: (storefrontId, productIds) => invoke("invoice:main-store-availability", storefrontId, productIds),
     update: (id, input) => invoke("invoice:update", id, input),
     recordPayment: (id, input) => invoke("invoice:record-payment", id, input),
     cancel: (id, input) => invoke("invoice:cancel", id, input),

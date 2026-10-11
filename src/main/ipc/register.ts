@@ -40,6 +40,7 @@ import {
 import {
   createInvoice,
   duplicateInvoice,
+  getInvoiceMainStoreAvailability,
   getInvoiceSummary,
   listInvoices,
   markInvoicePaid,
@@ -805,6 +806,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.invoiceList, () => listInvoices());
   ipcMain.handle(ipcChannels.invoiceSummary, () => getInvoiceSummary());
   ipcMain.handle(ipcChannels.invoiceCreate, (_event, input: unknown) => createInvoice(input));
+  ipcMain.handle(ipcChannels.invoiceMainStoreAvailability, (_event, storefrontId: string | null, productIds: string[]) =>
+    getInvoiceMainStoreAvailability(storefrontId, Array.isArray(productIds) ? productIds : [])
+  );
   ipcMain.handle(ipcChannels.invoiceUpdate, (_event, id: string, input: unknown) => updateInvoice(id, input));
   ipcMain.handle(ipcChannels.invoiceRecordPayment, (_event, id: string, input: unknown) =>
     recordInvoicePayment(id, input)

@@ -11,12 +11,15 @@ import {
   getCurrentBranchScope,
   getCurrentEmployeeId,
   getSession,
-  requirePermission
+  requirePermission,
+  requirePermissionAnyOf
 } from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
 import { createDeliveryCostExpenseIfNeeded } from "@main/services/expense-service";
 import {
   deductInvoiceLineStock,
+  findMainStoreIdIfEnabled,
+  mainStoreAvailableForStorefront,
   resolveLineStockLocationIds,
   restockInvoiceLineStock,
   stockSourceOfLocation
@@ -309,6 +312,32 @@ export function insertInvoiceFromCart(input: {
   });
 
   return saleId;
+}
+
+/** What the Main Store can supply `storefrontId` per product for a Main Store invoice line — that
+ * storefront's earmark + unallocated (mainStoreAvailableForStorefront), the exact figure a Main Store
+ * line is held to. Backs the invoice/quotation forms' per-line stock pills. Deliberately its own
+ * call rather than main-store:availability-for-stock-request (gated behind stock_requests, which a
+ * cashier invoicing may not hold). Empty when the admin's "Invoice stock from Main Store" toggle is
+ * off. A branch-scoped session always reads its own branch, whatever storefrontId says. */
+export function getInvoiceMainStoreAvailability(
+  storefrontId: string | null,
+  productIds: string[]
+): Array<{ productId: string; availableQuantity: number }> {
+  requirePermissionAnyOf([
+    ["sales", "create"],
+    ["sales", "edit"],
+    ["quotations", "create"],
+    ["quotations", "edit"]
+  ]);
+  const { tenantId } = getCurrentTenant();
+  const target = getCurrentBranchScope() ?? storefrontId;
+  const mainStoreId = findMainStoreIdIfEnabled(tenantId);
+  if (!target || !mainStoreId) return [];
+  return [...new Set(productIds)].map((productId) => ({
+    productId,
+    availableQuantity: mainStoreAvailableForStorefront(productId, mainStoreId, target)
+  }));
 }
 
 export function listInvoices(): InvoiceListItem[] {

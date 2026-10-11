@@ -8,6 +8,7 @@ import type { ProductRow } from "@main/database/repositories/product-repository"
 import * as quotationRepository from "@main/database/repositories/quotation-repository";
 import type { QuotationItemDetailRow } from "@main/database/repositories/quotation-repository";
 import * as serviceChargeRepository from "@main/database/repositories/service-charge-repository";
+import * as supplierRepository from "@main/database/repositories/supplier-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
 import { insertInvoiceFromCart } from "@main/services/invoice-service";
@@ -420,12 +421,35 @@ function repriceLineForQuantity(item: QuotationItemDetailRow, product: ProductRo
 function buildConversionCart(
   quotationId: string,
   tenantId: string,
-  quantityOverrides: Array<{ productId: string; quantity: number }>
+  quantityOverrides: Array<{ productId: string; quantity: number }>,
+  sourcedLines: Array<{ productId: string; localCostCents: number; localSupplierId: string | null }> = []
 ): PreparedCart {
-  const items = quotationRepository.findQuotationItemDetailRows(quotationId);
-  const overrideByProduct = new Map(quantityOverrides.map((entry) => [entry.productId, entry.quantity]));
+  // A line marked "Sourced from another shop" in the convert dialog is bought elsewhere on the spot:
+  // it keeps its full quoted quantity (no stock cap applies), and the sale/invoice skips stock for it.
+  const sourcedByProduct = new Map(sourcedLines.map((entry) => [entry.productId, entry]));
+  for (const entry of sourcedLines) {
+    if (entry.localSupplierId) {
+      const supplier = supplierRepository.findSupplierRowById(entry.localSupplierId);
+      if (!supplier || supplier.tenant_id !== tenantId) {
+        throw new Error("Selected local supplier was not found");
+      }
+    }
+  }
+  const overrideByProduct = new Map(
+    quantityOverrides.filter((entry) => !sourcedByProduct.has(entry.productId)).map((entry) => [entry.productId, entry.quantity])
+  );
+  // An override of 0 leaves the line off entirely — the answer to "neither the storefront nor the
+  // Main Store has this right now" (repriceLineForQuantity can't price a 0-quantity line anyway).
+  const items = quotationRepository
+    .findQuotationItemDetailRows(quotationId)
+    .filter((item) => overrideByProduct.get(item.product_id) !== 0);
 
-  const preparedItems: PreparedItem[] = items.map((item) => {
+  const preparedItems: PreparedItem[] = items.map((item): PreparedItem => {
+    const sourced = sourcedByProduct.get(item.product_id);
+    const asSourced = (prepared: PreparedItem): PreparedItem =>
+      sourced
+        ? { ...prepared, isLocallySourced: true, localCostCents: sourced.localCostCents, localSupplierId: sourced.localSupplierId }
+        : prepared;
     const product = productRepository.findProductRowById(item.product_id);
     if (!product || product.tenant_id !== tenantId) {
       throw new Error(`"${item.product_name}" is no longer available and can't be converted`);
@@ -436,10 +460,10 @@ function buildConversionCart(
 
     const override = overrideByProduct.get(item.product_id);
     if (override !== undefined && override !== item.quantity) {
-      return repriceLineForQuantity(item, product, override);
+      return asSourced(repriceLineForQuantity(item, product, override));
     }
 
-    return {
+    return asSourced({
       product,
       quantity: item.quantity,
       unitPriceCents: item.unit_price_cents,
@@ -453,7 +477,7 @@ function buildConversionCart(
       sectionLabel: item.section_label,
       variantKey: item.variant_key ?? null,
       variantLabel: item.variant_label ?? null
-    };
+    });
   });
 
   let subtotalCents = 0;
@@ -475,6 +499,9 @@ function buildConversionCart(
   const deliveryRow = deliveryNoteRepository.findDeliveryNoteRowByQuotationId(quotationId);
   const delivery = deliveryRow ? deliveryNoteRepository.mapDeliveryNoteRow(deliveryRow) : null;
   const extraFeesCents = serviceCharges.reduce((sum, charge) => sum + charge.feeCents, 0) + (delivery?.feeCents ?? 0);
+  if (preparedItems.length === 0 && serviceCharges.length === 0) {
+    throw new Error("Every line is set to 0 — there's nothing left to convert.");
+  }
 
   // Sums each line's own grossCents rather than branching off one global toggle — mirrors
   // prepareCart's own grandTotalCents formula in sale-service.ts (see its comment), since a
@@ -526,7 +553,7 @@ export function convertQuotationToSale(id: string, input: unknown): Sale {
   const parsed: ConvertToSaleInput = convertToSaleSchema.parse(input);
   const { quotation, tenantId, employeeId, locationId } = requireAcceptedQuotationAtActiveBranch(id);
 
-  const cart = buildConversionCart(quotation.id, tenantId, parsed.quantityOverrides);
+  const cart = buildConversionCart(quotation.id, tenantId, parsed.quantityOverrides, parsed.sourcedLines);
 
   const sale = insertCompletedSaleFromCart({
     tenantId,
@@ -564,17 +591,26 @@ export function convertQuotationToInvoice(id: string, input: unknown): Sale {
   // problem the Checkout-style Walk-in Customer option was deliberately kept OUT of invoice creation
   // to avoid (see Quotation["customerId"]'s own doc comment). Caught here, not left to whatever
   // insertInvoiceFromCart/the local NOT NULL-less-but-still-required-by-convention field would do.
+  // A walk-in quotation gets its customer picked right in the convert dialog (parsed.customerId)
+  // rather than being a dead end — there's no other place to attach one once it's accepted.
+  const customerId = quotation.customerId ?? parsed.customerId;
+  if (!customerId) {
+    throw new Error("This quotation was for a walk-in customer — choose who to bill before converting it to an invoice.");
+  }
   if (!quotation.customerId) {
-    throw new Error("This quotation has no customer — pick a customer before converting it to an invoice.");
+    const customer = customerRepository.findCustomerRowById(customerId);
+    if (!customer || customer.tenant_id !== tenantId) {
+      throw new Error("Customer not found");
+    }
   }
 
-  const cart = buildConversionCart(quotation.id, tenantId, parsed.quantityOverrides);
+  const cart = buildConversionCart(quotation.id, tenantId, parsed.quantityOverrides, parsed.sourcedLines);
 
   const saleId = insertInvoiceFromCart({
     tenantId,
     employeeId,
     locationId,
-    customerId: quotation.customerId,
+    customerId,
     transactionType: "invoice",
     dueDate: parsed.dueDate,
     invoiceNotes: quotation.notes,
