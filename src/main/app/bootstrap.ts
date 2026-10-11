@@ -3,43 +3,18 @@ import { join } from "node:path";
 import electron from "electron";
 import { migrateDatabase, type MigrationFailure } from "@main/database/migrate";
 import { ensureDefaultExpenseCategories } from "@main/services/expense-category-service";
-import { ensureExpensesHaveStorefront } from "@main/services/expense-service";
 import { reconcileAllCustomerBalances } from "@main/database/repositories/customer-repository";
 import { reconcileAllSupplierBalances } from "@main/database/repositories/supplier-balance-repository";
 import { registerIpcHandlers } from "@main/ipc/register";
 import { ensureDefaultSystemEmployee } from "@main/services/employee-service";
 import { ensureMainStoreLocation } from "@main/services/location-service";
-import { ensureCreditPaymentMethodDeactivated, ensureDefaultPaymentMethods } from "@main/services/payment-method-service";
-import {
-  consolidateToFourCoreRoles,
-  ensureBorrowsPermission,
-  ensureDataImportPermission,
-  ensureDefaultRoles,
-  ensureExpensesPermissions,
-  ensureLocalPurchasesPermission,
-  ensureMainStorePermission,
-  ensureManagerEmployeesPermission,
-  ensureOnlineStorePermission,
-  ensureOwnerAppPermission,
-  ensureQuotationsPermission,
-  ensureRidersPermission,
-  ensureSalariesPermission,
-  ensureStockRequestsPermission,
-  ensureStorekeeperCategoriesPermission,
-  ensureStorekeeperProductPermissions,
-  ensureSuperAdminFlag,
-  ensureSuperAdminRole,
-  fixCashierPermissionDrift,
-  restrictReportsToAdminRoles,
-  restrictSuppliersFromCashier
-} from "@main/services/role-service";
+import { ensureDefaultPaymentMethods } from "@main/services/payment-method-service";
+import { ensureDefaultRoles, ensureSuperAdminRole } from "@main/services/role-service";
 import { ensureTenantContext } from "@main/services/tenant-service";
 import { checkInWithServer } from "@main/services/license-service";
 import { checkDrift, syncCycle } from "@main/services/sync-engine";
 import { checkForUpdates, isUpdateInstallInProgress } from "@main/services/update-service";
 import { createMainWindow } from "@main/windows/main-window";
-import { seedDemoData } from "@main/dev/seed-demo-data";
-import { verifyImport } from "@main/dev/verify-import";
 
 const { app, dialog } = electron;
 
@@ -121,63 +96,24 @@ export async function bootstrap(): Promise<void> {
 
   logMigrationFailures(migrateDatabase());
   const tenant = ensureTenantContext();
+  // Seeding ONLY — each of these creates something a brand-new install doesn't have yet and is a
+  // no-op once it exists. Nothing here may modify data a user can change (role permissions, payment
+  // methods, expenses…): a one-time correction belongs in a versioned migration (runs once) or a
+  // manual script that is deleted after use — never an every-boot function. Every-boot "fixups"
+  // that kept re-applying old corrections were removed on 2026-10-11 after they overrode admins'
+  // own choices on every launch.
   ensureDefaultRoles(tenant.tenantId);
   ensureSuperAdminRole(tenant.tenantId);
-  ensureSuperAdminFlag(tenant.tenantId);
-  consolidateToFourCoreRoles(tenant.tenantId);
-  ensureQuotationsPermission(tenant.tenantId);
-  ensureStorekeeperProductPermissions(tenant.tenantId);
-  ensureStorekeeperCategoriesPermission(tenant.tenantId);
-  ensureExpensesPermissions(tenant.tenantId);
-  ensureSalariesPermission(tenant.tenantId);
-  ensureRidersPermission(tenant.tenantId);
-  ensureLocalPurchasesPermission(tenant.tenantId);
-  ensureBorrowsPermission(tenant.tenantId);
-  ensureStockRequestsPermission(tenant.tenantId);
-  ensureMainStorePermission(tenant.tenantId);
-  ensureManagerEmployeesPermission(tenant.tenantId);
-  ensureDataImportPermission(tenant.tenantId);
-  ensureOwnerAppPermission(tenant.tenantId);
-  ensureOnlineStorePermission(tenant.tenantId);
-  restrictReportsToAdminRoles(tenant.tenantId);
-  restrictSuppliersFromCashier(tenant.tenantId);
-  fixCashierPermissionDrift(tenant.tenantId);
   ensureMainStoreLocation(tenant.tenantId);
   ensureDefaultSystemEmployee(tenant.tenantId);
   ensureDefaultPaymentMethods(tenant.tenantId);
-  ensureCreditPaymentMethodDeactivated(tenant.tenantId);
   ensureDefaultExpenseCategories(tenant.tenantId);
-  ensureExpensesHaveStorefront(tenant.tenantId);
   // Self-heals suppliers.balance_cents from ground truth on every boot too, not just every sync
   // cycle — see reconcileAllSupplierBalances's own doc comment.
   reconcileAllSupplierBalances(tenant.tenantId);
   // Same self-healing treatment for customers.current_balance_cents — see
   // reconcileAllCustomerBalances's own doc comment (customer-repository.ts).
   reconcileAllCustomerBalances(tenant.tenantId);
-
-  if (process.env.BLUE_LEDGER_SEED_DEMO === "1") {
-    try {
-      await seedDemoData();
-    } catch (error) {
-      console.error("[seed] FAILED:", error);
-    } finally {
-      app.quit();
-    }
-    return;
-  }
-
-  // Temporary verification scaffolding for the bulk Import feature — see verify-import.ts's own
-  // doc comment. Only ever point BLUE_LEDGER_DATA_DIR at a scratch copy of the DB when using this.
-  if (process.env.BLUE_LEDGER_VERIFY_IMPORT === "1") {
-    try {
-      await verifyImport();
-    } catch (error) {
-      console.error("[verify-import] FAILED:", error);
-    } finally {
-      app.quit();
-    }
-    return;
-  }
 
   registerIpcHandlers();
 

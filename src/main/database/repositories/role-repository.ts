@@ -98,21 +98,6 @@ export function insertRoleRow(input: {
   return row;
 }
 
-/** Dedicated, narrow setter — deliberately NOT part of updateRoleRow's general input shape, since
- * this flag must never be reachable from the user-facing Roles & Permissions form (createRole/
- * updateRole). Only role-service.ts's ensureSuperAdminFlag calls this. */
-export function setRoleSuperAdminFlagRow(id: string, isSuperAdmin: boolean): RoleRow {
-  const now = new Date().toISOString();
-  getDatabase()
-    .prepare("UPDATE roles SET is_super_admin = ?, sync_status = 'pending', updated_at = ? WHERE id = ?")
-    .run(isSuperAdmin ? 1 : 0, now, id);
-
-  const row = findRoleRowById(id);
-  if (!row) {
-    throw new Error("Role not found after update");
-  }
-  return row;
-}
 
 export function updateRoleRow(
   id: string,

@@ -94,7 +94,12 @@ export function RolesRoute(): React.JSX.Element {
     return (form.permissions[moduleKey] ?? []).includes(action);
   }
 
+  // Super Admin has every permission by definition (auth-service.ts derives it at sign-in), so its
+  // boxes are shown all-ticked and locked rather than editable-but-ignored.
+  const lockedFullAccess = Boolean(editingRole?.isSuperAdmin);
+
   function toggleAction(moduleKey: PermissionModuleKey, action: PermissionAction): void {
+    if (lockedFullAccess) return;
     setForm((prev) => {
       const current = new Set(prev.permissions[moduleKey] ?? []);
       if (current.has(action)) {
@@ -107,6 +112,7 @@ export function RolesRoute(): React.JSX.Element {
   }
 
   function toggleRow(moduleKey: PermissionModuleKey, actions: readonly PermissionAction[]): void {
+    if (lockedFullAccess) return;
     setForm((prev) => {
       const current = prev.permissions[moduleKey] ?? [];
       const allGranted = actions.every((action) => current.includes(action));
@@ -118,6 +124,7 @@ export function RolesRoute(): React.JSX.Element {
   }
 
   function toggleColumn(action: PermissionAction): void {
+    if (lockedFullAccess) return;
     setForm((prev) => {
       const applicableModules = PERMISSION_MODULES.filter((module) =>
         (module.actions as readonly PermissionAction[]).includes(action)
@@ -367,7 +374,9 @@ export function RolesRoute(): React.JSX.Element {
           {editingRole?.isSystemRole && (
             <p className="mt-2 flex items-center gap-1.5 text-[11px] font-bold text-accent">
               <Lock className="size-3.5 flex-none" aria-hidden="true" />
-              This is a system role — its name is locked, but you can still tune its permissions.
+              {lockedFullAccess
+                ? "Super Admin always has every permission — including any module added in a future update. It can't be restricted; create a custom role for limited access."
+                : "This is a system role — its name is locked, but you can still tune its permissions."}
             </p>
           )}
 
@@ -414,9 +423,10 @@ export function RolesRoute(): React.JSX.Element {
                             {applicable ? (
                               <input
                                 type="checkbox"
-                                checked={isActionChecked(module.key, action)}
+                                checked={lockedFullAccess || isActionChecked(module.key, action)}
                                 onChange={() => toggleAction(module.key, action)}
-                                className="size-4 accent-primary"
+                                disabled={lockedFullAccess}
+                                className="size-4 accent-primary disabled:cursor-not-allowed"
                               />
                             ) : (
                               <span className="text-muted/30">—</span>

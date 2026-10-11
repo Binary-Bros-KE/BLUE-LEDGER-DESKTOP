@@ -71,27 +71,6 @@ export function assertValidPaymentMethod(tenantId: string, input: ExpenseInput):
   }
 }
 
-/**
- * Retroactively assigns a real storefront to any expense created before "General/Head Office" (a
- * null storefront) was removed — picked randomly per row, since there's no way to know after the
- * fact which storefront actually incurred it. New expenses can no longer be created without one
- * (expenseInputSchema requires it). Safe every boot: a no-op once no expense has a null storefront.
- */
-export function ensureExpensesHaveStorefront(tenantId: string): void {
-  const ids = expenseRepository.findExpenseIdsWithoutStorefront(tenantId);
-  if (ids.length === 0) return;
-
-  const storefronts = locationRepository
-    .findAllLocationRows(tenantId)
-    .filter((row) => isStorefrontType(row.location_type as LocationType) && row.status === "active");
-  if (storefronts.length === 0) return;
-
-  for (const id of ids) {
-    const randomStorefront = storefronts[Math.floor(Math.random() * storefronts.length)];
-    if (!randomStorefront) continue;
-    expenseRepository.setExpenseStorefrontRow(id, randomStorefront.id);
-  }
-}
 
 function getExpenseDetail(id: string): Expense {
   const row = expenseRepository.findExpenseDetailRowById(id);

@@ -7,7 +7,7 @@ import { loginInputSchema } from "@shared/schemas/auth";
 import type { AuthSession } from "@shared/types/auth";
 import type { EmployeeRow } from "@main/database/repositories/employee-repository";
 import type { LogoRatio } from "@shared/types/logo";
-import type { PermissionAction, PermissionModuleKey } from "@shared/types/role";
+import { PERMISSION_MODULES, type PermissionAction, type PermissionModuleKey, type PermissionsMap } from "@shared/types/role";
 
 const MAX_FAILED_ATTEMPTS = 10;
 const LOCKOUT_MINUTES = 15;
@@ -39,8 +39,18 @@ function buildSession(row: EmployeeRow, tenantId: string): AuthSession {
           logoRatio: branchRow.logo_ratio as LogoRatio | null
         }
       : null,
-    permissions: role?.permissions ?? {}
+    // A Super Admin role has every permission by definition — derived here from the live module list
+    // rather than read from its stored JSON, which only lists the modules that existed when the role
+    // was seeded. That staleness is what the old every-boot "ensure…Permission" re-grants papered
+    // over (and those also kept overriding admins' own choices); a module added later just works.
+    permissions: role?.isSuperAdmin ? allPermissions() : (role?.permissions ?? {})
   };
+}
+
+function allPermissions(): PermissionsMap {
+  const map: PermissionsMap = {};
+  for (const module of PERMISSION_MODULES) map[module.key] = [...module.actions];
+  return map;
 }
 
 export function login(input: unknown): AuthSession {
@@ -93,26 +103,6 @@ export function logout(): void {
   currentSession = null;
 }
 
-/**
- * Sets the active session for a known employee id, bypassing the PIN check entirely — never wired
- * to any IPC channel, callable only from trusted in-process dev tooling (the demo-data seed script,
- * gated behind BLUE_LEDGER_SEED_DEMO). Lets the seed script attribute sales/purchases/etc. to the
- * correct real employee (and therefore the correct branch, via that employee's own assignment)
- * without needing to know anyone's PIN.
- */
-export function setSessionForSeeding(employeeId: string): AuthSession {
-  const row = employeeRepository.findEmployeeRowById(employeeId);
-  if (!row) {
-    throw new Error(`Seed: employee ${employeeId} not found`);
-  }
-  const tenantRow = tenantRepository.findTenantRow();
-  if (!tenantRow) {
-    throw new Error("Tenant has not been initialized yet");
-  }
-  const session = buildSession(row, tenantRow.id);
-  currentSession = session;
-  return session;
-}
 
 export function getSession(): AuthSession | null {
   return currentSession;
