@@ -13,7 +13,12 @@ export const STOCK_MOVEMENT_TYPE_OPTIONS = [
   { value: "borrow_in", label: "Borrowed In" },
   { value: "borrow_return_out", label: "Returned Borrowed Stock" },
   { value: "loan_out", label: "Lent Out" },
-  { value: "loan_return_in", label: "Loan Returned" }
+  { value: "loan_return_in", label: "Loan Returned" },
+  // A confirmed web order holding its items so the till can't sell them again, and that hold being
+  // given back (cancelled / un-confirmed / completed — completion then records the real "sale"). Only
+  // ever created by online-store-service.ts.
+  { value: "online_hold", label: "Online Order Held" },
+  { value: "online_release", label: "Online Order Released" }
 ] as const;
 
 export type StockMovementType = (typeof STOCK_MOVEMENT_TYPE_OPTIONS)[number]["value"];
@@ -32,7 +37,9 @@ export const MANUAL_STOCK_MOVEMENT_TYPE_OPTIONS = STOCK_MOVEMENT_TYPE_OPTIONS.fi
     option.value !== "borrow_in" &&
     option.value !== "borrow_return_out" &&
     option.value !== "loan_out" &&
-    option.value !== "loan_return_in"
+    option.value !== "loan_return_in" &&
+    option.value !== "online_hold" &&
+    option.value !== "online_release"
 );
 
 /** Movement types where the backend/UI infers the sign — the user only ever enters a magnitude. */

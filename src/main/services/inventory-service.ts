@@ -22,8 +22,8 @@ import type {
   StockTransferResult
 } from "@shared/types/stock-movement";
 
-const INCREASING_MOVEMENT_TYPES = new Set(["purchase", "transfer_in", "return", "opening_stock", "borrow_in", "loan_return_in"]);
-const DECREASING_MOVEMENT_TYPES = new Set(["sale", "transfer_out", "damage", "borrow_return_out", "loan_out"]);
+const INCREASING_MOVEMENT_TYPES = new Set(["purchase", "transfer_in", "return", "opening_stock", "borrow_in", "loan_return_in", "online_release"]);
+const DECREASING_MOVEMENT_TYPES = new Set(["sale", "transfer_out", "damage", "borrow_return_out", "loan_out", "online_hold"]);
 
 /** transfer_in/transfer_out must only ever be created as a matched pair via recordStockTransfer;
  * the four borrow/lend movements must only ever be created by borrow-service.ts's own actions. */
@@ -33,7 +33,9 @@ const STANDALONE_BLOCKED_TYPES = new Set<StockMovementType>([
   "borrow_in",
   "borrow_return_out",
   "loan_out",
-  "loan_return_in"
+  "loan_return_in",
+  "online_hold",
+  "online_release"
 ]);
 
 function assertValidDirection(input: StockMovementInput): void {

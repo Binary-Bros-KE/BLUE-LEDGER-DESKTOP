@@ -8,6 +8,7 @@ import {
   FileText,
   History,
   Loader2,
+  Lock,
   MessageCircle,
   Package,
   Receipt,
@@ -21,6 +22,7 @@ import {
 import { Button } from "@renderer/shared/components/Button";
 import { useConfirm } from "@renderer/shared/components/ConfirmModal";
 import { ProductThumbnail } from "@renderer/shared/components/ProductThumbnail";
+import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
@@ -34,6 +36,7 @@ import type {
 } from "@shared/types/online-store";
 import { CompleteOrderModal } from "./CompleteOrderModal";
 import { FulfilmentCards } from "./FulfilmentCards";
+import { HoldStorefrontModal } from "./HoldStorefrontModal";
 import { OrderDocumentsModal, type OrderDocument } from "./OrderDocumentsModal";
 import type { OrderMessageRequest } from "./OrderMessageModal";
 import { RecordPaymentModal } from "./RecordPaymentModal";
@@ -99,6 +102,26 @@ export function OrderDetail({
   const [shipOpen, setShipOpen] = useState(false);
   const [completeOpen, setCompleteOpen] = useState(false);
   const [documentOpen, setDocumentOpen] = useState<OrderDocument | null>(null);
+  const [holdPickOpen, setHoldPickOpen] = useState(false);
+  const [holdStorefrontId, setHoldStorefrontId] = useState<string | null>(null);
+  const [holdBranchName, setHoldBranchName] = useState<string | null>(null);
+  const { session } = usePermissions();
+
+  const holdLocationId = order.stockHold?.locationId ?? null;
+  useEffect(() => {
+    setHoldBranchName(null);
+    if (!holdLocationId) return;
+    let cancelled = false;
+    void window.blueLedger.location
+      .get(holdLocationId)
+      .then((loc) => {
+        if (!cancelled) setHoldBranchName(loc?.locationName ?? null);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [holdLocationId]);
 
   useEffect(() => {
     setPaymentOpen(false);
@@ -118,24 +141,42 @@ export function OrderDetail({
     });
   }
 
-  async function moveTo(status: OnlineOrderStatus, opts?: { riderId?: string | null; tell?: boolean }): Promise<void> {
+  async function moveTo(
+    status: OnlineOrderStatus,
+    opts?: { riderId?: string | null; tell?: boolean; storefrontId?: string }
+  ): Promise<void> {
     setBusy(true);
     try {
-      const updated = await window.blueLedger.onlineOrders.setStatus({ id: order.id, status, riderId: opts?.riderId ?? null });
+      const updated = await window.blueLedger.onlineOrders.setStatus({
+        id: order.id,
+        status,
+        riderId: opts?.riderId ?? null,
+        storefrontId: opts?.storefrontId ?? holdStorefrontId
+      });
       showSuccessToast(`${order.orderNumber} — ${STATUS_LABEL[status].toLowerCase()}`);
       setShipOpen(false);
+      setHoldPickOpen(false);
       onChanged(updated);
       if (opts?.tell !== false) offerMessage(updated, status);
     } catch (err) {
+      // e.g. 'Insufficient stock for "X" at Branch. Available: 0, requested: 2' — confirming holds stock
       showErrorToast(getErrorMessage(err, "Couldn't update the order"));
     } finally {
       setBusy(false);
     }
   }
 
+  // Moving past pending holds the order's stock at a branch: the user's own, else the store's
+  // fulfilment branch — a branch-less user on a store without one picks it first.
+  const needsHoldBranch = !order.stockHold && !session?.branch && !order.fulfilmentLocationId;
+
   async function advance(): Promise<void> {
     const next = nextStatus(order);
     if (!next) return;
+    if (needsHoldBranch && !holdStorefrontId) {
+      setHoldPickOpen(true);
+      return;
+    }
     if (next === "SHIPPED") {
       setShipOpen(true);
       return;
@@ -148,7 +189,9 @@ export function OrderDetail({
     if (!prev) return;
     const ok = await confirm({
       title: `Move ${order.orderNumber} back?`,
-      message: `It goes back to "${STATUS_LABEL[prev]}". Use this to fix a step marked by mistake.`,
+      message: `It goes back to "${STATUS_LABEL[prev]}". Use this to fix a step marked by mistake.${
+        prev === "NEW" && order.stockHold ? " The held stock goes back on the shelf." : ""
+      }`,
       tone: "primary",
       confirmLabel: "Move back",
       cancelLabel: "Keep it"
@@ -161,8 +204,8 @@ export function OrderDetail({
       title: `Cancel ${order.orderNumber}?`,
       message:
         order.paidCents > 0
-          ? `${money(order.paidCents)} was paid on this order — refund the customer yourself; cancelling doesn't move money. You can message ${order.customerName} next.`
-          : `You can message ${order.customerName} about it next.`,
+          ? `${order.stockHold ? "The held stock goes back on the shelf. " : ""}${money(order.paidCents)} was paid on this order — refund the customer yourself; cancelling doesn't move money. You can message ${order.customerName} next.`
+          : `${order.stockHold ? "The held stock goes back on the shelf. " : ""}You can message ${order.customerName} about it next.`,
       tone: "danger",
       confirmLabel: "Cancel order",
       cancelLabel: "Keep order"
@@ -278,6 +321,13 @@ export function OrderDetail({
       <div className="border-b border-line p-5">
         <div className="mb-3 flex items-center justify-between">
           <SectionLabel>Items ({order.items.reduce((s, it) => s + it.qty, 0)})</SectionLabel>
+          {order.stockHold ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-extrabold text-accent">
+              <Lock className="size-3" aria-hidden="true" /> Stock held{holdBranchName ? ` at ${holdBranchName}` : ""}
+            </span>
+          ) : order.status === "NEW" ? (
+            <span className="text-[10px] font-bold text-muted">Stock is held when you confirm</span>
+          ) : null}
         </div>
         <div className="space-y-2.5">
           {order.items.map((it, index) => (
@@ -475,6 +525,20 @@ export function OrderDetail({
         }}
       />
       <OrderDocumentsModal order={order} document={documentOpen} onClose={() => setDocumentOpen(null)} />
+      <HoldStorefrontModal
+        order={order}
+        open={holdPickOpen}
+        busy={busy}
+        onClose={() => setHoldPickOpen(false)}
+        onChoose={(storefrontId) => {
+          setHoldStorefrontId(storefrontId);
+          setHoldPickOpen(false);
+          // state lands next render — continue with the chosen branch explicitly
+          const next = nextStatus(order);
+          if (next === "SHIPPED") setShipOpen(true);
+          else if (next) void moveTo(next, { storefrontId });
+        }}
+      />
     </div>
   );
 }

@@ -3496,6 +3496,66 @@ const migrations = [
       WHERE stock_location_id IS NULL
         AND EXISTS (SELECT 1 FROM sales s WHERE s.id = sale_items.sale_id AND s.stock_location_id IS NOT NULL);
     `
+  },
+  {
+    version: 103,
+    name: "stock_movements_online_order_hold",
+    sql: `
+      -- A confirmed web order holds its items out of stock (online_hold) so the till can't sell them
+      -- again; cancelling / un-confirming puts them back, and completing the order releases the hold
+      -- (online_release) in the same transaction as the sale's own movements — see
+      -- online-store-service.ts. Same table rebuild as migration 82 (SQLite can't ALTER a CHECK),
+      -- carrying the previous_quantity/new_quantity columns migration 83 added.
+      ALTER TABLE stock_movements RENAME TO stock_movements_pre_online_hold;
+
+      CREATE TABLE stock_movements (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        location_id TEXT NOT NULL,
+        movement_type TEXT NOT NULL CHECK (movement_type IN (
+          'purchase', 'sale', 'transfer_in', 'transfer_out', 'return', 'damage', 'adjustment', 'opening_stock',
+          'borrow_in', 'borrow_return_out', 'loan_out', 'loan_return_in', 'online_hold', 'online_release'
+        )),
+        quantity_change INTEGER NOT NULL,
+        reference_type TEXT,
+        reference_id TEXT,
+        performed_by TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        allocation_storefront_id TEXT,
+        allocation_explicit INTEGER NOT NULL DEFAULT 0,
+        previous_quantity INTEGER,
+        new_quantity INTEGER,
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (product_id) REFERENCES products(id),
+        FOREIGN KEY (location_id) REFERENCES locations(id)
+      );
+
+      INSERT INTO stock_movements (
+        id, tenant_id, product_id, location_id, movement_type, quantity_change, reference_type,
+        reference_id, performed_by, notes, created_at, sync_status, last_synced_at,
+        allocation_storefront_id, allocation_explicit, previous_quantity, new_quantity
+      )
+      SELECT
+        id, tenant_id, product_id, location_id, movement_type, quantity_change, reference_type,
+        reference_id, performed_by, notes, created_at, sync_status, last_synced_at,
+        allocation_storefront_id, allocation_explicit, previous_quantity, new_quantity
+      FROM stock_movements_pre_online_hold;
+
+      DROP TABLE stock_movements_pre_online_hold;
+
+      CREATE INDEX IF NOT EXISTS idx_stock_movements_product_location ON stock_movements(product_id, location_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_stock_movements_tenant_created ON stock_movements(tenant_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_stock_movements_reference ON stock_movements(reference_type, reference_id);
+
+      CREATE TRIGGER trg_stock_movements_sync_ai AFTER INSERT ON stock_movements BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'stock_movements', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.created_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+    `
   }
 ] as const;
 

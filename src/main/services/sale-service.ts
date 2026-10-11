@@ -705,6 +705,9 @@ export function insertCompletedSaleFromCart(input: {
    * amounts already add up to exactly the grand total. paymentMethodId/paymentReference above are
    * then the largest of them, kept so everything reading the single-method columns still works. */
   payments?: SalePayment[];
+  /** Runs inside the sale's own transaction, before its stock movements — a completed web order
+   * gives back its held stock here, so the release and the sale land (or fail) together. */
+  beforeStockMovements?: () => void;
 }): Sale {
   const { tenantId, employeeId, locationId, cart } = input;
 
@@ -718,6 +721,7 @@ export function insertCompletedSaleFromCart(input: {
 
   return runInTransaction(() => {
     discardResumedSale(tenantId, input.resumeSaleId ?? null);
+    input.beforeStockMovements?.();
 
     const receiptNumber = generateReceiptNumber(tenantId);
     const now = new Date().toISOString();

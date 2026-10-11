@@ -23,7 +23,7 @@ import {
   type StockMovementWithUnitPrice
 } from "@shared/types/stock-movement";
 
-const INCREASING_TYPES = new Set(["purchase", "transfer_in", "return", "opening_stock", "borrow_in", "loan_return_in"]);
+const INCREASING_TYPES = new Set(["purchase", "transfer_in", "return", "opening_stock", "borrow_in", "loan_return_in", "online_release"]);
 
 function movementTone(type: StockMovementType): "success" | "danger" | "neutral" {
   if (INCREASING_TYPES.has(type)) return "success";

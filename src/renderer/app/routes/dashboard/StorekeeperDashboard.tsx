@@ -29,7 +29,8 @@ const INCREASING_TYPES = new Set<StockMovementType>([
   "return",
   "opening_stock",
   "borrow_in",
-  "loan_return_in"
+  "loan_return_in",
+  "online_release"
 ]);
 
 function movementTone(type: StockMovementType): "success" | "danger" | "neutral" {

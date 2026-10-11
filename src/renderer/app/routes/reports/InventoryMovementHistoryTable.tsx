@@ -19,6 +19,8 @@ const MOVEMENT_LABEL: Record<string, string> = {
   borrow_return_out: "Returned Borrowed Stock",
   loan_out: "Lent Out",
   loan_return_in: "Loan Returned",
+  online_hold: "Online Order Held",
+  online_release: "Online Order Released",
 };
 
 const MOVEMENT_STYLE: Record<string, string> = {
@@ -34,6 +36,8 @@ const MOVEMENT_STYLE: Record<string, string> = {
   loan_return_in: "bg-success/10 text-success",
   borrow_return_out: "bg-warning/10 text-warning",
   loan_out: "bg-warning/10 text-warning",
+  online_hold: "bg-accent/10 text-accent",
+  online_release: "bg-accent/10 text-accent",
 };
 
 function formatCreatedAt(iso: string): string {

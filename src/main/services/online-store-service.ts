@@ -9,6 +9,7 @@ import * as productRepository from "@main/database/repositories/product-reposito
 import * as riderRepository from "@main/database/repositories/rider-repository";
 import * as saleRepository from "@main/database/repositories/sale-repository";
 import { getSession, requirePermission } from "@main/services/auth-service";
+import { applyValidatedStockMovement } from "@main/services/inventory-service";
 import { insertCompletedSaleFromCart, prepareCart, requireActiveSession } from "@main/services/sale-service";
 import { API_BASE_URL } from "@main/services/license-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
@@ -21,8 +22,10 @@ import type {
   OnlineOrder,
   OnlineOrderFulfilmentInput,
   OnlineOrderList,
+  OnlineOrderListQuery,
   OnlineOrderStatus,
   OnlineOrderStatusChange,
+  OnlineOrderStockHold,
   OnlineOrderSummary,
   RecordOnlineOrderPaymentInput,
   DeliveryMethodInput,
@@ -266,11 +269,14 @@ function withLocalProductInfo(order: OnlineOrder): OnlineOrder {
   };
 }
 
-export async function listOnlineOrders(statuses: OnlineOrderStatus[] | "ALL", page: number): Promise<OnlineOrderList> {
+export async function listOnlineOrders(query: OnlineOrderListQuery): Promise<OnlineOrderList> {
   const result = await postShopAdmin<OnlineOrderList>("/shop-admin/orders", {
-    ...(statuses === "ALL" ? { status: "ALL" } : { statuses }),
-    page,
-    pageSize: 30
+    ...(query.statuses === "ALL" ? { status: "ALL" } : { statuses: query.statuses }),
+    page: query.page,
+    pageSize: 30,
+    ...(query.search ? { search: query.search } : {}),
+    ...(query.from ? { from: query.from } : {}),
+    ...(query.to ? { to: query.to } : {})
   });
   return { ...result, orders: result.orders.map(withLocalProductInfo) };
 }
@@ -280,23 +286,115 @@ export function onlineOrderSummary(): Promise<OnlineOrderSummary> {
   return postShopAdmin<OnlineOrderSummary>("/shop-admin/orders/summary", {});
 }
 
-/** One step forward/back, cancel or reopen — SERVER refuses anything out of order. */
+// --- Stock hold: a confirmed order's items are taken out of the branch so the till can't sell them
+// again. online_hold movements when it's confirmed (or moved past pending without one — older
+// orders), online_release when it's cancelled / un-confirmed (here) or completed (inside the sale's
+// own transaction, convertOnlineOrderToSale). The cloud order records the hold, and SERVER clears it
+// atomically, so exactly one till ever gives it back.
+
+/** Steps after pending: the order's stock must be held from here on. */
+const HOLDING_STATUSES: ReadonlySet<OnlineOrderStatus> = new Set(["CONFIRMED", "READY", "SHIPPED", "PICKED_UP", "DELIVERED"]);
+
+/** Quantities per product (variants share their product's stock), stock-tracked products only. */
+function holdItemsFor(order: OnlineOrder, tenantId: string): OnlineOrderStockHold["items"] {
+  const qty = new Map<string, number>();
+  for (const item of order.items) {
+    const row = productRepository.findProductRowById(item.productId);
+    if (!row || row.tenant_id !== tenantId) {
+      throw new Error(`"${item.name}" isn't on this computer yet — run Cloud Sync, then try again.`);
+    }
+    if (row.track_stock) qty.set(item.productId, (qty.get(item.productId) ?? 0) + item.qty);
+  }
+  return [...qty].map(([productId, q]) => ({ productId, qty: q }));
+}
+
+/** Writes the hold / release movements. Call inside a transaction. */
+function moveHeldStock(
+  kind: "online_hold" | "online_release",
+  order: Pick<OnlineOrder, "id" | "orderNumber">,
+  hold: Pick<OnlineOrderStockHold, "locationId" | "items">,
+  tenantId: string,
+  employeeId: string
+): void {
+  for (const item of hold.items) {
+    applyValidatedStockMovement(
+      {
+        productId: item.productId,
+        locationId: hold.locationId,
+        movementType: kind,
+        quantityChange: kind === "online_hold" ? -item.qty : item.qty,
+        referenceType: "online_order",
+        referenceId: order.id,
+        performedBy: employeeId,
+        notes: `Web order ${order.orderNumber}`
+      },
+      tenantId
+    );
+  }
+}
+
+/** Gives held stock back — unless this order already became a sale here (its hold was released in
+ * that sale's transaction; only the cloud link was missing). */
+function releaseHeldStock(order: OnlineOrder, hold: OnlineOrderStockHold, tenantId: string, employeeId: string): void {
+  if (saleRepository.findSaleByNoteMarkerRow(tenantId, `[Web order ${order.orderNumber}]`)) return;
+  runInTransaction(() => moveHeldStock("online_release", order, hold, tenantId, employeeId));
+}
+
+/** One step forward/back, cancel or reopen — SERVER refuses anything out of order. Moving past
+ * pending holds the order's stock (refused, with the product and what's available, if the branch
+ * doesn't have it); going back to pending or cancelling gives it back. */
 export async function setOnlineOrderStatus(input: OnlineOrderStatusChange): Promise<OnlineOrder> {
   requirePermission("online_store", "edit");
+  const { tenantId } = getCurrentTenant();
+  const who = actor();
   let riderName: string | null = null;
   if (input.status === "SHIPPED" && input.riderId) {
     const rider = riderRepository.findRiderRowById(input.riderId);
-    if (!rider || rider.tenant_id !== getCurrentTenant().tenantId) throw new Error("Rider not found");
+    if (!rider || rider.tenant_id !== tenantId) throw new Error("Rider not found");
     riderName = rider.name;
   }
-  const order = await postShopAdmin<OnlineOrder>("/shop-admin/orders/status", {
-    id: input.id,
-    status: input.status,
-    riderId: input.status === "SHIPPED" ? (input.riderId ?? null) : null,
-    riderName,
-    actorName: actor().name
-  });
+
+  const current = await getOnlineOrder(input.id);
+  let hold: Pick<OnlineOrderStockHold, "locationId" | "items"> | null = null;
+  if (HOLDING_STATUSES.has(input.status) && !current.stockHold && current.status !== input.status && isOpenOrder(current)) {
+    const { locationId } = requireActiveSession(input.storefrontId ?? current.fulfilmentLocationId);
+    hold = { locationId, items: holdItemsFor(current, tenantId) };
+    const taken = hold;
+    runInTransaction(() => moveHeldStock("online_hold", current, taken, tenantId, who.id));
+  }
+
+  let result: OnlineOrder & { holdAccepted?: boolean; releasedHold?: OnlineOrderStockHold | null };
+  try {
+    result = await postShopAdmin("/shop-admin/orders/status", {
+      id: input.id,
+      status: input.status,
+      riderId: input.status === "SHIPPED" ? (input.riderId ?? null) : null,
+      riderName,
+      stockHold: hold,
+      actorName: who.name
+    });
+  } catch (err) {
+    // The step didn't happen — put back what we just held.
+    if (hold) {
+      const taken = hold;
+      runInTransaction(() => moveHeldStock("online_release", current, taken, tenantId, who.id));
+    }
+    throw err;
+  }
+
+  // Another till got there first and already holds this order's stock — ours is surplus.
+  if (hold && !result.holdAccepted) {
+    const taken = hold;
+    runInTransaction(() => moveHeldStock("online_release", current, taken, tenantId, who.id));
+  }
+  if (result.releasedHold) releaseHeldStock(current, result.releasedHold, tenantId, who.id);
+
+  const { holdAccepted: _accepted, releasedHold: _released, ...order } = result;
   return withLocalProductInfo(order);
+}
+
+function isOpenOrder(order: OnlineOrder): boolean {
+  return order.status !== "COMPLETED" && order.status !== "CANCELLED" && !order.linkedSaleId;
 }
 
 /** Validates the payment method locally (this POS owns them), then records the payment on the cloud
@@ -403,7 +501,9 @@ export async function convertOnlineOrderToSale(input: ConvertOnlineOrderInput): 
     throw new Error(`Mark ${order.orderNumber} ${route} before completing it.`);
   }
 
-  const { tenantId, employeeId, locationId } = requireActiveSession(input.storefrontId ?? order.fulfilmentLocationId);
+  const { tenantId, employeeId, locationId } = requireActiveSession(
+    input.storefrontId ?? order.stockHold?.locationId ?? order.fulfilmentLocationId
+  );
 
   // Sale already saved here on an earlier try whose cloud link failed (offline) — just link it now.
   const marker = `[Web order ${order.orderNumber}]`;
@@ -493,6 +593,7 @@ export async function convertOnlineOrderToSale(input: ConvertOnlineOrderInput): 
     }
   }
   const primary = payments[0]!;
+  const heldStock = order.stockHold;
 
   const noteParts = [marker, `${order.customerName} ${order.customerPhone}`];
   if (order.notes) noteParts.push(order.notes);
@@ -510,7 +611,10 @@ export async function convertOnlineOrderToSale(input: ConvertOnlineOrderInput): 
     notes: noteParts.join(" · "),
     // A single payment is fully described by the sale's own method columns (same as Checkout);
     // two or more keep each one, which reports then split by method.
-    ...(payments.length > 1 ? { payments } : {})
+    ...(payments.length > 1 ? { payments } : {}),
+    // The confirmed order's held stock goes back first, then the sale takes it — one transaction, so
+    // stock history shows a proper sale and nothing is ever double-counted.
+    ...(heldStock ? { beforeStockMovements: () => moveHeldStock("online_release", order, heldStock, tenantId, employeeId) } : {})
   });
 
   // The goods already reached the customer — the delivery note starts life delivered.

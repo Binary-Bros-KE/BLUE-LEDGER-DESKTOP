@@ -36,6 +36,7 @@ import type {
   OnlineOrder,
   OnlineOrderFulfilmentInput,
   OnlineOrderList,
+  OnlineOrderListQuery,
   OnlineOrderStatus,
   OnlineOrderStatusChange,
   OnlineOrderSummary,
@@ -406,7 +407,7 @@ export type IpcInvokeMap = {
     result: WebDeliveryMethod[];
   };
   "online-orders:list": {
-    args: [statuses: OnlineOrderStatus[] | "ALL", page: number];
+    args: [query: OnlineOrderListQuery];
     result: OnlineOrderList;
   };
   "online-orders:summary": {
@@ -1639,10 +1640,7 @@ export type BlueLedgerApi = {
     ) => Promise<IpcInvokeMap["online-store:delivery-reorder"]["result"]>;
   };
   onlineOrders: {
-    list: (
-      statuses: OnlineOrderStatus[] | "ALL",
-      page: number
-    ) => Promise<IpcInvokeMap["online-orders:list"]["result"]>;
+    list: (query: OnlineOrderListQuery) => Promise<IpcInvokeMap["online-orders:list"]["result"]>;
     summary: () => Promise<IpcInvokeMap["online-orders:summary"]["result"]>;
     setStatus: (
       input: OnlineOrderStatusChange

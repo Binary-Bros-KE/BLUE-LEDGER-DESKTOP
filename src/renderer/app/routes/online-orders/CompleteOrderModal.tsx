@@ -33,7 +33,7 @@ export function CompleteOrderModal({
   const methods = useActivePaymentMethods(open);
   const [methodId, setMethodId] = useState("");
   const [reference, setReference] = useState("");
-  const [storefrontId, setStorefrontId] = useState(order.fulfilmentLocationId ?? "");
+  const [storefrontId, setStorefrontId] = useState(order.stockHold?.locationId ?? order.fulfilmentLocationId ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,9 +41,9 @@ export function CompleteOrderModal({
     if (!open) return;
     setMethodId("");
     setReference("");
-    setStorefrontId(order.fulfilmentLocationId ?? "");
+    setStorefrontId(order.stockHold?.locationId ?? order.fulfilmentLocationId ?? "");
     setError(null);
-  }, [open, order.id, order.fulfilmentLocationId]);
+  }, [open, order.id, order.stockHold?.locationId, order.fulfilmentLocationId]);
 
   const method = useMemo(() => methods.find((m) => m.id === methodId) ?? null, [methods, methodId]);
   const money = (cents: number) => `${currency} ${formatCents(cents)}`.trim();
@@ -89,7 +89,11 @@ export function CompleteOrderModal({
             <p className="font-extrabold text-ink">Heads up — this converts the order into a sale</p>
             <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs font-semibold text-muted">
               <li>A receipt is created and it counts in all your sales reports.</li>
-              <li>Stock for every item is deducted now.</li>
+              <li>
+                {order.stockHold
+                  ? "The stock held for this order becomes the sale's stock (no double deduction)."
+                  : "Stock for every item is deducted now."}
+              </li>
               <li>The payments below become the sale&apos;s payments.</li>
               {delivery && <li>A delivery note is created, already marked delivered.</li>}
               <li>It can&apos;t be undone from here — use Returns/Void on the receipt if needed.</li>

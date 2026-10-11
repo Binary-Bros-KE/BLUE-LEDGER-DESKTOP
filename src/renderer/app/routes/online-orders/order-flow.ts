@@ -90,7 +90,9 @@ export function stageHint(order: OnlineOrder): string {
       : "Handed over and fully paid. Complete the order to turn it into a sale.";
   }
   const next = nextStatus(order);
-  if (order.status === "NEW") return "Call or WhatsApp the customer, then confirm the order.";
+  if (order.status === "NEW") {
+    return "Call or WhatsApp the customer, then confirm the order — confirming holds its items out of stock so nobody sells them at the till.";
+  }
   return next ? `Next: ${STATUS_LABEL[next].toLowerCase()}.` : "";
 }
 

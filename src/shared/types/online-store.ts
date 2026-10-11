@@ -460,6 +460,15 @@ export type OnlineOrder = {
   /** rider it was shipped with (delivery orders) */
   riderId: string | null;
   riderName: string | null;
+  /** stock held out of a branch since the order was confirmed (online_hold movements) — the till
+   * can't sell it again; given back on cancel / un-confirm, released into the sale on completion */
+  stockHold: OnlineOrderStockHold | null;
+};
+
+export type OnlineOrderStockHold = {
+  locationId: string;
+  items: { productId: string; qty: number }[];
+  heldAt: string;
 };
 
 /** Move an order one step (forward / back), cancel or reopen it. */
@@ -468,6 +477,9 @@ export type OnlineOrderStatusChange = {
   status: OnlineOrderStatus;
   /** SHIPPED only — a local rider; its name is looked up here */
   riderId?: string | null;
+  /** branch to hold the stock at, for a session with no branch of its own (e.g. Super Admin) when
+   * the store has no fulfilment branch either — see requireActiveSession */
+  storefrontId?: string | null;
 };
 
 export type RecordOnlineOrderPaymentInput = {
@@ -506,6 +518,17 @@ export type ConvertOnlineOrderResult = {
   deliveryNoteNumber: string | null;
   /** the sale is recorded, but the cloud order couldn't be marked (offline?) — tell the user */
   linkWarning: string | null;
+};
+
+export type OnlineOrderListQuery = {
+  statuses: OnlineOrderStatus[] | "ALL";
+  page: number;
+  /** order number, customer name, phone or email */
+  search: string | null;
+  /** placed on/after (ISO instant) */
+  from: string | null;
+  /** placed before (ISO instant) */
+  to: string | null;
 };
 
 export type OnlineOrderList = {

@@ -1,5 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Globe, Loader2, PackageCheck, RefreshCw, ShoppingBag, Store, Truck, Workflow } from "lucide-react";
+import {
+  CalendarDays,
+  CheckCircle2,
+  Globe,
+  Loader2,
+  PackageCheck,
+  RefreshCw,
+  Search,
+  ShoppingBag,
+  Store,
+  Truck,
+  Workflow,
+  X
+} from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { StatTile } from "@renderer/shared/components/StatTile";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
@@ -13,19 +26,68 @@ import { OrderDetail } from "./online-orders/OrderDetail";
 import { OrderMessageModal, type OrderMessageRequest } from "./online-orders/OrderMessageModal";
 import { PAYMENT_LABEL, PAYMENT_PILL, STATUS_LABEL, STATUS_PILL, paymentState, routeOf } from "./online-orders/order-flow";
 
-type TabKey = "pending" | "confirmed" | "on_the_way" | "to_complete" | "completed" | "cancelled" | "all";
+type TabKey = "all" | "pending" | "confirmed" | "on_the_way" | "to_complete" | "completed" | "cancelled";
 
 const TABS: { key: TabKey; label: string; statuses: OnlineOrderStatus[] | "ALL" }[] = [
+  { key: "all", label: "All orders", statuses: "ALL" },
   { key: "pending", label: "Pending", statuses: ["NEW"] },
   { key: "confirmed", label: "Confirmed", statuses: ["CONFIRMED"] },
   { key: "on_the_way", label: "Ready / Shipped", statuses: ["READY", "SHIPPED"] },
   { key: "to_complete", label: "To complete", statuses: ["PICKED_UP", "DELIVERED"] },
   { key: "completed", label: "Completed", statuses: ["COMPLETED"] },
-  { key: "cancelled", label: "Cancelled", statuses: ["CANCELLED"] },
-  { key: "all", label: "All", statuses: "ALL" }
+  { key: "cancelled", label: "Cancelled", statuses: ["CANCELLED"] }
 ];
 
+type DateKey = "any" | "today" | "yesterday" | "7d" | "30d" | "month" | "custom";
+
+const DATE_OPTIONS: { key: DateKey; label: string }[] = [
+  { key: "any", label: "Any date" },
+  { key: "today", label: "Today" },
+  { key: "yesterday", label: "Yesterday" },
+  { key: "7d", label: "Last 7 days" },
+  { key: "30d", label: "Last 30 days" },
+  { key: "month", label: "This month" },
+  { key: "custom", label: "Custom range…" }
+];
+
+function startOfLocalDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+/** Local calendar days → the [from, to) instants the server filters createdAt by. */
+function dateRange(key: DateKey, customFrom: string, customTo: string): { from: string | null; to: string | null } {
+  const today = startOfLocalDay(new Date());
+  const addDays = (d: Date, n: number): Date => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+  const iso = (d: Date | null): string | null => (d ? d.toISOString() : null);
+  switch (key) {
+    case "today":
+      return { from: iso(today), to: null };
+    case "yesterday":
+      return { from: iso(addDays(today, -1)), to: iso(today) };
+    case "7d":
+      return { from: iso(addDays(today, -6)), to: null };
+    case "30d":
+      return { from: iso(addDays(today, -29)), to: null };
+    case "month":
+      return { from: iso(new Date(today.getFullYear(), today.getMonth(), 1)), to: null };
+    case "custom": {
+      const parse = (s: string): Date | null => {
+        const [y, m, d] = s.split("-").map(Number);
+        return y && m && d ? new Date(y, m - 1, d) : null;
+      };
+      const from = parse(customFrom);
+      const to = parse(customTo);
+      return { from: iso(from), to: iso(to ? addDays(to, 1) : null) };
+    }
+    default:
+      return { from: null, to: null };
+  }
+}
+
 const REFRESH_MS = 60 * 1000;
+
+const filterControl =
+  "h-10 rounded-lg border border-line bg-white px-3 text-sm font-bold text-ink outline-none transition focus:border-accent cursor-pointer";
 
 function timeAgo(iso: string): string {
   const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
@@ -50,7 +112,12 @@ export function OnlineOrdersRoute(): React.JSX.Element {
   const canEdit = can("online_store", "edit");
   const canSell = canEdit && can("sales", "create");
 
-  const [tab, setTab] = useState<TabKey>("pending");
+  const [tab, setTab] = useState<TabKey>("all");
+  const [dateKey, setDateKey] = useState<DateKey>("any");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const [searchText, setSearchText] = useState("");
+  const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [data, setData] = useState<OnlineOrderList | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -64,17 +131,32 @@ export function OnlineOrdersRoute(): React.JSX.Element {
 
   const money = useCallback((cents: number) => `${currency} ${formatCents(cents)}`.trim(), [currency]);
 
+  // Typing settles for a moment before it searches.
+  useEffect(() => {
+    const id = setTimeout(() => setSearch(searchText.trim()), 350);
+    return () => clearTimeout(id);
+  }, [searchText]);
+
+  // Any filter change starts again from the first page with nothing pinned.
+  useEffect(() => {
+    setPage(1);
+    setSelectedId(null);
+    setPinned(null);
+  }, [tab, dateKey, customFrom, customTo, search]);
+
   const load = useCallback(async () => {
     const seq = ++requestSeq.current;
     setLoading(true);
     try {
       const statuses = TABS.find((t) => t.key === tab)?.statuses ?? "ALL";
-      const result = await window.blueLedger.onlineOrders.list(statuses, page);
-      if (seq !== requestSeq.current) return; // a newer request (tab/page change) won
+      const range = dateRange(dateKey, customFrom, customTo);
+      const result = await window.blueLedger.onlineOrders.list({ statuses, page, search: search || null, ...range });
+      if (seq !== requestSeq.current) return; // a newer request (filter/page change) won
       setData(result);
       setLoadError(null);
       setUpdatedAt(new Date());
-      setNewCount(result.counts.NEW);
+      // The sidebar badge counts every pending order — only trust these counts when unfiltered.
+      if (!search && !range.from && !range.to) setNewCount(result.counts.NEW);
       // Looking at them counts as "seen" — stops them being announced as new elsewhere.
       const unseenIds = result.orders.filter((o) => !o.seen).map((o) => o.id);
       if (unseenIds.length > 0) void window.blueLedger.onlineOrders.markSeen(unseenIds).catch(() => undefined);
@@ -84,7 +166,7 @@ export function OnlineOrdersRoute(): React.JSX.Element {
     } finally {
       if (seq === requestSeq.current) setLoading(false);
     }
-  }, [tab, page, setNewCount]);
+  }, [tab, page, search, dateKey, customFrom, customTo, setNewCount]);
 
   useEffect(() => {
     void load();
@@ -134,26 +216,69 @@ export function OnlineOrdersRoute(): React.JSX.Element {
         <StatTile icon={CheckCircle2} label="Completed" value={String(count(["COMPLETED"]))} tone="success" />
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {TABS.map((t) => (
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="relative min-w-[220px] flex-1">
+          <span className="sr-only">Search orders</span>
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden="true" />
+          <input
+            type="search"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            placeholder="Search order no., customer, phone or email"
+            className={cn(filterControl, "w-full cursor-text pl-9 font-semibold")}
+          />
+          {searchText && (
+            <button
+              type="button"
+              onClick={() => setSearchText("")}
+              className="absolute right-2 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-md text-muted hover:bg-soft cursor-pointer"
+            >
+              <X className="size-3.5" aria-hidden="true" />
+              <span className="sr-only">Clear search</span>
+            </button>
+          )}
+        </label>
+        <label>
+          <span className="sr-only">Status</span>
+          <select value={tab} onChange={(e) => setTab(e.target.value as TabKey)} className={filterControl}>
+            {TABS.map((t) => (
+              <option key={t.key} value={t.key}>
+                {t.label} ({tabCount(t)})
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="relative">
+          <span className="sr-only">Date placed</span>
+          <CalendarDays className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden="true" />
+          <select value={dateKey} onChange={(e) => setDateKey(e.target.value as DateKey)} className={cn(filterControl, "pl-9")}>
+            {DATE_OPTIONS.map((d) => (
+              <option key={d.key} value={d.key}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {dateKey === "custom" && (
+          <span className="flex items-center gap-1.5">
+            <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className={filterControl} aria-label="From" />
+            <span className="text-xs font-bold text-muted">to</span>
+            <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className={filterControl} aria-label="To" />
+          </span>
+        )}
+        {(tab !== "all" || dateKey !== "any" || searchText) && (
           <button
-            key={t.key}
             type="button"
             onClick={() => {
-              setTab(t.key);
-              setPage(1);
-              setSelectedId(null);
-              setPinned(null);
+              setTab("all");
+              setDateKey("any");
+              setSearchText("");
             }}
-            className={cn(
-              "inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-extrabold transition cursor-pointer",
-              tab === t.key ? "border-ink bg-ink text-white" : "border-line bg-white text-ink hover:border-ink"
-            )}
+            className="h-10 px-2 text-xs font-extrabold text-accent underline cursor-pointer"
           >
-            {t.label}
-            <span className={cn("tabular-nums", tab === t.key ? "text-white/70" : "text-muted")}>{tabCount(t)}</span>
+            Clear filters
           </button>
-        ))}
+        )}
       </div>
 
       {loadError && !data ? (
@@ -176,10 +301,12 @@ export function OnlineOrdersRoute(): React.JSX.Element {
         <div className="rounded-lg border border-dashed border-line bg-white p-10 text-center">
           <ShoppingBag className="mx-auto size-8 text-muted" aria-hidden="true" />
           <p className="mt-3 text-sm font-extrabold text-ink">
-            {tab === "pending" ? "No pending orders right now" : `No ${tab === "all" ? "" : `${TABS.find((t) => t.key === tab)?.label.toLowerCase()} `}orders`}
+            {search || dateKey !== "any" || tab !== "all" ? "No orders match these filters" : "No online orders yet"}
           </p>
           <p className="mt-1 text-sm font-semibold text-muted">
-            New website orders appear here automatically — you&apos;ll also get a notification.
+            {search || dateKey !== "any" || tab !== "all"
+              ? "Try another status, date or search."
+              : "New website orders appear here automatically — you'll also get a notification."}
           </p>
         </div>
       ) : (

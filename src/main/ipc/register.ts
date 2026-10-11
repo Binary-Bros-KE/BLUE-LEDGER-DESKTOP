@@ -571,18 +571,29 @@ export function registerIpcHandlers(): void {
   const optionalString = (value: unknown): string | null => (typeof value === "string" && value ? value : null);
   const cents = (value: unknown): number =>
     typeof value === "number" && Number.isFinite(value) ? Math.round(value) : 0;
-  ipcMain.handle(ipcChannels.onlineOrdersList, (_event, statuses: unknown, page: unknown) => {
-    const wanted = Array.isArray(statuses) ? statuses.filter(isOrderStatus) : [];
-    return listOnlineOrders(
-      wanted.length > 0 ? wanted : "ALL",
-      typeof page === "number" && page >= 1 ? Math.floor(page) : 1
-    );
+  ipcMain.handle(ipcChannels.onlineOrdersList, (_event, query: unknown) => {
+    const q = (query ?? {}) as Record<string, unknown>;
+    const wanted = Array.isArray(q.statuses) ? q.statuses.filter(isOrderStatus) : [];
+    const instant = (value: unknown): string | null =>
+      typeof value === "string" && !Number.isNaN(Date.parse(value)) ? new Date(value).toISOString() : null;
+    return listOnlineOrders({
+      statuses: wanted.length > 0 ? wanted : "ALL",
+      page: typeof q.page === "number" && q.page >= 1 ? Math.floor(q.page) : 1,
+      search: typeof q.search === "string" && q.search.trim() ? q.search.trim().slice(0, 120) : null,
+      from: instant(q.from),
+      to: instant(q.to)
+    });
   });
   ipcMain.handle(ipcChannels.onlineOrdersSummary, () => onlineOrderSummary());
   ipcMain.handle(ipcChannels.onlineOrdersSetStatus, (_event, input: unknown) => {
     const i = (input ?? {}) as Record<string, unknown>;
     if (typeof i.id !== "string" || !isOrderStatus(i.status)) throw new Error("Unknown order status");
-    return setOnlineOrderStatus({ id: i.id, status: i.status, riderId: optionalString(i.riderId) });
+    return setOnlineOrderStatus({
+      id: i.id,
+      status: i.status,
+      riderId: optionalString(i.riderId),
+      storefrontId: optionalString(i.storefrontId)
+    });
   });
   ipcMain.handle(ipcChannels.onlineOrdersAddPayment, (_event, input: unknown) => {
     const i = (input ?? {}) as Record<string, unknown>;
