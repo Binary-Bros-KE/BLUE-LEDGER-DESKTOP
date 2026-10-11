@@ -203,6 +203,9 @@ import {
   listOnlineOrders,
   markOnlineOrdersSeen,
   onlineOrderSummary,
+  recordOnlineOrderPayment,
+  removeOnlineOrderPayment,
+  setOnlineOrderFulfilment,
   setOnlineOrderStatus,
   reorderDeliveryMethods as reorderOnlineStoreDeliveryMethods,
   setProductOnline as setOnlineStoreProductOnline,
@@ -563,34 +566,70 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.onlineStoreDeliveryReorder, (_event, orderedIds: string[]) =>
     reorderOnlineStoreDeliveryMethods(orderedIds)
   );
-  ipcMain.handle(ipcChannels.onlineOrdersList, (_event, status: unknown, page: unknown) =>
-    listOnlineOrders(
-      (ONLINE_ORDER_STATUSES as readonly string[]).includes(status as string) ? (status as OnlineOrderStatus) : "ALL",
+  const isOrderStatus = (value: unknown): value is OnlineOrderStatus =>
+    (ONLINE_ORDER_STATUSES as readonly string[]).includes(value as string);
+  const optionalString = (value: unknown): string | null => (typeof value === "string" && value ? value : null);
+  const cents = (value: unknown): number =>
+    typeof value === "number" && Number.isFinite(value) ? Math.round(value) : 0;
+  ipcMain.handle(ipcChannels.onlineOrdersList, (_event, statuses: unknown, page: unknown) => {
+    const wanted = Array.isArray(statuses) ? statuses.filter(isOrderStatus) : [];
+    return listOnlineOrders(
+      wanted.length > 0 ? wanted : "ALL",
       typeof page === "number" && page >= 1 ? Math.floor(page) : 1
-    )
-  );
+    );
+  });
   ipcMain.handle(ipcChannels.onlineOrdersSummary, () => onlineOrderSummary());
-  ipcMain.handle(ipcChannels.onlineOrdersSetStatus, (_event, id: string, status: unknown) => {
-    if (!(ONLINE_ORDER_STATUSES as readonly string[]).includes(status as string)) {
-      throw new Error("Unknown order status");
+  ipcMain.handle(ipcChannels.onlineOrdersSetStatus, (_event, input: unknown) => {
+    const i = (input ?? {}) as Record<string, unknown>;
+    if (typeof i.id !== "string" || !isOrderStatus(i.status)) throw new Error("Unknown order status");
+    return setOnlineOrderStatus({ id: i.id, status: i.status, riderId: optionalString(i.riderId) });
+  });
+  ipcMain.handle(ipcChannels.onlineOrdersAddPayment, (_event, input: unknown) => {
+    const i = (input ?? {}) as Record<string, unknown>;
+    if (typeof i.orderId !== "string" || typeof i.paymentMethodId !== "string" || !i.paymentMethodId) {
+      throw new Error("Choose how the customer paid");
     }
-    return setOnlineOrderStatus(id, status as OnlineOrderStatus);
+    return recordOnlineOrderPayment({
+      orderId: i.orderId,
+      paymentMethodId: i.paymentMethodId,
+      amountCents: cents(i.amountCents),
+      reference: optionalString(i.reference),
+      notes: optionalString(i.notes)
+    });
+  });
+  ipcMain.handle(ipcChannels.onlineOrdersRemovePayment, (_event, orderId: unknown, paymentId: unknown) => {
+    if (typeof orderId !== "string" || typeof paymentId !== "string") throw new Error("Payment not found");
+    return removeOnlineOrderPayment(orderId, paymentId);
+  });
+  ipcMain.handle(ipcChannels.onlineOrdersSetFulfilment, (_event, input: unknown) => {
+    const i = (input ?? {}) as Record<string, unknown>;
+    if (typeof i.orderId !== "string" || (i.deliveryType !== "pickup" && i.deliveryType !== "delivery")) {
+      throw new Error("Choose pick-up or delivery");
+    }
+    return setOnlineOrderFulfilment({
+      orderId: i.orderId,
+      deliveryType: i.deliveryType,
+      deliveryAddress: optionalString(i.deliveryAddress),
+      deliveryMethodId: optionalString(i.deliveryMethodId)
+    });
   });
   ipcMain.handle(ipcChannels.onlineOrdersConvertToSale, (_event, input: unknown) => {
     const i = (input ?? {}) as Record<string, unknown>;
-    if (typeof i.orderId !== "string" || typeof i.paymentMethodId !== "string" || !i.paymentMethodId) {
-      throw new Error("Choose a payment method");
+    if (typeof i.orderId !== "string") throw new Error("Order not found");
+    const final = (i.finalPayment ?? null) as Record<string, unknown> | null;
+    if (final && (typeof final.paymentMethodId !== "string" || !final.paymentMethodId)) {
+      throw new Error("Choose how the customer paid the balance");
     }
     return convertOnlineOrderToSale({
       orderId: i.orderId,
-      paymentMethodId: i.paymentMethodId,
-      paymentReference: typeof i.paymentReference === "string" ? i.paymentReference : null,
-      amountReceivedCents:
-        typeof i.amountReceivedCents === "number" && Number.isFinite(i.amountReceivedCents)
-          ? Math.round(i.amountReceivedCents)
-          : null,
-      storefrontId: typeof i.storefrontId === "string" && i.storefrontId ? i.storefrontId : null,
-      chargeWebPrice: i.chargeWebPrice !== false
+      storefrontId: optionalString(i.storefrontId),
+      finalPayment: final
+        ? {
+            paymentMethodId: final.paymentMethodId as string,
+            amountCents: cents(final.amountCents),
+            reference: optionalString(final.reference)
+          }
+        : null
     });
   });
   ipcMain.handle(ipcChannels.onlineOrdersMarkSeen, (_event, ids: unknown) =>

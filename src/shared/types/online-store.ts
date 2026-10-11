@@ -355,10 +355,30 @@ export function parseThemeConfig(raw: Record<string, unknown> | null | undefined
 
 // --- Online orders (storefront checkout → this POS's "Online Orders" inbox) ----------------------
 // Mirrors SERVER services/shop-order-service.ts OnlineOrderView. Cloud-only: read + updated through
-// /shop-admin/orders/* while online (not a synced entity, not a Sale).
+// /shop-admin/orders/* while online (not a synced entity, not a Sale until it's completed).
 
-export const ONLINE_ORDER_STATUSES = ["NEW", "CONFIRMED", "COMPLETED", "CANCELLED"] as const;
+/** NEW is shown as "Pending". The order walks its route's steps one at a time (ONLINE_ORDER_FLOWS),
+ * then COMPLETED converts it to a normal sale. */
+export const ONLINE_ORDER_STATUSES = [
+  "NEW",
+  "CONFIRMED",
+  "READY",
+  "PICKED_UP",
+  "SHIPPED",
+  "DELIVERED",
+  "COMPLETED",
+  "CANCELLED"
+] as const;
 export type OnlineOrderStatus = (typeof ONLINE_ORDER_STATUSES)[number];
+
+export type OnlineOrderDeliveryType = "pickup" | "delivery";
+
+/** Same step order the SERVER enforces (ORDER_FLOWS). The last step is the hand-over; after it the
+ * only way forward is completing the order as a sale. */
+export const ONLINE_ORDER_FLOWS: Record<OnlineOrderDeliveryType, readonly OnlineOrderStatus[]> = {
+  pickup: ["NEW", "CONFIRMED", "READY", "PICKED_UP"],
+  delivery: ["NEW", "CONFIRMED", "SHIPPED", "DELIVERED"]
+};
 
 export type OnlineOrderItem = {
   productId: string;
@@ -370,6 +390,37 @@ export type OnlineOrderItem = {
   unitPriceCents: number;
   qty: number;
   lineTotalCents: number;
+  /** Filled in on this computer from the local product (not stored on the order): its first online
+   * photo's thumbnail, else its POS picture, plus its SKU. Absent when the product isn't here. */
+  imageUrl?: string | null;
+  imagePath?: string | null;
+  sku?: string | null;
+};
+
+/** Same shape as SalePayment — carried onto the sale unchanged when the order is completed. */
+export type OnlineOrderPayment = {
+  id: string;
+  paymentMethodId: string;
+  paymentMethodName: string;
+  amountCents: number;
+  reference: string | null;
+  receivedBy: string;
+  receivedByName: string;
+  receivedAt: string;
+  notes: string | null;
+};
+
+export type OnlineOrderHistoryEntry = {
+  at: string;
+  kind: "status" | "payment" | "payment_removed" | "fulfilment";
+  /** the new status (kind "status") or "pickup"/"delivery" (kind "fulfilment") */
+  status?: string;
+  amountCents?: number;
+  /** payment method name, or the delivery option chosen */
+  method?: string;
+  by?: string | null;
+  rider?: string | null;
+  receipt?: string;
 };
 
 export type OnlineOrder = {
@@ -388,32 +439,61 @@ export type OnlineOrder = {
    * arrives (orders placed before 2026-09-30 say "pay_on_delivery"). */
   paymentMethod: string;
   /** "pickup" (collects from the shop) | "delivery". Absent on orders from before it existed. */
-  deliveryType?: "pickup" | "delivery";
+  deliveryType?: OnlineOrderDeliveryType;
   items: OnlineOrderItem[];
   subtotalCents: number;
   totalCents: number;
   currency: string;
-  /** the store's fulfilment branch when the order came in (default branch for ringing it up) */
+  /** the store's fulfilment branch when the order came in (default branch for the sale) */
   fulfilmentLocationId: string | null;
   /** a POS device has listed it (drives the "new" badge) */
   seen: boolean;
   createdAt: string;
   statusChangedAt: string | null;
-  /** set once the order was rung up as a sale on a POS */
+  /** set once the order was completed as a sale on a POS */
   linkedSaleId: string | null;
   linkedReceiptNumber: string | null;
+  payments: OnlineOrderPayment[];
+  paidCents: number;
+  balanceCents: number;
+  history: OnlineOrderHistoryEntry[];
+  /** rider it was shipped with (delivery orders) */
+  riderId: string | null;
+  riderName: string | null;
 };
 
-/** "Ring up sale" — turns a web order into a completed POS sale. */
-export type ConvertOnlineOrderInput = {
+/** Move an order one step (forward / back), cancel or reopen it. */
+export type OnlineOrderStatusChange = {
+  id: string;
+  status: OnlineOrderStatus;
+  /** SHIPPED only — a local rider; its name is looked up here */
+  riderId?: string | null;
+};
+
+export type RecordOnlineOrderPaymentInput = {
   orderId: string;
   paymentMethodId: string;
-  paymentReference: string | null;
-  amountReceivedCents: number | null;
+  amountCents: number;
+  reference: string | null;
+  notes: string | null;
+};
+
+export type OnlineOrderFulfilmentInput = {
+  orderId: string;
+  deliveryType: OnlineOrderDeliveryType;
+  deliveryAddress: string | null;
+  /** one of the store's active delivery options (sets the fee); null = fee to be arranged (0) */
+  deliveryMethodId: string | null;
+};
+
+/** "Complete" — turns a handed-over web order into a completed POS sale. */
+export type ConvertOnlineOrderInput = {
+  orderId: string;
   /** only for a branch-less session (e.g. Super Admin) — see requireActiveSession */
   storefrontId: string | null;
-  /** true (default) = charge exactly the website price, VAT extracted from it (never added on top) */
-  chargeWebPrice: boolean;
+  /** whatever is still owed, paid now — recorded on the order first, then carried to the sale with
+   * the others. Null when the order is already fully paid. */
+  finalPayment: { paymentMethodId: string; amountCents: number; reference: string | null } | null;
 };
 
 export type ConvertOnlineOrderResult = {
@@ -422,6 +502,8 @@ export type ConvertOnlineOrderResult = {
   grandTotalCents: number;
   /** who the sale was recorded for */
   customerLabel: string;
+  /** set for a delivery order — the delivery note created on the sale */
+  deliveryNoteNumber: string | null;
   /** the sale is recorded, but the cloud order couldn't be marked (offline?) — tell the user */
   linkWarning: string | null;
 };

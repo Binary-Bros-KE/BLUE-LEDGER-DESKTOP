@@ -3,21 +3,28 @@ import { readFile } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import electron from "electron";
 import { runInTransaction } from "@main/database/connection";
+import * as deliveryNoteRepository from "@main/database/repositories/delivery-note-repository";
+import * as paymentMethodRepository from "@main/database/repositories/payment-method-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
+import * as riderRepository from "@main/database/repositories/rider-repository";
 import * as saleRepository from "@main/database/repositories/sale-repository";
-import { requirePermission } from "@main/services/auth-service";
+import { getSession, requirePermission } from "@main/services/auth-service";
 import { insertCompletedSaleFromCart, prepareCart, requireActiveSession } from "@main/services/sale-service";
 import { API_BASE_URL } from "@main/services/license-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { getCloudIdentity } from "@main/services/sync-engine";
 import type { OnlineImageRef, Product } from "@shared/types/product";
+import type { SalePayment } from "@shared/types/sale";
 import type {
   ConvertOnlineOrderInput,
   ConvertOnlineOrderResult,
   OnlineOrder,
+  OnlineOrderFulfilmentInput,
   OnlineOrderList,
   OnlineOrderStatus,
+  OnlineOrderStatusChange,
   OnlineOrderSummary,
+  RecordOnlineOrderPaymentInput,
   DeliveryMethodInput,
   NewsletterSubscriber,
   ProductOnlinePatch,
@@ -234,8 +241,38 @@ export function reorderDeliveryMethods(orderedIds: string[]): Promise<WebDeliver
 
 // --- Online orders inbox (online-only, like delivery methods) ------------------------------------
 
-export function listOnlineOrders(status: OnlineOrderStatus | "ALL", page: number): Promise<OnlineOrderList> {
-  return postShopAdmin<OnlineOrderList>("/shop-admin/orders", { status, page, pageSize: 30 });
+/** "Jane Doe" for the signed-in user — written into the order's history next to what they did. */
+function actor(): { id: string; name: string } {
+  const session = getSession();
+  if (!session) throw new Error("You must be signed in to do that");
+  return {
+    id: session.employee.id,
+    name: `${session.employee.firstName} ${session.employee.lastName}`.trim()
+  };
+}
+
+/** Adds each line's picture + SKU from the local product (the cloud order only knows ids/names). */
+function withLocalProductInfo(order: OnlineOrder): OnlineOrder {
+  return {
+    ...order,
+    payments: order.payments ?? [],
+    history: order.history ?? [],
+    items: order.items.map((item) => {
+      const row = productRepository.findProductRowById(item.productId);
+      if (!row) return item;
+      const online = productRepository.mapProductRow(row).onlineImageUrls[0];
+      return { ...item, imageUrl: online?.thumbUrl ?? online?.url ?? null, imagePath: row.image_path, sku: row.sku };
+    })
+  };
+}
+
+export async function listOnlineOrders(statuses: OnlineOrderStatus[] | "ALL", page: number): Promise<OnlineOrderList> {
+  const result = await postShopAdmin<OnlineOrderList>("/shop-admin/orders", {
+    ...(statuses === "ALL" ? { status: "ALL" } : { statuses }),
+    page,
+    pageSize: 30
+  });
+  return { ...result, orders: result.orders.map(withLocalProductInfo) };
 }
 
 /** Cheap poll behind the sidebar badge / new-order alerts. */
@@ -243,8 +280,71 @@ export function onlineOrderSummary(): Promise<OnlineOrderSummary> {
   return postShopAdmin<OnlineOrderSummary>("/shop-admin/orders/summary", {});
 }
 
-export function setOnlineOrderStatus(id: string, status: OnlineOrderStatus): Promise<OnlineOrder> {
-  return postShopAdmin<OnlineOrder>("/shop-admin/orders/status", { id, status });
+/** One step forward/back, cancel or reopen — SERVER refuses anything out of order. */
+export async function setOnlineOrderStatus(input: OnlineOrderStatusChange): Promise<OnlineOrder> {
+  requirePermission("online_store", "edit");
+  let riderName: string | null = null;
+  if (input.status === "SHIPPED" && input.riderId) {
+    const rider = riderRepository.findRiderRowById(input.riderId);
+    if (!rider || rider.tenant_id !== getCurrentTenant().tenantId) throw new Error("Rider not found");
+    riderName = rider.name;
+  }
+  const order = await postShopAdmin<OnlineOrder>("/shop-admin/orders/status", {
+    id: input.id,
+    status: input.status,
+    riderId: input.status === "SHIPPED" ? (input.riderId ?? null) : null,
+    riderName,
+    actorName: actor().name
+  });
+  return withLocalProductInfo(order);
+}
+
+/** Validates the payment method locally (this POS owns them), then records the payment on the cloud
+ * order — SERVER refuses anything above what's still owed. */
+export async function recordOnlineOrderPayment(input: RecordOnlineOrderPaymentInput): Promise<OnlineOrder> {
+  requirePermission("online_store", "edit");
+  const { tenantId } = getCurrentTenant();
+  const method = paymentMethodRepository.findPaymentMethodRowById(input.paymentMethodId);
+  if (!method || method.tenant_id !== tenantId) throw new Error("Payment method not found");
+  if (!method.is_active) throw new Error(`"${method.name}" is not active`);
+  const reference = input.reference?.trim() || null;
+  if (method.requires_reference && !reference) throw new Error(`${method.name} needs a reference (e.g. the M-Pesa code).`);
+  if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) throw new Error("Enter the amount received.");
+
+  const who = actor();
+  const order = await postShopAdmin<OnlineOrder>("/shop-admin/orders/payment/add", {
+    id: input.orderId,
+    paymentMethodId: method.id,
+    paymentMethodName: method.name,
+    amountCents: input.amountCents,
+    reference,
+    notes: input.notes?.trim() || null,
+    receivedBy: who.id,
+    receivedByName: who.name
+  });
+  return withLocalProductInfo(order);
+}
+
+export async function removeOnlineOrderPayment(orderId: string, paymentId: string): Promise<OnlineOrder> {
+  requirePermission("online_store", "edit");
+  const order = await postShopAdmin<OnlineOrder>("/shop-admin/orders/payment/remove", {
+    id: orderId,
+    paymentId,
+    actorName: actor().name
+  });
+  return withLocalProductInfo(order);
+}
+
+export async function setOnlineOrderFulfilment(input: OnlineOrderFulfilmentInput): Promise<OnlineOrder> {
+  requirePermission("online_store", "edit");
+  const order = await postShopAdmin<OnlineOrder>("/shop-admin/orders/fulfilment", {
+    id: input.orderId,
+    deliveryType: input.deliveryType,
+    deliveryAddress: input.deliveryAddress?.trim() || null,
+    deliveryMethodId: input.deliveryMethodId || null,
+    actorName: actor().name
+  });
+  return withLocalProductInfo(order);
 }
 
 /** No ids = mark every unseen order as seen. */
@@ -256,18 +356,37 @@ export function getOnlineOrder(id: string): Promise<OnlineOrder> {
   return postShopAdmin<OnlineOrder>("/shop-admin/orders/get", { id });
 }
 
+const HANDED_OVER: ReadonlySet<OnlineOrderStatus> = new Set(["PICKED_UP", "DELIVERED"]);
+
+function amount(currency: string, cents: number): string {
+  return `${currency} ${(cents / 100).toFixed(2)}`.trim();
+}
+
+function linkSale(orderId: string, saleId: string, receiptNumber: string | null): Promise<OnlineOrder> {
+  return postShopAdmin<OnlineOrder>("/shop-admin/orders/link-sale", {
+    id: orderId,
+    saleId,
+    receiptNumber,
+    actorName: actor().name
+  });
+}
+
 /**
- * "Ring up sale": turns a web order into a normal completed POS sale — same cart math, tax, stock
- * validation and receipt numbering as Checkout (prepareCart + insertCompletedSaleFromCart), so it
- * syncs, reports and prints like any other sale. Then completes + links the cloud order.
+ * "Complete": turns a picked-up / delivered web order into a normal completed POS sale — same cart
+ * math, tax, stock validation and receipt numbering as Checkout (prepareCart +
+ * insertCompletedSaleFromCart), so it syncs, reports and prints like any other sale. Then completes +
+ * links the cloud order.
  *
- * - Prices: the website's own unit prices. With chargeWebPrice (default) VAT lines are treated as
- *   tax-INCLUSIVE, so the customer pays exactly what the website showed (tax extracted, still
- *   reported) — never the website price plus VAT on top.
- * - Delivery fee → a "Delivery" service charge (untaxed).
- * - Customer: always a walk-in labelled "Web order WEB-0012" — never matched to (or creating) a
- *   customer record, so a web order can't land on the wrong account. The shopper's name and phone
- *   stay on the web order itself.
+ * - Prices: the website's own unit prices, VAT treated as INCLUSIVE — the customer pays exactly what
+ *   the website showed (tax extracted, still reported), never the website price plus VAT on top. So
+ *   the sale's grand total is the order total, and the payments taken on the order add up to it.
+ * - Payments: every payment recorded on the order (plus `finalPayment`, recorded on the order first)
+ *   becomes the sale's payments, with its original method, reference, who took it and when. They
+ *   must add up to exactly the total — a balance still owed is refused.
+ * - Delivery order → a real delivery note on the sale (DN-…: customer, address, the rider it shipped
+ *   with, the delivery fee), already marked delivered. The fee is part of the total like at Checkout.
+ * - Customer: a walk-in labelled "Jane Doe · Web order WEB-0012" — never matched to (or creating) a
+ *   customer record, so a web order can't land on the wrong account.
  * - Never twice: refused if the cloud order is already linked, or if a local sale already carries
  *   this order's marker (covers "sale saved, cloud link failed offline").
  */
@@ -275,20 +394,31 @@ export async function convertOnlineOrderToSale(input: ConvertOnlineOrderInput): 
   requirePermission("online_store", "edit");
   requirePermission("sales", "create");
 
-  const order = await getOnlineOrder(input.orderId);
+  let order = await getOnlineOrder(input.orderId);
   if (order.linkedSaleId) {
-    throw new Error(`${order.orderNumber} was already rung up as receipt ${order.linkedReceiptNumber ?? order.linkedSaleId}.`);
+    throw new Error(`${order.orderNumber} was already completed as receipt ${order.linkedReceiptNumber ?? order.linkedSaleId}.`);
   }
-  if (order.status === "CANCELLED") {
-    throw new Error(`${order.orderNumber} is cancelled — reopen it first if the customer still wants it.`);
+  if (!HANDED_OVER.has(order.status)) {
+    const route = order.deliveryType === "pickup" ? "picked up" : "delivered";
+    throw new Error(`Mark ${order.orderNumber} ${route} before completing it.`);
   }
 
   const { tenantId, employeeId, locationId } = requireActiveSession(input.storefrontId ?? order.fulfilmentLocationId);
 
+  // Sale already saved here on an earlier try whose cloud link failed (offline) — just link it now.
   const marker = `[Web order ${order.orderNumber}]`;
   const previous = saleRepository.findSaleByNoteMarkerRow(tenantId, marker);
   if (previous) {
-    throw new Error(`${order.orderNumber} was already rung up as receipt ${previous.receipt_number ?? previous.id}.`);
+    await linkSale(order.id, previous.id, previous.receipt_number);
+    const previousSale = saleRepository.findSaleRowById(previous.id);
+    return {
+      saleId: previous.id,
+      receiptNumber: previous.receipt_number,
+      grandTotalCents: previousSale?.grand_total_cents ?? order.totalCents,
+      customerLabel: `Walk-in: ${order.customerName}`,
+      deliveryNoteNumber: deliveryNoteRepository.findDeliveryNoteRowBySaleId(previous.id)?.delivery_note_number ?? null,
+      linkWarning: null
+    };
   }
 
   // A product published online but not yet pulled to THIS computer can't be sold from here.
@@ -299,38 +429,72 @@ export async function convertOnlineOrderToSale(input: ConvertOnlineOrderInput): 
     }
   }
 
+  const isDelivery = order.deliveryType !== "pickup";
+  // Validate everything that can fail locally (prices, totals) BEFORE taking a final payment online,
+  // so a doomed completion doesn't leave a stray payment on the order.
   const cart = prepareCart(
-    tenantId,
-    order.items.map((item) => ({
-      productId: item.productId,
-      quantity: item.qty,
-      discountAmountCents: 0,
-      unitPriceCents: item.unitPriceCents,
-      taxInclusiveOverride: input.chargeWebPrice ? true : undefined,
-      // The shopper's variant, when it's still a live variant on this computer — a variant switched
-      // off/removed since the order still rings up (as the plain product, at the web price).
-      variantKey: liveVariantKey(item.productId, item.variantKey)
-    })),
-    {
-      serviceCharges:
-        order.deliveryFeeCents > 0
-          ? [
-              {
-                name: order.deliveryMethodName ? `Delivery — ${order.deliveryMethodName}` : "Delivery",
-                feeCents: order.deliveryFeeCents,
-                costCents: 0,
-                taxType: "none",
-                taxInclusive: null
-              }
-            ]
-          : [],
-      delivery: null
+      tenantId,
+      order.items.map((item) => ({
+        productId: item.productId,
+        quantity: item.qty,
+        discountAmountCents: 0,
+        unitPriceCents: item.unitPriceCents,
+        taxInclusiveOverride: true,
+        // The shopper's variant, when it's still a live variant on this computer — a variant switched
+        // off/removed since the order still rings up (as the plain product, at the web price).
+        variantKey: liveVariantKey(item.productId, item.variantKey)
+      })),
+      {
+        serviceCharges: [],
+        delivery: isDelivery
+          ? {
+              riderId: order.riderId && riderRepository.findRiderRowById(order.riderId) ? order.riderId : null,
+              recipientName: order.customerName.slice(0, 150),
+              country: null,
+              town: null,
+              physicalAddress: (order.deliveryAddress?.trim() || "—").slice(0, 500),
+              notes: [order.deliveryMethodName, order.customerPhone].filter(Boolean).join(" · ").slice(0, 500) || null,
+              feeCents: order.deliveryFeeCents,
+              costCents: 0
+            }
+          : null
+      }
+    );
+
+  if (cart.grandTotalCents !== order.totalCents) {
+    const website = amount(order.currency, order.totalCents);
+    const here = amount(order.currency, cart.grandTotalCents);
+    throw new Error(`${order.orderNumber} totals ${website} on the website but ${here} here — check the products' prices, then try again.`);
+  }
+
+  if (input.finalPayment && input.finalPayment.amountCents > 0) {
+    order = await recordOnlineOrderPayment({
+      orderId: order.id,
+      paymentMethodId: input.finalPayment.paymentMethodId,
+      amountCents: input.finalPayment.amountCents,
+      reference: input.finalPayment.reference,
+      notes: null
+    });
+  }
+
+  const payments: SalePayment[] = [...order.payments].sort((a, b) => b.amountCents - a.amountCents);
+  const paidCents = payments.reduce((sum, p) => sum + p.amountCents, 0);
+  if (paidCents !== cart.grandTotalCents) {
+    throw new Error(
+      paidCents < cart.grandTotalCents
+        ? `${amount(order.currency, cart.grandTotalCents - paidCents)} is still owed on ${order.orderNumber} — record it before completing.`
+        : `${order.orderNumber} has ${amount(order.currency, paidCents - cart.grandTotalCents)} more in payments than its total — remove the extra payment first.`
+    );
+  }
+  for (const p of payments) {
+    const method = paymentMethodRepository.findPaymentMethodRowById(p.paymentMethodId);
+    if (!method || method.tenant_id !== tenantId) {
+      throw new Error(`The payment method "${p.paymentMethodName}" isn't on this computer — run Cloud Sync, then try again.`);
     }
-  );
+  }
+  const primary = payments[0]!;
 
-  const walkInName = `Web order ${order.orderNumber}`;
-
-  const noteParts = [marker];
+  const noteParts = [marker, `${order.customerName} ${order.customerPhone}`];
   if (order.notes) noteParts.push(order.notes);
 
   const sale = insertCompletedSaleFromCart({
@@ -338,32 +502,41 @@ export async function convertOnlineOrderToSale(input: ConvertOnlineOrderInput): 
     employeeId,
     locationId,
     customerId: null,
-    walkInName,
+    walkInName: `${order.customerName} · Web order ${order.orderNumber}`.slice(0, 150),
     cart,
-    paymentMethodId: input.paymentMethodId,
-    paymentReference: input.paymentReference?.trim() || null,
-    amountReceivedCents: input.amountReceivedCents,
-    notes: noteParts.join(" · ")
+    paymentMethodId: primary.paymentMethodId,
+    paymentReference: primary.reference,
+    amountReceivedCents: cart.grandTotalCents,
+    notes: noteParts.join(" · "),
+    // A single payment is fully described by the sale's own method columns (same as Checkout);
+    // two or more keep each one, which reports then split by method.
+    ...(payments.length > 1 ? { payments } : {})
   });
+
+  // The goods already reached the customer — the delivery note starts life delivered.
+  let deliveryNoteNumber: string | null = null;
+  if (isDelivery) {
+    const note = deliveryNoteRepository.findDeliveryNoteRowBySaleId(sale.id);
+    if (note) {
+      deliveryNoteNumber = deliveryNoteRepository.setDeliveryNoteDeliveredRow(note.id, true).delivery_note_number;
+    }
+  }
 
   let linkWarning: string | null = null;
   try {
-    await postShopAdmin<OnlineOrder>("/shop-admin/orders/link-sale", {
-      id: order.id,
-      saleId: sale.id,
-      receiptNumber: sale.receiptNumber
-    });
+    await linkSale(order.id, sale.id, sale.receiptNumber);
   } catch (err) {
     linkWarning = `Sale recorded, but ${order.orderNumber} couldn't be marked completed online (${
       err instanceof Error ? err.message : "no connection"
-    }). Mark it Completed once you're back online.`;
+    }). Open it again once you're back online.`;
   }
 
   return {
     saleId: sale.id,
     receiptNumber: sale.receiptNumber,
     grandTotalCents: cart.grandTotalCents,
-    customerLabel: `Walk-in: ${walkInName}`,
+    customerLabel: `Walk-in: ${order.customerName}`,
+    deliveryNoteNumber,
     linkWarning
   };
 }

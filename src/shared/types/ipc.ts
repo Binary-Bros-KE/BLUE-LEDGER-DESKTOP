@@ -34,9 +34,12 @@ import type {
   ConvertOnlineOrderInput,
   ConvertOnlineOrderResult,
   OnlineOrder,
+  OnlineOrderFulfilmentInput,
   OnlineOrderList,
   OnlineOrderStatus,
-  OnlineOrderSummary
+  OnlineOrderStatusChange,
+  OnlineOrderSummary,
+  RecordOnlineOrderPaymentInput
 } from "./online-store";
 import type { ProductSalesHistoryEntry, ProductsPerformanceReport } from "./product-report";
 import type { CustomerPurchaseHistoryEntry, OutstandingInvoicesSummary, TopCustomerRow } from "./customer-report";
@@ -403,7 +406,7 @@ export type IpcInvokeMap = {
     result: WebDeliveryMethod[];
   };
   "online-orders:list": {
-    args: [status: OnlineOrderStatus | "ALL", page: number];
+    args: [statuses: OnlineOrderStatus[] | "ALL", page: number];
     result: OnlineOrderList;
   };
   "online-orders:summary": {
@@ -411,7 +414,19 @@ export type IpcInvokeMap = {
     result: OnlineOrderSummary;
   };
   "online-orders:set-status": {
-    args: [id: string, status: OnlineOrderStatus];
+    args: [input: OnlineOrderStatusChange];
+    result: OnlineOrder;
+  };
+  "online-orders:add-payment": {
+    args: [input: RecordOnlineOrderPaymentInput];
+    result: OnlineOrder;
+  };
+  "online-orders:remove-payment": {
+    args: [orderId: string, paymentId: string];
+    result: OnlineOrder;
+  };
+  "online-orders:set-fulfilment": {
+    args: [input: OnlineOrderFulfilmentInput];
     result: OnlineOrder;
   };
   "online-orders:mark-seen": {
@@ -1625,14 +1640,23 @@ export type BlueLedgerApi = {
   };
   onlineOrders: {
     list: (
-      status: OnlineOrderStatus | "ALL",
+      statuses: OnlineOrderStatus[] | "ALL",
       page: number
     ) => Promise<IpcInvokeMap["online-orders:list"]["result"]>;
     summary: () => Promise<IpcInvokeMap["online-orders:summary"]["result"]>;
     setStatus: (
-      id: string,
-      status: OnlineOrderStatus
+      input: OnlineOrderStatusChange
     ) => Promise<IpcInvokeMap["online-orders:set-status"]["result"]>;
+    addPayment: (
+      input: RecordOnlineOrderPaymentInput
+    ) => Promise<IpcInvokeMap["online-orders:add-payment"]["result"]>;
+    removePayment: (
+      orderId: string,
+      paymentId: string
+    ) => Promise<IpcInvokeMap["online-orders:remove-payment"]["result"]>;
+    setFulfilment: (
+      input: OnlineOrderFulfilmentInput
+    ) => Promise<IpcInvokeMap["online-orders:set-fulfilment"]["result"]>;
     markSeen: (ids?: string[]) => Promise<IpcInvokeMap["online-orders:mark-seen"]["result"]>;
     convertToSale: (
       input: ConvertOnlineOrderInput
