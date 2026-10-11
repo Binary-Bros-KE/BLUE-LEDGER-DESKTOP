@@ -98,6 +98,9 @@ export type SaleItemRow = {
   section_label: string | null;
   variant_key: string | null;
   variant_label: string | null;
+  /** Invoices only: where THIS line's stock was deducted from when that isn't the sale's location_id
+   * (only ever the Main Store) — NULL = the storefront itself. See migration 102. */
+  stock_location_id: string | null;
   created_at: string;
 };
 
@@ -573,6 +576,8 @@ export function insertSaleItemRow(input: {
   sectionLabel: string | null;
   variantKey?: string | null | undefined;
   variantLabel?: string | null | undefined;
+  /** See SaleItemRow["stock_location_id"] — null/omitted = the storefront itself. */
+  stockLocationId?: string | null | undefined;
 }): SaleItemRow {
   const now = new Date().toISOString();
 
@@ -582,9 +587,10 @@ export function insertSaleItemRow(input: {
       INSERT INTO sale_items (
         id, sale_id, product_id, quantity, unit_price_cents,
         discount_amount_cents, tax_type, tax_amount_cents, line_total_cents,
-        is_locally_sourced, local_cost_cents, local_supplier_id, section_label, variant_key, variant_label, created_at
+        is_locally_sourced, local_cost_cents, local_supplier_id, section_label, variant_key, variant_label,
+        stock_location_id, created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
     )
     .run(
@@ -603,6 +609,7 @@ export function insertSaleItemRow(input: {
       input.sectionLabel,
       input.variantKey ?? null,
       input.variantLabel ?? null,
+      input.stockLocationId ?? null,
       now
     );
 
@@ -870,6 +877,7 @@ export function mapSaleItemDetailRow(row: SaleItemDetailRow): SaleItem {
     sectionLabel: row.section_label,
     variantKey: row.variant_key ?? null,
     variantLabel: row.variant_label ?? null,
+    stockSource: row.stock_location_id ? "main_store" : "storefront",
     createdAt: row.created_at
   };
 }

@@ -3449,6 +3449,53 @@ const migrations = [
       ALTER TABLE quotation_items ADD COLUMN variant_key TEXT;
       ALTER TABLE quotation_items ADD COLUMN variant_label TEXT;
     `
+  },
+  {
+    version: 100,
+    name: "invoice_stock_from_main_store",
+    sql: `
+      -- Client request: a business can let invoices take stock straight from the Main Store instead
+      -- of the storefront's shelf, without a transfer first. The tenant flag is admin-dashboard
+      -- controlled (same lifecycle as invoice_edits_disabled — applied from the activation/heartbeat
+      -- response, never pushed). Default 0 keeps storefront-only invoicing for every existing tenant.
+      ALTER TABLE tenant ADD COLUMN invoice_stock_from_main_store INTEGER NOT NULL DEFAULT 0;
+      -- Where THIS invoice's stock was deducted from, when that isn't location_id (only ever the Main
+      -- Store). NULL = the storefront itself — every existing row. Every restock path (invoice edit,
+      -- cancellation, sale return/void) reads it so stock goes back to where it came from.
+      ALTER TABLE sales ADD COLUMN stock_location_id TEXT REFERENCES locations(id);
+    `
+  },
+  {
+    version: 101,
+    name: "stock_request_dispatched_backfill",
+    sql: `
+      -- quantity_dispatched was never in the stock_requests sync payload, so every pull (including a
+      -- device's own echo) rebuilt items with it NULL — blank "Dispatched" column and every approved
+      -- request flagged "Partial". It's exactly recoverable from the storefront's own frozen
+      -- before/after pair (set at approval, and always synced): dispatched = new - previous.
+      UPDATE stock_request_items
+      SET quantity_dispatched = MAX(0, new_quantity - previous_quantity)
+      WHERE quantity_dispatched IS NULL
+        AND previous_quantity IS NOT NULL
+        AND new_quantity IS NOT NULL
+        AND stock_request_id IN (SELECT id FROM stock_requests WHERE status = 'approved');
+    `
+  },
+  {
+    version: 102,
+    name: "invoice_line_stock_location",
+    sql: `
+      -- Client follow-up to migration 100: the Main Store stock source is chosen PER LINE, not per
+      -- invoice — one invoice can mix storefront and Main Store lines. NULL = the storefront itself
+      -- (every existing line). Every restock path (edit, cancel, return, void) reads it per line.
+      ALTER TABLE sale_items ADD COLUMN stock_location_id TEXT REFERENCES locations(id);
+      -- Carry over any invoice saved under migration 100's whole-invoice column; that column is no
+      -- longer read or written after this.
+      UPDATE sale_items
+      SET stock_location_id = (SELECT s.stock_location_id FROM sales s WHERE s.id = sale_items.sale_id)
+      WHERE stock_location_id IS NULL
+        AND EXISTS (SELECT 1 FROM sales s WHERE s.id = sale_items.sale_id AND s.stock_location_id IS NOT NULL);
+    `
   }
 ] as const;
 

@@ -15,7 +15,12 @@ import {
 } from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
 import { createDeliveryCostExpenseIfNeeded } from "@main/services/expense-service";
-import { applyValidatedStockMovement } from "@main/services/inventory-service";
+import {
+  deductInvoiceLineStock,
+  resolveLineStockLocationIds,
+  restockInvoiceLineStock,
+  stockSourceOfLocation
+} from "@main/services/invoice-stock";
 import {
   getSaleDetail,
   persistCartExtras,
@@ -36,7 +41,7 @@ import {
   type UpdateInvoiceInput
 } from "@shared/schemas/invoice";
 import type { InvoiceListItem, InvoiceSummary } from "@shared/types/invoice";
-import type { Sale, SalePayment, TransactionType } from "@shared/types/sale";
+import type { InvoiceStockSource, Sale, SalePayment, TransactionType } from "@shared/types/sale";
 
 const markPaidSchema = z.object({
   paymentMethodId: z.string().trim().min(1, "Select a payment method"),
@@ -172,8 +177,15 @@ export function insertInvoiceFromCart(input: {
   includeTaxBreakdown?: boolean;
   /** See includeTaxBreakdown above — same defaulting rule, independent flag. */
   includeBusinessInfo?: boolean;
+  /** Each cart line's stock source, aligned with cart.items — a missing entry = "storefront"
+   * (today's behaviour). See SaleItem["stockSource"]. */
+  lineStockSources?: Array<InvoiceStockSource | undefined> | undefined;
 }): string {
   const { tenantId, employeeId, locationId } = input;
+  const lineStockLocationIds = resolveLineStockLocationIds(
+    tenantId,
+    input.cart.items.map((_, index) => input.lineStockSources?.[index] ?? "storefront")
+  );
   const saleId = `sale_${randomUUID()}`;
   const invoiceNumber = generateInvoiceNumber(tenantId);
   const invoiceDate = new Date().toISOString();
@@ -245,7 +257,8 @@ export function insertInvoiceFromCart(input: {
       includeBusinessInfo: input.includeBusinessInfo
     });
 
-    for (const item of input.cart.items) {
+    for (const [index, item] of input.cart.items.entries()) {
+      const stockLocationId = lineStockLocationIds[index] ?? null;
       saleRepository.insertSaleItemRow({
         id: `sale_item_${randomUUID()}`,
         saleId,
@@ -261,23 +274,20 @@ export function insertInvoiceFromCart(input: {
         localSupplierId: item.localSupplierId,
         sectionLabel: item.sectionLabel,
         variantKey: item.variantKey,
-        variantLabel: item.variantLabel
+        variantLabel: item.variantLabel,
+        stockLocationId
       });
 
       if (item.product.track_stock && !item.isLocallySourced) {
-        applyValidatedStockMovement(
-          {
-            productId: item.product.id,
-            locationId,
-            movementType: "sale",
-            quantityChange: -item.quantity,
-            referenceType: "invoice",
-            referenceId: saleId,
-            performedBy: employeeId,
-            notes: null
-          },
-          tenantId
-        );
+        deductInvoiceLineStock({
+          tenantId,
+          employeeId,
+          storefrontId: locationId,
+          stockLocationId,
+          productId: item.product.id,
+          quantity: item.quantity,
+          saleId
+        });
       }
     }
 
@@ -343,7 +353,8 @@ export function createInvoice(input: unknown): Sale {
     cart,
     initialPayment: parsed.initialPayment,
     includeTaxBreakdown: parsed.includeTaxBreakdown,
-    includeBusinessInfo: parsed.includeBusinessInfo
+    includeBusinessInfo: parsed.includeBusinessInfo,
+    lineStockSources: parsed.items.map((item) => item.stockSource)
   });
 
   return getSaleDetail(saleId);
@@ -369,7 +380,9 @@ function requireEditableUnpaidInvoice(id: string, tenantId: string): SaleRow {
  * !is_locally_sourced). If the new cart needs more stock than's available, applyValidatedStockMovement
  * throws and the whole transaction rolls back — the old items' restock happens in the SAME
  * transaction, so nothing is left half-adjusted. The invoice's own storefront is fixed at creation,
- * same as a quotation's — parsed.locationId (if sent) is simply never read here. */
+ * same as a quotation's — parsed.locationId (if sent) is simply never read here. Each line's stock
+ * source CAN change on edit: old lines restock to where they came from, new lines deduct from their
+ * own source; a line sent without one keeps its matching existing line's (same product + variant). */
 export function updateInvoice(id: string, input: unknown): Sale {
   requirePermission("sales", "edit");
   const parsed: UpdateInvoiceInput = updateInvoiceSchema.parse(input);
@@ -401,23 +414,29 @@ export function updateInvoice(id: string, input: unknown): Sale {
     throw new Error("You must be signed in to do that");
   }
 
+  const existingItems = saleRepository.findSaleItemDetailRows(id);
+  const lineKey = (productId: string, variantKey: string | null | undefined): string => `${productId}:${variantKey ?? ""}`;
+  const existingSourceByKey = new Map(
+    existingItems.map((item) => [lineKey(item.product_id, item.variant_key), stockSourceOfLocation(item.stock_location_id)])
+  );
+  const nextLineStockLocationIds = resolveLineStockLocationIds(
+    tenantId,
+    parsed.items.map((item) => item.stockSource ?? existingSourceByKey.get(lineKey(item.productId, item.variantKey)) ?? "storefront")
+  );
+
   runInTransaction(() => {
-    const existingItems = saleRepository.findSaleItemDetailRows(id);
     for (const item of existingItems) {
       if (!item.track_stock || item.is_locally_sourced) continue;
-      applyValidatedStockMovement(
-        {
-          productId: item.product_id,
-          locationId: row.location_id,
-          movementType: "return",
-          quantityChange: item.quantity,
-          referenceType: "invoice_edit",
-          referenceId: id,
-          performedBy: employeeId,
-          notes: null
-        },
-        tenantId
-      );
+      restockInvoiceLineStock({
+        tenantId,
+        performedBy: employeeId,
+        storefrontId: row.location_id,
+        stockLocationId: item.stock_location_id,
+        productId: item.product_id,
+        quantity: item.quantity,
+        referenceType: "invoice_edit",
+        referenceId: id
+      });
     }
 
     saleRepository.updateInvoiceContentRow({
@@ -438,7 +457,8 @@ export function updateInvoice(id: string, input: unknown): Sale {
     });
 
     saleRepository.deleteSaleItemsForSaleRow(id);
-    for (const item of cart.items) {
+    for (const [index, item] of cart.items.entries()) {
+      const stockLocationId = nextLineStockLocationIds[index] ?? null;
       saleRepository.insertSaleItemRow({
         id: `sale_item_${randomUUID()}`,
         saleId: id,
@@ -454,23 +474,20 @@ export function updateInvoice(id: string, input: unknown): Sale {
         localSupplierId: item.localSupplierId,
         sectionLabel: item.sectionLabel,
         variantKey: item.variantKey,
-        variantLabel: item.variantLabel
+        variantLabel: item.variantLabel,
+        stockLocationId
       });
 
       if (item.product.track_stock && !item.isLocallySourced) {
-        applyValidatedStockMovement(
-          {
-            productId: item.product.id,
-            locationId: row.location_id,
-            movementType: "sale",
-            quantityChange: -item.quantity,
-            referenceType: "invoice",
-            referenceId: id,
-            performedBy: employeeId,
-            notes: null
-          },
-          tenantId
-        );
+        deductInvoiceLineStock({
+          tenantId,
+          employeeId,
+          storefrontId: row.location_id,
+          stockLocationId,
+          productId: item.product.id,
+          quantity: item.quantity,
+          saleId: id
+        });
       }
     }
 
@@ -571,7 +588,12 @@ export function duplicateInvoice(saleId: string): Sale {
     // Carried over, not re-decided — same "duplicate is a faithful copy" reasoning as unitPriceCents
     // above, not the schema's own default.
     includeTaxBreakdown: original.includeTaxBreakdown,
-    includeBusinessInfo: original.includeBusinessInfo
+    includeBusinessInfo: original.includeBusinessInfo,
+    // Carried over too — unless the admin has since switched the Main Store toggle off, in which case
+    // the duplicate falls back to the storefront instead of failing outright.
+    lineStockSources: original.items.map((item) =>
+      tenantRepository.findTenantRow()?.invoice_stock_from_main_store ? item.stockSource : "storefront"
+    )
   });
 
   return getSaleDetail(saleId2);

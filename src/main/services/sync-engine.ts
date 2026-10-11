@@ -601,6 +601,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
           requested_at: string;
           reviewed_by: string | null;
           reviewed_at: string | null;
+          fulfillment_note: string | null;
           created_at: string;
           updated_at: string;
           synced_updated_at: string | null;
@@ -618,6 +619,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       new_quantity: number | null;
       main_store_previous_quantity: number | null;
       main_store_new_quantity: number | null;
+      quantity_dispatched: number | null;
       created_at: string;
     }>;
 
@@ -632,6 +634,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       requestedAt: row.requested_at,
       reviewedBy: row.reviewed_by,
       reviewedAt: row.reviewed_at,
+      fulfillmentNote: row.fulfillment_note,
       items: itemRows.map((i) => ({
         id: i.id,
         // Alias-translate before push — see resolveRef's pull-side counterpart in the apply
@@ -639,6 +642,10 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
         // this device's own local id with a different cloud id at any time).
         productId: resolveCloudRef("products", i.product_id),
         quantityRequested: i.quantity_requested,
+        // Was missing from this payload entirely (partial fulfillment, migration 97, never added it
+        // here) — so every pull, including this device's own echo, rebuilt the items with a NULL
+        // quantity_dispatched: blank "Dispatched" column, and every approved request flagged Partial.
+        quantityDispatched: i.quantity_dispatched,
         // Null for a still-pending or rejected request's items — see stock-request-service.ts's
         // approveStockRequest for where these get frozen at approval, mirroring stock_receipts'
         // own previous/new quantity pair below.
@@ -842,6 +849,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
     const itemRows = getDatabase()
       .prepare("SELECT * FROM sale_items WHERE sale_id = ? ORDER BY created_at ASC")
       .all(id) as Array<{
+      stock_location_id: string | null;
       id: string;
       product_id: string;
       quantity: number;
@@ -876,6 +884,9 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       sectionLabel: i.section_label,
       variantKey: i.variant_key ?? null,
       variantLabel: i.variant_label ?? null,
+      // Per-line stock source (migration 102) — null = the storefront. Always sent (even null) so a
+      // pull can tell "storefront" apart from "older payload without the field".
+      stockLocationId: resolveCloudRef("locations", i.stock_location_id),
       createdAt: i.created_at
     }));
 
@@ -2402,10 +2413,11 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
       const values: SQLInputValue[] = [
         id,
         localTenantId,
-        ...SALE_HEADER_COLUMNS.map((c) =>
-          c.refEntity
-            ? ((c.refNotNull ? resolveRef(c.refEntity, row[c.cloud]) : resolveRefOrNull(c.refEntity, row[c.cloud])) as SQLInputValue)
-            : (row[c.cloud] as SQLInputValue)
+        ...SALE_HEADER_COLUMNS.map(
+          (c) =>
+            (c.refEntity
+              ? ((c.refNotNull ? resolveRef(c.refEntity, row[c.cloud]) : resolveRefOrNull(c.refEntity, row[c.cloud])) as SQLInputValue)
+              : (row[c.cloud] as SQLInputValue)) ?? null
         ),
         JSON.stringify(row.payments ?? []),
         // Same "bound separately, older payload predates this field entirely" treatment as payments
@@ -2438,10 +2450,11 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         ...(isConflictAware ? ["synced_updated_at = ?"] : [])
       ];
       const values: SQLInputValue[] = [
-        ...SALE_HEADER_COLUMNS.map((c) =>
-          c.refEntity
-            ? ((c.refNotNull ? resolveRef(c.refEntity, row[c.cloud]) : resolveRefOrNull(c.refEntity, row[c.cloud])) as SQLInputValue)
-            : (row[c.cloud] as SQLInputValue)
+        ...SALE_HEADER_COLUMNS.map(
+          (c) =>
+            (c.refEntity
+              ? ((c.refNotNull ? resolveRef(c.refEntity, row[c.cloud]) : resolveRefOrNull(c.refEntity, row[c.cloud])) as SQLInputValue)
+              : (row[c.cloud] as SQLInputValue)) ?? null
         ),
         JSON.stringify(row.payments ?? []),
         JSON.stringify(row.notesSections ?? []),
@@ -2459,8 +2472,8 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
     const items = (row.items as Array<Record<string, unknown>>) ?? [];
     for (const item of items) {
       db.prepare(
-        `INSERT INTO sale_items (id, sale_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, is_locally_sourced, local_cost_cents, local_supplier_id, section_label, variant_key, variant_label, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO sale_items (id, sale_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, is_locally_sourced, local_cost_cents, local_supplier_id, section_label, variant_key, variant_label, stock_location_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         item.id as string,
         id,
@@ -2493,6 +2506,12 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         // Older device's payload predates variants — same fallback as sectionLabel.
         (item.variantKey as string | null | undefined) ?? null,
         (item.variantLabel as string | null | undefined) ?? null,
+        // Per-line stock source. A line without the key was saved by the first, whole-invoice version
+        // of this feature (the mobile app/server) — fall back to that sale-level stockLocationId.
+        resolveRefOrNull(
+          "locations",
+          (item.stockLocationId !== undefined ? item.stockLocationId : row.stockLocationId) ?? null
+        ) as string | null,
         item.createdAt as string
       );
     }
@@ -2688,10 +2707,11 @@ function upsertDocumentHeader(
     const values: SQLInputValue[] = [
       id,
       localTenantId,
-      ...businessColumns.map((c) =>
-        c.refEntity
-          ? ((c.refNotNull ? resolveRef(c.refEntity, row[c.cloud]) : resolveRefOrNull(c.refEntity, row[c.cloud])) as SQLInputValue)
-          : (row[c.cloud] as SQLInputValue)
+      ...businessColumns.map(
+        (c) =>
+          (c.refEntity
+            ? ((c.refNotNull ? resolveRef(c.refEntity, row[c.cloud]) : resolveRefOrNull(c.refEntity, row[c.cloud])) as SQLInputValue)
+            : (row[c.cloud] as SQLInputValue)) ?? null
       ),
       ...jsonColumns.map((c) => JSON.stringify(row[c.cloud] ?? null)),
       localCreatedAt,
@@ -2711,10 +2731,11 @@ function upsertDocumentHeader(
       ...(isConflictAware ? ["synced_updated_at = ?"] : [])
     ];
     const values: SQLInputValue[] = [
-      ...businessColumns.map((c) =>
-        c.refEntity
-          ? ((c.refNotNull ? resolveRef(c.refEntity, row[c.cloud]) : resolveRefOrNull(c.refEntity, row[c.cloud])) as SQLInputValue)
-          : (row[c.cloud] as SQLInputValue)
+      ...businessColumns.map(
+        (c) =>
+          (c.refEntity
+            ? ((c.refNotNull ? resolveRef(c.refEntity, row[c.cloud]) : resolveRefOrNull(c.refEntity, row[c.cloud])) as SQLInputValue)
+            : (row[c.cloud] as SQLInputValue)) ?? null
       ),
       ...jsonColumns.map((c) => JSON.stringify(row[c.cloud] ?? null)),
       localUpdatedAt,
@@ -3167,7 +3188,9 @@ const STOCK_REQUEST_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEnt
   { local: "requested_by", cloud: "requestedBy", refEntity: "employees", refNotNull: true },
   { local: "requested_at", cloud: "requestedAt" },
   { local: "reviewed_by", cloud: "reviewedBy", refEntity: "employees" },
-  { local: "reviewed_at", cloud: "reviewedAt" }
+  { local: "reviewed_at", cloud: "reviewedAt" },
+  // Storekeeper's partial-dispatch note — same "never synced before" gap as quantityDispatched.
+  { local: "fulfillment_note", cloud: "fulfillmentNote" }
 ];
 
 /** Last entity in "buy a new device, get everything back" — back to the plain document-with-
@@ -3190,8 +3213,8 @@ function applyStockRequestPulledRow(row: Record<string, unknown>, force: boolean
       db.prepare(
         `INSERT INTO stock_request_items (
           id, stock_request_id, product_id, quantity_requested, previous_quantity, new_quantity,
-          main_store_previous_quantity, main_store_new_quantity, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          main_store_previous_quantity, main_store_new_quantity, quantity_dispatched, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         item.id as string,
         id,
@@ -3205,10 +3228,26 @@ function applyStockRequestPulledRow(row: Record<string, unknown>, force: boolean
         (item.newQuantity as number | null | undefined) ?? null,
         (item.mainStorePreviousQuantity as number | null | undefined) ?? null,
         (item.mainStoreNewQuantity as number | null | undefined) ?? null,
+        pulledQuantityDispatched(row.status, item),
         item.createdAt as string
       );
     }
   });
+}
+
+/** quantity_dispatched for a pulled stock_request_items row. Cloud copies pushed before the payload
+ * carried quantityDispatched lack the key — for an approved request it's still exactly derivable from
+ * the storefront's own frozen before/after pair (newQuantity - previousQuantity, set at approval by
+ * stock-request-service.ts), which DID always sync. Same rule as migration 101's backfill. */
+function pulledQuantityDispatched(status: unknown, item: Record<string, unknown>): number | null {
+  const sent = item.quantityDispatched as number | null | undefined;
+  if (sent !== undefined && sent !== null) return sent;
+  const previous = item.previousQuantity as number | null | undefined;
+  const next = item.newQuantity as number | null | undefined;
+  if (status === "approved" && typeof previous === "number" && typeof next === "number") {
+    return Math.max(0, next - previous);
+  }
+  return null;
 }
 
 const STOCK_RECEIPT_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }> = [
@@ -4130,6 +4169,14 @@ async function runSyncCycle(): Promise<void> {
     if (tenantRow) supplierBalanceRepository.reconcileAllSupplierBalances(tenantRow.id);
   } catch (err) {
     console.error("[sync] reconcileAllSupplierBalances failed:", err);
+  }
+  // Same self-healing treatment for customers.current_balance_cents — see
+  // reconcileAllCustomerBalances's own doc comment (customer-repository.ts).
+  try {
+    const tenantRow = tenantRepository.findTenantRow();
+    if (tenantRow) customerRepository.reconcileAllCustomerBalances(tenantRow.id);
+  } catch (err) {
+    console.error("[sync] reconcileAllCustomerBalances failed:", err);
   }
 
   finalizeRunReport();

@@ -43,6 +43,7 @@ function toTenantContext(row: tenantRepository.TenantRow): TenantContext {
     vatRatePercent: row.vat_rate_percent,
     pricesTaxInclusive: Boolean(row.prices_tax_inclusive),
     invoiceEditsDisabled: Boolean(row.invoice_edits_disabled),
+    invoiceStockFromMainStore: Boolean(row.invoice_stock_from_main_store),
     activated: row.license_key !== null,
     licenseStatus: row.license_status as LicenseStatus,
     nextDueDate: row.next_due_date,

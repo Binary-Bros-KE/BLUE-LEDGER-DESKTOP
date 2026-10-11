@@ -72,7 +72,7 @@ import type { PaymentMethod } from "@shared/types/payment-method";
 import type { ProductListItem } from "@shared/types/product";
 import { VariantPickerModal } from "@renderer/shared/components/VariantPickerModal";
 import { lineName, needsVariantPicker, pricedForVariant, variantSearchText, type VariantPick } from "@renderer/shared/lib/variant-cart";
-import type { SaleDelivery } from "@shared/types/sale";
+import type { InvoiceStockSource, SaleDelivery } from "@shared/types/sale";
 import type { SupplierPickerOption } from "@shared/types/supplier";
 import {
   QUOTATION_STATUS_OPTIONS,
@@ -167,6 +167,8 @@ function Th({ children, className }: { children: React.ReactNode; className?: st
 export function QuotationsRoute(): React.JSX.Element {
   const currency = useAppStore((state) => state.context?.tenant.currency ?? "");
   const tenantContext = useAppStore((state) => state.context?.tenant ?? null);
+  // Admin "Invoice stock from Main Store" toggle — only then does Convert to Invoice offer a per-line Stock select.
+  const canChooseStockSource = Boolean(tenantContext?.invoiceStockFromMainStore);
   const { can, session } = usePermissions();
   const showStorefrontFilter = session?.branch == null;
   const canCreate = can("quotations", "create");
@@ -269,6 +271,8 @@ export function QuotationsRoute(): React.JSX.Element {
   const [convertPaymentReference, setConvertPaymentReference] = useState("");
   const [convertAmountReceived, setConvertAmountReceived] = useState("");
   const [convertDueDate, setConvertDueDate] = useState(addDaysIso(30));
+  /** Convert to Invoice's per-line stock source, keyed by productId (same keying as quantityEdits). */
+  const [convertLineSources, setConvertLineSources] = useState<Record<string, InvoiceStockSource>>({});
   const [convertSaving, setConvertSaving] = useState(false);
   const [convertError, setConvertError] = useState<string | null>(null);
 
@@ -546,6 +550,7 @@ export function QuotationsRoute(): React.JSX.Element {
     setConvertPaymentReference("");
     setConvertAmountReceived("");
     setConvertDueDate(addDaysIso(30));
+    setConvertLineSources({});
     setQuantityEdits({});
     setStockCheck(null);
     if (kind === "sale") setConvertSaleOpen(true);
@@ -582,7 +587,39 @@ export function QuotationsRoute(): React.JSX.Element {
       });
   }
 
-  const hasInsufficientStock = stockCheck?.some((item) => item.sufficient === false && (quantityEdits[item.productId] ?? item.requestedQuantity) > item.availableQuantity) ?? false;
+  type StockCheckLine = NonNullable<typeof stockCheck>[number];
+
+  /** A line's chosen source — only ever "main_store" inside Convert to Invoice with the admin toggle on;
+   * Convert to Sale always draws from the storefront. */
+  function lineSourceFor(productId: string): InvoiceStockSource {
+    return convertInvoiceOpen && canChooseStockSource ? (convertLineSources[productId] ?? "storefront") : "storefront";
+  }
+
+  /** Availability at the line's chosen source — the Main Store figure is already "earmark +
+   * unallocated", the amount a Main Store line is actually held to at conversion. */
+  function lineAvailable(item: StockCheckLine): number {
+    return lineSourceFor(item.productId) === "main_store" ? (item.mainStoreAvailableQuantity ?? 0) : item.availableQuantity;
+  }
+
+  function lineSufficient(item: StockCheckLine): boolean {
+    return lineAvailable(item) >= item.requestedQuantity;
+  }
+
+  /** Switching a line's source re-judges it against that source: cap the quantity to what's there,
+   * or clear the cap if the new source has enough. */
+  function setConvertLineSource(item: StockCheckLine, source: InvoiceStockSource): void {
+    setConvertLineSources((prev) => ({ ...prev, [item.productId]: source }));
+    const available = source === "main_store" ? (item.mainStoreAvailableQuantity ?? 0) : item.availableQuantity;
+    setQuantityEdits((prev) => {
+      const next = { ...prev };
+      if (item.requestedQuantity > available) next[item.productId] = available;
+      else delete next[item.productId];
+      return next;
+    });
+  }
+
+  const hasInsufficientStock =
+    stockCheck?.some((item) => !lineSufficient(item) && (quantityEdits[item.productId] ?? item.requestedQuantity) > lineAvailable(item)) ?? false;
 
   async function submitConvertToSale(event: React.FormEvent): Promise<void> {
     event.preventDefault();
@@ -619,7 +656,10 @@ export function QuotationsRoute(): React.JSX.Element {
     try {
       const sale = await window.blueLedger.quotation.convertToInvoice(viewingQuotation.id, {
         dueDate: convertDueDate,
-        quantityOverrides: buildQuantityOverrides()
+        quantityOverrides: buildQuantityOverrides(),
+        stockSources: canChooseStockSource
+          ? Object.entries(convertLineSources).map(([productId, stockSource]) => ({ productId, stockSource }))
+          : []
       });
       closeConvert();
       await refreshViewing(viewingQuotation.id);
@@ -1982,6 +2022,12 @@ export function QuotationsRoute(): React.JSX.Element {
             </div>
           )}
 
+          {canChooseStockSource && (
+            <p className="mb-3 text-[11px] font-semibold text-muted">
+              Choose where each line's stock comes from — this storefront, or straight from the Main Store (this storefront's earmarked stock first, then unallocated). No transfer needed.
+            </p>
+          )}
+
           {stockCheckLoading ? (
             <div className="flex min-h-[100px] items-center justify-center text-muted">
               <Loader2 className="size-5 animate-spin" aria-hidden="true" />
@@ -1995,7 +2041,7 @@ export function QuotationsRoute(): React.JSX.Element {
                     key={item.productId}
                     className={cn(
                       "flex items-start justify-between gap-2 rounded-lg border px-3 py-2",
-                      item.sufficient ? "border-line" : "border-danger/40 bg-danger-soft"
+                      lineSufficient(item) ? "border-line" : "border-danger/40 bg-danger-soft"
                     )}
                   >
                     <div className="min-w-0">
@@ -2003,16 +2049,28 @@ export function QuotationsRoute(): React.JSX.Element {
                         {item.productName}
                       </p>
                       <p className="text-[11px] font-semibold text-muted">
-                        Requested {item.requestedQuantity} · Available {item.availableQuantity}
-                        {!item.sufficient && " · Insufficient stock"}
+                        Requested {item.requestedQuantity} · Available {lineAvailable(item)}
+                        {lineSourceFor(item.productId) === "main_store" ? " at Main Store" : ""}
+                        {!lineSufficient(item) && " · Insufficient stock"}
                       </p>
+                      {canChooseStockSource && item.mainStoreAvailableQuantity !== null && (
+                        <select
+                          value={lineSourceFor(item.productId)}
+                          onChange={(event) => setConvertLineSource(item, event.target.value as InvoiceStockSource)}
+                          aria-label={`Stock source for ${item.productName}`}
+                          className="mt-1 h-7 rounded-md border border-line px-1 text-[11px] font-semibold outline-none focus:border-accent"
+                        >
+                          <option value="storefront">Storefront ({item.availableQuantity})</option>
+                          <option value="main_store">Main Store ({item.mainStoreAvailableQuantity})</option>
+                        </select>
+                      )}
                     </div>
-                    {!item.sufficient && (
+                    {!lineSufficient(item) && (
                       <input
                         type="number"
                         min={0}
-                        max={item.availableQuantity}
-                        value={quantityEdits[item.productId] ?? item.availableQuantity}
+                        max={lineAvailable(item)}
+                        value={quantityEdits[item.productId] ?? lineAvailable(item)}
                         onChange={(event) =>
                           setQuantityEdits((prev) => ({ ...prev, [item.productId]: Number(event.target.value) }))
                         }

@@ -64,6 +64,9 @@ export type BusinessProfile = {
   pricesTaxInclusive: boolean;
   /** Business Profile "Disable invoice edits" — synced to every device/mobile; see invoice-service.ts's updateInvoice. */
   invoiceEditsDisabled: boolean;
+  /** Admin "Invoice stock from Main Store" toggle — when true, an invoice (or a quotation converted into one)
+   * can take its stock from the Main Store instead of the storefront; see invoice-service.ts. */
+  invoiceStockFromMainStore: boolean;
   receiptHeader: string | null;
   receiptFooter: string | null;
 };
@@ -126,6 +129,9 @@ export type TenantContext = {
   vatRatePercent: number;
   pricesTaxInclusive: boolean;
   invoiceEditsDisabled: boolean;
+  /** Admin "Invoice stock from Main Store" toggle — when true, an invoice (or a quotation converted into one)
+   * can take its stock from the Main Store instead of the storefront; see invoice-service.ts. */
+  invoiceStockFromMainStore: boolean;
   /** True once this install has a real license key from the cloud registry — App.tsx gates the
    * entire app on this, before even the employee login screen. False means "freshly installed,
    * never activated" (licenseKey is still null). */

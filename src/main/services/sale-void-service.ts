@@ -3,7 +3,7 @@ import { runInTransaction } from "@main/database/connection";
 import * as saleRepository from "@main/database/repositories/sale-repository";
 import * as saleVoidRepository from "@main/database/repositories/sale-void-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
-import { applyValidatedStockMovement } from "@main/services/inventory-service";
+import { restockInvoiceLineStock } from "@main/services/invoice-stock";
 import { assertNotAlreadyDecidedRemotely } from "@main/services/sync-engine";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { approvalDecisionSchema, saleVoidRequestSchema } from "@shared/schemas/sale-void";
@@ -90,19 +90,17 @@ export async function approveSaleVoid(id: string, input: unknown): Promise<SaleV
 
   runInTransaction(() => {
     for (const item of items) {
-      applyValidatedStockMovement(
-        {
-          productId: item.product_id,
-          locationId: sale.location_id,
-          movementType: "return",
-          quantityChange: item.quantity,
-          referenceType: "sale_void",
-          referenceId: id,
-          performedBy: approverId,
-          notes: null
-        },
-        tenantId
-      );
+      // Same "back to where it came from" rule as sale-return-service.ts — see invoice-stock.ts.
+      restockInvoiceLineStock({
+        tenantId,
+        performedBy: approverId,
+        storefrontId: sale.location_id,
+        stockLocationId: item.stock_location_id,
+        productId: item.product_id,
+        quantity: item.quantity,
+        referenceType: "sale_void",
+        referenceId: id
+      });
     }
     saleVoidRepository.updateSaleVoidStatusRow(id, "approved", approverId, parsed.notes);
   });

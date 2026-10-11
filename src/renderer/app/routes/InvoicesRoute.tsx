@@ -76,8 +76,10 @@ import type { ProductListItem } from "@shared/types/product";
 import { VariantPickerModal } from "@renderer/shared/components/VariantPickerModal";
 import { lineName, needsVariantPicker, pricedForVariant, variantSearchText, type VariantPick } from "@renderer/shared/lib/variant-cart";
 import {
+  INVOICE_STOCK_SOURCE_OPTIONS,
   PAYMENT_STATUS_OPTIONS,
   TRANSACTION_TYPE_OPTIONS,
+  type InvoiceStockSource,
   type PaymentStatus,
   type Sale,
   type SaleDelivery,
@@ -135,6 +137,9 @@ type CartLine = {
    * leading bucket with no header. See groupItemsBySections's own doc comment
    * (shared/lib/document-sections.ts). */
   sectionLabel: string | null;
+  /** Where THIS line's stock comes from — see SaleItem["stockSource"]. Only selectable (and only sent)
+   * when the admin's "Invoice stock from Main Store" toggle is on. */
+  stockSource: InvoiceStockSource;
 };
 
 function statusTone(status: PaymentStatus): "success" | "warning" | "danger" | "neutral" | "accent" {
@@ -201,6 +206,8 @@ export function InvoicesRoute(): React.JSX.Element {
   const canCreate = can("sales", "create");
   const canEdit = can("sales", "edit");
   const canEditInvoice = canEdit && !tenantContext?.invoiceEditsDisabled;
+  // Admin "Invoice stock from Main Store" toggle — only then does each line offer a Stock select.
+  const canChooseStockSource = Boolean(tenantContext?.invoiceStockFromMainStore);
   const canExport = can("sales", "export");
   // Cancelling outright (no approval step) is gated the same as approving one — whoever can approve
   // someone else's cancellation request can just as well skip the request step themselves. Matches
@@ -1001,6 +1008,7 @@ export function InvoicesRoute(): React.JSX.Element {
         // keeps its price exactly as it was — same "don't silently re-price from the product's
         // CURRENT price" reasoning as duplicateInvoice's own cart-building (see invoice-service.ts).
         priceOverride: fromCents(item.unitPriceCents),
+        stockSource: item.stockSource,
         isLocallySourced: item.isLocallySourced,
         // item.localCostCents is stored as the TOTAL for this line (see money.ts's own doc comment
         // on the pair below) — back it out to the per-unit figure this field shows.
@@ -1096,7 +1104,8 @@ export function InvoicesRoute(): React.JSX.Element {
           localCost: "",
           localSupplierId: null,
           taxInclusiveOverride: null,
-          sectionLabel: targetSectionLabel
+          sectionLabel: targetSectionLabel,
+          stockSource: "storefront"
         }
       ];
     });
@@ -1169,6 +1178,10 @@ export function InvoicesRoute(): React.JSX.Element {
    * without having to remove and re-add it. */
   function updateCreateSectionLabel(key: string, sectionLabel: string | null): void {
     setCreateItems((prev) => prev.map((line) => (line.key === key ? { ...line, sectionLabel } : line)));
+  }
+
+  function updateCreateStockSource(key: string, stockSource: InvoiceStockSource): void {
+    setCreateItems((prev) => prev.map((line) => (line.key === key ? { ...line, stockSource } : line)));
   }
 
   /** Confirms the inline "new section" composer — sets the section every subsequently-added
@@ -1269,7 +1282,10 @@ export function InvoicesRoute(): React.JSX.Element {
         localSupplierId: line.localSupplierId,
         taxInclusiveOverride: line.taxInclusiveOverride,
         sectionLabel: line.sectionLabel,
-        variantKey: line.variantKey
+        variantKey: line.variantKey,
+        // Only sent when the per-line Stock select is shown — omitted keeps an edited line's current
+        // source (and means "storefront" on create), so a tenant with the toggle off never sends it.
+        stockSource: canChooseStockSource ? line.stockSource : undefined
       })),
       serviceCharges: createServiceCharges.map((charge) => ({
         name: charge.name,
@@ -1634,6 +1650,22 @@ export function InvoicesRoute(): React.JSX.Element {
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Storefront</p>
                 <p className="mt-0.5 truncate text-sm font-bold text-ink">{viewingSale.locationName}</p>
               </div>
+              {(() => {
+                const mainStoreLines = viewingSale.items.filter((item) => item.stockSource === "main_store");
+                if (mainStoreLines.length === 0) return null;
+                const all = mainStoreLines.length === viewingSale.items.length;
+                return (
+                  <div
+                    className="rounded-lg border border-line bg-soft px-3 py-2.5"
+                    title={`From Main Store: ${mainStoreLines.map((item) => item.productName).join(", ")}`}
+                  >
+                    <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Stock From</p>
+                    <p className="mt-0.5 truncate text-sm font-bold text-ink">
+                      {all ? "Main Store" : `Mixed — ${mainStoreLines.length} of ${viewingSale.items.length} lines from Main Store`}
+                    </p>
+                  </div>
+                );
+              })()}
               <div className="rounded-lg border border-line bg-soft px-3 py-2.5">
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Issued By</p>
                 <p className="mt-0.5 truncate text-sm font-bold text-ink">{viewingSale.employeeName}</p>
@@ -2382,6 +2414,12 @@ export function InvoicesRoute(): React.JSX.Element {
             <Field label="Due Date" type="date" value={createDueDate} onChange={setCreateDueDate} required />
           </div>
 
+          {canChooseStockSource && (
+            <p className="mt-3 text-[11px] font-semibold text-muted">
+              Each product line can take its stock from this storefront or straight from the Main Store (this storefront's earmarked stock first, then unallocated) — use the line's Stock select. No transfer needed.
+            </p>
+          )}
+
           <div className="mt-4">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Products</span>
@@ -2642,7 +2680,12 @@ export function InvoicesRoute(): React.JSX.Element {
                               <div className="flex flex-wrap items-center gap-x-2 text-[10px] font-semibold text-muted">
                                 <span>@ {formatCents(pricing.unitPriceCents)}</span>
                                 <div className="min-w-0 [&>p]:mt-0">
-                                  <StockByLocationRow balances={createLineStock.get(line.productId)} locationId={effectiveCreateLocationId} />
+                                  {/* Hidden for a Main Store invoice: the storefront's shelf count is irrelevant there, and
+                                      the Main Store's raw total would overstate it (other storefronts' earmarks). */}
+                                  <StockByLocationRow
+                                    balances={createLineStock.get(line.productId)}
+                                    locationId={canChooseStockSource && line.stockSource === "main_store" ? null : effectiveCreateLocationId}
+                                  />
                                 </div>
                                 {belowMinimum && <span className="font-bold text-danger">Below min {fromCents(product.minimumPriceCents)}</span>}
                               </div>
@@ -2730,6 +2773,28 @@ export function InvoicesRoute(): React.JSX.Element {
                               />
                               Sourced from another shop
                             </label>
+                            {canChooseStockSource && !line.isLocallySourced && (
+                              <label
+                                className="flex items-center gap-1 text-[10px] font-bold text-muted"
+                                title="Where this line's stock is taken from — Main Store uses this storefront's earmarked stock first, then unallocated"
+                              >
+                                Stock
+                                <select
+                                  value={line.stockSource}
+                                  onChange={(event) => updateCreateStockSource(line.key, event.target.value as InvoiceStockSource)}
+                                  className={cn(
+                                    "h-7 w-28 rounded-md border px-1 text-[11px] font-semibold outline-none focus:border-accent",
+                                    line.stockSource === "main_store" ? "border-accent text-accent" : "border-line"
+                                  )}
+                                >
+                                  {INVOICE_STOCK_SOURCE_OPTIONS.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            )}
                             <label className="flex items-center gap-1 text-[10px] font-bold text-muted">
                               Section
                               <select

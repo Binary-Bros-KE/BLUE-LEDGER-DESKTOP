@@ -35,6 +35,7 @@ export type TenantRow = {
   vat_rate_percent: number;
   prices_tax_inclusive: number;
   invoice_edits_disabled: number;
+  invoice_stock_from_main_store: number;
   receipt_header: string | null;
   receipt_footer: string | null;
   // Fallback-only, like receipt_header/receipt_footer above — no Business Profile UI sets these,
@@ -283,6 +284,7 @@ export function mapTenantRow(row: TenantRow, appVersion: string): TenantRecord {
     vatRatePercent: row.vat_rate_percent,
     pricesTaxInclusive: Boolean(row.prices_tax_inclusive),
     invoiceEditsDisabled: Boolean(row.invoice_edits_disabled),
+    invoiceStockFromMainStore: Boolean(row.invoice_stock_from_main_store),
     receiptHeader: row.receipt_header,
     receiptFooter: row.receipt_footer,
     licenseKey: row.license_key,
@@ -562,4 +564,12 @@ export function setInvoiceEditsDisabledRow(disabled: boolean): void {
   getDatabase()
     .prepare("UPDATE tenant SET invoice_edits_disabled = ? WHERE id = (SELECT id FROM tenant ORDER BY created_at LIMIT 1)")
     .run(disabled ? 1 : 0);
+}
+
+/** Admin-dashboard-controlled (see SERVER's Tenant.invoiceStockFromMainStore) — same "applied
+ * straight from every heartbeat" treatment as setInvoiceEditsDisabledRow above. */
+export function setInvoiceStockFromMainStoreRow(enabled: boolean): void {
+  getDatabase()
+    .prepare("UPDATE tenant SET invoice_stock_from_main_store = ? WHERE id = (SELECT id FROM tenant ORDER BY created_at LIMIT 1)")
+    .run(enabled ? 1 : 0);
 }

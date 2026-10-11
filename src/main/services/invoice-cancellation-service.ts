@@ -3,7 +3,7 @@ import { runInTransaction } from "@main/database/connection";
 import * as invoiceCancellationRepository from "@main/database/repositories/invoice-cancellation-repository";
 import * as saleRepository from "@main/database/repositories/sale-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
-import { applyValidatedStockMovement } from "@main/services/inventory-service";
+import { restockInvoiceLineStock } from "@main/services/invoice-stock";
 import { requireInvoiceRow } from "@main/services/invoice-service";
 import { getSaleDetail } from "@main/services/sale-service";
 import { assertNotAlreadyDecidedRemotely } from "@main/services/sync-engine";
@@ -71,19 +71,17 @@ function restockAndMarkCancelled(tenantId: string, saleId: string, cancellationI
   const items = saleRepository.findSaleItemDetailRows(saleId);
   for (const item of items) {
     if (!item.track_stock || item.is_locally_sourced) continue;
-    applyValidatedStockMovement(
-      {
-        productId: item.product_id,
-        locationId: sale.location_id,
-        movementType: "return",
-        quantityChange: item.quantity,
-        referenceType: "invoice_cancellation",
-        referenceId: cancellationId,
-        performedBy: actorId,
-        notes: null
-      },
-      tenantId
-    );
+    // Back to wherever the invoice drew it from (storefront or Main Store) — see invoice-stock.ts.
+    restockInvoiceLineStock({
+      tenantId,
+      performedBy: actorId,
+      storefrontId: sale.location_id,
+      stockLocationId: item.stock_location_id,
+      productId: item.product_id,
+      quantity: item.quantity,
+      referenceType: "invoice_cancellation",
+      referenceId: cancellationId
+    });
   }
   saleRepository.updateSalePaymentStatusRow(saleId, "cancelled" satisfies PaymentStatus);
 }

@@ -11,6 +11,7 @@ import * as serviceChargeRepository from "@main/database/repositories/service-ch
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
 import { insertInvoiceFromCart } from "@main/services/invoice-service";
+import { findMainStoreIdIfEnabled, mainStoreAvailableForStorefront } from "@main/services/invoice-stock";
 import {
   getSaleDetail,
   insertCompletedSaleFromCart,
@@ -333,10 +334,14 @@ export function setQuotationIncludeBusinessInfo(id: string, includeBusinessInfo:
   return getQuotationDetail(id);
 }
 
-/** Live stock at the quotation's own storefront for each line — lets the UI warn before conversion. */
+/** Live stock at the quotation's own storefront for each line — lets the UI warn before conversion.
+ * With the admin's Main Store toggle on, each line also reports what the Main Store could supply this
+ * storefront (earmark + unallocated, the figure a Main Store invoice line is held to), so Convert to
+ * Invoice can pick a source per line. */
 export function checkQuotationStock(id: string): QuotationStockCheckItem[] {
   requirePermission("quotations", "view");
   const quotation = getQuotationDetail(id);
+  const mainStoreId = findMainStoreIdIfEnabled(getCurrentTenant().tenantId);
 
   // A locally-sourced line never touched (and never will touch) this shop's own inventory — see
   // insertCompletedSaleFromCart's own stock-movement skip for the same condition — so checking its
@@ -345,14 +350,16 @@ export function checkQuotationStock(id: string): QuotationStockCheckItem[] {
   return quotation.items
     .filter((item) => !item.isLocallySourced)
     .map((item) => {
-      const inventoryRow = inventoryRepository.findInventoryRow(item.productId, quotation.locationId);
-      const availableQuantity = inventoryRow?.quantity ?? 0;
+      const availableQuantity = inventoryRepository.findInventoryRow(item.productId, quotation.locationId)?.quantity ?? 0;
       return {
         productId: item.productId,
         productName: item.productName,
         requestedQuantity: item.quantity,
         availableQuantity,
-        sufficient: availableQuantity >= item.quantity
+        sufficient: availableQuantity >= item.quantity,
+        mainStoreAvailableQuantity: mainStoreId
+          ? mainStoreAvailableForStorefront(item.productId, mainStoreId, quotation.locationId)
+          : null
       };
     });
 }
@@ -577,7 +584,12 @@ export function convertQuotationToInvoice(id: string, input: unknown): Sale {
     cart,
     initialPayment: null,
     includeTaxBreakdown: quotation.includeTaxBreakdown,
-    includeBusinessInfo: quotation.includeBusinessInfo
+    includeBusinessInfo: quotation.includeBusinessInfo,
+    // The convert dialog's per-line Storefront / Main Store choice (only offered when the admin toggle
+    // is on — insertInvoiceFromCart enforces that regardless).
+    lineStockSources: cart.items.map(
+      (item) => parsed.stockSources.find((entry) => entry.productId === item.product.id)?.stockSource
+    )
   });
 
   quotationRepository.markQuotationConvertedRow(quotation.id, saleId);

@@ -2,6 +2,11 @@ import { z } from "zod";
 import { deliveryFieldSchema, notesSectionsFieldSchema, serviceChargesFieldSchema } from "@shared/schemas/charges";
 import { LOCAL_SOURCING_REFINEMENT_OPTS, localSourcingRequiresCost, optionalBoolean, optionalText } from "@shared/schemas/common";
 
+/** Where an invoice LINE's stock is deducted from — see SaleItem["stockSource"]. "main_store" is
+ * refused unless the tenant's admin toggle is on (invoice-stock.ts's resolveLineStockLocationIds).
+ * Optional: omitted on create = "storefront"; omitted on update = the matching existing line's source. */
+export const invoiceStockSourceSchema = z.enum(["storefront", "main_store"]);
+
 const invoiceCartItemSchema = z
   .object({
     productId: z.string().trim().min(1),
@@ -29,6 +34,7 @@ const invoiceCartItemSchema = z
     sectionLabel: optionalText(120),
     /** Shared-stock variant for this line (docs/VARIANTS.md) — prepareCart resolves its price and label. */
     variantKey: optionalText(40),
+    stockSource: invoiceStockSourceSchema.optional(),
   })
   .refine(localSourcingRequiresCost, LOCAL_SOURCING_REFINEMENT_OPTS);
 

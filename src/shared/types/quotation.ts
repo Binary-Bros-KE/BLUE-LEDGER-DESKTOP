@@ -124,4 +124,8 @@ export type QuotationStockCheckItem = {
   requestedQuantity: number;
   availableQuantity: number;
   sufficient: boolean;
+  /** What the Main Store could supply this storefront for the line (its earmark + unallocated — the
+   * figure a Main Store invoice line is held to). Null unless the admin's "Invoice stock from Main
+   * Store" toggle is on — Convert to Invoice then lets each line pick its source. */
+  mainStoreAvailableQuantity: number | null;
 };

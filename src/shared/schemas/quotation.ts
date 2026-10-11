@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { deliveryFieldSchema, notesSectionsFieldSchema, serviceChargesFieldSchema } from "@shared/schemas/charges";
 import { LOCAL_SOURCING_REFINEMENT_OPTS, localSourcingRequiresCost, optionalBoolean, optionalText } from "@shared/schemas/common";
+import { invoiceStockSourceSchema } from "@shared/schemas/invoice";
 
 const quotationCartItemSchema = z
   .object({
@@ -103,7 +104,13 @@ export type ConvertToSaleInput = z.infer<typeof convertToSaleSchema>;
 
 export const convertToInvoiceSchema = z.object({
   dueDate: z.string().trim().min(1, "Due date is required"),
-  quantityOverrides: z.array(quotationConvertItemOverrideSchema).optional().default([])
+  quantityOverrides: z.array(quotationConvertItemOverrideSchema).optional().default([]),
+  /** Per-line stock source (see invoiceStockSourceSchema), keyed by productId — same keying as
+   * quantityOverrides. A line not listed takes "storefront". */
+  stockSources: z
+    .array(z.object({ productId: z.string().trim().min(1), stockSource: invoiceStockSourceSchema }))
+    .optional()
+    .default([])
 });
 
 export type ConvertToInvoiceInput = z.infer<typeof convertToInvoiceSchema>;

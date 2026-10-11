@@ -25,6 +25,14 @@ export const TRANSACTION_TYPE_OPTIONS = [
 
 export type TransactionType = (typeof TRANSACTION_TYPE_OPTIONS)[number]["value"];
 
+/** Where an invoice line's stock comes from — see SaleItem["stockSource"]. */
+export const INVOICE_STOCK_SOURCE_OPTIONS = [
+  { value: "storefront", label: "Storefront" },
+  { value: "main_store", label: "Main Store" }
+] as const;
+
+export type InvoiceStockSource = (typeof INVOICE_STOCK_SOURCE_OPTIONS)[number]["value"];
+
 export const PAYMENT_STATUS_OPTIONS = [
   { value: "unpaid", label: "Unpaid" },
   { value: "partially_paid", label: "Partially Paid" },
@@ -130,6 +138,11 @@ export type SaleItem = {
    * appended ("Travel Mug — Red"), so every receipt/document/report shows it without extra work. */
   variantKey: string | null;
   variantLabel: string | null;
+  /** Invoices only: where THIS line's stock was deducted from — the selling storefront (default, every
+   * receipt line and every pre-existing line) or the tenant's Main Store. Chosen per line, and only
+   * when the admin's "Invoice stock from Main Store" toggle is on
+   * (TenantContext["invoiceStockFromMainStore"]). */
+  stockSource: InvoiceStockSource;
   createdAt: string;
 };
 

@@ -3,7 +3,7 @@ import { runInTransaction } from "@main/database/connection";
 import * as saleRepository from "@main/database/repositories/sale-repository";
 import * as saleReturnRepository from "@main/database/repositories/sale-return-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
-import { applyValidatedStockMovement } from "@main/services/inventory-service";
+import { restockInvoiceLineStock } from "@main/services/invoice-stock";
 import { assertNotAlreadyDecidedRemotely } from "@main/services/sync-engine";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { approvalDecisionSchema } from "@shared/schemas/sale-void";
@@ -132,22 +132,24 @@ export async function approveSaleReturn(id: string, input: unknown): Promise<Sal
     throw new Error("Sale not found");
   }
   const items = saleReturnRepository.findSaleReturnItemDetailRows(id);
+  // Each returned line goes back to wherever ITS invoice line drew it from (sale_items.stock_location_id
+  // — an invoice line may have come from the Main Store); every receipt line restocks the storefront.
+  const stockLocationBySaleItemId = new Map(
+    saleRepository.findSaleItemDetailRows(sale.id).map((saleItem) => [saleItem.id, saleItem.stock_location_id])
+  );
 
   runInTransaction(() => {
     for (const item of items) {
-      applyValidatedStockMovement(
-        {
-          productId: item.product_id,
-          locationId: sale.location_id,
-          movementType: "return",
-          quantityChange: item.quantity,
-          referenceType: "sale_return",
-          referenceId: id,
-          performedBy: approverId,
-          notes: null
-        },
-        tenantId
-      );
+      restockInvoiceLineStock({
+        tenantId,
+        performedBy: approverId,
+        storefrontId: sale.location_id,
+        stockLocationId: stockLocationBySaleItemId.get(item.sale_item_id) ?? null,
+        productId: item.product_id,
+        quantity: item.quantity,
+        referenceType: "sale_return",
+        referenceId: id
+      });
     }
     saleReturnRepository.updateSaleReturnStatusRow(id, "approved", approverId, parsed.notes);
   });
