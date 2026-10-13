@@ -11,6 +11,7 @@ import {
   Lock,
   MessageCircle,
   Package,
+  Pencil,
   Receipt,
   RotateCcw,
   StickyNote,
@@ -36,6 +37,7 @@ import type {
 } from "@shared/types/online-store";
 import { CompleteOrderModal } from "./CompleteOrderModal";
 import { FulfilmentCards } from "./FulfilmentCards";
+import { EditItemsModal } from "./EditItemsModal";
 import { HoldStorefrontModal } from "./HoldStorefrontModal";
 import { OrderDocumentsModal, type OrderDocument } from "./OrderDocumentsModal";
 import type { OrderMessageRequest } from "./OrderMessageModal";
@@ -50,6 +52,7 @@ import {
   STATUS_PILL,
   buildOrderMessage,
   canCancel,
+  canSwitchRoute,
   flowOf,
   isHandedOver,
   isOpen,
@@ -103,6 +106,9 @@ export function OrderDetail({
   const [completeOpen, setCompleteOpen] = useState(false);
   const [documentOpen, setDocumentOpen] = useState<OrderDocument | null>(null);
   const [holdPickOpen, setHoldPickOpen] = useState(false);
+  const [editItemsOpen, setEditItemsOpen] = useState(false);
+  // A refused step (e.g. a stock shortage, which names every short item) stays on screen, not a toast.
+  const [actionError, setActionError] = useState<string | null>(null);
   const [holdStorefrontId, setHoldStorefrontId] = useState<string | null>(null);
   const [holdBranchName, setHoldBranchName] = useState<string | null>(null);
   const { session } = usePermissions();
@@ -128,14 +134,21 @@ export function OrderDetail({
     setShipOpen(false);
     setCompleteOpen(false);
     setDocumentOpen(null);
+    setEditItemsOpen(false);
+    setActionError(null);
   }, [order.id]);
 
   const money = (cents: number): string => `${currency} ${formatCents(cents)}`.trim();
 
-  function offerMessage(updated: OnlineOrder, kind: OrderMessageKind, extra?: { payment?: OnlineOrderPayment | null; receiptNumber?: string | null }): void {
+  function offerMessage(
+    updated: OnlineOrder,
+    kind: OrderMessageKind,
+    extra?: { payment?: OnlineOrderPayment | null; receiptNumber?: string | null; changes?: string[] | null }
+  ): void {
     onMessage({
       order: updated,
-      heading: kind === "PAYMENT" ? "Payment recorded" : `Order ${STATUS_LABEL[kind].toLowerCase()}`,
+      heading:
+        kind === "PAYMENT" ? "Payment recorded" : kind === "UPDATED" ? "Items updated" : `Order ${STATUS_LABEL[kind].toLowerCase()}`,
       subject: MESSAGE_SUBJECT[kind],
       text: buildOrderMessage(updated, kind, { businessName, money, ...extra })
     });
@@ -156,11 +169,14 @@ export function OrderDetail({
       showSuccessToast(`${order.orderNumber} — ${STATUS_LABEL[status].toLowerCase()}`);
       setShipOpen(false);
       setHoldPickOpen(false);
+      setActionError(null);
       onChanged(updated);
       if (opts?.tell !== false) offerMessage(updated, status);
     } catch (err) {
       // e.g. 'Insufficient stock for "X" at Branch. Available: 0, requested: 2' — confirming holds stock
-      showErrorToast(getErrorMessage(err, "Couldn't update the order"));
+      const message = getErrorMessage(err, "Couldn't update the order");
+      setActionError(message);
+      showErrorToast(message);
     } finally {
       setBusy(false);
     }
@@ -319,8 +335,10 @@ export function OrderDetail({
 
       {/* items */}
       <div className="border-b border-line p-5">
-        <div className="mb-3 flex items-center justify-between">
-          <SectionLabel>Items ({order.items.reduce((s, it) => s + it.qty, 0)})</SectionLabel>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="mr-auto">
+            <SectionLabel>Items ({order.items.reduce((s, it) => s + it.qty, 0)})</SectionLabel>
+          </span>
           {order.stockHold ? (
             <span className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-extrabold text-accent">
               <Lock className="size-3" aria-hidden="true" /> Stock held{holdBranchName ? ` at ${holdBranchName}` : ""}
@@ -328,6 +346,22 @@ export function OrderDetail({
           ) : order.status === "NEW" ? (
             <span className="text-[10px] font-bold text-muted">Stock is held when you confirm</span>
           ) : null}
+          {canEdit && canSwitchRoute(order) && (
+            order.paidCents > 0 ? (
+              <span className="text-[10px] font-bold text-muted" title="Items can't change once a payment is recorded">
+                Paid — items locked
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setEditItemsOpen(true)}
+                disabled={busy}
+                className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[11px] font-extrabold text-ink hover:border-ink cursor-pointer"
+              >
+                <Pencil className="size-3" aria-hidden="true" /> Edit items
+              </button>
+            )
+          )}
         </div>
         <div className="space-y-2.5">
           {order.items.map((it, index) => (
@@ -416,6 +450,15 @@ export function OrderDetail({
 
       {/* actions */}
       <div className="sticky bottom-0 border-t border-line bg-white p-4">
+        {actionError && (
+          <div className="mb-3 flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2.5 text-xs font-bold text-danger">
+            <XCircle className="mt-0.5 size-4 flex-none" aria-hidden="true" />
+            <span className="flex-1">{actionError}</span>
+            <button type="button" onClick={() => setActionError(null)} className="text-danger/70 hover:text-danger cursor-pointer">
+              <span className="sr-only">Dismiss</span>✕
+            </button>
+          </div>
+        )}
         <p className="mb-3 text-xs font-semibold text-muted">{stageHint(order)}</p>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {canEdit && canCancel(order) && (
@@ -525,6 +568,19 @@ export function OrderDetail({
         }}
       />
       <OrderDocumentsModal order={order} document={documentOpen} onClose={() => setDocumentOpen(null)} />
+      <EditItemsModal
+        order={order}
+        open={editItemsOpen}
+        money={money}
+        onClose={() => setEditItemsOpen(false)}
+        onSaved={(updated, changes) => {
+          setEditItemsOpen(false);
+          setActionError(null);
+          showSuccessToast(`${order.orderNumber} updated — new total ${money(updated.totalCents)}`);
+          onChanged(updated);
+          offerMessage(updated, "UPDATED", { changes });
+        }}
+      />
       <HoldStorefrontModal
         order={order}
         open={holdPickOpen}
@@ -652,6 +708,8 @@ function historyText(entry: OnlineOrderHistoryEntry, money: (cents: number) => s
       return `Payment removed ${money(entry.amountCents ?? 0)} · ${entry.method ?? ""}`;
     case "fulfilment":
       return entry.status === "pickup" ? "Switched to pick up from shop" : `Switched to delivery${entry.method ? ` — ${entry.method}` : ""}`;
+    case "items":
+      return `Items changed${entry.method ? `: ${entry.method}` : ""}`;
   }
 }
 

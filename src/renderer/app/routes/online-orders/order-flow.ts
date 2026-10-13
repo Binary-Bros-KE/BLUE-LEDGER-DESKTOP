@@ -117,13 +117,15 @@ export const PAYMENT_PILL: Record<PaymentState, string> = {
 
 // --- Customer messages ---------------------------------------------------------------------------
 
-export type OrderMessageKind = OnlineOrderStatus | "PAYMENT";
+export type OrderMessageKind = OnlineOrderStatus | "PAYMENT" | "UPDATED";
 
 type MessageContext = {
   businessName: string;
   money: (cents: number) => string;
   /** for "PAYMENT": the payment just recorded */
   payment?: OnlineOrderPayment | null;
+  /** for "UPDATED": what changed, e.g. "10UF Capacitor: 50 → 12" */
+  changes?: string[] | null;
   /** for "COMPLETED": the receipt it became */
   receiptNumber?: string | null;
 };
@@ -215,6 +217,16 @@ export function buildOrderMessage(order: OnlineOrder, kind: OrderMessageKind, ct
           : "If this is unexpected, just reply to this message.",
         sign
       ].join("\n\n");
+    case "UPDATED":
+      return [
+        hi,
+        `We've updated your order ${ref}:`,
+        (ctx.changes ?? []).map((c) => `• ${c}`).join("\n"),
+        `Your order now:\n${items}`,
+        `*New total: ${ctx.money(order.totalCents)}*`,
+        "Reply to this message if you have any questions.",
+        sign
+      ].join("\n\n");
     case "PAYMENT": {
       const p = ctx.payment;
       return [
@@ -240,5 +252,6 @@ export const MESSAGE_SUBJECT: Record<OrderMessageKind, string> = {
   DELIVERED: "Your order has been delivered",
   COMPLETED: "Your order is complete",
   CANCELLED: "Your order has been cancelled",
-  PAYMENT: "Payment received"
+  PAYMENT: "Payment received",
+  UPDATED: "Your order has been updated"
 };

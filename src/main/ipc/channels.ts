@@ -82,6 +82,7 @@ export const ipcChannels = {
   onlineOrdersAddPayment: "online-orders:add-payment",
   onlineOrdersRemovePayment: "online-orders:remove-payment",
   onlineOrdersSetFulfilment: "online-orders:set-fulfilment",
+  onlineOrdersEditItems: "online-orders:edit-items",
   mainStoreProductList: "main-store:product-list",
   mainStoreAllocationSummary: "main-store:allocation-summary",
   mainStoreAvailabilityForStockRequest: "main-store:availability-for-stock-request",

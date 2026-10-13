@@ -4,6 +4,8 @@ import { basename, extname } from "node:path";
 import electron from "electron";
 import { runInTransaction } from "@main/database/connection";
 import * as deliveryNoteRepository from "@main/database/repositories/delivery-note-repository";
+import * as inventoryRepository from "@main/database/repositories/inventory-repository";
+import * as locationRepository from "@main/database/repositories/location-repository";
 import * as paymentMethodRepository from "@main/database/repositories/payment-method-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
 import * as riderRepository from "@main/database/repositories/rider-repository";
@@ -19,6 +21,7 @@ import type { SalePayment } from "@shared/types/sale";
 import type {
   ConvertOnlineOrderInput,
   ConvertOnlineOrderResult,
+  EditOnlineOrderItemsInput,
   OnlineOrder,
   OnlineOrderFulfilmentInput,
   OnlineOrderList,
@@ -333,6 +336,42 @@ function moveHeldStock(
   }
 }
 
+/**
+ * Refuses a hold the branch can't cover with one message naming every short item, what this branch
+ * has, and where else the stock is — so the user knows whether to move stock in, borrow it from
+ * another shop, or reduce the order. `alreadyHeld` counts stock this order holds here now (an edit
+ * gives it back before taking the new amount). Products that may go negative are never short.
+ */
+function assertHoldCovered(
+  order: Pick<OnlineOrder, "orderNumber">,
+  hold: Pick<OnlineOrderStockHold, "locationId" | "items">,
+  tenantId: string,
+  action: string,
+  alreadyHeld: OnlineOrderStockHold["items"] = []
+): void {
+  const here = locationRepository.findLocationRowById(hold.locationId)?.location_name ?? "this branch";
+  const short: string[] = [];
+  for (const item of hold.items) {
+    const product = productRepository.findProductRowById(item.productId);
+    if (!product || product.allow_negative_stock) continue;
+    const overview = inventoryRepository.findInventoryOverviewForProduct(tenantId, item.productId);
+    const held = alreadyHeld.find((h) => h.productId === item.productId)?.qty ?? 0;
+    const available = (overview.find((o) => o.location_id === hold.locationId)?.quantity ?? 0) + held;
+    if (available >= item.qty) continue;
+    const elsewhere = overview
+      .filter((o) => o.location_id !== hold.locationId && (o.quantity ?? 0) > 0)
+      .map((o) => `${o.location_name} has ${o.quantity}`);
+    short.push(
+      `${product.name}: need ${item.qty}, ${here} has ${Math.max(0, available)}${elsewhere.length ? ` (${elsewhere.join(", ")})` : " (none anywhere else either)"}`
+    );
+  }
+  if (short.length === 0) return;
+  throw new Error(
+    `Not enough stock at ${here} to ${action} ${order.orderNumber} — ${short.join("; ")}. ` +
+      "Move stock to this branch, borrow it from another shop (Borrow & Lend), or edit the order's quantities, then try again."
+  );
+}
+
 /** Gives held stock back — unless this order already became a sale here (its hold was released in
  * that sale's transaction; only the cloud link was missing). */
 function releaseHeldStock(order: OnlineOrder, hold: OnlineOrderStockHold, tenantId: string, employeeId: string): void {
@@ -359,6 +398,7 @@ export async function setOnlineOrderStatus(input: OnlineOrderStatusChange): Prom
   if (HOLDING_STATUSES.has(input.status) && !current.stockHold && current.status !== input.status && isOpenOrder(current)) {
     const { locationId } = requireActiveSession(input.storefrontId ?? current.fulfilmentLocationId);
     hold = { locationId, items: holdItemsFor(current, tenantId) };
+    assertHoldCovered(current, hold, tenantId, input.status === "CONFIRMED" ? "confirm" : "move on");
     const taken = hold;
     runInTransaction(() => moveHeldStock("online_hold", current, taken, tenantId, who.id));
   }
@@ -391,6 +431,63 @@ export async function setOnlineOrderStatus(input: OnlineOrderStatusChange): Prom
 
   const { holdAccepted: _accepted, releasedHold: _released, ...order } = result;
   return withLocalProductInfo(order);
+}
+
+/**
+ * Changes quantities / removes lines while the order is pending or confirmed and unpaid (SERVER
+ * enforces the same). A confirmed order's hold is redone in one local transaction — the old hold
+ * back, the new one out — before the cloud update; undone if that update is refused.
+ */
+export async function editOnlineOrderItems(input: EditOnlineOrderItemsInput): Promise<OnlineOrder> {
+  requirePermission("online_store", "edit");
+  const { tenantId } = getCurrentTenant();
+  const who = actor();
+  const current = await getOnlineOrder(input.orderId);
+  if (current.payments.length > 0) {
+    throw new Error(`${current.orderNumber} has a payment recorded — its items can't be edited any more.`);
+  }
+  if (current.items.length === 0 || input.items.length === 0) {
+    throw new Error("An order needs at least one item — cancel it instead.");
+  }
+
+  const oldHold = current.stockHold;
+  let newHold: Pick<OnlineOrderStockHold, "locationId" | "items"> | null = null;
+  if (oldHold) {
+    const edited: OnlineOrder = {
+      ...current,
+      items: input.items.flatMap((line) => {
+        const was = current.items.find((it) => it.productId === line.productId && (it.variantKey ?? null) === line.variantKey);
+        return was ? [{ ...was, qty: line.qty }] : [];
+      })
+    };
+    newHold = { locationId: oldHold.locationId, items: holdItemsFor(edited, tenantId) };
+    assertHoldCovered(current, newHold, tenantId, "keep", oldHold.items);
+    const taking = newHold;
+    runInTransaction(() => {
+      moveHeldStock("online_release", current, oldHold, tenantId, who.id);
+      moveHeldStock("online_hold", current, taking, tenantId, who.id);
+    });
+  }
+
+  try {
+    const order = await postShopAdmin<OnlineOrder>("/shop-admin/orders/items", {
+      id: current.id,
+      items: input.items,
+      stockHold: newHold,
+      replacesHeldAt: oldHold?.heldAt ?? null,
+      actorName: who.name
+    });
+    return withLocalProductInfo(order);
+  } catch (err) {
+    if (oldHold && newHold) {
+      const taken = newHold;
+      runInTransaction(() => {
+        moveHeldStock("online_release", current, taken, tenantId, who.id);
+        moveHeldStock("online_hold", current, oldHold, tenantId, who.id);
+      });
+    }
+    throw err;
+  }
 }
 
 function isOpenOrder(order: OnlineOrder): boolean {

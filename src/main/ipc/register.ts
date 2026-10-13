@@ -206,6 +206,7 @@ import {
   recordOnlineOrderPayment,
   removeOnlineOrderPayment,
   setOnlineOrderFulfilment,
+  editOnlineOrderItems,
   setOnlineOrderStatus,
   reorderDeliveryMethods as reorderOnlineStoreDeliveryMethods,
   setProductOnline as setOnlineStoreProductOnline,
@@ -623,6 +624,18 @@ export function registerIpcHandlers(): void {
       deliveryAddress: optionalString(i.deliveryAddress),
       deliveryMethodId: optionalString(i.deliveryMethodId)
     });
+  });
+  ipcMain.handle(ipcChannels.onlineOrdersEditItems, (_event, input: unknown) => {
+    const i = (input ?? {}) as Record<string, unknown>;
+    if (typeof i.orderId !== "string" || !Array.isArray(i.items)) throw new Error("Order not found");
+    const items = i.items.flatMap((raw) => {
+      const line = (raw ?? {}) as Record<string, unknown>;
+      const qty = cents(line.qty);
+      return typeof line.productId === "string" && qty >= 1
+        ? [{ productId: line.productId, variantKey: optionalString(line.variantKey), qty: Math.min(999, qty) }]
+        : [];
+    });
+    return editOnlineOrderItems({ orderId: i.orderId, items });
   });
   ipcMain.handle(ipcChannels.onlineOrdersConvertToSale, (_event, input: unknown) => {
     const i = (input ?? {}) as Record<string, unknown>;

@@ -33,6 +33,7 @@ import type {
   WebDeliveryMethod,
   ConvertOnlineOrderInput,
   ConvertOnlineOrderResult,
+  EditOnlineOrderItemsInput,
   OnlineOrder,
   OnlineOrderFulfilmentInput,
   OnlineOrderList,
@@ -428,6 +429,10 @@ export type IpcInvokeMap = {
   };
   "online-orders:set-fulfilment": {
     args: [input: OnlineOrderFulfilmentInput];
+    result: OnlineOrder;
+  };
+  "online-orders:edit-items": {
+    args: [input: EditOnlineOrderItemsInput];
     result: OnlineOrder;
   };
   "online-orders:mark-seen": {
@@ -1655,6 +1660,7 @@ export type BlueLedgerApi = {
     setFulfilment: (
       input: OnlineOrderFulfilmentInput
     ) => Promise<IpcInvokeMap["online-orders:set-fulfilment"]["result"]>;
+    editItems: (input: EditOnlineOrderItemsInput) => Promise<IpcInvokeMap["online-orders:edit-items"]["result"]>;
     markSeen: (ids?: string[]) => Promise<IpcInvokeMap["online-orders:mark-seen"]["result"]>;
     convertToSale: (
       input: ConvertOnlineOrderInput

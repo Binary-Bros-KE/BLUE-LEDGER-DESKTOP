@@ -412,11 +412,11 @@ export type OnlineOrderPayment = {
 
 export type OnlineOrderHistoryEntry = {
   at: string;
-  kind: "status" | "payment" | "payment_removed" | "fulfilment";
+  kind: "status" | "payment" | "payment_removed" | "fulfilment" | "items";
   /** the new status (kind "status") or "pickup"/"delivery" (kind "fulfilment") */
   status?: string;
   amountCents?: number;
-  /** payment method name, or the delivery option chosen */
+  /** payment method name, the delivery option chosen, or (kind "items") what changed */
   method?: string;
   by?: string | null;
   rider?: string | null;
@@ -488,6 +488,13 @@ export type RecordOnlineOrderPaymentInput = {
   amountCents: number;
   reference: string | null;
   notes: string | null;
+};
+
+/** New quantities for an order's existing lines; a line left out is removed. Only while
+ * pending/confirmed with no payment recorded. */
+export type EditOnlineOrderItemsInput = {
+  orderId: string;
+  items: { productId: string; variantKey: string | null; qty: number }[];
 };
 
 export type OnlineOrderFulfilmentInput = {
