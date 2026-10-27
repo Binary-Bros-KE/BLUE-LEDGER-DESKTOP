@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { dateTableAsBootSeed } from "@main/database/boot-seed";
 import * as expenseCategoryRepository from "@main/database/repositories/expense-category-repository";
 import { requirePermission, requireSignedIn } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
@@ -25,6 +26,7 @@ export function ensureDefaultExpenseCategories(tenantId: string): void {
       description: null
     });
   }
+  dateTableAsBootSeed("expense_categories", tenantId);
 }
 
 /** Used by internal auto-booking flows (e.g. the delivery-cost expense created alongside a sale/

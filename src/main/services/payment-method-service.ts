@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { dateTableAsBootSeed } from "@main/database/boot-seed";
 import * as paymentMethodRepository from "@main/database/repositories/payment-method-repository";
 import { requirePermission, requireSignedIn } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
@@ -41,6 +42,7 @@ export function ensureDefaultPaymentMethods(tenantId: string): void {
       isSystemMethod: true
     });
   });
+  dateTableAsBootSeed("payment_methods", tenantId);
 }
 
 

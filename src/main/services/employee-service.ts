@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { dateTableAsBootSeed } from "@main/database/boot-seed";
 import * as employeeRepository from "@main/database/repositories/employee-repository";
 import * as locationRepository from "@main/database/repositories/location-repository";
 import * as roleRepository from "@main/database/repositories/role-repository";
@@ -121,6 +122,7 @@ export function ensureDefaultSystemEmployee(tenantId: string): void {
   });
 
   createEmployeeInternal(parsed, tenantId, null);
+  dateTableAsBootSeed("employees", tenantId);
 
   console.log(
     `[Blue Ledger] Seeded default "System" employee (code ${DEFAULT_SYSTEM_EMPLOYEE_CODE}, PIN ${DEFAULT_SYSTEM_PIN}). Change this once real login is in place.`

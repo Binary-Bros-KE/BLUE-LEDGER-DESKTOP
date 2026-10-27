@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { dateRowAsBootSeed } from "@main/database/boot-seed";
 import * as locationRepository from "@main/database/repositories/location-repository";
 import { getCurrentEmployeeId, requirePermission, requireSignedIn } from "@main/services/auth-service";
 import { deleteManagedLocationLogo, finalizeLocationLogoPath } from "@main/services/image-service";
@@ -77,8 +78,9 @@ export function ensureMainStoreLocation(tenantId: string): void {
     .find((row) => row.location_type === "distribution_center");
   if (existing) return;
 
+  const id = `location_${randomUUID()}`;
   locationRepository.insertLocationRow({
-    id: `location_${randomUUID()}`,
+    id,
     tenantId,
     locationName: "Main Store",
     locationCode: "MAIN-STORE",
@@ -112,4 +114,5 @@ export function ensureMainStoreLocation(tenantId: string): void {
     canTransferStock: true,
     createdBy: null
   });
+  dateRowAsBootSeed("locations", id);
 }

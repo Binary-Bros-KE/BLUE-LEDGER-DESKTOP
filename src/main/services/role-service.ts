@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { dateTableAsBootSeed } from "@main/database/boot-seed";
 import * as employeeRepository from "@main/database/repositories/employee-repository";
 import * as roleRepository from "@main/database/repositories/role-repository";
 import { getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
@@ -160,6 +161,7 @@ export function ensureDefaultRoles(tenantId: string): void {
       createdBy: null
     });
   }
+  dateTableAsBootSeed("roles", tenantId);
 }
 
 /**
