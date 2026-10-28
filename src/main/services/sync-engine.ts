@@ -28,6 +28,7 @@ import * as serviceChargeRepository from "@main/database/repositories/service-ch
 import * as stockMovementRepository from "@main/database/repositories/stock-movement-repository";
 import * as stockReceiptRepository from "@main/database/repositories/stock-receipt-repository";
 import * as stockRequestRepository from "@main/database/repositories/stock-request-repository";
+import * as purchaseRequisitionRepository from "@main/database/repositories/purchase-requisition-repository";
 import * as supplierBalanceRepository from "@main/database/repositories/supplier-balance-repository";
 import * as supplierRepository from "@main/database/repositories/supplier-repository";
 import * as tenantRepository from "@main/database/repositories/tenant-repository";
@@ -86,6 +87,9 @@ const SYNC_ENTITIES: SyncEntity[] = [
   "purchases",
   // Same dependency shape as purchases (suppliers + locations + products) — see borrow-service.ts.
   "borrows",
+  // Depends on locations + employees + products (items). After purchases so an approved
+  // requisition's purchase_id usually already exists locally (a plain column, no FK, either way).
+  "purchase_requisitions",
   "sale_returns",
   "sale_voids",
   "invoice_cancellations",
@@ -118,7 +122,9 @@ const BESPOKE_APPLY_ENTITIES = new Set<SyncEntity>([
   // update path (approve/reject) plus items only ever inserted once at creation.
   "stock_requests",
   // Same shape again, but create-only — no update path at all (see this entity's own comments).
-  "stock_receipts"
+  "stock_receipts",
+  // Same document-with-line-items shape as stock_requests (header with a real decision path).
+  "purchase_requisitions"
 ]);
 
 /** Every entity whose PAYLOAD_BUILDER includes a `baseUpdatedAt` field and whose successful push/
@@ -154,6 +160,7 @@ const CONFLICT_AWARE_ENTITIES = new Set<SyncEntity>([
   "sale_returns",
   "stock_requests",
   "stock_receipts",
+  "purchase_requisitions",
   // Unlike stock_movements (append-only, no concurrent-edit scenario), this table genuinely can be
   // touched by two devices before either syncs (e.g. both reallocate the same bucket offline) — a
   // real optimistic-lock case, same as any other mutable reference row.
@@ -653,6 +660,66 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
         newQuantity: i.new_quantity,
         mainStorePreviousQuantity: i.main_store_previous_quantity,
         mainStoreNewQuantity: i.main_store_new_quantity,
+        createdAt: i.created_at
+      })),
+      localCreatedAt: row.created_at,
+      localUpdatedAt: row.updated_at,
+      baseUpdatedAt: row.synced_updated_at
+    };
+  },
+  // Same document-with-line-items shape as stock_requests. productId is null on a free-text line
+  // until an approver links it (itemName always carries what was asked for).
+  purchase_requisitions: (id) => {
+    const row = getDatabase().prepare("SELECT * FROM purchase_requisitions WHERE id = ?").get(id) as
+      | {
+          id: string;
+          requisition_number: string;
+          storefront_id: string;
+          status: string;
+          notes: string | null;
+          rejection_reason: string | null;
+          purchase_id: string | null;
+          requested_by: string;
+          requested_at: string;
+          reviewed_by: string | null;
+          reviewed_at: string | null;
+          created_at: string;
+          updated_at: string;
+          synced_updated_at: string | null;
+        }
+      | undefined;
+    if (!row) return null;
+
+    const itemRows = getDatabase()
+      .prepare("SELECT * FROM purchase_requisition_items WHERE purchase_requisition_id = ? ORDER BY created_at ASC")
+      .all(id) as Array<{
+      id: string;
+      product_id: string | null;
+      item_name: string;
+      quantity_requested: number;
+      notes: string | null;
+      created_at: string;
+    }>;
+
+    return {
+      id: row.id,
+      requisitionNumber: row.requisition_number,
+      storefrontId: row.storefront_id,
+      status: row.status,
+      notes: row.notes,
+      rejectionReason: row.rejection_reason,
+      purchaseId: row.purchase_id,
+      requestedBy: row.requested_by,
+      requestedAt: row.requested_at,
+      reviewedBy: row.reviewed_by,
+      reviewedAt: row.reviewed_at,
+      items: itemRows.map((i) => ({
+        id: i.id,
+        // Alias-translate before push, same as stock_requests' items (null passes through).
+        productId: resolveCloudRef("products", i.product_id),
+        itemName: i.item_name,
+        quantityRequested: i.quantity_requested,
+        notes: i.notes,
         createdAt: i.created_at
       })),
       localCreatedAt: row.created_at,
@@ -2170,7 +2237,8 @@ function refColumnsFor(entity: SyncEntity): Array<{ cloud: string; refEntity: Sy
     // before push, the exact bug class [[project_alias_push_resolution_bug]] fixed elsewhere in this
     // codebase; found and closed alongside adding stock_receipts (its own sibling entity) below.
     stock_requests: STOCK_REQUEST_HEADER_COLUMNS,
-    stock_receipts: STOCK_RECEIPT_HEADER_COLUMNS
+    stock_receipts: STOCK_RECEIPT_HEADER_COLUMNS,
+    purchase_requisitions: PURCHASE_REQUISITION_HEADER_COLUMNS
   };
   const columns = APPLY_CONFIG[entity]?.columns ?? bespokeColumns[entity] ?? [];
   return columns.filter((c): c is { local: string; cloud: string; refEntity: SyncEntity } => Boolean(c.refEntity));
@@ -2213,6 +2281,7 @@ function applyPulledRow(entity: SyncEntity, row: Record<string, unknown>, force 
     if (entity === "supplier_balance_entries") applySupplierBalanceEntryPulledRow(row);
     if (entity === "stock_requests") applyStockRequestPulledRow(row, force);
     if (entity === "stock_receipts") applyStockReceiptPulledRow(row, force);
+    if (entity === "purchase_requisitions") applyPurchaseRequisitionPulledRow(row, force);
     return;
   }
 
@@ -3250,6 +3319,49 @@ function pulledQuantityDispatched(status: unknown, item: Record<string, unknown>
   return null;
 }
 
+const PURCHASE_REQUISITION_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }> = [
+  { local: "requisition_number", cloud: "requisitionNumber" },
+  { local: "storefront_id", cloud: "storefrontId", refEntity: "locations", refNotNull: true },
+  { local: "status", cloud: "status" },
+  { local: "notes", cloud: "notes" },
+  { local: "rejection_reason", cloud: "rejectionReason" },
+  // Nullable until approval; no local FK, so a requisition can land before its purchase does.
+  { local: "purchase_id", cloud: "purchaseId", refEntity: "purchases" },
+  { local: "requested_by", cloud: "requestedBy", refEntity: "employees", refNotNull: true },
+  { local: "requested_at", cloud: "requestedAt" },
+  { local: "reviewed_by", cloud: "reviewedBy", refEntity: "employees" },
+  { local: "reviewed_at", cloud: "reviewedAt" }
+];
+
+/** Same pattern as applyStockRequestPulledRow: header upsert, then replace-all items — safe because
+ * the pushing device's item rows (including any product link set at review time) are the truth. */
+function applyPurchaseRequisitionPulledRow(row: Record<string, unknown>, force: boolean): void {
+  runInTransaction(() => {
+    const id = row.id as string;
+    const localTenantId = upsertDocumentHeader("purchase_requisitions", PURCHASE_REQUISITION_HEADER_COLUMNS, [], row, force);
+    if (!localTenantId) return;
+
+    const db = getDatabase();
+    db.prepare("DELETE FROM purchase_requisition_items WHERE purchase_requisition_id = ?").run(id);
+    const items = (row.items as Array<Record<string, unknown>>) ?? [];
+    for (const item of items) {
+      db.prepare(
+        `INSERT INTO purchase_requisition_items (
+          id, purchase_requisition_id, product_id, item_name, quantity_requested, notes, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        item.id as string,
+        id,
+        (resolveRef("products", item.productId) as string | null | undefined) ?? null,
+        (item.itemName as string | undefined) ?? "",
+        item.quantityRequested as number,
+        (item.notes as string | null | undefined) ?? null,
+        item.createdAt as string
+      );
+    }
+  });
+}
+
 const STOCK_RECEIPT_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }> = [
   { local: "receipt_number", cloud: "receiptNumber" },
   { local: "location_id", cloud: "locationId", refEntity: "locations", refNotNull: true },
@@ -3374,7 +3486,9 @@ const ITEM_REFS: Partial<Record<SyncEntity, Array<{ itemsKey: string; idKey: str
   borrows: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }],
   sale_returns: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }],
   stock_requests: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }],
-  stock_receipts: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }]
+  stock_receipts: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }],
+  // productId is null on an unlinked free-text line — missingRefsFor already skips nulls.
+  purchase_requisitions: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }]
 };
 
 /** table name === entity name for every synced entity. */
@@ -4266,6 +4380,10 @@ const CONFLICT_LABEL_BUILDERS: Partial<Record<SyncEntity, (entityId: string) => 
   stock_receipts: (id) => {
     const row = stockReceiptRepository.findStockReceiptRowById(id);
     return row ? row.receipt_number : id;
+  },
+  purchase_requisitions: (id) => {
+    const row = purchaseRequisitionRepository.findRequisitionRowById(id);
+    return row ? row.requisition_number : id;
   },
   expenses: (id) => {
     const row = expenseRepository.findExpenseRowById(id);

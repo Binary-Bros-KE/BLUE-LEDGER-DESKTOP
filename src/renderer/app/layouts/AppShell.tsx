@@ -1,4 +1,5 @@
-import type { PropsWithChildren } from "react";
+import { useEffect, type PropsWithChildren } from "react";
+import { DEFAULT_CHECKOUT_LAYOUT } from "@shared/types/checkout-layout";
 import { Download } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
@@ -11,6 +12,7 @@ import { Sidebar } from "./Sidebar";
 import { useSyncStatusWidget } from "./useSyncStatusWidget";
 import { useOnlineOrderAlerts } from "./useOnlineOrderAlerts";
 import { useStockRequestAlerts } from "./useStockRequestAlerts";
+import { usePurchaseRequisitionAlerts } from "./usePurchaseRequisitionAlerts";
 import { useUpdateStatusWidget } from "./useUpdateStatusWidget";
 
 export function AppShell({ children }: PropsWithChildren): React.JSX.Element {
@@ -25,12 +27,28 @@ export function AppShell({ children }: PropsWithChildren): React.JSX.Element {
   const indexLabel = String(activeIndex >= 0 ? activeIndex + 1 : flatItems.length).padStart(2, "0");
 
   const isDashboard = activeNavKey === "dashboard";
+
+  const checkoutLayout = useUiStore((state) => state.checkoutLayout);
+  const setCheckoutLayout = useUiStore((state) => state.setCheckoutLayout);
+  useEffect(() => {
+    void window.blueLedger.preferences
+      .getCheckoutLayout()
+      .then(setCheckoutLayout)
+      // Unreadable for any reason → the default (Classic), never a broken Checkout.
+      .catch(() => setCheckoutLayout(DEFAULT_CHECKOUT_LAYOUT));
+  }, [setCheckoutLayout]);
+
+  // Only the Full Screen checkout layout gets every pixel — no page title, no sync widget, no
+  // padding; that route lays itself out to fill this <main> exactly (see CheckoutRoute). Classic
+  // Checkout keeps the normal page chrome like every other tab.
+  const isFullBleed = activeNavKey === "checkout" && checkoutLayout === "focus";
   const eyebrow = isDashboard ? "Daily Focus" : (activeGroup?.title ?? "Blue Ledger");
   const title = isDashboard ? "Command Center" : (activeItem?.label ?? "Blue Ledger");
 
   const snapshot = useSyncStatusWidget();
   const updateStatus = useUpdateStatusWidget();
   useStockRequestAlerts();
+  usePurchaseRequisitionAlerts();
   useOnlineOrderAlerts();
 
   // A MONTHLY tenant past grace never reaches this component at all (App.tsx routes to
@@ -50,7 +68,14 @@ export function AppShell({ children }: PropsWithChildren): React.JSX.Element {
           had nowhere to go on a narrower-than-1440-design screen — content just rendered past the
           right edge with no scrollbar to reach it. This doesn't fix any one tab's sizing, it just
           guarantees nothing is ever permanently unreachable. */}
-      <main className="min-w-0 flex-1 overflow-x-auto overflow-y-auto px-7 py-6">
+      <main
+        className={
+          isFullBleed
+            ? "flex min-w-0 flex-1 flex-col overflow-y-auto lg:overflow-hidden"
+            : "min-w-0 flex-1 overflow-x-auto overflow-y-auto px-7 py-6"
+        }
+      >
+        {!isFullBleed && (
         <header className="flex items-center justify-between gap-6">
           <div>
             <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">
@@ -84,9 +109,18 @@ export function AppShell({ children }: PropsWithChildren): React.JSX.Element {
             )}
           </div>
         </header>
+        )}
 
+        {/* Still shown on full-bleed pages (an update waiting to install matters more than the
+            space), just as a flat strip across the top instead of an inset card. */}
         {updateStatus?.status === "downloaded" && (
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-accent/30 bg-accent/10 px-4 py-3">
+          <div
+            className={
+              isFullBleed
+                ? "flex flex-none flex-wrap items-center justify-between gap-3 border-b border-accent/30 bg-accent/10 px-4 py-2"
+                : "mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-accent/30 bg-accent/10 px-4 py-3"
+            }
+          >
             <div className="flex items-center gap-2.5">
               <Download className="size-4 flex-none text-accent" aria-hidden="true" />
               <p className="text-xs font-bold text-ink">

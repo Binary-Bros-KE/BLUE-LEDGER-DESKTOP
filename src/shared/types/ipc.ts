@@ -92,6 +92,8 @@ import type {
 } from "./stock-movement";
 import type { StockReceipt, StockReceiptListItem } from "./stock-receipt";
 import type { StockRequest, StockRequestListItem } from "./stock-request";
+import type { PurchaseRequisition, PurchaseRequisitionListItem } from "./purchase-requisition";
+import type { InvoiceDraft, InvoiceDraftListItem } from "./invoice-draft";
 import type {
   BlockedSyncRecord,
   ConflictResolution,
@@ -111,6 +113,7 @@ import type {
   ImportPreviewResult
 } from "./import";
 import type { ShareDocumentEntity } from "./share";
+import type { CheckoutLayout } from "./checkout-layout";
 import type { CustomerStatementViewModel } from "./statement";
 import type { SupplierStatementViewModel } from "./supplier-statement";
 
@@ -284,7 +287,8 @@ export type IpcInvokeMap = {
     result: { id: string };
   };
   "product:list": {
-    args: [storefrontId?: string | null];
+    /** stockedOnly: only products with stock at that storefront (the Products tab's filter). */
+    args: [storefrontId?: string | null, stockedOnly?: boolean];
     result: ProductListItem[];
   };
   "product:next-sku": {
@@ -1279,6 +1283,54 @@ export type IpcInvokeMap = {
     args: [string, Record<string, unknown>];
     result: StockRequest;
   };
+  "purchase-requisition:list": {
+    args: [];
+    result: PurchaseRequisitionListItem[];
+  };
+  "purchase-requisition:list-pending": {
+    args: [];
+    result: PurchaseRequisitionListItem[];
+  };
+  "purchase-requisition:get": {
+    args: [string];
+    result: PurchaseRequisition;
+  };
+  "purchase-requisition:create": {
+    args: [Record<string, unknown>];
+    result: PurchaseRequisition;
+  };
+  "purchase-requisition:cancel": {
+    args: [string];
+    result: PurchaseRequisition;
+  };
+  "purchase-requisition:reject": {
+    args: [string, Record<string, unknown>];
+    result: PurchaseRequisition;
+  };
+  "purchase-requisition:link-item": {
+    args: [string, Record<string, unknown>];
+    result: PurchaseRequisition;
+  };
+  "purchase-requisition:approve": {
+    args: [string, Record<string, unknown>];
+    result: PurchaseRequisition;
+  };
+  "invoice-draft:list": {
+    args: [];
+    result: InvoiceDraftListItem[];
+  };
+  "invoice-draft:get": {
+    args: [string];
+    result: InvoiceDraft;
+  };
+  "invoice-draft:save": {
+    args: [Record<string, unknown>];
+    result: InvoiceDraft;
+  };
+  "invoice-draft:delete": {
+    args: [string];
+    result: void;
+  };
   "stock-receipt:list": {
     args: [];
     result: StockReceiptListItem[];
@@ -1390,6 +1442,14 @@ export type IpcInvokeMap = {
   "theme:save": {
     args: [BrandTheme];
     result: BrandTheme;
+  };
+  "preferences:get-checkout-layout": {
+    args: [];
+    result: CheckoutLayout;
+  };
+  "preferences:save-checkout-layout": {
+    args: [CheckoutLayout];
+    result: CheckoutLayout;
   };
   "report:sales-financial-overview": {
     args: [DateRangeInput];
@@ -1576,7 +1636,7 @@ export type BlueLedgerApi = {
     delete: (id: string) => Promise<IpcInvokeMap["category:delete"]["result"]>;
   };
   product: {
-    list: (storefrontId?: string | null) => Promise<IpcInvokeMap["product:list"]["result"]>;
+    list: (storefrontId?: string | null, stockedOnly?: boolean) => Promise<IpcInvokeMap["product:list"]["result"]>;
     nextSku: () => Promise<IpcInvokeMap["product:next-sku"]["result"]>;
     stockSummary: (id: string) => Promise<IpcInvokeMap["product:stock-summary"]["result"]>;
     get: (id: string) => Promise<IpcInvokeMap["product:get"]["result"]>;
@@ -2140,6 +2200,25 @@ export type BlueLedgerApi = {
       input: Record<string, unknown>
     ) => Promise<IpcInvokeMap["stock-request:reject"]["result"]>;
   };
+  /** Local-only held invoices — never synced (see shared/types/invoice-draft.ts). */
+  invoiceDraft: {
+    list: () => Promise<InvoiceDraftListItem[]>;
+    get: (id: string) => Promise<InvoiceDraft>;
+    save: (input: Record<string, unknown>) => Promise<InvoiceDraft>;
+    delete: (id: string) => Promise<void>;
+  };
+  purchaseRequisition: {
+    list: () => Promise<PurchaseRequisitionListItem[]>;
+    listPending: () => Promise<PurchaseRequisitionListItem[]>;
+    get: (id: string) => Promise<PurchaseRequisition>;
+    create: (input: Record<string, unknown>) => Promise<PurchaseRequisition>;
+    cancel: (id: string) => Promise<PurchaseRequisition>;
+    reject: (id: string, input: Record<string, unknown>) => Promise<PurchaseRequisition>;
+    linkItem: (id: string, input: Record<string, unknown>) => Promise<PurchaseRequisition>;
+    /** input = the same payload the Purchase form sends for a new purchase (locationId is ignored —
+     * always the requisition's own storefront). */
+    approve: (id: string, input: Record<string, unknown>) => Promise<PurchaseRequisition>;
+  };
   stockReceipt: {
     list: () => Promise<IpcInvokeMap["stock-receipt:list"]["result"]>;
     get: (id: string) => Promise<IpcInvokeMap["stock-receipt:get"]["result"]>;
@@ -2199,6 +2278,10 @@ export type BlueLedgerApi = {
   };
   theme: {
     save: (theme: BrandTheme) => Promise<BrandTheme>;
+  };
+  preferences: {
+    getCheckoutLayout: () => Promise<CheckoutLayout>;
+    saveCheckoutLayout: (layout: CheckoutLayout) => Promise<CheckoutLayout>;
   };
   report: {
     salesFinancialOverview: (range: DateRangeInput) => Promise<SalesFinancialOverview>;

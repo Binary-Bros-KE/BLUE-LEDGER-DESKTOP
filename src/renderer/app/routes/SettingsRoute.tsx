@@ -1,10 +1,23 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { CheckCircle2, Download, Loader2, MessageCircle, Printer, RefreshCw, Settings as SettingsIcon, XCircle } from "lucide-react";
+import {
+  CheckCircle2,
+  Download,
+  LayoutPanelLeft,
+  Loader2,
+  MessageCircle,
+  Printer,
+  RefreshCw,
+  Settings as SettingsIcon,
+  XCircle
+} from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { CheckboxField, Field, SelectField } from "@renderer/shared/components/form-fields";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
+import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
+import { useUiStore } from "@renderer/shared/stores/ui-store";
+import { CHECKOUT_LAYOUT_OPTIONS, DEFAULT_CHECKOUT_LAYOUT, type CheckoutLayout } from "@shared/types/checkout-layout";
 import { getSharePreferences, setSharePreferences } from "@renderer/shared/lib/share-preferences";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useUpdateStatusWidget } from "@renderer/app/layouts/useUpdateStatusWidget";
@@ -78,6 +91,26 @@ export function SettingsRoute(): React.JSX.Element {
   function handleWhatsappInstalledChange(checked: boolean): void {
     setWhatsappInstalled(checked);
     setSharePreferences({ ...getSharePreferences(), whatsappInstalled: checked });
+  }
+
+  // Loaded once by AppShell into the UI store; this only ever WRITES it (main process first, store
+  // only after the save actually succeeded, so the screen never shows a choice that wasn't saved).
+  const checkoutLayout = useUiStore((state) => state.checkoutLayout);
+  const setCheckoutLayout = useUiStore((state) => state.setCheckoutLayout);
+  const [savingLayout, setSavingLayout] = useState(false);
+
+  async function handleCheckoutLayoutChange(layout: CheckoutLayout): Promise<void> {
+    if (layout === checkoutLayout) return;
+    setSavingLayout(true);
+    try {
+      const saved = await window.blueLedger.preferences.saveCheckoutLayout(layout);
+      setCheckoutLayout(saved);
+      showSuccessToast(`Checkout layout set to ${CHECKOUT_LAYOUT_OPTIONS.find((option) => option.value === saved)?.label ?? saved}`);
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Failed to save checkout layout"));
+    } finally {
+      setSavingLayout(false);
+    }
   }
 
   useEffect(() => {
@@ -181,6 +214,63 @@ export function SettingsRoute(): React.JSX.Element {
             <SettingsIcon className="size-5 text-primary" aria-hidden="true" />
             Preferences
           </h2>
+        </div>
+
+        <div className="mt-6 border-t border-line pt-5">
+          <h3 className="flex items-center gap-2 text-sm font-extrabold text-ink">
+            <LayoutPanelLeft className="size-4 text-primary" aria-hidden="true" />
+            Checkout Layout
+          </h3>
+          <p className="mt-1 text-xs font-semibold text-muted">
+            Choose how the Checkout screen looks on this computer. Saved on this machine and kept through
+            app updates — it only changes when someone changes it here.
+          </p>
+
+          <div className="mt-4 grid max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Checkout layout">
+            {CHECKOUT_LAYOUT_OPTIONS.map((option) => {
+              const selected = checkoutLayout === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => void handleCheckoutLayoutChange(option.value)}
+                  disabled={!canEdit || savingLayout || checkoutLayout === null}
+                  className={cn(
+                    "flex items-start gap-3 rounded-lg border-2 p-4 text-left transition disabled:cursor-not-allowed",
+                    selected ? "border-primary bg-primary/5" : "border-line bg-white hover:border-accent",
+                    !canEdit && !selected && "opacity-60"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "mt-0.5 grid size-4 flex-none place-items-center rounded-full border-2",
+                      selected ? "border-primary" : "border-line"
+                    )}
+                    aria-hidden="true"
+                  >
+                    {selected && <span className="size-2 rounded-full bg-primary" />}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-2 text-sm font-extrabold text-ink">
+                      {option.label}
+                      {option.value === DEFAULT_CHECKOUT_LAYOUT && (
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Default</span>
+                      )}
+                      {selected && savingLayout && <Loader2 className="size-3.5 animate-spin text-muted" aria-hidden="true" />}
+                    </span>
+                    <span className="mt-1 block text-xs font-semibold text-muted">{option.description}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {!canEdit && (
+            <p className="mt-2 text-[11px] font-semibold text-muted">
+              Only roles that can edit Settings can change this.
+            </p>
+          )}
         </div>
 
         <div className="mt-6 border-t border-line pt-5">

@@ -44,6 +44,10 @@ export const PERMISSION_MODULES = [
   { key: "suppliers", label: "Suppliers", actions: ["view", "create", "edit", "delete", "export"] },
   { key: "riders", label: "Riders", actions: ["view", "create", "edit", "delete", "export"] },
   { key: "stock_requests", label: "Stock Requests", actions: ["view", "create", "approve", "export"] },
+  // Requests to BUY stock from a supplier (see purchase-requisition.ts). "approve" = turn one into a
+  // Purchase. Roles saved before this module existed get a computed default — see
+  // withLaterModuleDefaults (shared/lib/role-defaults.ts).
+  { key: "purchase_requisitions", label: "Purchase Requisitions", actions: ["view", "create", "approve"] },
   { key: "expenses", label: "Expenses", actions: ["view", "create", "edit", "delete", "export"] },
   {
     key: "expense_categories",

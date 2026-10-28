@@ -215,6 +215,15 @@ export function getPurchase(id: string): Purchase {
 
 /** Creates a purchase order — stock never moves here. Goods only enter inventory via receivePurchaseGoods. */
 export function createPurchase(input: unknown): Purchase {
+  return createPurchaseWithHook(input);
+}
+
+/** createPurchase, plus an optional `afterInsert` that runs INSIDE the same transaction, right after
+ * the purchase and its items are written — used by purchase-requisition-service.ts so approving a
+ * requisition and creating its purchase commit (or roll back) together. runInTransaction can't nest,
+ * which is why this is a hook rather than the caller wrapping createPurchase in its own transaction.
+ * Every validation/permission check below still applies unchanged. */
+export function createPurchaseWithHook(input: unknown, afterInsert?: (purchaseId: string) => void): Purchase {
   requirePermission("purchases", "create");
   const parsed: PurchaseCreateInput = purchaseCreateSchema.parse(input);
   const { tenantId } = getCurrentTenant();
@@ -283,6 +292,8 @@ export function createPurchase(input: unknown): Purchase {
         date: now
       });
     }
+
+    afterInsert?.(purchaseId);
 
     return getPurchaseDetail(purchaseId);
   });

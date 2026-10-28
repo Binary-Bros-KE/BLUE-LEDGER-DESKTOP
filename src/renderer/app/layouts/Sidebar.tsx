@@ -14,6 +14,7 @@ const WEBSITE_KEYS = new Set(["online-orders", "online-store", "website-home", "
 /** Entries that only exist on some website templates. */
 const TEMPLATE_ONLY: Record<string, string[]> = { "website-home": ["adia"], "website-subscribers": ["adia"] };
 import { useStockRequestAlertsStore } from "@renderer/shared/stores/stock-request-alerts-store";
+import { usePurchaseRequisitionAlertsStore } from "@renderer/shared/stores/purchase-requisition-alerts-store";
 import { cn } from "@renderer/shared/lib/cn";
 import { smallLogoBoxClassName } from "@renderer/shared/lib/logo";
 import { navGroups, type NavItem } from "./navigation";
@@ -35,6 +36,7 @@ export function Sidebar(): React.JSX.Element {
   // last activation/heartbeat). Without the plan, the tab stays hidden even for a Super Admin.
   const ecommerceEnabled = useAppStore((state) => state.context?.tenant.ecommerceEnabled ?? false);
   const pendingStockRequestCount = useStockRequestAlertsStore((state) => state.pending.length);
+  const pendingRequisitionCount = usePurchaseRequisitionAlertsStore((state) => state.pending.length);
   const newOnlineOrderCount = useOnlineOrderAlertsStore((state) => state.newCount);
   const templateId = useWebsiteStore((state) => state.templateId);
   const setTemplateId = useWebsiteStore((state) => state.setTemplateId);
@@ -183,6 +185,8 @@ export function Sidebar(): React.JSX.Element {
                       badgeCount={
                         item.key === "stock-requests"
                           ? pendingStockRequestCount
+                          : item.key === "purchase-requisitions"
+                            ? pendingRequisitionCount
                           : item.key === "online-orders"
                             ? newOnlineOrderCount
                             : 0

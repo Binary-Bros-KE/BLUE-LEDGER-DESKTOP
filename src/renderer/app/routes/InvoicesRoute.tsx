@@ -6,6 +6,7 @@ import {
   Copy,
   Eye,
   FileBarChart,
+  FilePen,
   FileText,
   Loader2,
   Package,
@@ -70,6 +71,7 @@ import type { Customer } from "@shared/types/customer";
 import type { SupplierPickerOption } from "@shared/types/supplier";
 import type { ExportListRequest } from "@shared/types/export";
 import type { InvoiceListItem, InvoiceSummary } from "@shared/types/invoice";
+import type { InvoiceDraftListItem } from "@shared/types/invoice-draft";
 import type { InvoiceCancellation } from "@shared/types/invoice-cancellation";
 import { isStorefrontType, type Location } from "@shared/types/location";
 import type { PaymentMethod } from "@shared/types/payment-method";
@@ -100,6 +102,28 @@ const FILTER_TABS: Array<{ value: FilterTab; label: string }> = [
 ];
 
 type SortKey = "invoiceNumber" | "customerName" | "invoiceDate" | "dueDate" | "grandTotalCents" | "balanceDueCents";
+
+/** The Invoices form's own state, saved verbatim as a local-only draft (see
+ * shared/types/invoice-draft.ts — drafts are never synced, so they can always be deleted). `v` lets a
+ * future build read an older snapshot; anything missing falls back to a blank form's default. */
+type InvoiceDraftForm = {
+  v: 1;
+  customerId: string | null;
+  storefrontId: string;
+  transactionType: "invoice" | "wholesale_sale";
+  dueDate: string;
+  notes: string;
+  includeTaxBreakdown: boolean;
+  includeBusinessInfo: boolean;
+  items: CartLine[];
+  serviceCharges: ServiceChargeDraft[];
+  delivery: DeliveryDraft | null;
+  notesSections: Array<{ key: string; title: string; body: string }>;
+  includeInitialPayment: boolean;
+  initialPaymentMethodId: string;
+  initialPaymentAmount: string;
+  initialPaymentReference: string;
+};
 
 type CartLine = {
   /** Stable UI-only identity for this line, never sent to the backend — needed because the same
@@ -284,6 +308,12 @@ export function InvoicesRoute(): React.JSX.Element {
   // creating a new one — reuses the same modal/state/submit-button rather than a second near-
   // identical form (the two only differ in a few gated sections, see the JSX below).
   const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
+  // Non-null while the form was opened from (or has been saved as) a local-only draft — "Save as
+  // Draft" then updates that draft, and creating the invoice deletes it.
+  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<InvoiceDraftListItem[]>([]);
+  const [draftsOpen, setDraftsOpen] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
   const [createCustomerId, setCreateCustomerId] = useState<string | null>(null);
   // Only ever consulted when session.branch is null (see StorefrontPicker/requireActiveSession).
   const [createStorefrontId, setCreateStorefrontId] = useState("");
@@ -966,6 +996,7 @@ export function InvoicesRoute(): React.JSX.Element {
 
   function openCreateModal(): void {
     setEditingInvoiceId(null);
+    setEditingDraftId(null);
     setCreateCustomerId(null);
     setCreateStorefrontId("");
     setCustomerSearch("");
@@ -996,6 +1027,7 @@ export function InvoicesRoute(): React.JSX.Element {
    * is fixed at creation, and a payment can't be recorded through an edit. */
   function openEditInvoice(sale: Sale): void {
     setEditingInvoiceId(sale.id);
+    setEditingDraftId(null);
     setCreateCustomerId(sale.customerId);
     setCreateStorefrontId(sale.locationId);
     setCustomerSearch("");
@@ -1070,6 +1102,119 @@ export function InvoicesRoute(): React.JSX.Element {
     setInitialPaymentReference("");
     setCreateError(null);
     setCreateOpen(true);
+  }
+
+  const loadDrafts = useCallback(async (): Promise<void> => {
+    if (!canCreate) return;
+    try {
+      setDrafts(await window.blueLedger.invoiceDraft.list());
+    } catch {
+      // Drafts are a convenience — a failed read just shows none, never breaks the page.
+    }
+  }, [canCreate]);
+
+  useEffect(() => {
+    void loadDrafts();
+  }, [loadDrafts]);
+
+  function buildDraftForm(): InvoiceDraftForm {
+    return {
+      v: 1,
+      customerId: createCustomerId,
+      storefrontId: createStorefrontId,
+      transactionType: createTransactionType,
+      dueDate: createDueDate,
+      notes: createNotes,
+      includeTaxBreakdown: createIncludeTaxBreakdown,
+      includeBusinessInfo: createIncludeBusinessInfo,
+      items: createItems,
+      serviceCharges: createServiceCharges,
+      delivery: createDelivery,
+      notesSections: createNotesSections,
+      includeInitialPayment,
+      initialPaymentMethodId,
+      initialPaymentAmount,
+      initialPaymentReference
+    };
+  }
+
+  /** Lenient on purpose: an unfinished invoice (no customer, no lines yet) is exactly what a draft is.
+   * Stays on this computer only — never synced. */
+  async function saveAsDraft(): Promise<void> {
+    if (!createCustomerId && createItems.length === 0 && createServiceCharges.length === 0) {
+      showErrorToast("Pick a customer or add something before saving a draft");
+      return;
+    }
+    setSavingDraft(true);
+    try {
+      const saved = await window.blueLedger.invoiceDraft.save({
+        id: editingDraftId,
+        customerId: createCustomerId,
+        customerName: customers.find((customer) => customer.id === createCustomerId)?.name ?? null,
+        storefrontId: createStorefrontId || null,
+        itemCount: createItems.length + createServiceCharges.length,
+        estimatedTotalCents: Math.max(0, createTotals.grandTotalCents),
+        form: buildDraftForm()
+      });
+      setEditingDraftId(saved.id);
+      setCreateOpen(false);
+      showSuccessToast(editingDraftId ? "Draft updated" : "Saved as draft");
+      await loadDrafts();
+    } catch (err) {
+      const message = getErrorMessage(err, "Failed to save draft");
+      setCreateError(message);
+      showErrorToast(message);
+    } finally {
+      setSavingDraft(false);
+    }
+  }
+
+  /** Restores a draft into the same New Invoice form. Lines keep the prices typed into them; the
+   * invoice is still fully re-priced and validated by createInvoice when it's actually created. */
+  async function openDraft(id: string): Promise<void> {
+    try {
+      const draft = await window.blueLedger.invoiceDraft.get(id);
+      const form = draft.form as Partial<InvoiceDraftForm>;
+      openCreateModal();
+      setEditingDraftId(draft.id);
+      setCreateCustomerId(form.customerId ?? null);
+      setCreateStorefrontId(form.storefrontId ?? "");
+      setCreateTransactionType(form.transactionType === "wholesale_sale" ? "wholesale_sale" : "invoice");
+      setCreateDueDate(form.dueDate ?? todayIsoDate());
+      setCreateNotes(form.notes ?? "");
+      setCreateIncludeTaxBreakdown(form.includeTaxBreakdown ?? true);
+      setCreateIncludeBusinessInfo(form.includeBusinessInfo ?? defaultIncludeBusinessInfoRef.current);
+      setCreateItems((form.items ?? []).map((line) => ({ ...line, key: line.key || crypto.randomUUID() })));
+      setCreateServiceCharges(form.serviceCharges ?? []);
+      setCreateDelivery(form.delivery ?? null);
+      setCreateNotesSections(form.notesSections ?? []);
+      setIncludeInitialPayment(form.includeInitialPayment ?? false);
+      setInitialPaymentMethodId(form.initialPaymentMethodId ?? "");
+      setInitialPaymentAmount(form.initialPaymentAmount ?? "");
+      setInitialPaymentReference(form.initialPaymentReference ?? "");
+      setDraftsOpen(false);
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Failed to open draft"));
+      void loadDrafts();
+    }
+  }
+
+  async function deleteDraft(draft: InvoiceDraftListItem): Promise<void> {
+    const ok = await confirm({
+      title: "Delete this draft?",
+      message: `${draft.customerName ?? "Draft"} — this can't be undone.`,
+      tone: "danger",
+      confirmLabel: "Delete Draft"
+    });
+    if (!ok) return;
+    try {
+      await window.blueLedger.invoiceDraft.delete(draft.id);
+      if (editingDraftId === draft.id) setEditingDraftId(null);
+      showSuccessToast("Draft deleted");
+      await loadDrafts();
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Failed to delete draft"));
+    }
   }
 
   const [variantPickerFor, setVariantPickerFor] = useState<ProductListItem | null>(null);
@@ -1338,6 +1483,16 @@ export function InvoicesRoute(): React.JSX.Element {
       } else {
         await window.blueLedger.invoice.create(payload);
         setCreateOpen(false);
+        if (editingDraftId) {
+          // The draft has become a real (synced) invoice — remove it so it can't be created twice.
+          try {
+            await window.blueLedger.invoiceDraft.delete(editingDraftId);
+          } catch {
+            showErrorToast("Invoice created, but its draft could not be removed — delete it from Drafts");
+          }
+          setEditingDraftId(null);
+          void loadDrafts();
+        }
         await loadAll();
         showSuccessToast("Invoice created");
       }
@@ -1395,6 +1550,24 @@ export function InvoicesRoute(): React.JSX.Element {
               <FileBarChart className="mr-1.5 size-4" aria-hidden="true" />
               Statement
             </Button>
+            {canCreate && (
+              <Button
+                type="button"
+                onClick={() => {
+                  void loadDrafts();
+                  setDraftsOpen(true);
+                }}
+                className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+              >
+                <FilePen className="mr-1.5 size-4" aria-hidden="true" />
+                Drafts
+                {drafts.length > 0 && (
+                  <span className="ml-1.5 grid min-w-5 place-items-center rounded-full bg-warning px-1.5 text-[10px] text-white">
+                    {drafts.length}
+                  </span>
+                )}
+              </Button>
+            )}
             {canCreate && (
               <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
                 <Plus className="mr-1.5 size-4" aria-hidden="true" />
@@ -2329,7 +2502,7 @@ export function InvoicesRoute(): React.JSX.Element {
       <Modal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        title={editingInvoiceId ? "Edit Invoice" : "New Invoice"}
+        title={editingInvoiceId ? "Edit Invoice" : editingDraftId ? "New Invoice (from draft)" : "New Invoice"}
         description={
           editingInvoiceId
             ? "Only available while nothing has been paid yet — the storefront and items are re-priced from scratch on save."
@@ -2943,7 +3116,19 @@ export function InvoicesRoute(): React.JSX.Element {
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={createSaving} className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50">
+            {!editingInvoiceId && (
+              <Button
+                type="button"
+                onClick={() => void saveAsDraft()}
+                disabled={savingDraft || createSaving}
+                title="Keep this invoice on this computer to finish later — drafts are never synced and can be deleted anytime"
+                className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {savingDraft ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : <FilePen className="mr-1.5 size-4" aria-hidden="true" />}
+                {editingDraftId ? "Update Draft" : "Save as Draft"}
+              </Button>
+            )}
+            <Button type="submit" disabled={createSaving || savingDraft} className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50">
               {createSaving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
               {editingInvoiceId ? (createSaving ? "Saving..." : "Save Changes") : createSaving ? "Creating..." : "Create Invoice"}
             </Button>
@@ -2952,6 +3137,54 @@ export function InvoicesRoute(): React.JSX.Element {
           </div>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        open={draftsOpen}
+        onClose={() => setDraftsOpen(false)}
+        title="Invoice Drafts"
+        description="Held invoices saved on this computer. Drafts are never synced — open one to finish it, or delete it anytime."
+        widthClassName="max-w-2xl"
+      >
+        {drafts.length === 0 ? (
+          <div className="flex min-h-[160px] flex-col items-center justify-center rounded-lg border border-dashed border-line bg-soft/60 p-8 text-center">
+            <FilePen className="size-7 text-muted" aria-hidden="true" />
+            <p className="mt-2 text-sm font-bold text-ink">No drafts</p>
+            <p className="mt-1 text-xs font-semibold text-muted">Use "Save as Draft" on the New Invoice form to hold one here.</p>
+          </div>
+        ) : (
+          <div className="max-h-[60vh] space-y-1.5 overflow-y-auto">
+            {drafts.map((draft) => (
+              <div
+                key={draft.id}
+                onClick={() => void openDraft(draft.id)}
+                className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-line px-3.5 py-2.5 transition hover:border-accent hover:bg-soft/60"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-extrabold text-ink">{draft.customerName ?? "No customer yet"}</p>
+                  <p className="text-[11px] font-semibold text-muted">
+                    {draft.itemCount} line{draft.itemCount === 1 ? "" : "s"} · saved {formatDocumentDateTime(draft.updatedAt)} by{" "}
+                    {draft.createdByName}
+                  </p>
+                </div>
+                <div className="flex flex-none items-center gap-2">
+                  <span className="text-sm font-extrabold tabular-nums text-ink">{formatCents(draft.estimatedTotalCents)}</span>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void deleteDraft(draft);
+                    }}
+                    aria-label="Delete draft"
+                    className="grid size-8 place-items-center rounded-md text-muted transition hover:bg-danger-soft hover:text-danger cursor-pointer"
+                  >
+                    <Trash2 className="size-3.5" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </Modal>
 
       <QuickCreateCustomerModal

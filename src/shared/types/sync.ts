@@ -30,6 +30,7 @@ export type SyncEntity =
   | "stock_movements"
   | "stock_requests"
   | "stock_receipts"
+  | "purchase_requisitions"
   | "main_store_allocations"
   | "borrows";
 

@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import {
   CheckCircle2,
   ChevronDown,
+  History,
   Info,
   Loader2,
   Minus,
@@ -34,6 +35,7 @@ import { QuickCreateCustomerModal } from "@renderer/shared/components/QuickCreat
 import { ReceiptPreview } from "@renderer/shared/components/ReceiptPreview";
 import { StampBadge } from "@renderer/shared/components/StampBadge";
 import { StorefrontPicker } from "@renderer/shared/components/StorefrontPicker";
+import { useUiStore } from "@renderer/shared/stores/ui-store";
 import { SupplierPicker } from "@renderer/shared/components/SupplierPicker";
 import { TaxBreakdownTable } from "@renderer/shared/components/TaxBreakdownTable";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
@@ -193,6 +195,13 @@ export function CheckoutRoute(): React.JSX.Element {
   const [mpesaManualChecking, setMpesaManualChecking] = useState(false);
 
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  const [heldSalesOpen, setHeldSalesOpen] = useState(false);
+  const checkoutLayout = useUiStore((state) => state.checkoutLayout);
+  const [completeOpen, setCompleteOpen] = useState(false);
+  // The Complete Sale modal always belongs to whichever sale was on screen when it opened.
+  useEffect(() => {
+    setCompleteOpen(false);
+  }, [activeKey]);
   const [customerSearch, setCustomerSearch] = useState("");
   const [quickCreateCustomerOpen, setQuickCreateCustomerOpen] = useState(false);
 
@@ -1005,6 +1014,7 @@ export function CheckoutRoute(): React.JSX.Element {
     };
   }
 
+  // Classic layout only — Full Screen has no New Sale button (adding a product starts a sale).
   function handleNewSale(): void {
     const draft = createDraft();
     setOpenSales((prev) => [draft, ...prev]);
@@ -1215,13 +1225,834 @@ export function CheckoutRoute(): React.JSX.Element {
     (activeDraft?.splitPayments ?? []).reduce((sum, row) => sum + (row.amount.trim() ? toCents(row.amount) : 0), 0);
   const splitRemainingCents = activeTotals ? activeTotals.grandTotalCents - splitPaidCents : 0;
 
+  // Everything open except the sale on screen — mostly held (suspended) sales, plus any unsaved
+  // draft the cashier switched away from. Reached through the "Held Sales" button/modal.
+  const otherOpenSales = sortedOpenSales.filter((draft) => draft.key !== activeKey);
+
+  /** Picking a sale from the Held Sales modal. An untouched, never-saved draft on screen is simply
+   * dropped rather than left behind as an empty entry in that list. */
+  function resumeOpenSale(key: string): void {
+    if (activeDraft && activeDraft.status === "draft" && !activeDraft.dbSaleId && activeDraft.items.length === 0) {
+      const emptyKey = activeDraft.key;
+      setOpenSales((prev) => prev.filter((draft) => draft.key !== emptyKey));
+    }
+    setActiveKey(key);
+    setHeldSalesOpen(false);
+  }
+
+  // Not loaded yet (AppShell fetches it from app_settings on mount) — wait rather than flash the
+  // wrong layout for a frame.
+  if (checkoutLayout === null) {
+    return (
+      <div className="flex min-h-[300px] flex-1 items-center justify-center text-muted">
+        <Loader2 className="size-6 animate-spin" aria-hidden="true" />
+      </div>
+    );
+  }
+  const isFocusLayout = checkoutLayout === "focus";
+
+  // Two layouts over the SAME state and handlers above (Settings → Checkout Layout, saved per
+  // machine). Classic is the original markup, kept as-is; Full Screen ("focus") is the redesign.
+  // The modals at the bottom (customer picker, variant picker, …) are shared by both.
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12 }}
+      initial={{ opacity: 0, y: isFocusLayout ? 0 : 12 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25 }}
-      className="relative mt-6 space-y-5 pb-10 pl-4"
+      transition={{ duration: isFocusLayout ? 0.2 : 0.25 }}
+      className={isFocusLayout ? "flex min-h-0 flex-1 flex-col" : "relative mt-6 space-y-5 pb-10 pl-4"}
     >
+      {isFocusLayout ? (
+        <>
+      {/* Client request (second pass): Checkout is full-bleed — AppShell drops its page title, sync
+          widget and padding for this route (see AppShell's isFullBleed), and this grid fills every
+          pixel that's left. From lg: up nothing scrolls as a page: the product grid scrolls inside
+          the left column, the sale's lines scroll inside the right panel, and the right panel's
+          header, payment fields, Total Due and Hold/Charge stay pinned. There's no "New Sale"
+          button: adding a product with no sale on screen starts one (addPickToCart), holding a sale
+          clears the panel for the next customer, and held sales come back via the Held Sales modal. */}
+      <div className="grid flex-1 grid-cols-1 lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_440px] lg:grid-rows-[minmax(0,1fr)]">
+        <section className="@container flex flex-col lg:min-h-0">
+          <div className="flex flex-wrap items-center gap-3 px-4 pt-4">
+            <label className="block min-w-[16rem] flex-1">
+              <span className="sr-only">Search Products</span>
+              <div className="relative">
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted"
+                  aria-hidden="true"
+                />
+                <input
+                  type="text"
+                  autoFocus
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                  placeholder="Scan a barcode, or search by SKU / name"
+                  className="h-11 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm font-semibold text-ink outline-none transition placeholder:font-normal placeholder:text-muted/60 focus:border-accent focus:ring-4 focus:ring-accent/15"
+                />
+              </div>
+            </label>
+            {session && !session.branch && (
+              <StorefrontPicker compact value={storefrontId} onChange={setStorefrontId} />
+            )}
+            <p className="flex flex-none items-center gap-x-3 text-xs font-semibold text-muted">
+              {session?.branch && (
+                <span className="inline-flex items-center gap-1">
+                  <Store className="size-3.5 text-primary" aria-hidden="true" />
+                  {session.branch.locationName}
+                </span>
+              )}
+              <span className="inline-flex items-center gap-1">
+                <UserRound className="size-3.5 text-primary" aria-hidden="true" />
+                {session?.employee.firstName} {session?.employee.lastName}
+              </span>
+            </p>
+          </div>
+
+          {/* Two per row, three once this column itself is wide enough (container query on the
+              section, so it follows the column's real width — screen size AND sidebar state — not
+              the viewport). Scrollbar hidden on purpose (client request); wheel/touch/keyboard
+              scrolling all still work. */}
+          <div className="mt-3 grid max-h-[1640px] grid-cols-2 content-start gap-2.5 overflow-y-auto px-4 pb-4 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden @4xl:grid-cols-3 lg:max-h-none lg:min-h-0 lg:flex-1">
+            {products === null ? (
+              <div className="col-span-full flex min-h-[200px] items-center justify-center text-muted">
+                <Loader2 className="size-6 animate-spin" aria-hidden="true" />
+              </div>
+            ) : filteredProducts.length === 0 ? (
+              <div className="col-span-full flex min-h-[160px] flex-col items-center justify-center rounded-lg border border-dashed border-line bg-soft/60 p-8 text-center">
+                <Search className="size-6 text-muted" aria-hidden="true" />
+                <p className="mt-3 text-sm font-bold text-ink">No products match your search</p>
+              </div>
+            ) : (
+              filteredProducts.map((product) => (
+                <FocusProductCard
+                  key={product.id}
+                  product={product}
+                  currency={currency}
+                  stock={stockByProductId.get(product.id) ?? 0}
+                  onAdd={() => addToCart(product)}
+                />
+              ))
+            )}
+          </div>
+        </section>
+
+        <aside className="flex flex-col overflow-hidden rounded-lg border-2 border-primary bg-white shadow-[-8px_0_24px_-16px_rgba(0,0,0,0.25)] lg:min-h-0">
+          <div className="flex flex-none items-center justify-between gap-3 border-b border-line px-4 py-3">
+            {activeDraft ? (
+              <div className="min-w-0">
+                <p className="flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-wider text-muted">
+                  Current Sale · #{activeDraft.displayNumber}
+                  <DashedPill tone={activeDraft.status === "suspended" ? "warning" : "success"}>
+                    {activeDraft.status === "suspended" ? "Held" : "Open"}
+                  </DashedPill>
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setCustomerPickerOpen(true)}
+                  className="mt-1 flex max-w-full items-center gap-1.5 text-sm font-extrabold text-ink transition hover:text-primary cursor-pointer"
+                >
+                  <UserRound className="size-4 flex-none text-primary" aria-hidden="true" />
+                  <span className="truncate">{customerLabel(activeDraft.customerId, activeDraft.walkInName)}</span>
+                  <ChevronDown className="size-3.5 flex-none text-muted" aria-hidden="true" />
+                </button>
+              </div>
+            ) : (
+              <div className="min-w-0">
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Current Sale</p>
+                <p className="mt-1 text-sm font-extrabold text-muted">New order</p>
+              </div>
+            )}
+
+            <div className="flex flex-none items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setHeldSalesOpen(true)}
+                className={cn(
+                  "flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[11px] font-extrabold uppercase tracking-wide transition cursor-pointer",
+                  otherOpenSales.length > 0
+                    ? "border-warning/50 bg-warning/10 text-ink hover:bg-warning/20"
+                    : "border-line text-muted hover:bg-soft"
+                )}
+              >
+                <History className="size-4" aria-hidden="true" />
+                Held
+                {otherOpenSales.length > 0 && (
+                  <span className="grid min-w-5 place-items-center rounded-full bg-warning px-1.5 text-[10px] text-white">
+                    {otherOpenSales.length}
+                  </span>
+                )}
+              </button>
+              {/* Holding is a one-tap action mid-queue, so it stays on the panel too — not only inside
+                  the Complete Sale modal. */}
+              {activeDraft && (
+                <button
+                  type="button"
+                  onClick={() => void handleSuspend()}
+                  disabled={activeDraft.items.length === 0 || suspending}
+                  aria-label="Suspend sale"
+                  title="Suspend (hold) this sale"
+                  className="grid size-9 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+                >
+                  {suspending ? (
+                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <PauseCircle className="size-4" aria-hidden="true" />
+                  )}
+                </button>
+              )}
+              {activeDraft && (activeDraft.status === "draft" || canDeletePending) && (
+                <button
+                  type="button"
+                  onClick={() => void handleDeleteDraft(activeDraft)}
+                  aria-label="Delete sale"
+                  className="grid size-9 place-items-center rounded-lg text-muted transition hover:bg-danger-soft hover:text-danger cursor-pointer"
+                >
+                  <Trash2 className="size-4" aria-hidden="true" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {(loadError ?? actionError) && (
+            <div className="flex-none border-b border-danger/30 bg-danger-soft px-4 py-2.5 text-sm font-bold text-danger">
+              {loadError ?? actionError}
+            </div>
+          )}
+
+          {!activeDraft || !activeTotals ? (
+            // Same shape as a real sale (empty lines area, Total Due, Suspend/Charge) so the panel never
+            // changes layout between customers — the first Add To Order just fills it in.
+            <div className="flex flex-col lg:min-h-0 lg:flex-1">
+              <div className="flex min-h-[200px] flex-col px-4 py-3 lg:flex-1">
+                <div className="flex flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-line bg-soft/60 p-6 text-center">
+                  <ShoppingCart className="size-7 text-muted" aria-hidden="true" />
+                  <p className="mt-2 text-sm font-bold text-ink">No items in this order yet</p>
+                  <p className="mt-1 max-w-[16rem] text-xs font-semibold text-muted">
+                    Tap Add To Order on any product (or scan a barcode) to start the sale.
+                    {otherOpenSales.length > 0 && " Or open Held to continue one."}
+                  </p>
+                </div>
+              </div>
+              <div className="grid flex-none grid-cols-2 gap-2 border-t border-line p-3">
+                <div className="flex h-10 items-center rounded-lg bg-ink px-3.5">
+                  <span className="truncate text-lg font-extrabold tabular-nums text-white">{currency} {formatCents(0)}</span>
+                </div>
+                <Button
+                  type="button"
+                  disabled={true}
+                  className="h-10 bg-teal text-sm hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <CheckCircle2 className="mr-1.5 size-4" aria-hidden="true" />
+                  Complete
+                </Button>
+              </div>
+            </div>
+          ) : (
+            (() => {
+              const draft = activeDraft;
+              const totals = activeTotals;
+
+              return (
+                <div key={draft.key} className="flex flex-col lg:min-h-0 lg:flex-1">
+                  {/* The only part of the sale that scrolls: its lines, plus the rarely-touched extras
+                      (notes, service/delivery charges, tax table, receipt options) underneath them. */}
+                  <div className="px-4 py-3 lg:min-h-[8rem] lg:flex-1 lg:overflow-y-auto">
+                  <div className="space-y-2">
+                    {totals.lines.length === 0 ? (
+                      <div className="flex min-h-[100px] flex-col items-center justify-center rounded-lg border border-dashed border-line bg-soft/60 p-6 text-center">
+                        <p className="text-xs font-bold text-muted">Search and add products to this sale</p>
+                      </div>
+                    ) : (
+                      totals.lines.map(({ line, product, pricing }) => (
+                        <div key={line.lineId} className="rounded-lg border border-line p-2.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="line-clamp-2 text-sm font-extrabold leading-snug text-ink" title={line.name}>
+                                {line.name}
+                              </p>
+                              <p className="text-[11px] font-semibold tabular-nums text-muted">
+                                {line.quantity} × {formatCents(pricing.unitPriceCents)}
+                              </p>
+                            </div>
+                            <div className="flex-none text-right">
+                              <p className="text-sm font-extrabold tabular-nums text-ink">
+                                {formatCents(pricing.lineTotalCents)}
+                              </p>
+                              <div className="mt-0.5 flex items-center justify-end gap-1">
+                                <DashedPill
+                                  tone={pricing.unitPriceCents === product.sellingPriceCents ? "neutral" : "accent"}
+                                >
+                                  {pricing.unitPriceCents === product.sellingPriceCents ? "Unit Rate" : "Bulk Rate"}
+                                </DashedPill>
+                                {(() => {
+                                  const config = {
+                                    vatRatePercent: tenantContext?.vatRatePercent ?? 16,
+                                    pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true
+                                  };
+                                  // Client request: let a cashier switch this ONE line between
+                                  // inclusive/exclusive VAT for this sale only — see
+                                  // toggleTaxInclusiveOverride's own doc comment. Non-vat products keep
+                                  // the plain static badge, same as before, since there's no mode to flip.
+                                  if (product.taxType !== "vat") {
+                                    const badge = taxModeBadgeLabel(product, config);
+                                    return <DashedPill tone={badge.tone}>{badge.label}</DashedPill>;
+                                  }
+                                  const effectiveInclusive =
+                                    line.taxInclusiveOverride ?? resolveProductTaxConfig(product, config).pricesTaxInclusive;
+                                  const badge = taxModeBadgeLabel({ ...product, pricesTaxInclusive: effectiveInclusive }, config);
+                                  return (
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleTaxInclusiveOverride(line.lineId, effectiveInclusive)}
+                                      title="Switch this line's VAT pricing for this sale only"
+                                      className="cursor-pointer"
+                                    >
+                                      <DashedPill tone={badge.tone}>{badge.label}</DashedPill>
+                                    </button>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="mt-2 flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => updateQuantity(line.lineId, line.quantity - 1)}
+                                disabled={line.quantity <= 1}
+                                className="grid size-7 place-items-center rounded-md border border-line text-muted transition hover:bg-soft disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+                              >
+                                <Minus className="size-3" aria-hidden="true" />
+                              </button>
+                              <input
+                                type="number"
+                                min={1}
+                                value={line.quantity === 0 ? "" : line.quantity}
+                                onChange={(event) => updateQuantityDraft(line.lineId, event.target.value)}
+                                onBlur={() => updateQuantity(line.lineId, line.quantity)}
+                                className="h-7 w-12 rounded-md border border-line text-center text-xs font-bold outline-none focus:border-accent"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => updateQuantity(line.lineId, line.quantity + 1)}
+                                className="grid size-7 place-items-center rounded-md border border-line text-muted transition hover:bg-soft cursor-pointer"
+                              >
+                                <Plus className="size-3" aria-hidden="true" />
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <label
+                                className="flex items-center gap-1 text-[10px] font-bold text-muted"
+                                title="Override this line's unit price for this sale only — the product's own price is never changed"
+                              >
+                                Price
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={line.priceOverride}
+                                  onChange={(event) => updatePriceOverride(line.lineId, event.target.value)}
+                                  placeholder={fromCents(pricing.unitPriceCents)}
+                                  className={cn(
+                                    "h-7 w-16 rounded-md border px-1.5 text-right text-xs font-semibold outline-none focus:border-accent",
+                                    line.priceOverride.trim() && isPriceBelowMinimum(toCents(line.priceOverride), product.minimumPriceCents)
+                                      ? "border-danger text-danger"
+                                      : "border-line"
+                                  )}
+                                />
+                              </label>
+                              <label className="flex items-center gap-1 text-[10px] font-bold text-muted">
+                                Disc.
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={line.discount}
+                                  onChange={(event) => updateDiscount(line.lineId, event.target.value)}
+                                  className="h-7 w-16 rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => removeLine(line.lineId)}
+                                aria-label={`Remove ${line.name}`}
+                                className="grid size-7 place-items-center rounded-md text-muted transition hover:bg-danger-soft hover:text-danger cursor-pointer"
+                              >
+                                <Trash2 className="size-3.5" aria-hidden="true" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {line.priceOverride.trim() && isPriceBelowMinimum(toCents(line.priceOverride), product.minimumPriceCents) && (
+                            <p className="mt-1 text-right text-[10px] font-bold text-danger">
+                              Below minimum price of {fromCents(product.minimumPriceCents)}
+                            </p>
+                          )}
+
+                          <label className="mt-2 flex items-center gap-1.5 text-[10px] font-bold text-muted cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={line.isLocallySourced}
+                              onChange={() => toggleLocallySourced(line.lineId)}
+                              className="size-3.5 accent-accent"
+                            />
+                            Sourced from another shop
+                          </label>
+
+                          {line.isLocallySourced && (
+                            <div className="mt-2 flex flex-col gap-2.5 rounded-md bg-soft/60 p-2.5">
+                              <label className="block text-sm font-extrabold text-ink">
+                                Unit Cost
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={line.localCost}
+                                  onChange={(event) => updateLocalCost(line.lineId, event.target.value)}
+                                  placeholder="0.00"
+                                  className="mt-1 h-10 w-full rounded-md border border-line px-3 text-sm font-semibold outline-none focus:border-accent"
+                                />
+                              </label>
+                              {line.localCost.trim() && (
+                                <p className="text-[10px] font-semibold text-muted">
+                                  Total for {line.quantity}: {formatCents(unitCostToTotalCents(line.localCost, line.quantity))}
+                                </p>
+                              )}
+                              <div>
+                                <p className="text-sm font-extrabold text-ink">Local supplier</p>
+                                <SupplierPicker
+                                  suppliers={suppliers}
+                                  value={line.localSupplierId}
+                                  onChange={(supplierId) => updateLocalSupplier(line.lineId, supplierId)}
+                                  onSupplierCreated={(supplier) => setSuppliers((prev) => [...prev, supplier])}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  </div>
+              <div className="grid flex-none grid-cols-2 gap-2 border-t border-line p-3">
+                <div className="flex h-10 items-center rounded-lg bg-ink px-3.5">
+                  <span className="truncate text-lg font-extrabold tabular-nums text-white">{currency} {formatCents(totals.grandTotalCents)}</span>
+                </div>
+                <Button
+                  type="button"
+                  onClick={() => setCompleteOpen(true)}
+                  disabled={totals.lines.length === 0}
+                  className="h-10 bg-teal text-sm hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <CheckCircle2 className="mr-1.5 size-4" aria-hidden="true" />
+                  Complete
+                </Button>
+              </div>
+                </div>
+              );
+            })()
+          )}
+        </aside>
+      </div>
+
+      {/* Client request: the sale panel shows only the items + Total/Complete; everything needed to
+          actually finish the sale (notes, service/delivery charges, tax, receipt options, payment,
+          M-Pesa STK push, split payments, Suspend/Charge) lives here instead. Closes itself whenever
+          the active sale changes — completed, held, deleted or switched (see the activeKey effect). */}
+      <Modal
+        open={completeOpen && Boolean(activeDraft && activeTotals)}
+        onClose={() => setCompleteOpen(false)}
+        title={activeDraft ? `Complete Sale · #${activeDraft.displayNumber}` : "Complete Sale"}
+        description={activeDraft ? customerLabel(activeDraft.customerId, activeDraft.walkInName) : ""}
+        widthClassName="max-w-4xl"
+      >
+        {activeDraft &&
+          activeTotals &&
+          (() => {
+            const draft = activeDraft;
+            const totals = activeTotals;
+            return (
+              <form onSubmit={handleComplete} className="grid gap-6 md:grid-cols-2">
+                <div>
+                  <ExtraChargesSection
+                    className="mt-0 border-t-0 pt-0"
+                    serviceCharges={draft.serviceCharges}
+                    onServiceChargesChange={updateActiveServiceCharges}
+                    delivery={draft.delivery}
+                    onDeliveryChange={updateActiveDelivery}
+                    customerName={draft.customerId ? customerLabel(draft.customerId) : draft.walkInName}
+                    tenantTaxConfig={{ vatRatePercent: tenantContext?.vatRatePercent ?? 16, pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true }}
+                  />
+
+                  <TaxBreakdownTable
+                    breakdown={computeTaxBreakdown(
+                      totals.lines.map(({ line, product, pricing }) => ({
+                        unitPriceCents: pricing.unitPriceCents,
+                        quantity: line.quantity,
+                        discountAmountCents: pricing.discountAmountCents,
+                        taxType: product.taxType,
+                        taxAmountCents: pricing.taxCents,
+                        lineTotalCents: pricing.lineTotalCents
+                      }))
+                    )}
+                    tenantTaxConfig={{ vatRatePercent: tenantContext?.vatRatePercent ?? 16, pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true }}
+                  />
+
+                  <div className="mt-3">
+                    <CheckboxField
+                      label="Include tax information"
+                      description="Shows the Tax Breakdown section on this sale's receipt (print, download, and share)"
+                      checked={activeDraft?.includeTaxBreakdown ?? true}
+                      onChange={updateActiveIncludeTaxBreakdown}
+                    />
+                  </div>
+
+                  <div className="mt-3">
+                    <CheckboxField
+                      label="Include storefront information"
+                      description="Shows the shop name, logo, address, contacts and header/footer text on this receipt. Turn off for a fully anonymous receipt."
+                      checked={activeDraft?.includeBusinessInfo ?? true}
+                      onChange={updateActiveIncludeBusinessInfo}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <TextAreaField
+                    label="Notes"
+                    value={draft.notes}
+                    onChange={updateActiveNotes}
+                    placeholder="Optional note for this sale"
+                    rows={2}
+                  />
+
+                  <div className="mt-3 space-y-0.5 text-xs text-muted">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold">Subtotal</span>
+                      <span className="font-bold tabular-nums">{formatCents(totals.subtotalCents)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold">Discount</span>
+                      <span className="font-bold tabular-nums">-{formatCents(totals.discountAmountCents)}</span>
+                    </div>
+                    {totals.serviceChargesFeeCents > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold">Service Charges</span>
+                        <span className="font-bold tabular-nums">{formatCents(totals.serviceChargesFeeCents)}</span>
+                      </div>
+                    )}
+                    {totals.deliveryFeeCents > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold">Delivery Fee</span>
+                        <span className="font-bold tabular-nums">{formatCents(totals.deliveryFeeCents)}</span>
+                      </div>
+                    )}
+                    {draft.includeTaxBreakdown && totals.addedTaxCents > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold">Total Tax</span>
+                        <span className="font-bold tabular-nums">{formatCents(totals.addedTaxCents)}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-2.5 grid grid-cols-2 gap-3">
+                    <SelectField
+                      label="Payment Method"
+                      value={activeDraft?.paymentMethodId ?? ""}
+                      onChange={updateActivePaymentMethod}
+                      options={paymentMethodOptions}
+                    />
+                    <Field
+                      label={isSplit ? `Paid by ${selectedPaymentMethod?.name ?? "this method"}` : "Amount Received"}
+                      type="number"
+                      value={activeDraft?.amountReceived ?? ""}
+                      onChange={updateActiveAmountReceived}
+                      placeholder={isSplit ? "0.00" : fromCents(totals.grandTotalCents)}
+                    />
+                  </div>
+
+                  {selectedPaymentMethod?.code === "MPESA" && mpesaConfigured && (
+                    <div className="mt-3 rounded-lg border border-line bg-soft/60 p-3">
+                      <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">
+                        M-Pesa STK Push
+                      </p>
+                      {(mpesaState === "idle" || mpesaState === "error") && (
+                        <div className="mt-2 flex items-end gap-2">
+                          <Field
+                            label="Phone Number"
+                            value={mpesaPhone}
+                            onChange={setMpesaPhone}
+                            placeholder="e.g. 0712 345 678"
+                            className="flex-1"
+                          />
+                          <Button
+                            type="button"
+                            onClick={() => void handleSendStkPush()}
+                            disabled={!mpesaPhone.trim() || totals.lines.length === 0}
+                            className="h-10 shrink-0 bg-teal text-xs hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <Smartphone className="mr-1.5 size-3.5" aria-hidden="true" />
+                            Send STK Push
+                          </Button>
+                        </div>
+                      )}
+                      {mpesaState === "sending" && (
+                        <div className="mt-2 flex items-center gap-2 text-sm font-bold text-muted">
+                          <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                          Sending STK push...
+                        </div>
+                      )}
+                      {mpesaState === "awaiting" && (
+                        <div className="mt-2 space-y-2">
+                          <div className="flex items-center gap-2 text-sm font-bold text-teal">
+                            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                            Waiting for customer to enter PIN...
+                          </div>
+                          <Button
+                            type="button"
+                            onClick={() => void handleCheckStatusNow()}
+                            disabled={mpesaManualChecking}
+                            className="h-8 border border-line bg-white px-2.5 text-[11px] text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {mpesaManualChecking ? (
+                              <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+                            ) : (
+                              <RefreshCw className="mr-1.5 size-3.5" aria-hidden="true" />
+                            )}
+                            {mpesaManualChecking ? "Checking..." : "Taking long? Check Status Now"}
+                          </Button>
+                        </div>
+                      )}
+                      {mpesaState === "success" && (
+                        <div className="mt-2 flex items-center gap-2 text-sm font-extrabold text-success">
+                          <CheckCircle2 className="size-4" aria-hidden="true" />
+                          {mpesaMessage ?? "Payment successful"}
+                        </div>
+                      )}
+                      {mpesaState === "error" && mpesaMessage && (
+                        <div className="mt-2 flex items-center gap-2 text-sm font-bold text-danger">
+                          <XCircle className="size-4 flex-none" aria-hidden="true" />
+                          {mpesaMessage}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {selectedPaymentMethod?.requiresReference && (
+                    <Field
+                      label="Reference"
+                      value={activeDraft?.paymentReference ?? ""}
+                      onChange={updateActivePaymentReference}
+                      placeholder="e.g. M-Pesa code, transaction ID"
+                      required
+                      className="mt-3"
+                    />
+                  )}
+
+                  {(activeDraft?.splitPayments ?? []).map((row, index) => {
+                    const rowMethod = activePaymentMethods.find((method) => method.id === row.methodId) ?? null;
+                    return (
+                      <div key={row.key} className="mt-3 rounded-lg border border-line p-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">
+                            Payment {index + 2}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => removeSplitPayment(row.key)}
+                            className="text-[11px] font-extrabold uppercase text-danger hover:underline cursor-pointer"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <SelectField
+                          label="Payment Method"
+                          value={row.methodId}
+                          onChange={(value) => updateSplitPayment(row.key, { methodId: value })}
+                          options={paymentMethodOptions}
+                          className="mt-1.5"
+                        />
+                        <div className={cn("mt-2 grid gap-3", rowMethod?.requiresReference ? "grid-cols-2" : "grid-cols-1")}>
+                          <Field
+                            label="Amount"
+                            type="number"
+                            value={row.amount}
+                            onChange={(value) => updateSplitPayment(row.key, { amount: value })}
+                            placeholder="0.00"
+                          />
+                          {rowMethod?.requiresReference && (
+                            <Field
+                              label="Reference"
+                              value={row.reference}
+                              onChange={(value) => updateSplitPayment(row.key, { reference: value })}
+                              placeholder="e.g. M-Pesa code"
+                              required
+                            />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  <button
+                    type="button"
+                    onClick={addSplitPayment}
+                    disabled={totals.lines.length === 0}
+                    className="mt-3 flex items-center gap-1 text-[11px] font-extrabold uppercase text-accent hover:underline disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+                  >
+                    <Plus className="size-3" aria-hidden="true" />
+                    Split payment
+                  </button>
+
+                  <div className="mt-4 border-t border-line pt-4">
+                  <div className="flex items-center justify-between rounded-lg bg-ink px-3.5 py-2">
+                    <div>
+                      <span className="block text-[11px] font-extrabold uppercase tracking-wide text-white/70">
+                        Total Due
+                      </span>
+                      {!isSplit && changeDueCents !== null && (
+                        <span
+                          className={cn(
+                            "block text-[11px] font-bold tabular-nums",
+                            changeDueCents < 0 ? "text-red-300" : "text-white/80"
+                          )}
+                        >
+                          Change Due {formatCents(changeDueCents)}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-lg font-extrabold text-white">
+                      {formatCents(totals.grandTotalCents)}
+                    </span>
+                  </div>
+
+                  {isSplit && splitRemainingCents !== 0 && (
+                    <div
+                      className={cn(
+                        "mt-2 flex items-center justify-between rounded-lg border px-3.5 py-2",
+                        splitRemainingCents > 0 ? "border-danger/30 bg-danger-soft" : "border-line bg-soft"
+                      )}
+                    >
+                      <span className="text-xs font-extrabold uppercase tracking-wide text-muted">
+                        {splitRemainingCents > 0 ? "Still to pay" : "Change due"}
+                      </span>
+                      <span
+                        className={cn(
+                          "text-base font-extrabold tabular-nums",
+                          splitRemainingCents > 0 ? "text-danger" : "text-ink"
+                        )}
+                      >
+                        {formatCents(Math.abs(splitRemainingCents))}
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <Button
+                      type="button"
+                      onClick={() => void handleSuspend()}
+                      disabled={totals.lines.length === 0 || suspending}
+                      className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {suspending ? (
+                        <Loader2 className="mr-1.5 size-4 animate-spin" aria-hidden="true" />
+                      ) : (
+                        <PauseCircle className="mr-1.5 size-4" aria-hidden="true" />
+                      )}
+                      Suspend
+                    </Button>
+                    <Button
+                      type="submit"
+                      disabled={
+                        totals.lines.length === 0 ||
+                        completing ||
+                        !activeDraft?.paymentMethodId ||
+                        (isSplit && splitRemainingCents > 0)
+                      }
+                      className="h-9 bg-teal text-xs hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {completing ? (
+                        <Loader2 className="mr-1.5 size-4 animate-spin" aria-hidden="true" />
+                      ) : (
+                        `Charge ${formatCents(totals.grandTotalCents)}`
+                      )}
+                    </Button>
+                  </div>
+                  </div>
+                  {actionError && (
+                    <div className="mt-3 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2 text-xs font-bold text-danger">
+                      {actionError}
+                    </div>
+                  )}
+                </div>
+              </form>
+            );
+          })()}
+      </Modal>
+
+      <Modal
+        open={heldSalesOpen}
+        onClose={() => setHeldSalesOpen(false)}
+        title="Held Sales"
+        description="Pick a sale to bring it back to the checkout."
+        widthClassName="max-w-lg"
+      >
+        {otherOpenSales.length === 0 ? (
+          <div className="flex min-h-[140px] flex-col items-center justify-center rounded-lg border border-dashed border-line bg-soft/60 p-6 text-center">
+            <PauseCircle className="size-6 text-muted" aria-hidden="true" />
+            <p className="mt-2 text-sm font-bold text-ink">No held sales</p>
+            <p className="mt-1 text-xs font-semibold text-muted">Sales you hold with the Suspend button show up here.</p>
+          </div>
+        ) : (
+          <div className="max-h-[60vh] space-y-1.5 overflow-y-auto">
+            {otherOpenSales.map((draft) => {
+              const totals = computeDraftTotals(draft.items, draft.serviceCharges, draft.delivery);
+              const canRemove = draft.status === "draft" || canDeletePending;
+              return (
+                <div
+                  key={draft.key}
+                  onClick={() => resumeOpenSale(draft.key)}
+                  className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-line px-3.5 py-2.5 transition hover:border-accent hover:bg-soft/60"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-extrabold text-ink">
+                      #{draft.displayNumber} · {customerLabel(draft.customerId, draft.walkInName)}
+                    </p>
+                    <p className="text-[11px] font-semibold text-muted">
+                      {draft.items.length} item{draft.items.length === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                  <div className="flex flex-none items-center gap-2">
+                    <DashedPill tone={draft.status === "suspended" ? "warning" : "neutral"}>
+                      {draft.status === "suspended" ? "Held" : "Unsaved"}
+                    </DashedPill>
+                    <span className="text-sm font-extrabold tabular-nums text-ink">
+                      {formatCents(totals.grandTotalCents)}
+                    </span>
+                    {canRemove && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleDeleteDraft(draft);
+                        }}
+                        aria-label="Delete sale"
+                        className="grid size-7 place-items-center rounded-md text-muted transition hover:bg-danger-soft hover:text-danger cursor-pointer"
+                      >
+                        <Trash2 className="size-3.5" aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Modal>
+
+        </>
+      ) : (
+        <>
       <span
         className="pointer-events-none absolute -left-[5px] top-2 size-2.5 rounded-full border-2 border-line bg-app"
         aria-hidden="true"
@@ -1917,6 +2748,8 @@ export function CheckoutRoute(): React.JSX.Element {
           )}
         </div>
       </div>
+        </>
+      )}
 
       <Modal
         open={customerPickerOpen}
@@ -2074,6 +2907,123 @@ export function CheckoutRoute(): React.JSX.Element {
   );
 }
 
+function FocusProductCard({
+  product,
+  stock,
+  currency,
+  onAdd
+}: {
+  product: ProductListItem;
+  stock: number;
+  currency: string;
+  onAdd: () => void;
+}): React.JSX.Element {
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [showInfo, setShowInfo] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!product.imagePath) {
+      setImageUrl(null);
+      return undefined;
+    }
+    void window.blueLedger.product.readImagePreview(product.imagePath).then((url) => {
+      if (!cancelled) setImageUrl(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [product.imagePath]);
+
+  const outOfStock = product.trackStock && stock <= 0 && !product.allowNegativeStock;
+
+  return (
+    // Laid out for a ~165px-wide grid cell (three per row on a laptop): name on top, meta below it,
+    // then price + info, then the Add button pinned to the bottom (mt-auto) so every card in a row
+    // lines its buttons up regardless of how many lines its name wraps to.
+    <div className="flex flex-col gap-2 rounded-xl border-2 border-gray-400 bg-white p-2.5 shadow-soft transition hover:shadow-md">
+      {showInfo && <ProductInfoModal product={product} onClose={() => setShowInfo(false)} />}
+      <div className="flex items-start gap-2.5">
+        <div
+          className="relative grid size-9 flex-none place-items-center overflow-hidden rounded-lg"
+          style={{ backgroundColor: imageUrl ? undefined : (product.categoryColor ?? "#83795f") }}
+        >
+          {imageUrl ? (
+            // Absolute (not size-full) — see ProductThumbnail.tsx's own doc comment for why a
+            // percentage height inside a place-items-center grid cell can't be trusted otherwise.
+            <img src={imageUrl} alt="" className="absolute inset-0 size-full object-contain" />
+          ) : (
+            <Package className="size-4 text-white/90" aria-hidden="true" />
+          )}
+        </div>
+        <p className="line-clamp-3 min-w-0 text-[13px] font-extrabold leading-snug text-ink" title={product.name}>
+          {product.name}
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] font-bold text-muted">
+        <span className="truncate">{product.sku}</span>
+        {(product.variantConfig?.mode === "shared" || product.variantGroupId) && (
+          <span className="text-accent">Has variants</span>
+        )}
+        {product.trackStock && <span className={cn(outOfStock && "text-danger")}>Stock: {stock}</span>}
+        {product.wholesalePriceCents !== null && product.wholesaleMinQuantity > 0 && (
+          <span className="text-teal">
+            Bulk {product.wholesaleMinQuantity}+ @ {currency} {formatCents(product.wholesalePriceCents)}
+          </span>
+        )}
+      </div>
+
+      <div className="mt-auto flex items-center justify-between gap-1">
+        <p className="min-w-0 truncate text-base font-extrabold tabular-nums text-warning">
+          {currency} {formatCents(product.sellingPriceCents)}
+        </p>
+        <button
+          type="button"
+          onClick={() => setShowInfo(true)}
+          aria-label={`View details for ${product.name}`}
+          className="grid size-7 flex-none place-items-center rounded-md text-muted transition hover:bg-soft hover:text-primary cursor-pointer"
+        >
+          <Info className="size-4" aria-hidden="true" />
+        </button>
+      </div>
+
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={onAdd}
+          disabled={outOfStock}
+          className={cn(
+            "flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg px-3.5 text-[11px] font-extrabold uppercase tracking-wide transition",
+            outOfStock ? "cursor-not-allowed bg-soft text-muted" : "cursor-pointer bg-teal text-white hover:brightness-110"
+          )}
+        >
+          {outOfStock ? (
+            "Out of Stock"
+          ) : (
+            <>
+              <Plus className="size-3.5" aria-hidden="true" />
+              Add To Order
+            </>
+          )}
+        </button>
+        {outOfStock && (
+          <button
+            type="button"
+            onClick={onAdd}
+            title="Add anyway — source this one from another shop"
+            aria-label="Add anyway — source this one from another shop"
+            className="grid size-9 flex-none cursor-pointer place-items-center rounded-lg border border-teal text-teal transition hover:bg-teal hover:text-white"
+          >
+            <Store className="size-4" aria-hidden="true" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Classic layout's product row — the original card, unchanged. */
 function ProductCard({
   product,
   stock,

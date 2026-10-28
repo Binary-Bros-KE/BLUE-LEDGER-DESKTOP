@@ -22,12 +22,15 @@ export function QuickCreateProductModal({
   open,
   onClose,
   onCreated,
-  storefrontId
+  storefrontId,
+  initialName
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: (product: Product) => void;
   storefrontId?: string | null;
+  /** Pre-fills Name — e.g. a purchase requisition's free-text item being turned into a real product. */
+  initialName?: string;
 }): React.JSX.Element {
   const [sku, setSku] = useState("");
   const [barcode, setBarcode] = useState("");
@@ -50,10 +53,11 @@ export function QuickCreateProductModal({
 
   useEffect(() => {
     if (!open) return;
+    if (initialName) setName(initialName);
     // Prefills the next auto-generated SKU so nobody has to track the latest number by hand — still a
     // normal editable field, so it can be overridden for a tenant with their own existing SKU scheme.
     void window.blueLedger.product.nextSku().then(setSku).catch(() => {});
-  }, [open]);
+  }, [open, initialName]);
 
   async function handleSubmit(event: React.FormEvent): Promise<void> {
     event.preventDefault();

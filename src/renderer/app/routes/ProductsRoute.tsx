@@ -143,7 +143,7 @@ export function ProductsRoute(): React.JSX.Element {
     setLoadError(null);
     try {
       const [productList, categoryList, locationList] = await Promise.all([
-        window.blueLedger.product.list(storefrontFilter || null),
+        window.blueLedger.product.list(storefrontFilter || null, true),
         window.blueLedger.category.list(),
         window.blueLedger.location.list()
       ]);

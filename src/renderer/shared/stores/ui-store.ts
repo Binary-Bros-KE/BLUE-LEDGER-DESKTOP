@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { CheckoutLayout } from "@shared/types/checkout-layout";
 
 const SIDEBAR_COLLAPSED_KEY = "blue-ledger:sidebar-collapsed";
 
@@ -15,6 +16,11 @@ type UiStore = {
   toggleSidebar: () => void;
   activeNavKey: string;
   setActiveNavKey: (key: string) => void;
+  /** This machine's chosen Checkout layout, loaded once from app_settings by AppShell (main process
+   * is the source of truth — see preferences-service.ts). null until that first load finishes, so
+   * Checkout can wait instead of flashing the wrong layout. */
+  checkoutLayout: CheckoutLayout | null;
+  setCheckoutLayout: (layout: CheckoutLayout) => void;
 };
 
 export const useUiStore = create<UiStore>((set, get) => ({
@@ -29,5 +35,7 @@ export const useUiStore = create<UiStore>((set, get) => ({
     set({ sidebarCollapsed: next });
   },
   activeNavKey: "dashboard",
-  setActiveNavKey: (key) => set({ activeNavKey: key })
+  setActiveNavKey: (key) => set({ activeNavKey: key }),
+  checkoutLayout: null,
+  setCheckoutLayout: (layout) => set({ checkoutLayout: layout })
 }));

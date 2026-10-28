@@ -8,6 +8,7 @@ import {
   Building2,
   ClipboardCheck,
   ClipboardList,
+  ClipboardPen,
   CreditCard,
   FileSpreadsheet,
   FileText,
@@ -185,6 +186,13 @@ export const navGroups: NavGroup[] = [
         description: "Vendors & purchase orders",
         icon: Truck,
         permissionModule: "suppliers"
+      },
+      {
+        key: "purchase-requisitions",
+        label: "Requisitions",
+        description: "Ask for stock to be bought — approved ones become purchases",
+        icon: ClipboardPen,
+        permissionModule: "purchase_requisitions"
       },
       {
         key: "purchases",

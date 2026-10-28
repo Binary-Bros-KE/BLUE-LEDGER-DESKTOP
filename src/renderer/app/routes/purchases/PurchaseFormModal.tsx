@@ -77,10 +77,23 @@ function lineTaxCents(line: ItemLine, product: ProductListItem | undefined, tena
   return computeLineTax(lineTaxableCents(line), line.taxType, lineTaxConfig(product, tenantTaxConfig)).taxCents;
 }
 
+/** Opening the form to APPROVE a purchase requisition: pre-filled with the requisition's storefront
+ * (locked — a requisition always buys for its own storefront) and its items/quantities; saving calls
+ * purchaseRequisition.approve instead of purchase.create, so the purchase and the requisition's
+ * "approved" status are written together (see purchase-requisition-service.ts). The approver can
+ * still adjust lines, quantities and everything else like any new purchase. */
+export type PurchaseFromRequisition = {
+  requisitionId: string;
+  requisitionNumber: string;
+  locationId: string;
+  items: Array<{ product: ProductListItem; quantity: number }>;
+};
+
 export function PurchaseFormModal({
   open,
   onClose,
   editingPurchase,
+  fromRequisition = null,
   suppliers,
   products,
   locations,
@@ -91,6 +104,7 @@ export function PurchaseFormModal({
   open: boolean;
   onClose: () => void;
   editingPurchase: Purchase | null;
+  fromRequisition?: PurchaseFromRequisition | null;
   suppliers: Supplier[];
   products: ProductListItem[];
   locations: Location[];
@@ -153,7 +167,7 @@ export function PurchaseFormModal({
       );
     } else {
       setSupplierId(null);
-      setLocationId("");
+      setLocationId(fromRequisition?.locationId ?? "");
       setSupplierInvoiceNumber("");
       setShippingCost("");
       setShippingExpense("");
@@ -161,14 +175,18 @@ export function PurchaseFormModal({
       setShipmentTrackingNumber("");
       setShipmentDepartedAt("");
       setShipmentEta("");
-      setNotes("");
+      setNotes(fromRequisition ? `From requisition ${fromRequisition.requisitionNumber}` : "");
       setAttachmentPath(null);
-      setItems([]);
+      setItems(
+        fromRequisition
+          ? fromRequisition.items.map(({ product, quantity }) => ({ ...emptyItemLine(product), orderedQuantity: quantity }))
+          : []
+      );
     }
     setSupplierSearch("");
     setProductSearch("");
     setError(null);
-  }, [open, editingPurchase]);
+  }, [open, editingPurchase, fromRequisition]);
 
   // Mirrors PurchaseDetailModal's own canEditPurchase / purchase-service.ts's requireEditablePurchase
   // — only reachable when true anyway (that's the only way this modal opens for a non-draft
@@ -192,7 +210,9 @@ export function PurchaseFormModal({
     return products
       .filter((product) => product.status === "active")
       .filter((product) => `${product.name} ${product.sku}`.toLowerCase().includes(term))
-      .slice(0, 8);
+      // Enough that a common word (e.g. a brand) never hides the product being searched for —
+      // the old 8-result cap did, while Checkout showed every match. The list scrolls.
+      .slice(0, 50);
   }, [products, productSearch]);
 
   const productById = useMemo(() => new Map(products.map((product) => [product.id, product])), [products]);
@@ -316,10 +336,18 @@ export function PurchaseFormModal({
     try {
       if (editingPurchase) {
         await window.blueLedger.purchase.update(editingPurchase.id, payload);
+      } else if (fromRequisition) {
+        await window.blueLedger.purchaseRequisition.approve(fromRequisition.requisitionId, payload);
       } else {
         await window.blueLedger.purchase.create(payload);
       }
-      showSuccessToast(editingPurchase ? "Purchase updated" : "Purchase created");
+      showSuccessToast(
+        editingPurchase
+          ? "Purchase updated"
+          : fromRequisition
+            ? `${fromRequisition.requisitionNumber} approved — purchase created`
+            : "Purchase created"
+      );
       await onSaved();
       onClose();
     } catch (err) {
@@ -336,7 +364,13 @@ export function PurchaseFormModal({
       <Modal
         open={open}
         onClose={onClose}
-        title={editingPurchase ? `Edit ${editingPurchase.purchaseNumber}` : "New Purchase Order"}
+        title={
+          editingPurchase
+            ? `Edit ${editingPurchase.purchaseNumber}`
+            : fromRequisition
+              ? `Approve ${fromRequisition.requisitionNumber} as a Purchase`
+              : "New Purchase Order"
+        }
         description="Record inventory you're buying from a supplier — stock only enters once goods are received."
         widthClassName="max-w-7xl"
       >
@@ -415,6 +449,7 @@ export function PurchaseFormModal({
               label="Destination Location"
               value={locationId}
               onChange={setLocationId}
+              disabled={fromRequisition !== null}
               options={[
                 { value: "", label: "Select location" },
                 ...locations.map((location) => ({ value: location.id, label: location.locationName }))

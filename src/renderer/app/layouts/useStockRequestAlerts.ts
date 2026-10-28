@@ -23,7 +23,7 @@ function describe(newOnes: StockRequestListItem[]): { title: string; body: strin
   };
 }
 
-function playBeep(): void {
+export function playBeep(): void {
   try {
     const context = new AudioContext();
     const oscillator = context.createOscillator();

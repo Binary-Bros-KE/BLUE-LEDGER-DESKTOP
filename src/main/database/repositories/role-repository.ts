@@ -1,4 +1,5 @@
 import { getDatabase } from "@main/database/connection";
+import { withLaterModuleDefaults } from "@shared/lib/role-defaults";
 import type { PermissionsMap, Role, RoleListItem, RoleSyncStatus } from "@shared/types/role";
 
 export type RoleRow = {
@@ -150,7 +151,7 @@ export function mapRoleRow(row: RoleRow): Role {
     tenantId: row.tenant_id,
     roleName: row.role_name,
     description: row.description,
-    permissions: parsePermissions(row.permissions_json),
+    permissions: withLaterModuleDefaults(parsePermissions(row.permissions_json)),
     isSystemRole: Boolean(row.is_system_role),
     isSuperAdmin: Boolean(row.is_super_admin),
     createdAt: row.created_at,

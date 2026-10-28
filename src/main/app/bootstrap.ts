@@ -92,7 +92,11 @@ export async function bootstrap(): Promise<void> {
     return;
   }
 
-  app.setAppUserModelId("com.blueledger.desktop");
+  // Dev runs must NOT claim the installed app's ID: Windows resolves a taskbar button's icon through
+  // the Start Menu shortcut registered for that ID (the installed Program Files exe), not this
+  // window's own icon — so `npm run dev` on a machine that also has the app installed showed a
+  // generic/blank taskbar icon. process.execPath (node_modules' electron.exe) keeps dev separate.
+  app.setAppUserModelId(app.isPackaged ? "com.blueledger.desktop" : process.execPath);
 
   logMigrationFailures(migrateDatabase());
   const tenant = ensureTenantContext();

@@ -153,6 +153,22 @@ import {
   rejectStockRequest
 } from "@main/services/stock-request-service";
 import {
+  approvePurchaseRequisition,
+  cancelPurchaseRequisition,
+  createPurchaseRequisition,
+  getPurchaseRequisition,
+  linkPurchaseRequisitionItem,
+  listPendingPurchaseRequisitions,
+  listPurchaseRequisitions,
+  rejectPurchaseRequisition
+} from "@main/services/purchase-requisition-service";
+import {
+  deleteInvoiceDraft,
+  getInvoiceDraft,
+  listInvoiceDrafts,
+  saveInvoiceDraft
+} from "@main/services/invoice-draft-service";
+import {
   advanceRecurringBill,
   createRecurringBill,
   deleteRecurringBill,
@@ -349,6 +365,7 @@ import {
 import { commitImport, pickImportFile, previewImport } from "@main/services/import-service";
 import { createDeliveryShareLink, createShareLink } from "@main/services/share-service";
 import { saveTheme } from "@main/services/theme-service";
+import { getCheckoutLayout, saveCheckoutLayout } from "@main/services/preferences-service";
 import {
   getCancelledPurchasesInRange,
   getFinancialsByStorefront,
@@ -506,7 +523,9 @@ export function registerIpcHandlers(): void {
     setCategoryStatus(id, status)
   );
   ipcMain.handle(ipcChannels.categoryDelete, (_event, id: string) => deleteCategory(id));
-  ipcMain.handle(ipcChannels.productList, (_event, storefrontId?: string | null) => listProducts(storefrontId));
+  ipcMain.handle(ipcChannels.productList, (_event, storefrontId?: string | null, stockedOnly?: boolean) =>
+    listProducts(storefrontId, stockedOnly === true)
+  );
   ipcMain.handle(ipcChannels.productNextSku, () => nextProductSku());
   ipcMain.handle(ipcChannels.productStockSummary, (_event, id: string) => getProductStockSummary(id));
   ipcMain.handle(ipcChannels.productGet, (_event, id: string) => getProduct(id));
@@ -1037,6 +1056,22 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.stockRequestCreate, (_event, input: unknown) => createStockRequest(input));
   ipcMain.handle(ipcChannels.stockRequestApprove, (_event, id: string, input: unknown) => approveStockRequest(id, input));
   ipcMain.handle(ipcChannels.stockRequestReject, (_event, id: string, input: unknown) => rejectStockRequest(id, input));
+  ipcMain.handle(ipcChannels.invoiceDraftList, () => listInvoiceDrafts());
+  ipcMain.handle(ipcChannels.invoiceDraftGet, (_event, id: string) => getInvoiceDraft(id));
+  ipcMain.handle(ipcChannels.invoiceDraftSave, (_event, input: unknown) => saveInvoiceDraft(input));
+  ipcMain.handle(ipcChannels.invoiceDraftDelete, (_event, id: string) => deleteInvoiceDraft(id));
+  ipcMain.handle(ipcChannels.purchaseRequisitionList, () => listPurchaseRequisitions());
+  ipcMain.handle(ipcChannels.purchaseRequisitionListPending, () => listPendingPurchaseRequisitions());
+  ipcMain.handle(ipcChannels.purchaseRequisitionGet, (_event, id: string) => getPurchaseRequisition(id));
+  ipcMain.handle(ipcChannels.purchaseRequisitionCreate, (_event, input: unknown) => createPurchaseRequisition(input));
+  ipcMain.handle(ipcChannels.purchaseRequisitionCancel, (_event, id: string) => cancelPurchaseRequisition(id));
+  ipcMain.handle(ipcChannels.purchaseRequisitionReject, (_event, id: string, input: unknown) => rejectPurchaseRequisition(id, input));
+  ipcMain.handle(ipcChannels.purchaseRequisitionLinkItem, (_event, id: string, input: unknown) =>
+    linkPurchaseRequisitionItem(id, input)
+  );
+  ipcMain.handle(ipcChannels.purchaseRequisitionApprove, (_event, id: string, input: unknown) =>
+    approvePurchaseRequisition(id, input)
+  );
   ipcMain.handle(ipcChannels.stockReceiptList, () => listStockReceipts());
   ipcMain.handle(ipcChannels.stockReceiptGet, (_event, id: string) => getStockReceipt(id));
   ipcMain.handle(ipcChannels.stockReceiptCreate, (_event, input: unknown) => createStockReceipt(input));
@@ -1081,6 +1116,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.themeSave, (_event, theme: unknown) =>
     saveTheme(brandThemeSchema.parse(theme))
   );
+  ipcMain.handle(ipcChannels.preferencesGetCheckoutLayout, () => getCheckoutLayout());
+  ipcMain.handle(ipcChannels.preferencesSaveCheckoutLayout, (_event, layout: unknown) => saveCheckoutLayout(layout));
   ipcMain.handle(ipcChannels.reportSalesFinancialOverview, (_event, range: unknown) =>
     getSalesFinancialOverview(range)
   );

@@ -4,6 +4,7 @@ import { Button } from "@renderer/shared/components/Button";
 import { CheckboxField, Field, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { computeServiceChargeAmount } from "@renderer/shared/lib/cart-pricing";
+import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
@@ -80,7 +81,8 @@ export function ExtraChargesSection({
   delivery,
   onDeliveryChange,
   customerName,
-  tenantTaxConfig
+  tenantTaxConfig,
+  className
 }: {
   serviceCharges: ServiceChargeDraft[];
   onServiceChargesChange: (next: ServiceChargeDraft[]) => void;
@@ -90,6 +92,8 @@ export function ExtraChargesSection({
   /** Needed only to compute the live "Total: X" hint below a VAT-exclusive charge's own Fee field
    * — see the tax <select>'s own rendering below. */
   tenantTaxConfig: TenantTaxConfig;
+  /** Overrides the default top divider/spacing — e.g. where this section is the first thing in a column. */
+  className?: string;
 }): React.JSX.Element {
   const [riders, setRiders] = useState<Rider[]>([]);
   const [riderModalOpen, setRiderModalOpen] = useState(false);
@@ -128,7 +132,7 @@ export function ExtraChargesSection({
   const activeRiders = riders.filter((rider) => rider.status === "active");
 
   return (
-    <div className="mt-3 space-y-4 border-t border-line pt-3">
+    <div className={cn("mt-3 space-y-4 border-t border-line pt-3", className)}>
       <div>
         <div className="flex items-center justify-between gap-2">
           <p className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-muted">
@@ -339,6 +343,12 @@ function QuickCreateRiderModal({
 
   async function handleSubmit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
+    // This modal is portaled to <body> in the DOM, but React still bubbles its submit event up the
+    // COMPONENT tree — into whatever <form> renders ExtraChargesSection (Checkout's Complete Sale,
+    // Invoices, Quotations). Without this, saving a rider also tried to submit that whole sale/
+    // document, which is where the "Delivery address is required; Select a payment method" error
+    // showing up right after the "Rider added" toast came from.
+    event.stopPropagation();
     setSaving(true);
     setError(null);
     try {

@@ -74,7 +74,7 @@ const api: BlueLedgerApi = {
     delete: (id) => invoke("category:delete", id)
   },
   product: {
-    list: (storefrontId) => invoke("product:list", storefrontId),
+    list: (storefrontId, stockedOnly) => invoke("product:list", storefrontId, stockedOnly),
     nextSku: () => invoke("product:next-sku"),
     stockSummary: (id) => invoke("product:stock-summary", id),
     get: (id) => invoke("product:get", id),
@@ -392,6 +392,22 @@ const api: BlueLedgerApi = {
     approve: (id, input) => invoke("stock-request:approve", id, input),
     reject: (id, input) => invoke("stock-request:reject", id, input)
   },
+  invoiceDraft: {
+    list: () => invoke("invoice-draft:list"),
+    get: (id) => invoke("invoice-draft:get", id),
+    save: (input) => invoke("invoice-draft:save", input),
+    delete: (id) => invoke("invoice-draft:delete", id)
+  },
+  purchaseRequisition: {
+    list: () => invoke("purchase-requisition:list"),
+    listPending: () => invoke("purchase-requisition:list-pending"),
+    get: (id) => invoke("purchase-requisition:get", id),
+    create: (input) => invoke("purchase-requisition:create", input),
+    cancel: (id) => invoke("purchase-requisition:cancel", id),
+    reject: (id, input) => invoke("purchase-requisition:reject", id, input),
+    linkItem: (id, input) => invoke("purchase-requisition:link-item", id, input),
+    approve: (id, input) => invoke("purchase-requisition:approve", id, input)
+  },
   stockReceipt: {
     list: () => invoke("stock-receipt:list"),
     get: (id) => invoke("stock-receipt:get", id),
@@ -432,6 +448,10 @@ const api: BlueLedgerApi = {
   },
   theme: {
     save: (theme) => invoke("theme:save", theme)
+  },
+  preferences: {
+    getCheckoutLayout: () => invoke("preferences:get-checkout-layout"),
+    saveCheckoutLayout: (layout) => invoke("preferences:save-checkout-layout", layout)
   },
   report: {
     salesFinancialOverview: (range) => invoke("report:sales-financial-overview", range),

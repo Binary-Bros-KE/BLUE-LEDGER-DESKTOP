@@ -100,7 +100,12 @@ function assertUniqueFields(
  * "sellable here" test (storefront tag, or untagged) so Checkout/Invoices/Quotations keep showing a
  * product the moment it's created, before any stock has physically been distributed to it.
  */
-export function listProducts(storefrontId?: string | null): ProductListItem[] {
+/** `stockedOnly`: the Products tab's own storefront filter — "products actually stocked there"
+ * (an inventory row exists). Everyone else picking products to SELL at a storefront (Invoices,
+ * Quotations) gets Checkout's rule instead — "sold there" (tagged to it or All Storefronts), stock or
+ * not; a branch-less Super Admin used to get the stocked-only list there, so a product never stocked
+ * at that storefront could be found in Checkout but not on an invoice. */
+export function listProducts(storefrontId?: string | null, stockedOnly = false): ProductListItem[] {
   requirePermission("products", "view");
   const { tenantId } = getCurrentTenant();
   const branchScope = getCurrentBranchScope();
@@ -112,7 +117,7 @@ export function listProducts(storefrontId?: string | null): ProductListItem[] {
     }
   }
   const locationId = branchScope ?? requestedLocationId;
-  const requireInventoryRow = !branchScope && requestedLocationId !== null;
+  const requireInventoryRow = stockedOnly && !branchScope && requestedLocationId !== null;
   return productRepository
     .findAllProductRows(tenantId, locationId, requireInventoryRow)
     .map(productRepository.mapProductListRow);

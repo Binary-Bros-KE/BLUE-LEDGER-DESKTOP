@@ -3556,6 +3556,109 @@ const migrations = [
         VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'stock_movements', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.created_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
       END;
     `
+  },
+  {
+    version: 104,
+    name: "purchase_requisitions",
+    sql: `
+      -- Requests to BUY stock (see shared/types/purchase-requisition.ts) — for a business with no Main
+      -- Store, Stock Requests can't help. Same header + line-items document shape as stock_requests.
+      -- purchase_id is set once, at approval, to the Purchase it became (one requisition -> one
+      -- purchase); no FK on it, same as other cross-document references that may arrive by sync in
+      -- either order.
+      CREATE TABLE purchase_requisitions (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        requisition_number TEXT NOT NULL,
+        storefront_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
+        notes TEXT,
+        rejection_reason TEXT,
+        purchase_id TEXT,
+        requested_by TEXT NOT NULL,
+        requested_at TEXT NOT NULL,
+        reviewed_by TEXT,
+        reviewed_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        synced_updated_at TEXT,
+        UNIQUE (tenant_id, requisition_number),
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (storefront_id) REFERENCES locations(id),
+        FOREIGN KEY (requested_by) REFERENCES employees(id),
+        FOREIGN KEY (reviewed_by) REFERENCES employees(id)
+      );
+
+      CREATE INDEX idx_purchase_requisitions_tenant_status ON purchase_requisitions(tenant_id, status);
+      CREATE INDEX idx_purchase_requisitions_storefront ON purchase_requisitions(storefront_id);
+
+      -- product_id is NULL for a free-text line until an approver links it to a catalog product;
+      -- item_name always keeps what was originally asked for.
+      CREATE TABLE purchase_requisition_items (
+        id TEXT PRIMARY KEY,
+        purchase_requisition_id TEXT NOT NULL,
+        product_id TEXT,
+        item_name TEXT NOT NULL,
+        quantity_requested INTEGER NOT NULL,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (purchase_requisition_id) REFERENCES purchase_requisitions(id),
+        FOREIGN KEY (product_id) REFERENCES products(id)
+      );
+
+      CREATE INDEX idx_purchase_requisition_items_requisition ON purchase_requisition_items(purchase_requisition_id);
+
+      -- Same sync-outbox trigger set as stock_requests (riding the create migration, like
+      -- stock_receipts did). Every status change and item link also bumps the header's updated_at
+      -- (see purchase-requisition-repository.ts), so the AFTER UPDATE trigger covers them; the item
+      -- insert trigger is belt-and-braces for the creation transaction.
+      CREATE TRIGGER trg_purchase_requisitions_sync_ai AFTER INSERT ON purchase_requisitions BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'purchase_requisitions', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_purchase_requisitions_sync_au AFTER UPDATE ON purchase_requisitions WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'purchase_requisitions', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_purchase_requisitions_sync_ad AFTER DELETE ON purchase_requisitions BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'purchase_requisitions', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_purchase_requisition_items_reenqueue_ai AFTER INSERT ON purchase_requisition_items BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), pr.tenant_id, (SELECT client_id FROM tenant WHERE id = pr.tenant_id), 'purchase_requisitions', pr.id, 'upsert', 'push', 'queued', 0, '{}', pr.id || ':' || pr.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now')
+        FROM purchase_requisitions pr WHERE pr.id = NEW.purchase_requisition_id;
+      END;
+    `
+  },
+  {
+    version: 105,
+    name: "invoice_drafts_local_only",
+    sql: `
+      -- Held invoices (see shared/types/invoice-draft.ts). LOCAL-ONLY BY DESIGN: no sync triggers, no
+      -- sync columns, not in sync-engine.ts's SYNC_ENTITIES — never add any of those. A synced row
+      -- can't be truly deleted (the cloud and every other device keep it), and a draft must be freely
+      -- deletable, so a plain DELETE is the whole delete story here. form_json is the renderer's own
+      -- form snapshot, stored as-is. customer_id/storefront_id are plain references with no FK, so
+      -- deleting a customer or a sync pull re-aliasing ids can never block or break a draft.
+      CREATE TABLE invoice_drafts (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        customer_id TEXT,
+        customer_name TEXT,
+        storefront_id TEXT,
+        item_count INTEGER NOT NULL DEFAULT 0,
+        estimated_total_cents INTEGER NOT NULL DEFAULT 0,
+        form_json TEXT NOT NULL,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX idx_invoice_drafts_tenant_updated ON invoice_drafts(tenant_id, updated_at);
+    `
   }
 ] as const;
 
