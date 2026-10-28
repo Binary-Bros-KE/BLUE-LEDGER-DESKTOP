@@ -196,7 +196,9 @@ export function GoodsReceivedRoute(): React.JSX.Element {
     return products
       .filter((product) => product.status === "active")
       .filter((product) => `${product.name} ${product.sku}`.toLowerCase().includes(term))
-      .slice(0, 8);
+      // Enough that a common word (e.g. a brand) never hides the product being searched for —
+      // the old 8-result cap did, while Checkout showed every match. The list scrolls.
+      .slice(0, 50);
   }, [products, productSearch]);
 
   const availableYears = useMemo(() => buildAvailableYears((receipts ?? []).map((r) => r.createdAt)), [receipts]);
