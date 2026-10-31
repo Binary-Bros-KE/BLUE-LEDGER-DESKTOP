@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { AppShell } from "@renderer/app/layouts/AppShell";
-import { navItemsByKey } from "@renderer/app/layouts/navigation";
+import { canViewNavItem, navItemsByKey } from "@renderer/app/layouts/navigation";
 import { AccessDeniedRoute } from "@renderer/app/routes/AccessDeniedRoute";
 import { ActivationRoute } from "@renderer/app/routes/ActivationRoute";
 import { ApprovalsRoute } from "@renderer/app/routes/ApprovalsRoute";
@@ -42,7 +42,6 @@ import { SalariesRoute } from "@renderer/app/routes/SalariesRoute";
 import { SettingsRoute } from "@renderer/app/routes/SettingsRoute";
 import { StockLedgerRoute } from "@renderer/app/routes/StockLedgerRoute";
 import { StockRequestsRoute } from "@renderer/app/routes/StockRequestsRoute";
-import { PurchaseRequisitionsRoute } from "@renderer/app/routes/PurchaseRequisitionsRoute";
 import { StorefrontsRoute } from "@renderer/app/routes/StorefrontsRoute";
 import { SuppliersRoute } from "@renderer/app/routes/SuppliersRoute";
 import { TransactionsRoute } from "@renderer/app/routes/TransactionsRoute";
@@ -141,7 +140,7 @@ export function App(): React.JSX.Element {
 
   const activeItem = navItemsByKey[activeNavKey];
   const isDashboard = activeNavKey === "dashboard" || !activeItem;
-  const hasAccess = isDashboard || can(activeItem.permissionModule, "view");
+  const hasAccess = isDashboard || canViewNavItem(activeItem, can);
 
   return (
     <AppShell>
@@ -175,8 +174,6 @@ export function App(): React.JSX.Element {
         <StockLedgerRoute />
       ) : activeNavKey === "stock-requests" ? (
         <StockRequestsRoute />
-      ) : activeNavKey === "purchase-requisitions" ? (
-        <PurchaseRequisitionsRoute />
       ) : activeNavKey === "goods-received" ? (
         <GoodsReceivedRoute />
       ) : activeNavKey === "employees" ? (

@@ -405,6 +405,27 @@ export function PurchaseDetailModal({
           )}
         </div>
 
+        {/* One document, one history: a purchase approved from a requisition carries that requisition's
+            own stages in front of its own (see PurchaseOrigin). */}
+        {purchase.origin && (
+          <ol className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-line bg-soft/60 px-3 py-2.5 text-[11px] font-semibold text-muted">
+            <li>
+              <span className="font-extrabold text-ink">Requested</span> {purchase.origin.requisitionNumber} by{" "}
+              {purchase.origin.requestedByName} · {formatDate(purchase.origin.requestedAt)}
+            </li>
+            <li aria-hidden="true">→</li>
+            <li>
+              <span className="font-extrabold text-ink">Approved</span>
+              {purchase.origin.approvedByName ? ` by ${purchase.origin.approvedByName}` : ""}
+              {purchase.origin.approvedAt ? ` · ${formatDate(purchase.origin.approvedAt)}` : ""}
+            </li>
+            <li aria-hidden="true">→</li>
+            <li>
+              <span className="font-extrabold text-ink">{statusLabel(purchase.status)}</span>
+            </li>
+          </ol>
+        )}
+
         <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
           <div className="rounded-lg border border-line bg-soft px-3 py-2.5">
             <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Supplier</p>

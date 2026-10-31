@@ -160,7 +160,8 @@ import {
   linkPurchaseRequisitionItem,
   listPendingPurchaseRequisitions,
   listPurchaseRequisitions,
-  rejectPurchaseRequisition
+  rejectPurchaseRequisition,
+  updatePurchaseRequisition
 } from "@main/services/purchase-requisition-service";
 import {
   deleteInvoiceDraft,
@@ -1065,6 +1066,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.purchaseRequisitionGet, (_event, id: string) => getPurchaseRequisition(id));
   ipcMain.handle(ipcChannels.purchaseRequisitionCreate, (_event, input: unknown) => createPurchaseRequisition(input));
   ipcMain.handle(ipcChannels.purchaseRequisitionCancel, (_event, id: string) => cancelPurchaseRequisition(id));
+  ipcMain.handle(ipcChannels.purchaseRequisitionUpdate, (_event, id: string, input: unknown) => updatePurchaseRequisition(id, input));
   ipcMain.handle(ipcChannels.purchaseRequisitionReject, (_event, id: string, input: unknown) => rejectPurchaseRequisition(id, input));
   ipcMain.handle(ipcChannels.purchaseRequisitionLinkItem, (_event, id: string, input: unknown) =>
     linkPurchaseRequisitionItem(id, input)

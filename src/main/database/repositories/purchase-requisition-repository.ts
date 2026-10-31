@@ -67,6 +67,12 @@ export function findRequisitionNumberRows(tenantId: string): string[] {
   ).map((row) => row.requisition_number);
 }
 
+export function findRequisitionRowByPurchaseId(purchaseId: string): PurchaseRequisitionRow | undefined {
+  return getDatabase().prepare(`${SELECT_WITH_JOINS} WHERE pr.purchase_id = ? LIMIT 1`).get(purchaseId) as
+    | PurchaseRequisitionRow
+    | undefined;
+}
+
 export function findRequisitionRowById(id: string): PurchaseRequisitionRow | undefined {
   return getDatabase().prepare(`${SELECT_WITH_JOINS} WHERE pr.id = ?`).get(id) as PurchaseRequisitionRow | undefined;
 }
@@ -140,6 +146,43 @@ export function insertRequisitionItemRow(input: {
       input.notes,
       new Date().toISOString()
     );
+}
+
+/** Replaces a pending requisition's notes + lines (the requester editing it). A line passed with an
+ * existing id keeps that id and its original created_at, so sync sees the same line, edited. Bumps the
+ * header's updated_at so the AFTER UPDATE trigger re-pushes the whole requisition. */
+export function replaceRequisitionContentRows(
+  requisitionId: string,
+  notes: string | null,
+  lines: Array<{ id: string | null; productId: string | null; itemName: string; quantityRequested: number; notes: string | null }>
+): void {
+  const db = getDatabase();
+  const existing = new Map(
+    (
+      db.prepare("SELECT id, created_at FROM purchase_requisition_items WHERE purchase_requisition_id = ?").all(requisitionId) as Array<{
+        id: string;
+        created_at: string;
+      }>
+    ).map((row) => [row.id, row.created_at])
+  );
+  const now = new Date().toISOString();
+  db.prepare("DELETE FROM purchase_requisition_items WHERE purchase_requisition_id = ?").run(requisitionId);
+  for (const line of lines) {
+    const keepId = line.id && existing.has(line.id) ? line.id : null;
+    db.prepare(
+      `INSERT INTO purchase_requisition_items (id, purchase_requisition_id, product_id, item_name, quantity_requested, notes, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      keepId ?? `preqi_${randomUUID()}`,
+      requisitionId,
+      line.productId,
+      line.itemName,
+      line.quantityRequested,
+      line.notes,
+      keepId ? existing.get(keepId)! : now
+    );
+  }
+  db.prepare("UPDATE purchase_requisitions SET notes = ?, updated_at = ? WHERE id = ?").run(notes, now, requisitionId);
 }
 
 /** Items carry no sync trigger of their own on UPDATE — bumping the header's updated_at in the same

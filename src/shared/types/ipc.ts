@@ -1303,6 +1303,10 @@ export type IpcInvokeMap = {
     args: [string];
     result: PurchaseRequisition;
   };
+  "purchase-requisition:update": {
+    args: [string, Record<string, unknown>];
+    result: PurchaseRequisition;
+  };
   "purchase-requisition:reject": {
     args: [string, Record<string, unknown>];
     result: PurchaseRequisition;
@@ -2213,6 +2217,8 @@ export type BlueLedgerApi = {
     get: (id: string) => Promise<PurchaseRequisition>;
     create: (input: Record<string, unknown>) => Promise<PurchaseRequisition>;
     cancel: (id: string) => Promise<PurchaseRequisition>;
+    /** Requester or Super Admin, pending only. */
+    update: (id: string, input: Record<string, unknown>) => Promise<PurchaseRequisition>;
     reject: (id: string, input: Record<string, unknown>) => Promise<PurchaseRequisition>;
     linkItem: (id: string, input: Record<string, unknown>) => Promise<PurchaseRequisition>;
     /** input = the same payload the Purchase form sends for a new purchase (locationId is ignored —

@@ -17,7 +17,7 @@ import { useStockRequestAlertsStore } from "@renderer/shared/stores/stock-reques
 import { usePurchaseRequisitionAlertsStore } from "@renderer/shared/stores/purchase-requisition-alerts-store";
 import { cn } from "@renderer/shared/lib/cn";
 import { smallLogoBoxClassName } from "@renderer/shared/lib/logo";
-import { navGroups, type NavItem } from "./navigation";
+import { canViewNavItem, navGroups, type NavItem } from "./navigation";
 
 const EXPANDED_WIDTH = 272;
 const COLLAPSED_WIDTH = 80;
@@ -58,7 +58,7 @@ export function Sidebar(): React.JSX.Element {
           ...group,
           items: group.items.filter(
             (item) =>
-              can(item.permissionModule, "view") &&
+              canViewNavItem(item, can) &&
               (!WEBSITE_KEYS.has(item.key) || ecommerceEnabled) &&
               (!TEMPLATE_ONLY[item.key] || (templateId !== null && TEMPLATE_ONLY[item.key]!.includes(templateId)))
           )
@@ -185,7 +185,7 @@ export function Sidebar(): React.JSX.Element {
                       badgeCount={
                         item.key === "stock-requests"
                           ? pendingStockRequestCount
-                          : item.key === "purchase-requisitions"
+                          : item.key === "purchases"
                             ? pendingRequisitionCount
                           : item.key === "online-orders"
                             ? newOnlineOrderCount

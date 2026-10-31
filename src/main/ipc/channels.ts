@@ -297,6 +297,7 @@ export const ipcChannels = {
   purchaseRequisitionGet: "purchase-requisition:get",
   purchaseRequisitionCreate: "purchase-requisition:create",
   purchaseRequisitionCancel: "purchase-requisition:cancel",
+  purchaseRequisitionUpdate: "purchase-requisition:update",
   purchaseRequisitionReject: "purchase-requisition:reject",
   purchaseRequisitionLinkItem: "purchase-requisition:link-item",
   purchaseRequisitionApprove: "purchase-requisition:approve",

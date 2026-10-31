@@ -5,6 +5,7 @@ import * as locationRepository from "@main/database/repositories/location-reposi
 import * as paymentMethodRepository from "@main/database/repositories/payment-method-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
 import * as purchaseRepository from "@main/database/repositories/purchase-repository";
+import * as requisitionRepository from "@main/database/repositories/purchase-requisition-repository";
 import type { PurchaseRow } from "@main/database/repositories/purchase-repository";
 import * as supplierRepository from "@main/database/repositories/supplier-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, getSession, requirePermission } from "@main/services/auth-service";
@@ -189,7 +190,20 @@ export function getPurchaseDetail(id: string): Purchase {
     throw new Error("Purchase not found");
   }
   const items = purchaseRepository.findPurchaseItemDetailRowsForPurchase(id).map(purchaseRepository.mapPurchaseItemDetailRow);
-  return purchaseRepository.mapPurchaseDetailRow(row, items);
+  const requisition = requisitionRepository.findRequisitionRowByPurchaseId(id);
+  return {
+    ...purchaseRepository.mapPurchaseDetailRow(row, items),
+    origin: requisition
+      ? {
+          requisitionId: requisition.id,
+          requisitionNumber: requisition.requisition_number,
+          requestedByName: requisition.requested_by_name,
+          requestedAt: requisition.requested_at,
+          approvedByName: requisition.reviewed_by_name,
+          approvedAt: requisition.reviewed_at
+        }
+      : null
+  };
 }
 
 /** Tenant-wide by default; branch-scoped to the caller's assigned location like Sales/Invoices/Quotations —

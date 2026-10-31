@@ -404,6 +404,7 @@ const api: BlueLedgerApi = {
     get: (id) => invoke("purchase-requisition:get", id),
     create: (input) => invoke("purchase-requisition:create", input),
     cancel: (id) => invoke("purchase-requisition:cancel", id),
+    update: (id, input) => invoke("purchase-requisition:update", id, input),
     reject: (id, input) => invoke("purchase-requisition:reject", id, input),
     linkItem: (id, input) => invoke("purchase-requisition:link-item", id, input),
     approve: (id, input) => invoke("purchase-requisition:approve", id, input)
