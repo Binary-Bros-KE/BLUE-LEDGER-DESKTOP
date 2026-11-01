@@ -33,6 +33,7 @@ import {
 } from "@renderer/shared/components/ExtraChargesSection";
 import { CheckboxField, Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
+import { MpesaVerifyControl, mpesaVerificationActive, useMpesaVerificationState } from "@renderer/shared/components/MpesaVerification";
 import { QuickCreateCustomerModal } from "@renderer/shared/components/QuickCreateCustomerModal";
 import { QuickCreateProductModal } from "@renderer/shared/components/QuickCreateProductModal";
 import { ShareModal } from "@renderer/shared/components/ShareModal";
@@ -68,6 +69,8 @@ import { formatDocumentDate } from "@shared/lib/date";
 import type { Customer } from "@shared/types/customer";
 import type { ExportListRequest } from "@shared/types/export";
 import { isStorefrontType, type Location } from "@shared/types/location";
+import { mpesaCodeKey, mpesaStatusForCode } from "@shared/lib/mpesa-verification";
+import type { MpesaVerifications } from "@shared/types/mpesa";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import type { ProductListItem } from "@shared/types/product";
 import { VariantPickerModal } from "@renderer/shared/components/VariantPickerModal";
@@ -269,6 +272,9 @@ export function QuotationsRoute(): React.JSX.Element {
   const [quantityEdits, setQuantityEdits] = useState<Record<string, number>>({});
   const [convertPaymentMethodId, setConvertPaymentMethodId] = useState("");
   const [convertPaymentReference, setConvertPaymentReference] = useState("");
+  const [convertMpesaVerifications, setConvertMpesaVerifications] = useState<MpesaVerifications>({});
+  const [convertClaimKey, setConvertClaimKey] = useState(() => `claim_${crypto.randomUUID()}`);
+  const convertMpesaState = useMpesaVerificationState(convertSaleOpen ? viewingQuotation?.locationId : null);
   const [convertAmountReceived, setConvertAmountReceived] = useState("");
   const [convertDueDate, setConvertDueDate] = useState(addDaysIso(30));
   /** Who to bill when converting a walk-in quotation to an invoice — see convertToInvoiceSchema. */
@@ -582,6 +588,8 @@ export function QuotationsRoute(): React.JSX.Element {
   function closeConvert(): void {
     setConvertSaleOpen(false);
     setConvertInvoiceOpen(false);
+    setConvertMpesaVerifications({});
+    setConvertClaimKey(`claim_${crypto.randomUUID()}`);
   }
 
   function buildQuantityOverrides(): Array<{ productId: string; quantity: number }> {
@@ -665,13 +673,17 @@ export function QuotationsRoute(): React.JSX.Element {
     setConvertSaving(true);
     setConvertError(null);
     try {
+      const claimKey = convertClaimKey;
+      const verified = Object.keys(convertMpesaVerifications).length > 0;
       const sale = await window.blueLedger.quotation.convertToSale(viewingQuotation.id, {
         paymentMethodId: convertPaymentMethodId,
         paymentReference: convertPaymentReference,
+        mpesaVerifications: convertMpesaVerifications,
         amountReceivedCents: convertAmountReceived.trim() !== "" ? toCents(convertAmountReceived) : null,
         quantityOverrides: buildQuantityOverrides(),
         sourcedLines: buildSourcedLines()
       });
+      if (verified) void window.blueLedger.mpesa.attachClaim({ claimKey, saleId: sale.id }).catch(() => undefined);
       closeConvert();
       await refreshViewing(viewingQuotation.id);
       await loadAll();
@@ -2082,6 +2094,24 @@ export function QuotationsRoute(): React.JSX.Element {
               className="mt-4"
             />
           )}
+          {selectedConvertMethod?.code === "MPESA" && viewingQuotation && convertMpesaState && mpesaVerificationActive(convertMpesaState) && (
+            <MpesaVerifyControl
+              locationId={viewingQuotation.locationId}
+              state={convertMpesaState}
+              amountCents={viewingQuotation.grandTotalCents}
+              code={convertPaymentReference}
+              claimKey={convertClaimKey}
+              verifications={convertMpesaVerifications}
+              onUseCode={setConvertPaymentReference}
+              onVerified={(code, record) => setConvertMpesaVerifications((prev) => ({ ...prev, [mpesaCodeKey(code)]: record }))}
+            />
+          )}
+          {selectedConvertMethod?.code === "MPESA" &&
+            convertMpesaState?.mode === "strict" &&
+            convertMpesaState.available &&
+            mpesaStatusForCode(convertMpesaVerifications, convertPaymentReference) !== "verified" && (
+              <p className="mt-2 text-[11px] font-bold text-danger">Verify this M-Pesa code before converting.</p>
+            )}
           <Field
             label="Amount Received (optional)"
             type="number"
