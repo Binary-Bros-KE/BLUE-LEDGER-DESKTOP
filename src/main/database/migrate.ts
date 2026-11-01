@@ -3659,6 +3659,24 @@ const migrations = [
 
       CREATE INDEX idx_invoice_drafts_tenant_updated ON invoice_drafts(tenant_id, updated_at);
     `
+  },
+  {
+    version: 106,
+    name: "dropship_links_local_only",
+    sql: `
+      -- Which products follow a dropship supplier's stock (see dropship-repository.ts). LOCAL-ONLY BY
+      -- DESIGN: replaced wholesale from the server's heartbeat, no sync triggers or columns, not in
+      -- sync-engine.ts's SYNC_ENTITIES. Empty for every tenant without dropshipping, and an empty table
+      -- changes nothing about how stock behaves. product_id has no FK on purpose: the list can arrive
+      -- before a freshly imported product has been pulled down.
+      CREATE TABLE dropship_links (
+        product_id TEXT PRIMARY KEY,
+        supplier_name TEXT NOT NULL
+      );
+
+      -- {version, suppliers} from the last heartbeat; NULL for every tenant without dropshipping.
+      ALTER TABLE tenant ADD COLUMN dropship_state_json TEXT;
+    `
   }
 ] as const;
 

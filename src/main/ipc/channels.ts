@@ -95,6 +95,7 @@ export const ipcChannels = {
   mainStoreDamage: "main-store:damage",
   mainStoreAdjust: "main-store:adjust",
   inventoryOverview: "inventory:overview",
+  dropshipState: "dropship:state",
   inventoryListForLocation: "inventory:list-for-location",
   stockMovementList: "stock-movement:list",
   stockMovementListAll: "stock-movement:list-all",

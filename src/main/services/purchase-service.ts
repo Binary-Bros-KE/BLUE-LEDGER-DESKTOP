@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { runInTransaction } from "@main/database/connection";
+import * as dropshipRepository from "@main/database/repositories/dropship-repository";
 import * as inventoryRepository from "@main/database/repositories/inventory-repository";
 import * as locationRepository from "@main/database/repositories/location-repository";
 import * as paymentMethodRepository from "@main/database/repositories/payment-method-repository";
@@ -543,7 +544,9 @@ export function receivePurchaseGoods(id: string, input: unknown): Purchase {
       if (!item || entry.receivingQuantity <= 0) continue;
 
       const previousQuantity = inventoryRepository.findInventoryRow(item.product_id, purchase.location_id)?.quantity ?? 0;
-      const newQuantity = previousQuantity + entry.receivingQuantity;
+      // A dropship-linked product's stock stays the supplier's (see applyValidatedStockMovement).
+      const movesStock = dropshipRepository.findDropshipSupplierName(item.product_id) === null;
+      const newQuantity = movesStock ? previousQuantity + entry.receivingQuantity : previousQuantity;
 
       const newReceivedQuantity = item.received_quantity + entry.receivingQuantity;
       purchaseRepository.updatePurchaseItemReceivedQuantityRow(item.id, newReceivedQuantity);

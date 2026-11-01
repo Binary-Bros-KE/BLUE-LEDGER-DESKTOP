@@ -133,6 +133,9 @@ const api: BlueLedgerApi = {
     damage: (input) => invoke("main-store:damage", input),
     adjust: (input) => invoke("main-store:adjust", input)
   },
+  dropship: {
+    state: () => invoke("dropship:state")
+  },
   inventory: {
     overview: (productId) => invoke("inventory:overview", productId),
     listForLocation: (locationId) => invoke("inventory:list-for-location", locationId)

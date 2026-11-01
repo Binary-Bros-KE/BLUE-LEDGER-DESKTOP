@@ -63,6 +63,7 @@ import {
   recordStockMovement,
   recordStockTransfer
 } from "@main/services/inventory-service";
+import { getDropshipState } from "@main/services/dropship-service";
 import {
   createLocation,
   getLocation,
@@ -695,6 +696,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.mainStoreReallocate, (_event, input: unknown) => reallocateMainStoreStock(input));
   ipcMain.handle(ipcChannels.mainStoreDamage, (_event, input: unknown) => recordMainStoreDamage(input));
   ipcMain.handle(ipcChannels.mainStoreAdjust, (_event, input: unknown) => recordMainStoreAdjustment(input));
+  ipcMain.handle(ipcChannels.dropshipState, () => getDropshipState());
   ipcMain.handle(ipcChannels.inventoryOverview, (_event, productId: string) =>
     getInventoryOverview(productId)
   );

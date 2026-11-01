@@ -22,6 +22,7 @@ import {
 import { Button } from "@renderer/shared/components/Button";
 import { useConfirm } from "@renderer/shared/components/ConfirmModal";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { SupplierStockBadge } from "@renderer/shared/components/SupplierStockBadge";
 import { DeliveryNotePreview } from "@renderer/shared/components/DeliveryNotePreview";
 import {
   ExtraChargesSection,
@@ -2988,6 +2989,7 @@ function FocusProductCard({
         </button>
       </div>
 
+      <SupplierStockBadge productId={product.id} />
       <div className="flex items-center gap-1.5">
         <button
           type="button"
@@ -3106,6 +3108,7 @@ function ProductCard({
         </p>
       </div>
 
+      <SupplierStockBadge productId={product.id} />
       <div className="flex items-center gap-1.5">
         <button
           type="button"

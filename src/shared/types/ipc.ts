@@ -8,6 +8,7 @@ import type { AuthSession } from "./auth";
 import type { Category, CategoryStatus } from "./category";
 import type { Customer, CustomerStatus } from "./customer";
 import type { Employee, EmployeeListItem, EmployeeStatus } from "./employee";
+import type { DropshipState } from "./dropship";
 import type { InventoryBalance, LocationStockLevel } from "./inventory";
 import type { InventoryReportData, StockAsOfDateData } from "./inventory-report";
 import type { InvoiceListItem, InvoiceSummary } from "./invoice";
@@ -490,6 +491,10 @@ export type IpcInvokeMap = {
   "main-store:adjust": {
     args: [Record<string, unknown>];
     result: MainStoreProductDetail;
+  };
+  "dropship:state": {
+    args: [];
+    result: DropshipState;
   };
   "inventory:overview": {
     args: [string];
@@ -1742,6 +1747,9 @@ export type BlueLedgerApi = {
     reallocate: (input: Record<string, unknown>) => Promise<IpcInvokeMap["main-store:reallocate"]["result"]>;
     damage: (input: Record<string, unknown>) => Promise<IpcInvokeMap["main-store:damage"]["result"]>;
     adjust: (input: Record<string, unknown>) => Promise<IpcInvokeMap["main-store:adjust"]["result"]>;
+  };
+  dropship: {
+    state: () => Promise<IpcInvokeMap["dropship:state"]["result"]>;
   };
   inventory: {
     overview: (productId: string) => Promise<IpcInvokeMap["inventory:overview"]["result"]>;

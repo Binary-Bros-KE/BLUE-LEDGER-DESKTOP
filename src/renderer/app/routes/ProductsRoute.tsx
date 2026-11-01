@@ -28,6 +28,7 @@ import { SelectField } from "@renderer/shared/components/form-fields";
 import { ProductInfoModal } from "@renderer/shared/components/ProductInfoModal";
 import { ProductThumbnail } from "@renderer/shared/components/ProductThumbnail";
 import { StatTile } from "@renderer/shared/components/StatTile";
+import { SupplierStockBadge } from "@renderer/shared/components/SupplierStockBadge";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { cn } from "@renderer/shared/lib/cn";
@@ -677,6 +678,9 @@ export function ProductsRoute(): React.JSX.Element {
                             product.totalStock <= product.reorderLevel && <LowStockBadge />
                           )}
                         </span>
+                        <div className="mt-1 flex justify-end">
+                          <SupplierStockBadge productId={product.id} />
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <DashedPill tone={product.status === "active" ? "success" : "neutral"}>

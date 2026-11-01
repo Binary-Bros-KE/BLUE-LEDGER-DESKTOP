@@ -1,6 +1,8 @@
 import * as os from "node:os";
 import electron from "electron";
+import * as dropshipRepository from "@main/database/repositories/dropship-repository";
 import * as tenantRepository from "@main/database/repositories/tenant-repository";
+import type { DropshipSupplierInfo } from "@shared/types/dropship";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import type { PaymentHistoryResult, PaymentScheduleResult } from "@shared/types/subscription-payment";
 import type { TenantContext } from "@shared/types/tenant";
@@ -66,6 +68,10 @@ type RegisterResponse = CloudBusinessProfileFields & {
   ecommerceEnabled?: boolean;
 };
 
+/** Dropship summary on a heartbeat — null for a tenant without dropshipping, absent from an older
+ * SERVER. See SERVER's lib/dropship-links.ts. */
+type DropshipHeartbeat = { version: string; suppliers: DropshipSupplierInfo[] };
+
 type HeartbeatResponse = CloudBusinessProfileFields & {
   tenantId: string;
   deviceSequence: number;
@@ -78,6 +84,7 @@ type HeartbeatResponse = CloudBusinessProfileFields & {
   maxUsers: number;
   maxDevices: number;
   ecommerceEnabled?: boolean;
+  dropship?: DropshipHeartbeat | null;
 };
 
 function osDescription(): string {
@@ -189,6 +196,34 @@ export async function activateInstallation(licenseKey: string): Promise<TenantCo
   return getCurrentTenant();
 }
 
+/** Keeps the local linked-product list in step with the server. A tenant without dropshipping sends
+ * null and holds nothing, so this writes nothing for them. The full list is only fetched when its
+ * version changed: it can be thousands of rows and this runs on every 20s heartbeat. */
+async function applyDropshipHeartbeat(licenseKey: string, deviceId: string, dropship: DropshipHeartbeat | null | undefined): Promise<void> {
+  if (dropship === undefined) return; // older SERVER — keep whatever's held
+  const stored = dropshipRepository.readDropshipState();
+  if (dropship === null) {
+    if (stored) {
+      dropshipRepository.replaceDropshipLinks([]);
+      dropshipRepository.writeDropshipState(null);
+    }
+    return;
+  }
+  let version = stored?.version;
+  if (version !== dropship.version) {
+    const response = await fetch(`${API_BASE_URL}/activation/dropship-links`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ licenseKey, deviceId }),
+      signal: AbortSignal.timeout(15_000)
+    });
+    const list = await parseJsonResponse<{ version: string; links: Array<{ productId: string; supplierName: string }> }>(response);
+    dropshipRepository.replaceDropshipLinks(list.links);
+    version = list.version;
+  }
+  dropshipRepository.writeDropshipState({ version: version as string, suppliers: dropship.suppliers });
+}
+
 /** Best-effort periodic re-check — called once at boot and safe to call again later (e.g. a
  * future "check now" button, or a timer). Never throws: no internet, an unreachable server, or any
  * other failure is completely expected and just means "keep working off whatever was last cached."
@@ -292,6 +327,7 @@ export async function checkInWithServer(): Promise<void> {
     // timestamp above (an older server that doesn't send it yet just means "editing allowed").
     tenantRepository.setInvoiceEditsDisabledRow(result.invoiceEditsDisabled ?? false);
     tenantRepository.setInvoiceStockFromMainStoreRow(result.invoiceStockFromMainStore ?? false);
+    await applyDropshipHeartbeat(tenantRow.license_key, workstation.server_id, result.dropship);
   } catch {
     // No internet / server unreachable / timed out — exactly the case this app must keep working
     // through. Silently skip; last cached state stands until the next successful check-in.

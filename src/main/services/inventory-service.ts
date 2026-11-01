@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { runInTransaction } from "@main/database/connection";
+import * as dropshipRepository from "@main/database/repositories/dropship-repository";
 import * as inventoryRepository from "@main/database/repositories/inventory-repository";
 import * as inventoryReportRepository from "@main/database/repositories/inventory-report-repository";
 import * as locationRepository from "@main/database/repositories/location-repository";
@@ -38,6 +39,37 @@ const STANDALONE_BLOCKED_TYPES = new Set<StockMovementType>([
   "online_release"
 ]);
 
+/**
+ * A dropship-linked product's stock IS its supplier's live number, kept in step from the server, so
+ * nothing recorded on this tenant's devices may move it. What each movement means here:
+ *  - sale / online hold: checked against the reflected number exactly like any other sale, but written
+ *    nowhere — the supplier records the sale of its own stock itself.
+ *  - return / online release: nothing was ever taken, so nothing goes back.
+ *  - receiving a Purchase: the purchase document is still real; the stock just stays the supplier's.
+ *  - anything else (manual adjustment, damage, transfers, Main Store moves, goods received, borrowing):
+ *    refused, since the next reflection would silently undo it anyway.
+ */
+function assertDropshipMovementAllowed(
+  input: StockMovementInput,
+  supplierName: string,
+  product: { name: string; allow_negative_stock: number },
+  locationName: string
+): void {
+  const { movementType, quantityChange } = input;
+  if (movementType === "sale" || movementType === "online_hold") {
+    const available = inventoryRepository.findInventoryRow(input.productId, input.locationId)?.quantity ?? 0;
+    if (available + quantityChange < 0 && !product.allow_negative_stock) {
+      throw new Error(
+        `Insufficient stock for "${product.name}" at ${locationName}. Available: ${available}, requested: ${Math.abs(quantityChange)}`
+      );
+    }
+    return;
+  }
+  if (movementType === "return" || movementType === "online_release") return;
+  if (movementType === "purchase" && input.referenceType === "purchase") return;
+  throw new Error(`The stock of "${product.name}" follows ${supplierName} and can't be changed here`);
+}
+
 function assertValidDirection(input: StockMovementInput): void {
   if (INCREASING_MOVEMENT_TYPES.has(input.movementType) && input.quantityChange < 0) {
     throw new Error(`A "${input.movementType}" movement must increase stock (use a positive quantity)`);
@@ -74,7 +106,7 @@ function assertValidDirection(input: StockMovementInput): void {
 export function applyValidatedStockMovement(
   input: StockMovementInput & { allocationStorefrontId?: string | null },
   tenantId: string
-): StockMovement {
+): StockMovement | null {
   assertValidDirection(input);
 
   const product = productRepository.findProductRowById(input.productId);
@@ -85,6 +117,14 @@ export function applyValidatedStockMovement(
   const location = locationRepository.findLocationRowById(input.locationId);
   if (!location || location.tenant_id !== tenantId) {
     throw new Error("Location not found");
+  }
+
+  // Always null for a tenant without dropshipping — returns null only for a linked product, whose
+  // movement deliberately writes nothing (see assertDropshipMovementAllowed).
+  const dropshipSupplier = dropshipRepository.findDropshipSupplierName(input.productId);
+  if (dropshipSupplier !== null) {
+    assertDropshipMovementAllowed(input, dropshipSupplier, product, location.location_name);
+    return null;
   }
 
   const mainStore = locationRepository.findMainStoreLocationRow(tenantId);
@@ -200,9 +240,15 @@ export function recordStockMovement(input: unknown): StockMovement {
     throw new Error(`"${parsed.movementType}" can't be recorded as a standalone movement — use the matching action instead`);
   }
 
+  // A manual entry is refused outright on a linked product, whatever type it claims to be.
+  const dropshipSupplier = dropshipRepository.findDropshipSupplierName(parsed.productId);
+  if (dropshipSupplier !== null) {
+    throw new Error(`This product's stock follows ${dropshipSupplier} and can't be changed here`);
+  }
+
   const { tenantId } = getCurrentTenant();
   const performedBy = getCurrentEmployeeId();
-  return runInTransaction(() => applyValidatedStockMovement({ ...parsed, performedBy }, tenantId));
+  return runInTransaction(() => applyValidatedStockMovement({ ...parsed, performedBy }, tenantId) as StockMovement);
 }
 
 /**
@@ -229,7 +275,7 @@ export function recordStockTransfer(input: unknown): StockTransferResult {
         notes: parsed.notes
       },
       tenantId
-    );
+    ) as StockMovement; // a transfer of a dropship-linked product throws instead of returning null
 
     const transferIn = applyValidatedStockMovement(
       {
@@ -243,7 +289,7 @@ export function recordStockTransfer(input: unknown): StockTransferResult {
         notes: parsed.notes
       },
       tenantId
-    );
+    ) as StockMovement;
 
     return { transferOut, transferIn };
   });
