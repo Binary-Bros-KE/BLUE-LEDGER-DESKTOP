@@ -63,7 +63,14 @@ const api: BlueLedgerApi = {
     isConfigured: (locationId) => invoke("mpesa:is-configured", locationId),
     sendStkPush: (input) => invoke("mpesa:send-stk-push", input),
     getStkStatus: (checkoutRequestId) => invoke("mpesa:get-stk-status", checkoutRequestId),
-    checkStkStatus: (checkoutRequestId) => invoke("mpesa:check-stk-status", checkoutRequestId)
+    checkStkStatus: (checkoutRequestId) => invoke("mpesa:check-stk-status", checkoutRequestId),
+    verificationState: (locationId) => invoke("mpesa:verification-state", locationId),
+    saveVerificationMode: (locationId, mode) => invoke("mpesa:verification-save-mode", locationId, mode),
+    connectVerification: (locationId) => invoke("mpesa:verification-connect", locationId),
+    checkPayment: (input) => invoke("mpesa:check-payment", input),
+    verifyCode: (input) => invoke("mpesa:verify-code", input),
+    attachClaim: (input) => invoke("mpesa:attach-claim", input),
+    verifySaleCode: (input) => invoke("mpesa:verify-sale-code", input)
   },
   category: {
     list: () => invoke("category:list"),

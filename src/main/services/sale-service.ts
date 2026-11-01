@@ -1,3 +1,4 @@
+import { assertStrictVerification, readProvidedVerifications, stampSaleVerifications } from "@main/services/mpesa-verification-local";
 import { variantLabel } from "@shared/lib/variants";
 import { randomUUID } from "node:crypto";
 import * as customerRepository from "@main/database/repositories/customer-repository";
@@ -464,7 +465,15 @@ export function listSales(): SaleListItem[] {
 }
 
 /** Holds the current cart for later — no inventory impact, since nothing has been sold yet. */
+/** A held sale keeps what was already verified, so resuming it doesn't mean verifying again. */
 export function suspendSale(input: unknown): { id: string } {
+  const result = suspendSaleCore(input);
+  const verified = readProvidedVerifications(input);
+  if (Object.keys(verified).length > 0) saleRepository.updateSaleMpesaVerificationsRow(result.id, verified);
+  return result;
+}
+
+function suspendSaleCore(input: unknown): { id: string } {
   requirePermission("sales", "create");
   const parsed = saleCartInputSchema.parse(input);
   const { tenantId, employeeId, locationId } = requireActiveSession(parsed.locationId);
@@ -819,6 +828,11 @@ export function insertCompletedSaleFromCart(input: {
 export function completeSale(input: unknown): Sale {
   requirePermission("sales", "create");
   const parsed: CheckoutInput = checkoutInputSchema.parse(input);
+  assertStrictVerification(requireActiveSession(parsed.locationId).locationId, input);
+  return stampSaleVerifications(completeSaleCore(parsed), input);
+}
+
+function completeSaleCore(parsed: CheckoutInput): Sale {
   const { tenantId, employeeId, locationId } = requireActiveSession(parsed.locationId);
 
   if (parsed.payments && parsed.payments.length > 1) {

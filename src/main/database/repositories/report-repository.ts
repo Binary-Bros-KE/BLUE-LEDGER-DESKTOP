@@ -112,7 +112,7 @@ export function findCompletedSaleRows(
     .all(tenantId, startIso, endIsoExclusive, locationId, locationId) as CompletedSaleRow[];
 }
 
-export type PaymentTransactionSourceRow = CompletedSaleRow & { is_voided: 0 | 1; payment_reference: string | null };
+export type PaymentTransactionSourceRow = CompletedSaleRow & { is_voided: 0 | 1; payment_reference: string | null; mpesa_verifications: string | null };
 
 /**
  * Same shape as findCompletedSaleRows, but deliberately does NOT exclude voided/cancelled sales —
@@ -142,6 +142,7 @@ export function findPaymentTransactionRows(
         s.payment_method_id,
         pm.name AS payment_method_name,
         s.payment_reference,
+        s.mpesa_verifications,
         s.grand_total_cents,
         s.discount_amount_cents,
         s.tax_amount_cents,

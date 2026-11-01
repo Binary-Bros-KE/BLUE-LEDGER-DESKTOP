@@ -76,8 +76,16 @@ import {
   getStkStatus,
   isMpesaConfigured,
   saveMpesaTillSettings,
-  sendStkPush
+  sendStkPush,
+  attachClaim,
+  checkPayment,
+  connectVerification,
+  getVerificationState,
+  saveVerificationMode,
+  verifyCode,
+  verifySaleCode
 } from "@main/services/mpesa-service";
+import type { MpesaVerificationMode } from "@shared/types/mpesa";
 import {
   createPaymentMethod,
   deletePaymentMethod,
@@ -503,6 +511,21 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.locationPickLogo, () => pickAndStoreLocationLogo());
   ipcMain.handle(ipcChannels.locationReadLogoPreview, (_event, relativePath: string) =>
     readManagedLocationLogoPreview(relativePath)
+  );
+  ipcMain.handle(ipcChannels.mpesaVerificationState, (_event, locationId: string) => getVerificationState(locationId));
+  ipcMain.handle(ipcChannels.mpesaVerificationSaveMode, (_event, locationId: string, mode: MpesaVerificationMode) =>
+    saveVerificationMode(locationId, mode)
+  );
+  ipcMain.handle(ipcChannels.mpesaVerificationConnect, (_event, locationId: string) => connectVerification(locationId));
+  ipcMain.handle(ipcChannels.mpesaCheckPayment, (_event, input: { locationId: string; amountCents: number; claimKey: string }) =>
+    checkPayment(input)
+  );
+  ipcMain.handle(ipcChannels.mpesaVerifyCode, (_event, input: { locationId: string; code: string; amountCents: number | null; claimKey: string }) =>
+    verifyCode(input)
+  );
+  ipcMain.handle(ipcChannels.mpesaAttachClaim, (_event, input: { claimKey: string; saleId: string }) => attachClaim(input));
+  ipcMain.handle(ipcChannels.mpesaVerifySaleCode, (_event, input: { saleId: string; code: string; replacesCode: string | null }) =>
+    verifySaleCode(input)
   );
   ipcMain.handle(ipcChannels.mpesaGetSettings, (_event, locationId: string) => getMpesaTillSettings(locationId));
   ipcMain.handle(ipcChannels.mpesaSaveSettings, (_event, locationId: string, input: unknown) =>

@@ -3659,6 +3659,17 @@ const migrations = [
 
       CREATE INDEX idx_invoice_drafts_tenant_updated ON invoice_drafts(tenant_id, updated_at);
     `
+  },
+  {
+    // 106 belongs to the dropshipping branch.
+    version: 107,
+    name: "sale_mpesa_verifications",
+    sql: `
+      -- JSON: M-Pesa code -> {status, verifiedAt, payerName, amountCents}. NULL when verification wasn't
+      -- in play, which is what hides the indicator for shops that don't use it. See
+      -- services/mpesa-verification-local.ts.
+      ALTER TABLE sales ADD COLUMN mpesa_verifications TEXT;
+    `
   }
 ] as const;
 

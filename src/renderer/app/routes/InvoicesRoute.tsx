@@ -41,6 +41,12 @@ import { StatTile } from "@renderer/shared/components/StatTile";
 import { StorefrontPicker } from "@renderer/shared/components/StorefrontPicker";
 import { SupplierPicker } from "@renderer/shared/components/SupplierPicker";
 import { TaxBreakdownTable } from "@renderer/shared/components/TaxBreakdownTable";
+import {
+  MpesaSaleCodeActions,
+  MpesaVerifyControl,
+  mpesaVerificationActive,
+  useMpesaVerificationState
+} from "@renderer/shared/components/MpesaVerification";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { useMainStoreAvailability } from "@renderer/shared/hooks/use-main-store-availability";
 import { useProductStockOverview } from "@renderer/shared/hooks/use-product-stock-overview";
@@ -72,6 +78,8 @@ import type { SupplierPickerOption } from "@shared/types/supplier";
 import type { ExportListRequest } from "@shared/types/export";
 import type { InvoiceListItem, InvoiceSummary } from "@shared/types/invoice";
 import type { InvoiceDraftListItem } from "@shared/types/invoice-draft";
+import { mpesaCodeKey } from "@shared/lib/mpesa-verification";
+import type { MpesaVerifications } from "@shared/types/mpesa";
 import type { InvoiceCancellation } from "@shared/types/invoice-cancellation";
 import { isStorefrontType, type Location } from "@shared/types/location";
 import type { PaymentMethod } from "@shared/types/payment-method";
@@ -416,6 +424,44 @@ export function InvoicesRoute(): React.JSX.Element {
     }
     return map;
   }, [invoiceCancellations]);
+  // Shared by Record Payment, Mark as Paid and the new invoice's initial payment: only one is ever
+  // open at a time, and each open starts this over (openings below).
+  const [mpesaVerifications, setMpesaVerifications] = useState<MpesaVerifications>({});
+  const [mpesaClaimKey, setMpesaClaimKey] = useState(() => `claim_${crypto.randomUUID()}`);
+  const viewingMpesaState = useMpesaVerificationState(viewingSale?.locationId);
+
+  function resetMpesaVerification(): void {
+    setMpesaVerifications({});
+    setMpesaClaimKey(`claim_${crypto.randomUUID()}`);
+  }
+
+  function attachMpesaClaim(saleId: string): void {
+    if (Object.keys(mpesaVerifications).length === 0) return;
+    void window.blueLedger.mpesa.attachClaim({ claimKey: mpesaClaimKey, saleId }).catch(() => undefined);
+  }
+
+  function renderMpesaVerify(
+    state: ReturnType<typeof useMpesaVerificationState>,
+    locationId: string | null | undefined,
+    code: string,
+    amountCents: number | null,
+    onUseCode: (code: string) => void
+  ): React.JSX.Element | null {
+    if (!locationId || !state || !mpesaVerificationActive(state)) return null;
+    return (
+      <MpesaVerifyControl
+        locationId={locationId}
+        state={state}
+        amountCents={amountCents}
+        code={code}
+        claimKey={mpesaClaimKey}
+        verifications={mpesaVerifications}
+        onUseCode={onUseCode}
+        onVerified={(verifiedCode, record) => setMpesaVerifications((prev) => ({ ...prev, [mpesaCodeKey(verifiedCode)]: record }))}
+      />
+    );
+  }
+
   const selectedRecordMethod = activePaymentMethods.find((method) => method.id === paymentMethodId) ?? null;
   const selectedMarkPaidMethod = activePaymentMethods.find((method) => method.id === markPaidMethodId) ?? null;
   const selectedInitialMethod = activePaymentMethods.find((method) => method.id === initialPaymentMethodId) ?? null;
@@ -612,6 +658,7 @@ export function InvoicesRoute(): React.JSX.Element {
     setPaymentMethodId("");
     setPaymentAmount(viewingSale ? fromCents(viewingSale.balanceDueCents) : "");
     setPaymentReference("");
+    resetMpesaVerification();
     setPaymentNotes("");
     setPaymentError(null);
     setRecordPaymentOpen(true);
@@ -627,8 +674,10 @@ export function InvoicesRoute(): React.JSX.Element {
         paymentMethodId,
         amountCents: toCents(paymentAmount),
         reference: paymentReference,
-        notes: paymentNotes
+        notes: paymentNotes,
+        mpesaVerifications
       });
+      attachMpesaClaim(viewingSale.id);
       setRecordPaymentOpen(false);
       await refreshViewing(viewingSale.id);
       await loadAll();
@@ -645,6 +694,7 @@ export function InvoicesRoute(): React.JSX.Element {
   function openMarkPaid(): void {
     setMarkPaidMethodId("");
     setMarkPaidReference("");
+    resetMpesaVerification();
     setMarkPaidError(null);
     setMarkPaidOpen(true);
   }
@@ -658,8 +708,10 @@ export function InvoicesRoute(): React.JSX.Element {
       await window.blueLedger.invoice.markPaid(viewingSale.id, {
         paymentMethodId: markPaidMethodId,
         reference: markPaidReference,
-        notes: null
+        notes: null,
+        mpesaVerifications
       });
+      attachMpesaClaim(viewingSale.id);
       setMarkPaidOpen(false);
       await refreshViewing(viewingSale.id);
       await loadAll();
@@ -945,6 +997,7 @@ export function InvoicesRoute(): React.JSX.Element {
   const initialPaymentCents = includeInitialPayment && initialPaymentAmount.trim() !== "" ? toCents(initialPaymentAmount) : 0;
 
   const effectiveCreateLocationId = session?.branch ? session.branch.id : createStorefrontId || null;
+  const createMpesaState = useMpesaVerificationState(effectiveCreateLocationId);
   // Main Store figure for each line's stock pills — only fetched with the admin's Main Store toggle on.
   const createMainStoreAvailability = useMainStoreAvailability(
     effectiveCreateLocationId,
@@ -995,6 +1048,7 @@ export function InvoicesRoute(): React.JSX.Element {
   }, [effectiveCreateLocationId]);
 
   function openCreateModal(): void {
+    resetMpesaVerification();
     setEditingInvoiceId(null);
     setEditingDraftId(null);
     setCreateCustomerId(null);
@@ -1470,7 +1524,8 @@ export function InvoicesRoute(): React.JSX.Element {
             amountCents: initialPaymentCents,
             reference: initialPaymentReference
           }
-          : null
+          : null,
+      mpesaVerifications
     };
 
     try {
@@ -1481,7 +1536,8 @@ export function InvoicesRoute(): React.JSX.Element {
         if (viewingSale?.id === editingInvoiceId) setViewingSale(updated);
         showSuccessToast("Invoice updated");
       } else {
-        await window.blueLedger.invoice.create(payload);
+        const created = await window.blueLedger.invoice.create(payload);
+        attachMpesaClaim(created.id);
         setCreateOpen(false);
         if (editingDraftId) {
           // The draft has become a real (synced) invoice — remove it so it can't be created twice.
@@ -2076,6 +2132,17 @@ export function InvoicesRoute(): React.JSX.Element {
                         <p className="text-[11px] font-semibold text-muted">
                           {formatDateTime(payment.receivedAt)} · {payment.receivedByName}
                         </p>
+                        {payment.reference && (
+                          <MpesaSaleCodeActions
+                            saleId={viewingSale.id}
+                            code={payment.reference}
+                            verifications={viewingSale.mpesaVerifications}
+                            onChanged={async () => {
+                              await refreshViewing(viewingSale.id);
+                              await loadAll();
+                            }}
+                          />
+                        )}
                       </div>
                       <p className="flex-none text-sm font-extrabold text-success">{formatCents(payment.amountCents)}</p>
                     </div>
@@ -2424,6 +2491,14 @@ export function InvoicesRoute(): React.JSX.Element {
               className="mt-4"
             />
           )}
+          {selectedRecordMethod?.code === "MPESA" &&
+            renderMpesaVerify(
+              viewingMpesaState,
+              viewingSale?.locationId,
+              paymentReference,
+              paymentAmount.trim() ? toCents(paymentAmount) : null,
+              setPaymentReference
+            )}
           <TextAreaField label="Notes" value={paymentNotes} onChange={setPaymentNotes} className="mt-4" rows={2} />
           <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
             <Button
@@ -2479,6 +2554,14 @@ export function InvoicesRoute(): React.JSX.Element {
               className="mt-4"
             />
           )}
+          {selectedMarkPaidMethod?.code === "MPESA" &&
+            renderMpesaVerify(
+              viewingMpesaState,
+              viewingSale?.locationId,
+              markPaidReference,
+              viewingSale?.balanceDueCents ?? null,
+              setMarkPaidReference
+            )}
           <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
             <Button
               type="button"
@@ -2704,6 +2787,17 @@ export function InvoicesRoute(): React.JSX.Element {
                       placeholder="e.g. M-Pesa code"
                       className="col-span-2"
                     />
+                  )}
+                  {selectedInitialMethod?.code === "MPESA" && (
+                    <div className="col-span-2">
+                      {renderMpesaVerify(
+                        createMpesaState,
+                        effectiveCreateLocationId,
+                        initialPaymentReference,
+                        initialPaymentCents > 0 ? initialPaymentCents : null,
+                        setInitialPaymentReference
+                      )}
+                    </div>
                   )}
                 </div>
               )}

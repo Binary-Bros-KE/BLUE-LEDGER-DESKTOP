@@ -3,6 +3,7 @@ import { Loader2, Smartphone } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { Field, SelectField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
+import { MpesaVerificationSettings } from "@renderer/app/routes/storefronts/MpesaVerificationSettings";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import type { MpesaEnvironment, MpesaTillSettings } from "@shared/types/mpesa";
@@ -173,6 +174,8 @@ export function MpesaSettingsModal({
               className="sm:col-span-2"
             />
           </div>
+
+          <MpesaVerificationSettings locationId={locationId} refreshKey={savedAt} />
 
           <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
             <Button

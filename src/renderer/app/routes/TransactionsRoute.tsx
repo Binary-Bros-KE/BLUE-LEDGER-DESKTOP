@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowDownCircle, ArrowLeftRight, ArrowUpCircle, Loader2, Scale, Search } from "lucide-react";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
+import { MpesaStatusPill } from "@renderer/shared/components/MpesaVerification";
 import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import { StatTile } from "@renderer/shared/components/StatTile";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
@@ -396,6 +397,7 @@ export function TransactionsRoute(): React.JSX.Element {
                           <span>
                             {row.transactionCode}
                           </span>
+                          <MpesaStatusPill status={row.mpesaVerification} />
                           <span className="text-[10px] font-bold uppercase text-warning">
                             {formatDateTime(row.occurredAt)}
                           </span>

@@ -232,6 +232,8 @@ export type PaymentTransactionPartyLabel = "Customer" | "Supplier" | "Employee" 
  * stands (`complete`), or the underlying document was later voided/cancelled/reversed (`failed`).
  * Expenses have no such reversal concept in this codebase, so an expense row is always `complete`. */
 export type PaymentTransactionRow = {
+  /** Only set on an M-Pesa money-in row where verification was in play — null/absent shows nothing. */
+  mpesaVerification?: "verified" | "unverified" | null;
   id: string;
   transactionCode: string;
   occurredAt: string;
