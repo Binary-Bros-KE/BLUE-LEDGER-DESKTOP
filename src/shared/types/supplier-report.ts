@@ -6,6 +6,7 @@ export type OutstandingPurchaseRow = {
   purchaseId: string;
   supplierId: string;
   supplierName: string;
+  supplierType: "local" | "international";
   phone: string;
   purchaseNumber: string;
   status: string;

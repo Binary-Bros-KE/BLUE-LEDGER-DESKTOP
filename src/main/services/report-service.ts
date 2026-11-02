@@ -492,6 +492,7 @@ export function getSalesFinancialOverview(input: unknown): SalesFinancialOvervie
     name: row.supplier_name,
     balanceCents: row.balance_cents,
     documentCount: row.document_count,
+    supplierType: row.supplier_type === "international" ? "international" : "local",
   }));
   const totalDebtCents = debtors.reduce((sum, d) => sum + d.balanceCents, 0);
   const totalCreditCents = creditors.reduce((sum, c) => sum + c.balanceCents, 0);

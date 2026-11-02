@@ -1,6 +1,6 @@
 import { getDatabase } from "@main/database/connection";
 import type { SupplierInput } from "@shared/schemas/supplier";
-import type { Supplier, SupplierPaymentOption, SupplierStatus, SupplierSyncStatus } from "@shared/types/supplier";
+import type { Supplier, SupplierPaymentOption, SupplierType, SupplierStatus, SupplierSyncStatus } from "@shared/types/supplier";
 
 export type SupplierRow = {
   id: string;
@@ -18,6 +18,7 @@ export type SupplierRow = {
   town: string | null;
   physical_address: string | null;
   payment_option: string;
+  supplier_type: string;
   mpesa_name: string | null;
   mpesa_number: string | null;
   mpesa_alternative_number: string | null;
@@ -76,7 +77,7 @@ export function findMaxSupplierCodeRow(tenantId: string): string[] {
 }
 
 export function insertSupplierRow(
-  input: SupplierInput & { id: string; tenantId: string; supplierCode: string }
+  input: SupplierInput & { id: string; tenantId: string; supplierCode: string; supplierType: SupplierType }
 ): SupplierRow {
   const now = new Date().toISOString();
 
@@ -85,11 +86,11 @@ export function insertSupplierRow(
       `
       INSERT INTO suppliers (
         id, tenant_id, supplier_code, business_name, contact_person, phone_1, phone_2, email, kra_pin, website,
-        country, county, town, physical_address, payment_option, mpesa_name, mpesa_number,
+        country, county, town, physical_address, payment_option, supplier_type, mpesa_name, mpesa_number,
         mpesa_alternative_number, bank_name, bank_account_name, bank_account_number,
         credit_limit_cents, status, notes, created_at, updated_at, sync_status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
     `
     )
     .run(
@@ -108,6 +109,7 @@ export function insertSupplierRow(
       input.town,
       input.physicalAddress,
       input.paymentOption,
+      input.supplierType,
       input.mpesaName,
       input.mpesaNumber,
       input.mpesaAlternativeNumber,
@@ -127,7 +129,7 @@ export function insertSupplierRow(
   return row;
 }
 
-export function updateSupplierRow(id: string, input: SupplierInput): SupplierRow {
+export function updateSupplierRow(id: string, input: SupplierInput & { supplierType: SupplierType }): SupplierRow {
   const now = new Date().toISOString();
 
   getDatabase()
@@ -146,6 +148,7 @@ export function updateSupplierRow(id: string, input: SupplierInput): SupplierRow
         town = ?,
         physical_address = ?,
         payment_option = ?,
+        supplier_type = ?,
         mpesa_name = ?,
         mpesa_number = ?,
         mpesa_alternative_number = ?,
@@ -172,6 +175,7 @@ export function updateSupplierRow(id: string, input: SupplierInput): SupplierRow
       input.town,
       input.physicalAddress,
       input.paymentOption,
+      input.supplierType,
       input.mpesaName,
       input.mpesaNumber,
       input.mpesaAlternativeNumber,
@@ -222,6 +226,7 @@ export function mapSupplierRow(row: SupplierRow): Supplier {
     town: row.town,
     physicalAddress: row.physical_address,
     paymentOption: row.payment_option as SupplierPaymentOption,
+    supplierType: row.supplier_type as SupplierType,
     mpesaName: row.mpesa_name,
     mpesaNumber: row.mpesa_number,
     mpesaAlternativeNumber: row.mpesa_alternative_number,

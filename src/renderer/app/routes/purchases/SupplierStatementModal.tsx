@@ -10,7 +10,7 @@ import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { formatDocumentDate } from "@shared/lib/date";
 import type { PaymentMethod } from "@shared/types/payment-method";
 import { PURCHASE_PAYMENT_STATUS_OPTIONS, type PurchasePaymentStatus } from "@shared/types/purchase";
-import type { Supplier } from "@shared/types/supplier";
+import type { SupplierPickerOption } from "@shared/types/supplier";
 import type { SupplierStatementViewModel } from "@shared/types/supplier-statement";
 
 function statusTone(status: PurchasePaymentStatus): "success" | "warning" | "neutral" {
@@ -39,7 +39,7 @@ export function SupplierStatementModal({
 }: {
   open: boolean;
   onClose: () => void;
-  suppliers: Supplier[];
+  suppliers: SupplierPickerOption[];
   paymentMethods: PaymentMethod[];
   /** Called after a bulk payment successfully clears at least one purchase — lets the parent
    * (PurchasesRoute) refresh its own list/summary, which this modal's own re-fetched `vm` doesn't

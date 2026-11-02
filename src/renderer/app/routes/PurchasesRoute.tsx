@@ -49,7 +49,7 @@ import {
   type PurchaseSummary
 } from "@shared/types/purchase";
 import type { PurchaseRequisitionListItem } from "@shared/types/purchase-requisition";
-import type { Supplier } from "@shared/types/supplier";
+import { SUPPLIER_TYPE_OPTIONS, supplierTypeLabel, type Supplier, type SupplierPickerOption, type SupplierType } from "@shared/types/supplier";
 import { PurchaseDetailModal } from "./purchases/PurchaseDetailModal";
 import { PurchaseFormModal } from "./purchases/PurchaseFormModal";
 import { SupplierStatementModal } from "./purchases/SupplierStatementModal";
@@ -136,11 +136,14 @@ function Th({ children, className }: { children: React.ReactNode; className?: st
 function PurchaseRow({
   purchase,
   canEdit,
+  localOnly,
   onOpen,
   onEdit
 }: {
   purchase: PurchaseListItem;
   canEdit: boolean;
+  /** A local-credit role sees no payment figures, and every row is local anyway. */
+  localOnly: boolean;
   onOpen: () => void;
   onEdit: () => void;
 }): React.JSX.Element {
@@ -158,6 +161,9 @@ function PurchaseRow({
         <div className="flex flex-col gap-0.5">
           <span>{purchase.supplierName}</span>
           <span className="text-xs font-semibold text-primary/80">{purchase.locationName}</span>
+          {!localOnly && (
+            <span className="text-[10px] font-extrabold uppercase tracking-wide text-muted">{supplierTypeLabel(purchase.supplierType)}</span>
+          )}
         </div>
       </td>
       <td className="px-3 py-2.5">
@@ -165,9 +171,13 @@ function PurchaseRow({
       </td>
       <td className="px-3 py-2.5 text-right text-xs font-bold tabular-nums text-ink">{formatCents(purchase.grandTotalCents)}</td>
       <td className="px-3 py-2.5">
-        <DashedPill tone={paymentStatusTone(purchase.paymentStatus)}>
-          {purchase.paymentStatus === "partially_paid" ? "Partially Paid" : purchase.paymentStatus}
-        </DashedPill>
+        {localOnly ? (
+          <span className="text-xs font-semibold text-muted">—</span>
+        ) : (
+          <DashedPill tone={paymentStatusTone(purchase.paymentStatus)}>
+            {purchase.paymentStatus === "partially_paid" ? "Partially Paid" : purchase.paymentStatus}
+          </DashedPill>
+        )}
       </td>
       <td className="px-3 py-2.5">
         {purchase.shipmentDepartedAt ? (
@@ -221,14 +231,17 @@ export function PurchasesRoute(): React.JSX.Element {
   // Client request: one Purchases tab for the whole Requisition → Received document. Someone who can
   // only requisition (e.g. a Cashier) gets the same tab with everything purchase-side hidden — no
   // suppliers, costs, totals or statements; their requisitions show the stage they've reached.
-  const canViewPurchases = can("purchases", "view");
-  const canCreate = can("purchases", "create");
+  const canViewPurchases = can("purchases", "view") || can("local_credit_purchases", "view");
+  // Goods on credit from local suppliers only — see purchase-service.ts requirePurchaseAccess.
+  const localOnly = !can("purchases", "view") && can("local_credit_purchases", "view");
+  const canCreate = can("purchases", "create") || can("local_credit_purchases", "create");
   const canEdit = can("purchases", "edit");
+  const canReceiveGoods = can("purchases", "edit") || can("local_credit_purchases", "edit");
   const canExport = can("purchases", "export");
 
   const [summary, setSummary] = useState<PurchaseSummary | null>(null);
   const [purchases, setPurchases] = useState<PurchaseListItem[] | null>(null);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [suppliers, setSuppliers] = useState<SupplierPickerOption[]>([]);
   const [products, setProducts] = useState<ProductListItem[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
@@ -240,6 +253,7 @@ export function PurchasesRoute(): React.JSX.Element {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [supplierFilter, setSupplierFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
   const [locationFilter, setLocationFilter] = useState("");
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<PaymentStatusFilter>("all");
   const [shipmentFilter, setShipmentFilter] = useState<ShipmentFilter>("all");
@@ -260,6 +274,19 @@ export function PurchasesRoute(): React.JSX.Element {
       return;
     }
     try {
+      if (localOnly) {
+        const [purchaseList, supplierOptions, productList, locationList] = await Promise.all([
+          window.blueLedger.purchase.list(),
+          window.blueLedger.supplier.listPickerOptions(),
+          window.blueLedger.product.list(),
+          window.blueLedger.location.list()
+        ]);
+        setPurchases(purchaseList);
+        setSuppliers(supplierOptions);
+        setProducts(productList);
+        setLocations(locationList);
+        return;
+      }
       const [summaryResult, purchaseList, supplierList, productList, locationList, methodList] = await Promise.all([
         window.blueLedger.purchase.summary(),
         window.blueLedger.purchase.list(),
@@ -279,7 +306,7 @@ export function PurchasesRoute(): React.JSX.Element {
       setLoadError(message);
       showErrorToast(message);
     }
-  }, [canViewPurchases]);
+  }, [canViewPurchases, localOnly]);
 
   useEffect(() => {
     void loadAll();
@@ -321,6 +348,9 @@ export function PurchasesRoute(): React.JSX.Element {
     if (supplierFilter) {
       list = list.filter((purchase) => purchase.supplierId === supplierFilter);
     }
+    if (typeFilter) {
+      list = list.filter((purchase) => purchase.supplierType === typeFilter);
+    }
     if (locationFilter) {
       list = list.filter((purchase) => purchase.locationId === locationFilter);
     }
@@ -355,6 +385,7 @@ export function PurchasesRoute(): React.JSX.Element {
     purchases,
     statusFilter,
     supplierFilter,
+    typeFilter,
     locationFilter,
     paymentStatusFilter,
     shipmentFilter,
@@ -367,7 +398,7 @@ export function PurchasesRoute(): React.JSX.Element {
   const filteredRequisitions = useMemo(() => {
     if (!requisitions) return [];
     // Supplier / payment / shipment only describe purchases — a requisition has none of them yet.
-    if (supplierFilter || paymentStatusFilter !== "all" || shipmentFilter !== "all") return [];
+    if (supplierFilter || typeFilter || paymentStatusFilter !== "all" || shipmentFilter !== "all") return [];
     const shownPurchaseIds = new Set((purchases ?? []).map((purchase) => purchase.id));
     const fromTime = dateFrom ? new Date(dateFrom).getTime() : null;
     const toTime = dateTo ? new Date(dateTo).getTime() + 24 * 60 * 60 * 1000 - 1 : null;
@@ -404,6 +435,7 @@ export function PurchasesRoute(): React.JSX.Element {
     purchases,
     statusFilter,
     supplierFilter,
+    typeFilter,
     locationFilter,
     paymentStatusFilter,
     shipmentFilter,
@@ -433,6 +465,7 @@ export function PurchasesRoute(): React.JSX.Element {
     if (supplierFilter) {
       filterParts.push(`Supplier: ${suppliers.find((s) => s.id === supplierFilter)?.businessName ?? supplierFilter}`);
     }
+    if (typeFilter) filterParts.push(`Type: ${supplierTypeLabel(typeFilter as SupplierType)}`);
     if (locationFilter) {
       filterParts.push(`Destination: ${locations.find((l) => l.id === locationFilter)?.locationName ?? locationFilter}`);
     }
@@ -484,6 +517,7 @@ export function PurchasesRoute(): React.JSX.Element {
     statusFilter,
     paymentStatusFilter,
     supplierFilter,
+    typeFilter,
     locationFilter,
     dateFrom,
     dateTo,
@@ -607,7 +641,7 @@ export function PurchasesRoute(): React.JSX.Element {
           </div>
           <div className="flex items-center gap-2">
             {canViewPurchases && canExport && exportRequest && <ExportMenu request={exportRequest} />}
-            {canViewPurchases && (
+            {canViewPurchases && !localOnly && (
               <Button
                 type="button"
                 onClick={() => setStatementOpen(true)}
@@ -670,13 +704,19 @@ export function PurchasesRoute(): React.JSX.Element {
             options={[
               { value: "all", label: "All Stages" },
               { value: "requisitions", label: "Requisitions (awaiting approval)" },
-              ...PURCHASE_STATUS_OPTIONS.filter((option) => canViewPurchases || option.value !== "draft"),
+              ...PURCHASE_STATUS_OPTIONS.filter((option) => (canViewPurchases && !localOnly) || option.value !== "draft"),
               { value: "requisitions_closed", label: "Rejected / Cancelled requisitions" }
             ]}
           />
           <SelectField label="Year" value={yearFilter} onChange={setYearFilter} options={yearFilterOptions(availableYears)} />
-          {canViewPurchases && (
+          {canViewPurchases && !localOnly && (
           <>
+          <SelectField
+            label="Supplier Type"
+            value={typeFilter}
+            onChange={setTypeFilter}
+            options={[{ value: "", label: "All Types" }, ...SUPPLIER_TYPE_OPTIONS]}
+          />
           <SelectField
             label="Payment Status"
             value={paymentStatusFilter}
@@ -855,6 +895,7 @@ export function PurchasesRoute(): React.JSX.Element {
                         key={row.purchase.id}
                         purchase={row.purchase}
                         canEdit={canEdit}
+                        localOnly={localOnly}
                         onOpen={() => void openView(row.purchase.id)}
                         onEdit={() => void openEditModal(row.purchase.id)}
                       />
@@ -930,7 +971,8 @@ export function PurchasesRoute(): React.JSX.Element {
         editingPurchase={editingPurchase}
         suppliers={suppliers}
         products={products}
-        locations={locations}
+        locations={localOnly && session?.branch ? locations.filter((location) => location.id === session.branch?.id) : locations}
+        localOnly={localOnly}
         onSupplierCreated={handleSupplierCreated}
         onProductCreated={handleProductCreated}
         onSaved={loadAll}
@@ -947,6 +989,8 @@ export function PurchasesRoute(): React.JSX.Element {
           purchase={viewingPurchase}
           paymentMethods={paymentMethods}
           canEdit={canEdit}
+          canReceiveGoods={canReceiveGoods}
+          localOnly={localOnly}
           onClose={closeView}
           onEdit={() => void openEditModal(viewingPurchase.id)}
           onChanged={refreshViewing}

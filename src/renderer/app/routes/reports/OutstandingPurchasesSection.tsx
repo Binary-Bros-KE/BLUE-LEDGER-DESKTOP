@@ -1,6 +1,6 @@
 import { cn } from "@renderer/shared/lib/cn";
 import { formatCents } from "@renderer/shared/lib/money";
-import type { OutstandingPurchasesSummary } from "@shared/types/supplier-report";
+import type { OutstandingPurchaseRow, OutstandingPurchasesSummary } from "@shared/types/supplier-report";
 import { OverviewCard } from "./FinancialOverviewCards";
 
 function money(cents: number): string {
@@ -22,6 +22,10 @@ function formatDate(value: string | null): string {
  * Purchases have no due date in this schema, so days outstanding (since the
  * PO was placed) stands in for "overdue", flagged past 30 days. */
 export function OutstandingPurchasesSection({ summary }: { summary: OutstandingPurchasesSummary }): React.JSX.Element {
+  const local = summary.purchases.filter((purchase) => purchase.supplierType !== "international");
+  const international = summary.purchases.filter((purchase) => purchase.supplierType === "international");
+  const sum = (rows: OutstandingPurchaseRow[]) => rows.reduce((total, row) => total + row.balanceCents, 0);
+
   return (
     <div className="space-y-4">
       <div>
@@ -29,13 +33,15 @@ export function OutstandingPurchasesSection({ summary }: { summary: OutstandingP
         <p className="mt-0.5 text-xs font-semibold text-muted">A live snapshot as of today.</p>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <OverviewCard
           tone="danger"
           label="Total Outstanding"
           valueCents={summary.totalOutstandingCents}
           formula="Sum of every unpaid purchase balance"
         />
+        <OverviewCard tone="danger" label="Owed Locally" valueCents={sum(local)} formula="Unpaid balances to local suppliers" />
+        <OverviewCard tone="danger" label="Owed Internationally" valueCents={sum(international)} formula="Unpaid balances to international suppliers" />
         <OverviewCard
           tone="teal"
           label="Creditors"
@@ -44,11 +50,19 @@ export function OutstandingPurchasesSection({ summary }: { summary: OutstandingP
         />
       </div>
 
-      <div className="rounded-lg border border-line bg-white p-4">
-        <p className="text-[11px] font-bold uppercase tracking-wide text-muted">Outstanding purchases, oldest first</p>
+      <OutstandingTable title="Local suppliers, oldest first" rows={local} />
+      <OutstandingTable title="International suppliers, oldest first" rows={international} />
+    </div>
+  );
+}
 
-        {summary.purchases.length === 0 ? (
-          <p className="mt-4 text-sm font-semibold text-muted">No outstanding supplier payments right now.</p>
+function OutstandingTable({ title, rows }: { title: string; rows: OutstandingPurchaseRow[] }): React.JSX.Element {
+  return (
+      <div className="rounded-lg border border-line bg-white p-4">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-muted">{title}</p>
+
+        {rows.length === 0 ? (
+          <p className="mt-4 text-sm font-semibold text-muted">Nothing outstanding here right now.</p>
         ) : (
           <div className="mt-3 max-h-[480px] overflow-y-auto rounded-lg border border-line">
             <table className="w-full min-w-[760px] table-fixed border-collapse text-sm">
@@ -65,7 +79,7 @@ export function OutstandingPurchasesSection({ summary }: { summary: OutstandingP
                 </tr>
               </thead>
               <tbody>
-                {summary.purchases.map((purchase) => (
+                {rows.map((purchase) => (
                   <tr
                     key={purchase.purchaseId}
                     className={cn("border-t border-line", purchase.daysOutstanding > 30 ? "bg-danger-soft/40" : "odd:bg-white even:bg-soft/50")}
@@ -87,6 +101,5 @@ export function OutstandingPurchasesSection({ summary }: { summary: OutstandingP
           </div>
         )}
       </div>
-    </div>
   );
 }

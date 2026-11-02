@@ -75,6 +75,8 @@ export type SalesLedgerParty = {
   name: string;
   balanceCents: number;
   documentCount: number;
+  /** Creditors only: which list they belong in. */
+  supplierType?: "local" | "international";
 };
 
 export type SalesVoidStats = {

@@ -47,13 +47,13 @@ export type NavItem = {
   permissionModule: PermissionModuleKey;
   /** A second module whose "view" also opens this item — for a screen that hosts two modules' work
    * (Purchases also carries purchase requisitions, so a requisition-only Cashier still gets it). */
-  alsoVisibleWith?: PermissionModuleKey;
+  alsoVisibleWith?: PermissionModuleKey[];
   badge?: string;
 };
 
 /** The one visibility rule for a nav item — shared by Sidebar and App's route guard. */
 export function canViewNavItem(item: NavItem, can: (module: PermissionModuleKey, action: "view") => boolean): boolean {
-  return can(item.permissionModule, "view") || (item.alsoVisibleWith !== undefined && can(item.alsoVisibleWith, "view"));
+  return can(item.permissionModule, "view") || (item.alsoVisibleWith?.some((module) => can(module, "view")) ?? false);
 }
 
 export type NavGroup = {
@@ -201,7 +201,7 @@ export const navGroups: NavGroup[] = [
         description: "Requisitions, purchase orders & receiving",
         icon: ShoppingBag,
         permissionModule: "purchases",
-        alsoVisibleWith: "purchase_requisitions"
+        alsoVisibleWith: ["purchase_requisitions", "local_credit_purchases"]
       },
       {
         key: "local-purchases",

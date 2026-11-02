@@ -34,6 +34,7 @@ type BusinessData = {
   totalDebtCents: number;
   debtorCount: number;
   totalCreditCents: number;
+  internationalCreditCents: number;
   creditorCount: number;
   pendingApprovalsCount: number;
   dueRecurringBillsCount: number;
@@ -99,6 +100,9 @@ export function BusinessDashboard({ isBusinessWide }: { isBusinessWide: boolean 
           totalDebtCents: overview.totalDebtCents,
           debtorCount: overview.debtors.length,
           totalCreditCents: overview.totalCreditCents,
+          internationalCreditCents: overview.creditors
+            .filter((party) => party.supplierType === "international")
+            .reduce((sum, party) => sum + party.balanceCents, 0),
           creditorCount: overview.creditors.length,
           pendingApprovalsCount:
             voids.filter((v) => v.status === "pending_approval").length + returns.filter((r) => r.status === "pending_approval").length,
@@ -310,7 +314,7 @@ export function BusinessDashboard({ isBusinessWide }: { isBusinessWide: boolean 
             tone="danger"
             label="Creditors"
             value={String(data.creditorCount)}
-            sublabel={`${money(data.totalCreditCents)} you owe`}
+            sublabel={`Local ${money(data.totalCreditCents - data.internationalCreditCents)} · International ${money(data.internationalCreditCents)}`}
             actionLabel="View creditors"
             onAction={() => setActiveNavKey("reports-suppliers")}
           />

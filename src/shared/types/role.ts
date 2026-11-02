@@ -59,6 +59,10 @@ export const PERMISSION_MODULES = [
     label: "Local Purchases",
     actions: ["view", "create", "edit", "delete", "export"]
   },
+  // Goods taken on credit from a LOCAL supplier, for a role without the Purchases module (e.g. a
+  // Cashier). See purchase-service.ts requirePurchaseAccess. No computed default on purpose: until an
+  // owner ticks this, a saved role has no access (it adds stock and debt).
+  { key: "local_credit_purchases", label: "Local Credit Purchases (Edit = receive goods)", actions: ["view", "create", "edit"] },
   {
     key: "borrows",
     label: "Borrow & Lend",

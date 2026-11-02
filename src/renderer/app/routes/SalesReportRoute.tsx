@@ -485,20 +485,25 @@ export function SalesReportRoute(): React.JSX.Element {
           balance: money(party.balanceCents)
         }))
       },
-      overview.creditors.length > 0 && {
-        type: "table",
-        title: "Creditors — Who You Owe",
-        columns: [
-          { key: "name", header: "Supplier" },
-          { key: "documents", header: "Documents", align: "right" },
-          { key: "balance", header: "Balance", align: "right" }
-        ],
-        rows: overview.creditors.map((party) => ({
-          name: party.name,
-          documents: String(party.documentCount),
-          balance: money(party.balanceCents)
-        }))
-      },
+      ...(["local", "international"] as const).map((type) => {
+        const parties = overview.creditors.filter((party) => (party.supplierType ?? "local") === type);
+        return (
+          parties.length > 0 && {
+            type: "table" as const,
+            title: type === "local" ? "Creditors — Who You Owe Locally" : "Creditors — Who You Owe Internationally",
+            columns: [
+              { key: "name", header: "Supplier" },
+              { key: "documents", header: "Documents", align: "right" as const },
+              { key: "balance", header: "Balance", align: "right" as const }
+            ],
+            rows: parties.map((party) => ({
+              name: party.name,
+              documents: String(party.documentCount),
+              balance: money(party.balanceCents)
+            }))
+          }
+        );
+      }),
       taxReport !== null &&
         taxReport.byCategory.length > 0 && {
           type: "table",

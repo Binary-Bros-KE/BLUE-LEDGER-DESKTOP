@@ -1,3 +1,4 @@
+import type { SupplierType } from "@shared/types/supplier";
 import type { ProductTaxType } from "./product";
 
 export type PurchaseId = string;
@@ -184,6 +185,7 @@ export type PurchaseListItem = {
   purchaseNumber: string;
   supplierId: string;
   supplierName: string;
+  supplierType: SupplierType;
   supplierInvoiceNumber: string | null;
   locationId: string;
   locationName: string;

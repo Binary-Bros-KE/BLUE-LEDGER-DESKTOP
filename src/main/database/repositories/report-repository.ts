@@ -791,6 +791,7 @@ export function findProcessedReturnsInRange(
 export type CreditorRow = {
   supplier_id: string;
   supplier_name: string;
+  supplier_type: string;
   balance_cents: number;
   document_count: number;
 };
@@ -803,7 +804,7 @@ export function findOutstandingCreditors(tenantId: string, locationId: string | 
   return getDatabase()
     .prepare(
       `
-      SELECT p.supplier_id, s.business_name AS supplier_name,
+      SELECT p.supplier_id, s.business_name AS supplier_name, s.supplier_type,
         SUM(p.grand_total_cents - p.amount_paid_cents) AS balance_cents,
         COUNT(*) AS document_count
       FROM purchases p
@@ -812,7 +813,7 @@ export function findOutstandingCreditors(tenantId: string, locationId: string | 
         AND p.status NOT IN ('cancelled', 'draft')
         AND p.payment_status != 'paid'
         AND (? IS NULL OR p.location_id = ?)
-      GROUP BY p.supplier_id, s.business_name
+      GROUP BY p.supplier_id, s.business_name, s.supplier_type
       HAVING SUM(p.grand_total_cents - p.amount_paid_cents) > 0
       ORDER BY balance_cents DESC
     `

@@ -3670,6 +3670,20 @@ const migrations = [
       -- services/mpesa-verification-local.ts.
       ALTER TABLE sales ADD COLUMN mpesa_verifications TEXT;
     `
+  },
+  {
+    version: 108,
+    name: "supplier_type",
+    sql: `
+      -- Local or international. Existing suppliers: Kenya or no country = local, any other country =
+      -- international. SERVER's migration applies the same rule to its copy, so updated_at isn't
+      -- bumped: nothing needs pushing, and a bump would make every device's copy conflict.
+      ALTER TABLE suppliers ADD COLUMN supplier_type TEXT NOT NULL DEFAULT 'local';
+      UPDATE suppliers
+      SET supplier_type = 'international'
+      WHERE TRIM(COALESCE(country, '')) <> ''
+        AND LOWER(TRIM(country)) NOT IN ('kenya', 'ke');
+    `
   }
 ] as const;
 
