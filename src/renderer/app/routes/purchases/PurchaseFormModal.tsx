@@ -111,7 +111,7 @@ export function PurchaseFormModal({
   suppliers: SupplierPickerOption[];
   products: ProductListItem[];
   locations: Location[];
-  /** Goods on credit from a local supplier: no drafts, price changes or shipping expense (the service enforces this). */
+  /** Goods on credit from a local supplier: buying price only, no drafts or shipping expense (the service enforces this). */
   localOnly?: boolean;
   onSupplierCreated: (supplier: Supplier) => void;
   onProductCreated: (product: Product) => void;

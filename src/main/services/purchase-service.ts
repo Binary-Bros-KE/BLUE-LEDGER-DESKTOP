@@ -75,7 +75,8 @@ function generatePurchaseNumber(tenantId: string): string {
 
 /** Who may do what to purchases. "all" is the full Purchases module. "local" is Local Credit Purchases
  * (goods taken on credit, e.g. by a Cashier): only local suppliers, only their own storefront, and only
- * create and receive. Never drafts, editing, cancelling, paying or re-pricing products. */
+ * create and receive. They set the buying price but never the selling price. No drafts, editing,
+ * cancelling or paying. */
 function requirePurchaseAccess(action: "view" | "create" | "edit"): "all" | "local" {
   if (hasPermission("purchases", action)) return "all";
   requirePermission("local_credit_purchases", action);
@@ -319,7 +320,7 @@ export function createPurchaseWithHook(input: unknown, afterInsert?: (purchaseId
     }
 
     if (parsed.intent === "ordered") {
-      if (!localOnly) syncProductPricingFromOrder(cart.items);
+      syncProductPricingFromOrder(cart.items);
       // Client request: placing an order no longer touches the supplier balance at all — it only
       // grows as goods are actually received (see receivePurchaseGoods's own "purchase_received"
       // hook below), never at order time, and never including shippingCostCents.
