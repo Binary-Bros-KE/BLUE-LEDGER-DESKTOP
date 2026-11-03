@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LineQuantityField } from "@renderer/shared/components/LineQuantityField";
+import { baseToAmount, displayLine, displayPriceCents, priceUnitSuffix, unitFactor } from "@shared/lib/product-units";
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -44,7 +46,7 @@ import { TaxBreakdownTable } from "@renderer/shared/components/TaxBreakdownTable
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { useMainStoreAvailability } from "@renderer/shared/hooks/use-main-store-availability";
 import { useProductStockOverview } from "@renderer/shared/hooks/use-product-stock-overview";
-import { computeLinePricing, computeServiceChargeAmount, isPriceBelowMinimum } from "@renderer/shared/lib/cart-pricing";
+import { computeLinePricing, computeServiceChargeAmount, isPriceBelowMinimum, lineOverrideCents, linePriceInSaleUnit } from "@renderer/shared/lib/cart-pricing";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents, totalCentsToUnitCostText, unitCostToTotalCents } from "@renderer/shared/lib/money";
@@ -110,6 +112,8 @@ type CartLine = {
   variantKey: string | null;
   name: string;
   sku: string;
+  /** The unit this line is sold in (kg, carton); quantity stays in base units. Null = the base unit. */
+  unitCode: string | null;
   quantity: number;
   /** Raw decimal text, not cents — same reasoning as priceOverride below (see money.ts's own
    * fromCents/toCents split doc comment). Converted to cents only at the point of use
@@ -773,8 +777,9 @@ export function QuotationsRoute(): React.JSX.Element {
               line.quantity,
               toCents(line.discount),
               { vatRatePercent: tenantContext?.vatRatePercent ?? 16, pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true },
-              line.priceOverride.trim() ? toCents(line.priceOverride) : null,
-              line.taxInclusiveOverride
+              lineOverrideCents(line, product, toCents),
+              line.taxInclusiveOverride,
+              line.unitCode
             )
           };
         })
@@ -951,20 +956,21 @@ export function QuotationsRoute(): React.JSX.Element {
         name: item.productName,
         sku: item.sku,
         quantity: item.quantity,
+        unitCode: item.unitCode,
         discount: fromCents(item.discountAmountCents),
         // Pre-filled with the item's own current price so re-submitting without touching this line
         // keeps its price exactly as it was — same reasoning as InvoicesRoute's openEditInvoice.
-        priceOverride: fromCents(item.unitPriceCents),
+        priceOverride: fromCents(Math.round(item.unitPriceCents * (item.unitFactor ?? 1))),
         isLocallySourced: item.isLocallySourced,
         // item.localCostCents is stored as the TOTAL for this line (see money.ts's own doc comment
         // on the pair below) — back it out to the per-unit figure this field shows.
-        localCost: totalCentsToUnitCostText(item.localCostCents, item.quantity),
+        localCost: totalCentsToUnitCostText(item.localCostCents, item.quantity / (item.unitFactor ?? 1)),
         localSupplierId: item.localSupplierId,
         // Same "keep exactly what it was" reasoning as priceOverride above — see InvoicesRoute's
         // openEditInvoice for the identical derivation.
         taxInclusiveOverride:
           item.taxType === "vat"
-            ? item.lineTotalCents <= item.unitPriceCents * item.quantity - item.discountAmountCents
+            ? item.lineTotalCents <= Math.round(item.unitPriceCents * item.quantity) - item.discountAmountCents
             : null,
         sectionLabel: item.sectionLabel
       }))
@@ -1028,7 +1034,7 @@ export function QuotationsRoute(): React.JSX.Element {
         (line) => line.productId === product.id && line.variantKey === variantKey && line.sectionLabel === targetSectionLabel
       );
       if (existing) {
-        return prev.map((line) => (line.key === existing.key ? { ...line, quantity: line.quantity + 1 } : line));
+        return prev.map((line) => (line.key === existing.key ? { ...line, quantity: line.quantity + unitFactor(product.unitConfig, line.unitCode) } : line));
       }
       return [
         ...prev,
@@ -1038,7 +1044,9 @@ export function QuotationsRoute(): React.JSX.Element {
           variantKey,
           name: lineName(product, variantLabel),
           sku: product.sku,
-          quantity: 1,
+          // Starts at one of the product's usual selling unit: 1 kg is 1000 of a g-based product.
+          quantity: unitFactor(product.unitConfig, product.unitConfig?.defaultSaleUnit),
+          unitCode: product.unitConfig?.defaultSaleUnit ?? null,
           discount: "0.00",
           priceOverride: "",
           isLocallySourced: false,
@@ -1050,6 +1058,11 @@ export function QuotationsRoute(): React.JSX.Element {
       ];
     });
     setProductSearch("");
+  }
+
+  /** A typed price was per the old unit, so it goes when the unit changes. */
+  function updateCreateLineUnit(key: string, unitCode: string | null, quantity: number): void {
+    setCreateItems((prev) => prev.map((line) => (line.key === key ? { ...line, unitCode, quantity, priceOverride: "" } : line)));
   }
 
   function updateCreateQuantity(key: string, quantity: number): void {
@@ -1205,13 +1218,14 @@ export function QuotationsRoute(): React.JSX.Element {
         productId: line.productId,
         quantity: line.quantity,
         discountAmountCents: toCents(line.discount),
-        unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined,
+        unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) / unitFactor(productById.get(line.productId)?.unitConfig ?? null, line.unitCode) : undefined,
+        unitCode: line.unitCode,
         isLocallySourced: line.isLocallySourced,
         // line.localCost is what the user typed as the PER-UNIT cost — localCostCents itself is
         // still stored/reported as the line's total (see money.ts's own doc comment), so multiply
         // here rather than changing anything downstream.
         localCostCents:
-          line.isLocallySourced && line.localCost.trim() ? unitCostToTotalCents(line.localCost, line.quantity) : undefined,
+          line.isLocallySourced && line.localCost.trim() ? unitCostToTotalCents(line.localCost, line.quantity / unitFactor(productById.get(line.productId)?.unitConfig ?? null, line.unitCode)) : undefined,
         localSupplierId: line.localSupplierId,
         taxInclusiveOverride: line.taxInclusiveOverride,
         sectionLabel: line.sectionLabel,
@@ -1613,7 +1627,7 @@ export function QuotationsRoute(): React.JSX.Element {
                               {item.productName}
                             </p>
                             <p className="text-[11px] font-semibold text-muted">
-                              {item.quantity} x {currency} {formatCents(item.unitPriceCents)}
+                              {displayLine(item).quantity}{item.unitCode ? ` ${item.unitCode}` : ""} x {currency} {formatCents(displayLine(item).unitPriceCents)}
                             </p>
                           </div>
                           <p className="mt-0.5 flex-none text-sm font-extrabold text-ink">{formatCents(item.lineTotalCents)}</p>
@@ -1650,7 +1664,7 @@ export function QuotationsRoute(): React.JSX.Element {
                           <p className="truncate text-muted">{item.localSupplierName ?? "No supplier recorded"}</p>
                         </div>
                         <span className="mt-0.5 flex-none font-bold tabular-nums text-ink">
-                          Unit Cost {item.localCostCents !== null ? formatCents(Math.round(item.localCostCents / item.quantity)) : "—"}
+                          Unit Cost {item.localCostCents !== null ? formatCents(Math.round(item.localCostCents / displayLine(item).quantity)) : "—"}
                         </span>
                       </div>
                     ))}
@@ -2576,7 +2590,7 @@ export function QuotationsRoute(): React.JSX.Element {
                           className="flex w-full items-center justify-between px-3.5 py-2 text-left text-sm hover:bg-soft cursor-pointer"
                         >
                           <span className="font-bold text-ink">{product.name}</span>
-                          <span className="text-xs font-semibold text-muted">{formatCents(product.sellingPriceCents)}</span>
+                          <span className="text-xs font-semibold text-muted">{formatCents(displayPriceCents(product.sellingPriceCents, product.unitConfig))}{priceUnitSuffix(product.unitConfig)}</span>
                         </button>
                       ))}
                     </div>
@@ -2637,7 +2651,7 @@ export function QuotationsRoute(): React.JSX.Element {
                     )}
                     {group.items.map(({ line, product, pricing }) => {
                       const belowMinimum =
-                        line.priceOverride.trim() !== "" && isPriceBelowMinimum(toCents(line.priceOverride), product.minimumPriceCents);
+                        line.priceOverride.trim() !== "" && isPriceBelowMinimum(lineOverrideCents(line, product, toCents) as number, product.minimumPriceCents);
                       const taxConfig = {
                         vatRatePercent: tenantContext?.vatRatePercent ?? 16,
                         pricesTaxInclusive: tenantContext?.pricesTaxInclusive ?? true
@@ -2648,7 +2662,7 @@ export function QuotationsRoute(): React.JSX.Element {
                           <div className="flex items-center gap-2">
                             <p className="min-w-0 flex-1 truncate text-xs leading-tight" title={line.name}>
                               <span className="font-extrabold text-ink">{line.name}</span>
-                              <span className="ml-1.5 text-[10px] font-semibold text-muted">@ {formatCents(pricing.unitPriceCents)}</span>
+                              <span className="ml-1.5 text-[10px] font-semibold text-muted">@ {formatCents(linePriceInSaleUnit(pricing.unitPriceCents, product, line.unitCode))}{line.unitCode ? `/${line.unitCode}` : ""}</span>
                               {belowMinimum && (
                                 <span className="ml-1.5 text-[10px] font-bold text-danger">Below min {fromCents(product.minimumPriceCents)}</span>
                               )}
@@ -2718,13 +2732,12 @@ export function QuotationsRoute(): React.JSX.Element {
                           <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
                             <label className="flex items-center gap-1 text-[10px] font-bold text-muted">
                               Qty
-                              <input
-                                type="number"
-                                min={1}
-                                value={line.quantity === 0 ? "" : line.quantity}
-                                onChange={(event) => updateCreateQuantityDraft(line.key, event.target.value)}
-                                onBlur={() => updateCreateQuantity(line.key, line.quantity)}
-                                className="h-7 w-12 rounded-md border border-line text-center text-xs font-bold outline-none focus:border-accent"
+                              <LineQuantityField
+                                product={product}
+                                quantity={line.quantity}
+                                unitCode={line.unitCode}
+                                onQuantityChange={(quantity) => updateCreateQuantity(line.key, quantity)}
+                                onUnitChange={(unitCode, quantity) => updateCreateLineUnit(line.key, unitCode, quantity)}
                               />
                             </label>
                             <label
@@ -2738,7 +2751,7 @@ export function QuotationsRoute(): React.JSX.Element {
                                 step="0.01"
                                 value={line.priceOverride}
                                 onChange={(event) => updateCreatePriceOverride(line.key, event.target.value)}
-                                placeholder={fromCents(pricing.unitPriceCents)}
+                                placeholder={fromCents(linePriceInSaleUnit(pricing.unitPriceCents, product, line.unitCode))}
                                 className={cn(
                                   "h-7 w-20 rounded-md border px-1.5 text-right text-xs font-semibold outline-none focus:border-accent",
                                   belowMinimum ? "border-danger text-danger" : "border-line"
@@ -2821,7 +2834,7 @@ export function QuotationsRoute(): React.JSX.Element {
                                 />
                                 {line.localCost.trim() && (
                                   <span className="mt-0.5 block text-[10px] font-semibold text-muted">
-                                    Total for {line.quantity}: {formatCents(unitCostToTotalCents(line.localCost, line.quantity))}
+                                    Total for {baseToAmount(line.quantity, product.unitConfig, line.unitCode)}: {formatCents(unitCostToTotalCents(line.localCost, baseToAmount(line.quantity, product.unitConfig, line.unitCode)))}
                                   </span>
                                 )}
                               </label>

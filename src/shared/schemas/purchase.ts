@@ -5,14 +5,16 @@ import { TAX_TYPE_OPTIONS } from "@shared/types/product";
 const productTaxTypeValues = TAX_TYPE_OPTIONS.map((option) => option.value) as [string, ...string[]];
 
 const cents = z.coerce.number().int().min(0).max(100_000_000_000);
+const unitPriceCents = z.coerce.number().min(0).max(100_000_000_000);
 
 export const purchaseItemInputSchema = z.object({
   productId: z.string().trim().min(1),
   orderedQuantity: z.coerce.number().int().positive("Quantity must be greater than 0"),
-  unitCostCents: cents,
+  /** Per base unit, so possibly fractional — see shared/lib/product-units.ts. */
+  unitCostCents: unitPriceCents,
   // Optional: when the purchase is saved as "ordered", provided lines push their new selling price
   // onto the product alongside unitCostCents — see purchase-service.ts's syncProductPricingFromOrder.
-  sellingPriceCents: cents.optional(),
+  sellingPriceCents: unitPriceCents.optional(),
   discountAmountCents: cents.optional().default(0),
   // Defaults to "vat" only as a last resort (e.g. a very old client build that never sends it) —
   // the UI always pre-fills this from the product's own category. Tax is computed server-side from

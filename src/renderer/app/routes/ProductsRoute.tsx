@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { displayPriceCents, formatQuantity, priceUnitSuffix } from "@shared/lib/product-units";
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -265,10 +266,10 @@ export function ProductsRoute(): React.JSX.Element {
           number: String(index + 1),
           name: product.name,
           category: product.categoryName ?? "Uncategorized",
-          stock: String(product.totalStock),
-          buyingPrice: `${currency} ${formatCents(product.buyingPriceCents)}`,
-          sellingPrice: `${currency} ${formatCents(product.sellingPriceCents)}`,
-          margin: `${currency} ${formatCents(marginCents)}`,
+          stock: product.unitConfig ? formatQuantity(product.totalStock, product.unitOfMeasure, product.unitConfig) : String(product.totalStock),
+          buyingPrice: `${currency} ${formatCents(displayPriceCents(product.buyingPriceCents, product.unitConfig))}${priceUnitSuffix(product.unitConfig)}`,
+          sellingPrice: `${currency} ${formatCents(displayPriceCents(product.sellingPriceCents, product.unitConfig))}${priceUnitSuffix(product.unitConfig)}`,
+          margin: `${currency} ${formatCents(displayPriceCents(marginCents, product.unitConfig))}${priceUnitSuffix(product.unitConfig)}`,
           marginPercent: `${marginPercent.toFixed(1)}%`
         };
       }),
@@ -659,7 +660,7 @@ export function ProductsRoute(): React.JSX.Element {
                       </td>
 
                       <td className="px-4 py-3 text-right text-sm font-bold tabular-nums">
-                        {currency} {formatCents(product.sellingPriceCents)}
+                        {currency} {formatCents(displayPriceCents(product.sellingPriceCents, product.unitConfig))}{priceUnitSuffix(product.unitConfig)}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className="inline-flex items-center justify-end gap-1.5">
@@ -669,7 +670,7 @@ export function ProductsRoute(): React.JSX.Element {
                               product.totalStock <= product.reorderLevel && "text-warning"
                             )}
                           >
-                            {product.totalStock}
+                            {product.unitConfig ? formatQuantity(product.totalStock, product.unitOfMeasure, product.unitConfig) : product.totalStock}
                           </span>
                           {product.totalStock <= 0 ? (
                             <OutOfStockBadge />

@@ -279,6 +279,8 @@ export function insertInvoiceFromCart(input: {
         sectionLabel: item.sectionLabel,
         variantKey: item.variantKey,
         variantLabel: item.variantLabel,
+        unitCode: item.unitCode,
+        unitFactor: item.unitFactor,
         stockLocationId
       });
 
@@ -510,6 +512,8 @@ export function updateInvoice(id: string, input: unknown): Sale {
         sectionLabel: item.sectionLabel,
         variantKey: item.variantKey,
         variantLabel: item.variantLabel,
+        unitCode: item.unitCode,
+        unitFactor: item.unitFactor,
         stockLocationId
       });
 
@@ -597,6 +601,7 @@ export function duplicateInvoice(saleId: string): Sale {
       // Without this, prepareCart would silently re-price every line from the product's CURRENT
       // price, the exact bug fixed in invoiceCartItemSchema (see that field's own comment).
       unitPriceCents: item.unitPriceCents,
+      unitCode: item.unitCode,
       isLocallySourced: item.isLocallySourced,
       localCostCents: item.localCostCents ?? undefined,
       localSupplierId: item.localSupplierId,
@@ -605,7 +610,7 @@ export function duplicateInvoice(saleId: string): Sale {
       // original invoice actually used. Derived the same way computeTaxBreakdown does
       // (tax-calculation.ts): compare the frozen gross against the frozen taxable amount.
       taxInclusiveOverride:
-        item.taxType === "vat" ? item.lineTotalCents <= item.unitPriceCents * item.quantity - item.discountAmountCents : null,
+        item.taxType === "vat" ? item.lineTotalCents <= Math.round(item.unitPriceCents * item.quantity) - item.discountAmountCents : null,
       // Carried over, not re-decided — same "duplicate is a faithful copy" reasoning as
       // taxInclusiveOverride above.
       sectionLabel: item.sectionLabel,

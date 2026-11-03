@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { LineQuantityField } from "@renderer/shared/components/LineQuantityField";
+import { baseToAmount, displayPriceCents, formatQuantity, priceUnitSuffix, unitFactor } from "@shared/lib/product-units";
 import { motion } from "framer-motion";
 import {
   CheckCircle2,
@@ -42,7 +44,7 @@ import type { MpesaVerificationRecord, MpesaVerifications } from "@shared/types/
 import { SupplierPicker } from "@renderer/shared/components/SupplierPicker";
 import { TaxBreakdownTable } from "@renderer/shared/components/TaxBreakdownTable";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
-import { computeLinePricing, computeServiceChargeAmount, isPriceBelowMinimum, type LinePricing } from "@renderer/shared/lib/cart-pricing";
+import { computeLinePricing, computeServiceChargeAmount, isPriceBelowMinimum, lineOverrideCents, linePriceInSaleUnit, type LinePricing } from "@renderer/shared/lib/cart-pricing";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents, fromCents, toCents, totalCentsToUnitCostText, unitCostToTotalCents } from "@renderer/shared/lib/money";
@@ -75,6 +77,8 @@ import type { Sale } from "@shared/types/sale";
 import type { SupplierPickerOption } from "@shared/types/supplier";
 
 type CartLine = {
+  /** The unit this line is sold in (kg, carton); quantity stays in base units. Null = the base unit. */
+  unitCode: string | null;
   /** Line identity — the product id, or product id + variant key for a shared-stock variant (the same
    * product in two colours is two lines). Every per-line handler matches on this. */
   lineId: string;
@@ -161,6 +165,11 @@ const MPESA_FRIENDLY_MESSAGES: Record<MpesaTransactionStatus, string> = {
 
 function mpesaFriendlyMessage(status: MpesaTransactionStatus): string {
   return MPESA_FRIENDLY_MESSAGES[status];
+}
+
+/** The typed price as a per-base-unit price for the submit payload. */
+function submitOverrideCents(line: CartLine, product: ProductListItem | undefined): number | undefined {
+  return line.priceOverride.trim() ? toCents(line.priceOverride) / unitFactor(product?.unitConfig ?? null, line.unitCode) : undefined;
 }
 
 export function CheckoutRoute(): React.JSX.Element {
@@ -340,14 +349,15 @@ export function CheckoutRoute(): React.JSX.Element {
                 // if the product's own price changes later, same as a brand-new cart line would.
                 const product = productList.find((candidate) => candidate.id === item.productId);
                 const naturalUnitPriceCents = product
-                  ? computeLinePricing(pricedForVariant(product, item.variantKey), item.quantity, 0, taxConfig, null).unitPriceCents
+                  ? computeLinePricing(pricedForVariant(product, item.variantKey), item.quantity, 0, taxConfig, null, null, item.unitCode).unitPriceCents
                   : item.unitPriceCents;
+                const unitFactorOfItem = item.unitFactor ?? 1;
                 // Same "restore only if it actually diverges from today's natural default" treatment
                 // as priceOverride above — derive the frozen line's inclusive/exclusive mode the same
                 // way computeTaxBreakdown does (tax-calculation.ts), then compare against what the
                 // product's CURRENT effective config would produce. Only vat products have a mode at
                 // all; other tax types never get a sticky override.
-                const taxableCents = item.unitPriceCents * item.quantity - item.discountAmountCents;
+                const taxableCents = Math.round(item.unitPriceCents * item.quantity) - item.discountAmountCents;
                 const frozenInclusive = item.taxType === "vat" ? item.lineTotalCents <= taxableCents : null;
                 const currentDefaultInclusive =
                   item.taxType === "vat" && product ? resolveProductTaxConfig(product, taxConfig).pricesTaxInclusive : null;
@@ -358,14 +368,17 @@ export function CheckoutRoute(): React.JSX.Element {
                   name: item.productName,
                   sku: item.sku,
                   quantity: item.quantity,
+                  unitCode: item.unitCode,
                   discount: fromCents(item.discountAmountCents),
-                  priceOverride: naturalUnitPriceCents !== item.unitPriceCents ? fromCents(item.unitPriceCents) : "",
+                  // With a tolerance — a fractional per-base price can differ in the last float digits.
+                  priceOverride:
+                    Math.abs(naturalUnitPriceCents - item.unitPriceCents) > 1e-6 ? fromCents(Math.round(item.unitPriceCents * unitFactorOfItem)) : "",
                   // Unlike priceOverride, this IS a sticky fact about the line, not a pricing decision
                   // — it was bought from another shop or it wasn't.
                   isLocallySourced: item.isLocallySourced,
                   // item.localCostCents is stored as the TOTAL for this line (see money.ts's own doc
                   // comment on the pair below) — back it out to the per-unit figure this field shows.
-                  localCost: totalCentsToUnitCostText(item.localCostCents, item.quantity),
+                  localCost: totalCentsToUnitCostText(item.localCostCents, item.quantity / unitFactorOfItem),
                   localSupplierId: item.localSupplierId,
                   taxInclusiveOverride:
                     frozenInclusive !== null && frozenInclusive !== currentDefaultInclusive ? frozenInclusive : null
@@ -505,8 +518,9 @@ export function CheckoutRoute(): React.JSX.Element {
         line.quantity,
         toCents(line.discount),
         tenantTaxConfig,
-        line.priceOverride.trim() ? toCents(line.priceOverride) : null,
-        line.taxInclusiveOverride
+        lineOverrideCents(line, product, toCents),
+        line.taxInclusiveOverride,
+        line.unitCode
       );
       subtotalCents += pricing.lineSubtotalCents;
       discountAmountCents += pricing.discountAmountCents;
@@ -738,7 +752,7 @@ export function CheckoutRoute(): React.JSX.Element {
     const existing = draft.items.find((line) => line.lineId === lineId);
     const items = existing
       ? draft.items.map((line) =>
-        line.lineId === lineId ? { ...line, quantity: line.quantity + 1 } : line
+        line.lineId === lineId ? { ...line, quantity: line.quantity + unitFactor(product.unitConfig, line.unitCode) } : line
       )
       : [
         ...draft.items,
@@ -748,7 +762,9 @@ export function CheckoutRoute(): React.JSX.Element {
           variantKey,
           name: lineName(product, variantLabel),
           sku: product.sku,
-          quantity: 1,
+          // Starts at one of the product's usual selling unit: 1 kg is 1000 of a g-based product.
+          quantity: unitFactor(product.unitConfig, product.unitConfig?.defaultSaleUnit),
+          unitCode: product.unitConfig?.defaultSaleUnit ?? null,
           discount: "0.00",
           priceOverride: "",
           isLocallySourced: false,
@@ -819,6 +835,11 @@ export function CheckoutRoute(): React.JSX.Element {
     setOpenSales((prev) =>
       prev.map((draft) => (draft.key === activeKey ? { ...draft, items: updater(draft.items) } : draft))
     );
+  }
+
+  /** A typed price was per the old unit, so it goes when the unit changes. */
+  function updateLineUnit(lineId: string, unitCode: string | null, quantity: number): void {
+    updateActiveItems((items) => items.map((line) => (line.lineId === lineId ? { ...line, unitCode, quantity, priceOverride: "" } : line)));
   }
 
   function updateQuantity(lineId: string, quantity: number): void {
@@ -1101,13 +1122,14 @@ export function CheckoutRoute(): React.JSX.Element {
         quantity: line.quantity,
         variantKey: line.variantKey,
         discountAmountCents: toCents(line.discount),
-        unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined,
+        unitPriceCents: submitOverrideCents(line, productById.get(line.productId)),
+        unitCode: line.unitCode,
         isLocallySourced: line.isLocallySourced,
         // line.localCost is what the cashier typed as the PER-UNIT cost — localCostCents itself is
         // still stored/reported as the line's total (see money.ts's own doc comment), so multiply
         // here rather than changing anything downstream.
         localCostCents:
-          line.isLocallySourced && line.localCost.trim() ? unitCostToTotalCents(line.localCost, line.quantity) : undefined,
+          line.isLocallySourced && line.localCost.trim() ? unitCostToTotalCents(line.localCost, line.quantity / unitFactor(productById.get(line.productId)?.unitConfig ?? null, line.unitCode)) : undefined,
         localSupplierId: line.localSupplierId,
         taxInclusiveOverride: line.taxInclusiveOverride
       })),
@@ -1218,13 +1240,14 @@ export function CheckoutRoute(): React.JSX.Element {
           quantity: line.quantity,
           variantKey: line.variantKey,
           discountAmountCents: toCents(line.discount),
-          unitPriceCents: line.priceOverride.trim() ? toCents(line.priceOverride) : undefined,
+          unitPriceCents: submitOverrideCents(line, productById.get(line.productId)),
+        unitCode: line.unitCode,
           isLocallySourced: line.isLocallySourced,
           // line.localCost is what the cashier typed as the PER-UNIT cost — localCostCents itself is
           // still stored/reported as the line's total (see money.ts's own doc comment), so multiply
           // here rather than changing anything downstream.
           localCostCents:
-            line.isLocallySourced && line.localCost.trim() ? unitCostToTotalCents(line.localCost, line.quantity) : undefined,
+            line.isLocallySourced && line.localCost.trim() ? unitCostToTotalCents(line.localCost, line.quantity / unitFactor(productById.get(line.productId)?.unitConfig ?? null, line.unitCode)) : undefined,
           localSupplierId: line.localSupplierId,
           taxInclusiveOverride: line.taxInclusiveOverride
         })),
@@ -1553,7 +1576,7 @@ export function CheckoutRoute(): React.JSX.Element {
                                 {line.name}
                               </p>
                               <p className="text-[11px] font-semibold tabular-nums text-muted">
-                                {line.quantity} × {formatCents(pricing.unitPriceCents)}
+                                {baseToAmount(line.quantity, product.unitConfig, line.unitCode)}{line.unitCode ? ` ${line.unitCode}` : ""} × {formatCents(linePriceInSaleUnit(pricing.unitPriceCents, product, line.unitCode))}
                               </p>
                             </div>
                             <div className="flex-none text-right">
@@ -1597,31 +1620,14 @@ export function CheckoutRoute(): React.JSX.Element {
                             </div>
                           </div>
                           <div className="mt-2 flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => updateQuantity(line.lineId, line.quantity - 1)}
-                                disabled={line.quantity <= 1}
-                                className="grid size-7 place-items-center rounded-md border border-line text-muted transition hover:bg-soft disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
-                              >
-                                <Minus className="size-3" aria-hidden="true" />
-                              </button>
-                              <input
-                                type="number"
-                                min={1}
-                                value={line.quantity === 0 ? "" : line.quantity}
-                                onChange={(event) => updateQuantityDraft(line.lineId, event.target.value)}
-                                onBlur={() => updateQuantity(line.lineId, line.quantity)}
-                                className="h-7 w-12 rounded-md border border-line text-center text-xs font-bold outline-none focus:border-accent"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => updateQuantity(line.lineId, line.quantity + 1)}
-                                className="grid size-7 place-items-center rounded-md border border-line text-muted transition hover:bg-soft cursor-pointer"
-                              >
-                                <Plus className="size-3" aria-hidden="true" />
-                              </button>
-                            </div>
+                            <LineQuantityField
+                              product={product}
+                              quantity={line.quantity}
+                              unitCode={line.unitCode}
+                              stepper
+                              onQuantityChange={(quantity) => updateQuantity(line.lineId, quantity)}
+                              onUnitChange={(unitCode, quantity) => updateLineUnit(line.lineId, unitCode, quantity)}
+                            />
                             <div className="flex items-center gap-2">
                               <label
                                 className="flex items-center gap-1 text-[10px] font-bold text-muted"
@@ -1637,7 +1643,7 @@ export function CheckoutRoute(): React.JSX.Element {
                                   placeholder={fromCents(pricing.unitPriceCents)}
                                   className={cn(
                                     "h-7 w-16 rounded-md border px-1.5 text-right text-xs font-semibold outline-none focus:border-accent",
-                                    line.priceOverride.trim() && isPriceBelowMinimum(toCents(line.priceOverride), product.minimumPriceCents)
+                                    line.priceOverride.trim() && isPriceBelowMinimum(lineOverrideCents(line, product, toCents) as number, product.minimumPriceCents)
                                       ? "border-danger text-danger"
                                       : "border-line"
                                   )}
@@ -1665,7 +1671,7 @@ export function CheckoutRoute(): React.JSX.Element {
                             </div>
                           </div>
 
-                          {line.priceOverride.trim() && isPriceBelowMinimum(toCents(line.priceOverride), product.minimumPriceCents) && (
+                          {line.priceOverride.trim() && isPriceBelowMinimum(lineOverrideCents(line, product, toCents) as number, product.minimumPriceCents) && (
                             <p className="mt-1 text-right text-[10px] font-bold text-danger">
                               Below minimum price of {fromCents(product.minimumPriceCents)}
                             </p>
@@ -1697,7 +1703,7 @@ export function CheckoutRoute(): React.JSX.Element {
                               </label>
                               {line.localCost.trim() && (
                                 <p className="text-[10px] font-semibold text-muted">
-                                  Total for {line.quantity}: {formatCents(unitCostToTotalCents(line.localCost, line.quantity))}
+                                  Total for {baseToAmount(line.quantity, product.unitConfig, line.unitCode)}: {formatCents(unitCostToTotalCents(line.localCost, baseToAmount(line.quantity, product.unitConfig, line.unitCode)))}
                                 </p>
                               )}
                               <div>
@@ -2366,7 +2372,7 @@ export function CheckoutRoute(): React.JSX.Element {
                                 {line.name}
                               </p>
                               <p className="text-[11px] font-semibold tabular-nums text-muted">
-                                {line.quantity} × {formatCents(pricing.unitPriceCents)}
+                                {baseToAmount(line.quantity, product.unitConfig, line.unitCode)}{line.unitCode ? ` ${line.unitCode}` : ""} × {formatCents(linePriceInSaleUnit(pricing.unitPriceCents, product, line.unitCode))}
                               </p>
                             </div>
                             <div className="flex-none text-right">
@@ -2410,31 +2416,14 @@ export function CheckoutRoute(): React.JSX.Element {
                             </div>
                           </div>
                           <div className="mt-2 flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => updateQuantity(line.lineId, line.quantity - 1)}
-                                disabled={line.quantity <= 1}
-                                className="grid size-7 place-items-center rounded-md border border-line text-muted transition hover:bg-soft disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
-                              >
-                                <Minus className="size-3" aria-hidden="true" />
-                              </button>
-                              <input
-                                type="number"
-                                min={1}
-                                value={line.quantity === 0 ? "" : line.quantity}
-                                onChange={(event) => updateQuantityDraft(line.lineId, event.target.value)}
-                                onBlur={() => updateQuantity(line.lineId, line.quantity)}
-                                className="h-7 w-12 rounded-md border border-line text-center text-xs font-bold outline-none focus:border-accent"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => updateQuantity(line.lineId, line.quantity + 1)}
-                                className="grid size-7 place-items-center rounded-md border border-line text-muted transition hover:bg-soft cursor-pointer"
-                              >
-                                <Plus className="size-3" aria-hidden="true" />
-                              </button>
-                            </div>
+                            <LineQuantityField
+                              product={product}
+                              quantity={line.quantity}
+                              unitCode={line.unitCode}
+                              stepper
+                              onQuantityChange={(quantity) => updateQuantity(line.lineId, quantity)}
+                              onUnitChange={(unitCode, quantity) => updateLineUnit(line.lineId, unitCode, quantity)}
+                            />
                             <div className="flex items-center gap-2">
                               <label
                                 className="flex items-center gap-1 text-[10px] font-bold text-muted"
@@ -2450,7 +2439,7 @@ export function CheckoutRoute(): React.JSX.Element {
                                   placeholder={fromCents(pricing.unitPriceCents)}
                                   className={cn(
                                     "h-7 w-16 rounded-md border px-1.5 text-right text-xs font-semibold outline-none focus:border-accent",
-                                    line.priceOverride.trim() && isPriceBelowMinimum(toCents(line.priceOverride), product.minimumPriceCents)
+                                    line.priceOverride.trim() && isPriceBelowMinimum(lineOverrideCents(line, product, toCents) as number, product.minimumPriceCents)
                                       ? "border-danger text-danger"
                                       : "border-line"
                                   )}
@@ -2478,7 +2467,7 @@ export function CheckoutRoute(): React.JSX.Element {
                             </div>
                           </div>
 
-                          {line.priceOverride.trim() && isPriceBelowMinimum(toCents(line.priceOverride), product.minimumPriceCents) && (
+                          {line.priceOverride.trim() && isPriceBelowMinimum(lineOverrideCents(line, product, toCents) as number, product.minimumPriceCents) && (
                             <p className="mt-1 text-right text-[10px] font-bold text-danger">
                               Below minimum price of {fromCents(product.minimumPriceCents)}
                             </p>
@@ -2510,7 +2499,7 @@ export function CheckoutRoute(): React.JSX.Element {
                               </label>
                               {line.localCost.trim() && (
                                 <p className="text-[10px] font-semibold text-muted">
-                                  Total for {line.quantity}: {formatCents(unitCostToTotalCents(line.localCost, line.quantity))}
+                                  Total for {baseToAmount(line.quantity, product.unitConfig, line.unitCode)}: {formatCents(unitCostToTotalCents(line.localCost, baseToAmount(line.quantity, product.unitConfig, line.unitCode)))}
                                 </p>
                               )}
                               <div>
@@ -3070,7 +3059,7 @@ function FocusProductCard({
         {(product.variantConfig?.mode === "shared" || product.variantGroupId) && (
           <span className="text-accent">Has variants</span>
         )}
-        {product.trackStock && <span className={cn(outOfStock && "text-danger")}>Stock: {stock}</span>}
+        {product.trackStock && <span className={cn(outOfStock && "text-danger")}>Stock: {formatQuantity(stock, product.unitOfMeasure, product.unitConfig)}</span>}
         {product.wholesalePriceCents !== null && product.wholesaleMinQuantity > 0 && (
           <span className="text-teal">
             Bulk {product.wholesaleMinQuantity}+ @ {currency} {formatCents(product.wholesalePriceCents)}
@@ -3080,7 +3069,7 @@ function FocusProductCard({
 
       <div className="mt-auto flex items-center justify-between gap-1">
         <p className="min-w-0 truncate text-base font-extrabold tabular-nums text-warning">
-          {currency} {formatCents(product.sellingPriceCents)}
+          {currency} {formatCents(displayPriceCents(product.sellingPriceCents, product.unitConfig))}{priceUnitSuffix(product.unitConfig)}
         </p>
         <button
           type="button"
@@ -3196,7 +3185,7 @@ function ProductCard({
             {(product.variantConfig?.mode === "shared" || product.variantGroupId) && (
               <span className="text-accent">Has variants</span>
             )}
-            {product.trackStock && <span className={cn(outOfStock && "text-danger")}>Stock: {stock}</span>}
+            {product.trackStock && <span className={cn(outOfStock && "text-danger")}>Stock: {formatQuantity(stock, product.unitOfMeasure, product.unitConfig)}</span>}
             {product.wholesalePriceCents !== null && product.wholesaleMinQuantity > 0 && (
               <span className="text-teal">
                 Bulk {product.wholesaleMinQuantity}+ @ {currency} {formatCents(product.wholesalePriceCents)}
@@ -3206,7 +3195,7 @@ function ProductCard({
         </div>
 
         <p className="flex-none text-lg font-extrabold tabular-nums text-warning">
-          {currency} {formatCents(product.sellingPriceCents)}
+          {currency} {formatCents(displayPriceCents(product.sellingPriceCents, product.unitConfig))}{priceUnitSuffix(product.unitConfig)}
         </p>
       </div>
 

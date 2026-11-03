@@ -510,6 +510,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       categoryId: p.categoryId,
       storefrontId: p.storefrontId,
       unitOfMeasure: p.unitOfMeasure,
+      unitConfigJson: p.unitConfig,
       buyingPriceCents: p.buyingPriceCents,
       sellingPriceCents: p.sellingPriceCents,
       wholesalePriceCents: p.wholesalePriceCents,
@@ -933,6 +934,8 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       section_label: string | null;
       variant_key: string | null;
       variant_label: string | null;
+      unit_code?: string | null;
+      unit_factor?: number | null;
       created_at: string;
     }>;
     const items = itemRows.map((i) => ({
@@ -951,6 +954,8 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       localCostCents: i.local_cost_cents,
       localSupplierId: resolveCloudRef("suppliers", i.local_supplier_id),
       sectionLabel: i.section_label,
+      unitCode: i.unit_code ?? null,
+      unitFactor: i.unit_factor ?? null,
       variantKey: i.variant_key ?? null,
       variantLabel: i.variant_label ?? null,
       // Per-line stock source (migration 102) — null = the storefront. Always sent (even null) so a
@@ -1215,6 +1220,8 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       section_label: string | null;
       variant_key: string | null;
       variant_label: string | null;
+      unit_code?: string | null;
+      unit_factor?: number | null;
       created_at: string;
     }>;
     const items = itemRows.map((i) => ({
@@ -1233,6 +1240,8 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       localCostCents: i.local_cost_cents,
       localSupplierId: resolveCloudRef("suppliers", i.local_supplier_id),
       sectionLabel: i.section_label,
+      unitCode: i.unit_code ?? null,
+      unitFactor: i.unit_factor ?? null,
       variantKey: i.variant_key ?? null,
       variantLabel: i.variant_label ?? null,
       createdAt: i.created_at
@@ -1863,6 +1872,7 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       { local: "category_id", cloud: "categoryId", refEntity: "categories" },
       { local: "storefront_id", cloud: "storefrontId", refEntity: "locations" },
       { local: "unit_of_measure", cloud: "unitOfMeasure" },
+      { local: "unit_config_json", cloud: "unitConfigJson", type: "json" },
       { local: "buying_price_cents", cloud: "buyingPriceCents" },
       { local: "selling_price_cents", cloud: "sellingPriceCents" },
       { local: "wholesale_price_cents", cloud: "wholesalePriceCents" },
@@ -2549,8 +2559,8 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
     const items = (row.items as Array<Record<string, unknown>>) ?? [];
     for (const item of items) {
       db.prepare(
-        `INSERT INTO sale_items (id, sale_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, is_locally_sourced, local_cost_cents, local_supplier_id, section_label, variant_key, variant_label, stock_location_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO sale_items (id, sale_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, is_locally_sourced, local_cost_cents, local_supplier_id, section_label, variant_key, variant_label, unit_code, unit_factor, stock_location_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         item.id as string,
         id,
@@ -2583,6 +2593,9 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         // Older device's payload predates variants — same fallback as sectionLabel.
         (item.variantKey as string | null | undefined) ?? null,
         (item.variantLabel as string | null | undefined) ?? null,
+        // Older device's payload predates units — same fallback as variantKey.
+        (item.unitCode as string | null | undefined) ?? null,
+        (item.unitFactor as number | null | undefined) ?? null,
         // Per-line stock source. A line without the key was saved by the first, whole-invoice version
         // of this feature (the mobile app/server) — fall back to that sale-level stockLocationId.
         resolveRefOrNull(
@@ -2886,8 +2899,8 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
     const items = (row.items as Array<Record<string, unknown>>) ?? [];
     for (const item of items) {
       db.prepare(
-        `INSERT INTO quotation_items (id, quotation_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, is_locally_sourced, local_cost_cents, local_supplier_id, section_label, variant_key, variant_label, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO quotation_items (id, quotation_id, product_id, quantity, unit_price_cents, discount_amount_cents, tax_type, tax_amount_cents, line_total_cents, is_locally_sourced, local_cost_cents, local_supplier_id, section_label, variant_key, variant_label, unit_code, unit_factor, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         item.id as string,
         id,
@@ -2907,6 +2920,8 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
         // Older device's payload predates variants — same fallback as sectionLabel.
         (item.variantKey as string | null | undefined) ?? null,
         (item.variantLabel as string | null | undefined) ?? null,
+        (item.unitCode as string | null | undefined) ?? null,
+        (item.unitFactor as number | null | undefined) ?? null,
         item.createdAt as string
       );
     }

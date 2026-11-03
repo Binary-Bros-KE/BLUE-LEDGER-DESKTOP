@@ -11,7 +11,9 @@ const quotationCartItemSchema = z
     /** Cashier-entered price override for this line only — never written back to the product's own
      * sellingPriceCents. Omitted (not just 0) means "use the product's normal/wholesale price", so
      * this can't be used to accidentally zero out a price. See prepareCart in sale-service.ts. */
-    unitPriceCents: z.coerce.number().int().positive().max(100_000_000_000).optional(),
+    unitPriceCents: z.coerce.number().positive().max(100_000_000_000).optional(),
+    /** The unit this line is sold in (kg, carton); quantity is always in base units. */
+    unitCode: optionalText(30),
     // Same locally-sourced fields as saleCartItemSchema/invoiceCartItemSchema — a quoted product this
     // shop doesn't stock is just as likely to have been sourced from another shop as one already sold.
     // A checked box requires a real cost — see localSourcingRequiresCost's own doc comment; enforcing

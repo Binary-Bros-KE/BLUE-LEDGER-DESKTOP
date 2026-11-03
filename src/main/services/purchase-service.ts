@@ -139,7 +139,7 @@ function prepareCart(
     // exclusive setting as retail prices (see tax-calculation.ts) — tax is extracted for reporting
     // when inclusive, added on top when exclusive. taxType comes from the line itself (defaults from
     // the product in the UI, but a real invoice can classify differently).
-    const taxableCents = item.orderedQuantity * item.unitCostCents - item.discountAmountCents;
+    const taxableCents = Math.round(item.orderedQuantity * item.unitCostCents) - item.discountAmountCents;
     const taxType = item.taxType as ProductTaxType;
     const productTaxConfig = resolveProductTaxConfig(
       { pricesTaxInclusive: product.prices_tax_inclusive === null ? null : Boolean(product.prices_tax_inclusive) },
@@ -163,7 +163,7 @@ function prepareCart(
   let discountAmountCents = 0;
   let taxAmountCents = 0;
   for (const item of preparedItems) {
-    subtotalCents += item.orderedQuantity * item.unitCostCents;
+    subtotalCents += Math.round(item.orderedQuantity * item.unitCostCents);
     discountAmountCents += item.discountAmountCents;
     taxAmountCents += item.taxAmountCents;
   }

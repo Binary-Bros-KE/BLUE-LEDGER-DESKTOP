@@ -64,6 +64,8 @@ export type QuotationItemRow = {
   section_label: string | null;
   variant_key: string | null;
   variant_label: string | null;
+  unit_code?: string | null;
+  unit_factor?: number | null;
   created_at: string;
 };
 
@@ -229,6 +231,8 @@ export function insertQuotationItemRow(input: {
   sectionLabel: string | null;
   variantKey?: string | null | undefined;
   variantLabel?: string | null | undefined;
+  unitCode?: string | null | undefined;
+  unitFactor?: number | null | undefined;
 }): QuotationItemRow {
   const now = new Date().toISOString();
 
@@ -238,9 +242,9 @@ export function insertQuotationItemRow(input: {
       INSERT INTO quotation_items (
         id, quotation_id, product_id, quantity, unit_price_cents,
         discount_amount_cents, tax_type, tax_amount_cents, line_total_cents,
-        is_locally_sourced, local_cost_cents, local_supplier_id, section_label, variant_key, variant_label, created_at
+        is_locally_sourced, local_cost_cents, local_supplier_id, section_label, variant_key, variant_label, unit_code, unit_factor, created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
     )
     .run(
@@ -259,6 +263,8 @@ export function insertQuotationItemRow(input: {
       input.sectionLabel,
       input.variantKey ?? null,
       input.variantLabel ?? null,
+      input.unitCode ?? null,
+      input.unitFactor ?? null,
       now
     );
 
@@ -440,6 +446,8 @@ export function mapQuotationItemDetailRow(row: QuotationItemDetailRow): Quotatio
     sectionLabel: row.section_label,
     variantKey: row.variant_key ?? null,
     variantLabel: row.variant_label ?? null,
+    unitCode: row.unit_code ?? null,
+    unitFactor: row.unit_factor ?? null,
     createdAt: row.created_at
   };
 }

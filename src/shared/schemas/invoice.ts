@@ -18,7 +18,9 @@ const invoiceCartItemSchema = z
     // the product's own current price. That's exactly the bug this field fixes: the invoice creation
     // form let a user type a custom price, but the created invoice always used the product's default
     // price instead.
-    unitPriceCents: z.coerce.number().int().positive().max(100_000_000_000).optional(),
+    unitPriceCents: z.coerce.number().positive().max(100_000_000_000).optional(),
+    /** The unit this line is sold in (kg, carton); quantity is always in base units. */
+    unitCode: optionalText(30),
     // Same locally-sourced fields as saleCartItemSchema (shared/schemas/sale.ts) — an invoice is a
     // sale like any other, and a customer wanting something this shop doesn't stock is just as
     // likely to want it billed on credit as paid for on the spot. A checked box requires a real

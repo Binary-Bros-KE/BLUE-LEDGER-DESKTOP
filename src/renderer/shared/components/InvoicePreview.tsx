@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
+import { displayLine } from "@shared/lib/product-units";
 import { Eye, Loader2, Printer, Share2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { CheckboxField } from "@renderer/shared/components/form-fields";
@@ -158,8 +159,8 @@ export function InvoicePreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
                 {group.items.map((item) => (
                   <tr key={item.id}>
                     <td className="border border-ink px-1.5 py-1 font-bold">{item.productName}</td>
-                    <td className="border border-ink px-1.5 py-1 text-center">{item.quantity}</td>
-                    <td className="border border-ink px-1.5 py-1 text-right">{money(item.unitPriceCents)}</td>
+                    <td className="border border-ink px-1.5 py-1 text-center">{displayLine(item).quantity}{item.unitCode ? ` ${item.unitCode}` : ""}</td>
+                    <td className="border border-ink px-1.5 py-1 text-right">{money(displayLine(item).unitPriceCents)}</td>
                     <td className="border border-ink px-1.5 py-1 text-right font-bold">{money(item.lineTotalCents)}</td>
                   </tr>
                 ))}

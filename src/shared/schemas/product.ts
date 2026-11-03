@@ -19,10 +19,11 @@ const nullableUnitOfMeasure = z
   .optional()
   .transform((value) => (value ? value : null));
 
-const priceCents = z.coerce.number().int().min(0).max(100_000_000_000);
+// Not .int(): a product sold in several units keeps its price per base unit, which can be fractional
+// (KES 175/kg = 17.5 cents per gram) — see shared/lib/product-units.ts.
+const priceCents = z.coerce.number().min(0).max(100_000_000_000);
 const nullablePriceCents = z.coerce
   .number()
-  .int()
   .min(0)
   .max(100_000_000_000)
   .nullable()
@@ -40,6 +41,27 @@ export const productOpeningStockEntrySchema = z.object({
   allocationStorefrontId: z.string().trim().min(1).nullable().optional()
 });
 
+/** See shared/lib/product-units.ts — null = the product sells in one unit only. */
+const unitConfigSchema = z
+  .object({
+    kind: z.enum(["measure", "pack"]),
+    priceUnit: z.string().trim().min(1).max(30).nullable(),
+    defaultSaleUnit: z.string().trim().min(1).max(30).nullable(),
+    units: z
+      .array(
+        z.object({
+          code: z.string().trim().min(1, "Give the unit a name").max(30),
+          factor: z.coerce.number().int().min(2, "A unit must hold at least 2 of the base unit").max(10_000_000),
+          priceCents: z.coerce.number().min(0).max(100_000_000_000).nullable()
+        })
+      )
+      .min(1)
+      .max(5)
+  })
+  .nullable()
+  // Absent means "leave as is" on an update, so a save path that doesn't know about units can't wipe them.
+  .optional();
+
 const productFieldsSchema = z.object({
   sku: z
     .string()
@@ -55,6 +77,7 @@ const productFieldsSchema = z.object({
   categoryId: nullableId,
   storefrontId: nullableId,
   unitOfMeasure: nullableUnitOfMeasure,
+  unitConfig: unitConfigSchema,
   // Optional everywhere (bulk import, quick-create) — absent/blank = no brand.
   brand: optionalText(60),
   buyingPriceCents: priceCents,

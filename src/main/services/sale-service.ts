@@ -1,4 +1,5 @@
 import { assertStrictVerification, readProvidedVerifications, stampSaleVerifications } from "@main/services/mpesa-verification-local";
+import { findUnit, parseUnitConfig } from "@shared/lib/product-units";
 import { variantLabel } from "@shared/lib/variants";
 import { randomUUID } from "node:crypto";
 import * as customerRepository from "@main/database/repositories/customer-repository";
@@ -44,7 +45,19 @@ export type PreparedItem = {
   /** shared-stock variant (docs/VARIANTS.md) — null for a plain line */
   variantKey: string | null;
   variantLabel: string | null;
+  /** The unit it was sold in — see shared/lib/product-units.ts. Null = the base unit. */
+  unitCode: string | null;
+  unitFactor: number | null;
 };
+
+function parseUnitConfigRow(raw: string | null | undefined): ReturnType<typeof parseUnitConfig> {
+  if (!raw) return null;
+  try {
+    return parseUnitConfig(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
 
 export type PreparedCartExtras = {
   serviceCharges: ServiceChargeInput[];
@@ -150,6 +163,7 @@ export function prepareCart(
     quantity: number;
     discountAmountCents: number;
     unitPriceCents?: number | undefined;
+    unitCode?: string | null | undefined;
     isLocallySourced?: boolean | undefined;
     localCostCents?: number | undefined;
     localSupplierId?: string | null | undefined;
@@ -198,11 +212,24 @@ export function prepareCart(
     // clamping against minimum_price_cents, tax, line total) runs off this same value either way,
     // so an override needs no special-casing beyond picking the starting number.
     const variant = resolveCartVariant(product, item.variantKey);
+    // Sold in another unit (kg, carton): a pack can carry its own price, which then beats wholesale;
+    // otherwise the base price is already right for any unit (shared/lib/product-units.ts).
+    const unitConfig = parseUnitConfigRow(product.unit_config_json);
+    const saleUnit = findUnit(unitConfig, item.unitCode);
+    if (item.unitCode && !saleUnit) {
+      throw new Error(`"${product.name}" can't be sold in ${item.unitCode} any more — remove the line and add it again`);
+    }
+    if (saleUnit && unitConfig?.kind === "pack" && item.quantity % saleUnit.factor !== 0) {
+      throw new Error(`"${product.name}" sells in whole ${saleUnit.code}s`);
+    }
+    const unitOwnPriceCents = saleUnit?.priceCents != null ? saleUnit.priceCents / saleUnit.factor : null;
     const unitPriceCents =
       item.unitPriceCents ??
+      unitOwnPriceCents ??
       (useWholesale ? (product.wholesale_price_cents as number) : (variant?.priceCents ?? product.selling_price_cents));
 
-    const lineSubtotalCents = unitPriceCents * item.quantity;
+    // Rounded: a fractional per-gram price times grams can land between cents.
+    const lineSubtotalCents = Math.round(unitPriceCents * item.quantity);
     if (item.discountAmountCents > lineSubtotalCents) {
       throw new Error(`Discount for "${product.name}" can't exceed its subtotal`);
     }
@@ -215,7 +242,7 @@ export function prepareCart(
       );
     }
     const minLineSubtotalCents =
-      product.minimum_price_cents !== null ? product.minimum_price_cents * item.quantity : 0;
+      product.minimum_price_cents !== null ? Math.round(product.minimum_price_cents * item.quantity) : 0;
     if (lineSubtotalCents - item.discountAmountCents < minLineSubtotalCents) {
       throw new Error(`Discount for "${product.name}" would drop it below its minimum price`);
     }
@@ -274,7 +301,9 @@ export function prepareCart(
       localSupplierId: isLocallySourced ? localSupplierId : null,
       sectionLabel: item.sectionLabel ?? null,
       variantKey: variant?.key ?? null,
-      variantLabel: variant?.label ?? null
+      variantLabel: variant?.label ?? null,
+      unitCode: saleUnit?.code ?? null,
+      unitFactor: saleUnit?.factor ?? null
     };
   });
 
@@ -556,7 +585,9 @@ function suspendSaleCore(input: unknown): { id: string } {
         // SaleItem["sectionLabel"]'s own doc comment (shared/types/sale.ts).
         sectionLabel: item.sectionLabel,
         variantKey: item.variantKey,
-        variantLabel: item.variantLabel
+        variantLabel: item.variantLabel,
+        unitCode: item.unitCode,
+        unitFactor: item.unitFactor
       });
     }
 
@@ -777,7 +808,9 @@ export function insertCompletedSaleFromCart(input: {
         // SaleItem["sectionLabel"]'s own doc comment (shared/types/sale.ts).
         sectionLabel: item.sectionLabel,
         variantKey: item.variantKey,
-        variantLabel: item.variantLabel
+        variantLabel: item.variantLabel,
+        unitCode: item.unitCode,
+        unitFactor: item.unitFactor
       });
 
       // A locally-sourced line never touched this shop's own shelf — it went straight from the

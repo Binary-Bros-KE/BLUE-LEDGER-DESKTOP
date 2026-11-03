@@ -169,7 +169,9 @@ export function createQuotation(input: unknown): Quotation {
         localSupplierId: item.localSupplierId,
         sectionLabel: item.sectionLabel,
         variantKey: item.variantKey,
-        variantLabel: item.variantLabel
+        variantLabel: item.variantLabel,
+        unitCode: item.unitCode,
+        unitFactor: item.unitFactor
       });
     }
 
@@ -253,7 +255,9 @@ export function updateQuotation(id: string, input: unknown): Quotation {
         localSupplierId: item.localSupplierId,
         sectionLabel: item.sectionLabel,
         variantKey: item.variantKey,
-        variantLabel: item.variantLabel
+        variantLabel: item.variantLabel,
+        unitCode: item.unitCode,
+        unitFactor: item.unitFactor
       });
     }
 
@@ -375,8 +379,8 @@ export function checkQuotationStock(id: string): QuotationStockCheckItem[] {
  * the taxable amount when exclusive. */
 function repriceLineForQuantity(item: QuotationItemDetailRow, product: ProductRow, quantity: number): PreparedItem {
   const unitPriceCents = item.unit_price_cents;
-  const lineSubtotalCents = unitPriceCents * quantity;
-  const originalSubtotalCents = item.unit_price_cents * item.quantity;
+  const lineSubtotalCents = Math.round(unitPriceCents * quantity);
+  const originalSubtotalCents = Math.round(item.unit_price_cents * item.quantity);
   const discountRatio = originalSubtotalCents > 0 ? item.discount_amount_cents / originalSubtotalCents : 0;
   const discountAmountCents = Math.min(Math.round(lineSubtotalCents * discountRatio), lineSubtotalCents);
   const taxableCents = lineSubtotalCents - discountAmountCents;
@@ -390,7 +394,7 @@ function repriceLineForQuantity(item: QuotationItemDetailRow, product: ProductRo
   // (same technique as computeTaxBreakdown, tax-calculation.ts) and carry that mode forward rather
   // than falling back to the product's current default, mirroring every other field this function
   // already carries over unchanged (isLocallySourced/localCostCents/localSupplierId below).
-  const originalTaxableCents = item.unit_price_cents * item.quantity - item.discount_amount_cents;
+  const originalTaxableCents = Math.round(item.unit_price_cents * item.quantity) - item.discount_amount_cents;
   const originalWasInclusive = item.tax_type === "vat" ? item.line_total_cents <= originalTaxableCents : null;
   const effectiveTaxConfig =
     originalWasInclusive === null ? productTaxConfig : { ...productTaxConfig, pricesTaxInclusive: originalWasInclusive };
@@ -413,7 +417,9 @@ function repriceLineForQuantity(item: QuotationItemDetailRow, product: ProductRo
     // Carried over unchanged, same reasoning as originalWasInclusive above.
     sectionLabel: item.section_label,
     variantKey: item.variant_key ?? null,
-    variantLabel: item.variant_label ?? null
+    variantLabel: item.variant_label ?? null,
+    unitCode: item.unit_code ?? null,
+    unitFactor: item.unit_factor ?? null
   };
 }
 
@@ -477,7 +483,9 @@ function buildConversionCart(
       localSupplierId: item.local_supplier_id,
       sectionLabel: item.section_label,
       variantKey: item.variant_key ?? null,
-      variantLabel: item.variant_label ?? null
+      variantLabel: item.variant_label ?? null,
+      unitCode: item.unit_code ?? null,
+      unitFactor: item.unit_factor ?? null
     });
   });
 
@@ -485,7 +493,7 @@ function buildConversionCart(
   let discountAmountCents = 0;
   let taxAmountCents = 0;
   for (const item of preparedItems) {
-    subtotalCents += item.unitPriceCents * item.quantity;
+    subtotalCents += Math.round(item.unitPriceCents * item.quantity);
     discountAmountCents += item.discountAmountCents;
     taxAmountCents += item.taxAmountCents;
   }
