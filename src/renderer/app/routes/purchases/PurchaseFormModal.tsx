@@ -100,6 +100,7 @@ export function PurchaseFormModal({
   products,
   locations,
   localOnly = false,
+  lockedLocationId = null,
   onSupplierCreated,
   onProductCreated,
   onSaved
@@ -113,6 +114,8 @@ export function PurchaseFormModal({
   locations: Location[];
   /** Goods on credit from a local supplier: buying price only, no drafts or shipping expense (the service enforces this). */
   localOnly?: boolean;
+  /** The storefront this employee is assigned to: goods go there, so there's nothing to choose. */
+  lockedLocationId?: string | null;
   onSupplierCreated: (supplier: Supplier) => void;
   onProductCreated: (product: Product) => void;
   onSaved: () => Promise<void>;
@@ -172,7 +175,7 @@ export function PurchaseFormModal({
       );
     } else {
       setSupplierId(null);
-      setLocationId(fromRequisition?.locationId ?? "");
+      setLocationId(fromRequisition?.locationId ?? lockedLocationId ?? "");
       setSupplierInvoiceNumber("");
       setShippingCost("");
       setShippingExpense("");
@@ -191,7 +194,7 @@ export function PurchaseFormModal({
     setSupplierSearch("");
     setProductSearch("");
     setError(null);
-  }, [open, editingPurchase, fromRequisition]);
+  }, [open, editingPurchase, fromRequisition, lockedLocationId]);
 
   // Mirrors PurchaseDetailModal's own canEditPurchase / purchase-service.ts's requireEditablePurchase
   // — only reachable when true anyway (that's the only way this modal opens for a non-draft
@@ -454,7 +457,7 @@ export function PurchaseFormModal({
               label="Destination Location"
               value={locationId}
               onChange={setLocationId}
-              disabled={fromRequisition !== null}
+              disabled={fromRequisition !== null || lockedLocationId !== null}
               options={[
                 { value: "", label: "Select location" },
                 ...locations.map((location) => ({ value: location.id, label: location.locationName }))
@@ -468,47 +471,6 @@ export function PurchaseFormModal({
             />
           </div>
 
-          <div className="mt-4">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Products</span>
-              <button
-                type="button"
-                onClick={() => setQuickCreateProductOpen(true)}
-                className="flex items-center gap-1 text-[11px] font-extrabold uppercase text-accent hover:underline cursor-pointer"
-              >
-                <Plus className="size-3" aria-hidden="true" />
-                New Product
-              </button>
-            </div>
-            <div className="relative mt-1.5">
-              <Search
-                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted"
-                aria-hidden="true"
-              />
-              <input
-                type="text"
-                value={productSearch}
-                onChange={(event) => setProductSearch(event.target.value)}
-                placeholder="Search product by name or SKU"
-                className="h-10 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
-              />
-              {filteredProducts.length > 0 && (
-                <div className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-line bg-white shadow-soft">
-                  {filteredProducts.map((product) => (
-                    <button
-                      key={product.id}
-                      type="button"
-                      onClick={() => addItemLine(product)}
-                      className="flex w-full items-center justify-between px-3.5 py-2 text-left text-sm hover:bg-soft cursor-pointer"
-                    >
-                      <span className="font-bold text-ink">{product.name}</span>
-                      {!localOnly && <span className="text-xs font-semibold text-muted">{formatCents(product.buyingPriceCents)}</span>}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
           <div className="mt-4 grid grid-cols-2 gap-3 max-w-md">
             <Field
               label="Shipping Fee"
@@ -611,8 +573,43 @@ export function PurchaseFormModal({
             </div>
 
           <div className="flex min-h-0 flex-col rounded-lg border border-line lg:h-full">
-            <div className="flex flex-none items-center justify-between border-b border-line bg-soft/60 px-3 py-1.5">
-              <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Items ({items.length})</p>
+            <div className="flex-none space-y-1.5 border-b border-line bg-soft/60 px-3 py-2">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Items ({items.length})</p>
+                <button
+                  type="button"
+                  onClick={() => setQuickCreateProductOpen(true)}
+                  className="flex items-center gap-1 text-[11px] font-extrabold uppercase text-accent hover:underline cursor-pointer"
+                >
+                  <Plus className="size-3" aria-hidden="true" />
+                  New Product
+                </button>
+              </div>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden="true" />
+                <input
+                  type="text"
+                  value={productSearch}
+                  onChange={(event) => setProductSearch(event.target.value)}
+                  placeholder="Search product by name or SKU"
+                  className="h-9 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+                />
+                {filteredProducts.length > 0 && (
+                  <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-line bg-white shadow-soft">
+                    {filteredProducts.map((product) => (
+                      <button
+                        key={product.id}
+                        type="button"
+                        onClick={() => addItemLine(product)}
+                        className="flex w-full items-center justify-between px-3.5 py-2 text-left text-sm hover:bg-soft cursor-pointer"
+                      >
+                        <span className="font-bold text-ink">{product.name}</span>
+                        {!localOnly && <span className="text-xs font-semibold text-muted">{formatCents(product.buyingPriceCents)}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="max-h-[24rem] min-h-[8rem] flex-1 overflow-y-auto lg:max-h-none">
               {items.length === 0 ? (

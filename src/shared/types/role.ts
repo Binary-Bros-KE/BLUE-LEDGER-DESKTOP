@@ -63,6 +63,9 @@ export const PERMISSION_MODULES = [
   // Cashier). See purchase-service.ts requirePurchaseAccess. No computed default on purpose: until an
   // owner ticks this, a saved role has no access (it adds stock and debt).
   { key: "local_credit_purchases", label: "Local Credit Purchases (Edit = receive goods)", actions: ["view", "create", "edit"] },
+  // Without this a role only ever sees local suppliers and their purchases, whatever else it's ticked
+  // for (Suppliers, Purchases, Reports). Saved roles get a computed default — see withLaterModuleDefaults.
+  { key: "international_suppliers", label: "International Suppliers", actions: ["view"] },
   {
     key: "borrows",
     label: "Borrow & Lend",

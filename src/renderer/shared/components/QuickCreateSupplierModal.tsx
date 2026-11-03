@@ -29,7 +29,7 @@ export function QuickCreateSupplierModal({
   const [supplierType, setSupplierType] = useState<SupplierType>("local");
   // Only someone who can see international suppliers can make one; everyone else's is simply Local.
   const { can } = usePermissions();
-  const canChooseType = can("suppliers", "view") || can("purchases", "view");
+  const canChooseType = can("international_suppliers", "view");
 
   function reset(): void {
     setBusinessName("");

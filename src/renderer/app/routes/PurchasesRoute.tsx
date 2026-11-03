@@ -137,11 +137,13 @@ function PurchaseRow({
   purchase,
   canEdit,
   localOnly,
+  showSupplierType,
   onOpen,
   onEdit
 }: {
   purchase: PurchaseListItem;
   canEdit: boolean;
+  showSupplierType: boolean;
   /** A local-credit role sees no payment figures, and every row is local anyway. */
   localOnly: boolean;
   onOpen: () => void;
@@ -161,7 +163,7 @@ function PurchaseRow({
         <div className="flex flex-col gap-0.5">
           <span>{purchase.supplierName}</span>
           <span className="text-xs font-semibold text-primary/80">{purchase.locationName}</span>
-          {!localOnly && (
+          {showSupplierType && (
             <span className="text-[10px] font-extrabold uppercase tracking-wide text-muted">{supplierTypeLabel(purchase.supplierType)}</span>
           )}
         </div>
@@ -237,6 +239,7 @@ export function PurchasesRoute(): React.JSX.Element {
   const canCreate = can("purchases", "create") || can("local_credit_purchases", "create");
   const canEdit = can("purchases", "edit");
   const canReceiveGoods = can("purchases", "edit") || can("local_credit_purchases", "edit");
+  const seesInternational = can("international_suppliers", "view");
   const canExport = can("purchases", "export");
 
   const [summary, setSummary] = useState<PurchaseSummary | null>(null);
@@ -290,7 +293,8 @@ export function PurchasesRoute(): React.JSX.Element {
       const [summaryResult, purchaseList, supplierList, productList, locationList, methodList] = await Promise.all([
         window.blueLedger.purchase.summary(),
         window.blueLedger.purchase.list(),
-        window.blueLedger.supplier.list(),
+        // Purchases can be ticked without the Suppliers tab: names are all this screen needs.
+        can("suppliers", "view") ? window.blueLedger.supplier.list() : window.blueLedger.supplier.listPickerOptions(),
         window.blueLedger.product.list(),
         window.blueLedger.location.list(),
         window.blueLedger.paymentMethod.list()
@@ -306,6 +310,8 @@ export function PurchasesRoute(): React.JSX.Element {
       setLoadError(message);
       showErrorToast(message);
     }
+    // can is stable per session; the two flags above are what actually change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canViewPurchases, localOnly]);
 
   useEffect(() => {
@@ -711,12 +717,14 @@ export function PurchasesRoute(): React.JSX.Element {
           <SelectField label="Year" value={yearFilter} onChange={setYearFilter} options={yearFilterOptions(availableYears)} />
           {canViewPurchases && !localOnly && (
           <>
-          <SelectField
-            label="Supplier Type"
-            value={typeFilter}
-            onChange={setTypeFilter}
-            options={[{ value: "", label: "All Types" }, ...SUPPLIER_TYPE_OPTIONS]}
-          />
+          {seesInternational && (
+            <SelectField
+              label="Supplier Type"
+              value={typeFilter}
+              onChange={setTypeFilter}
+              options={[{ value: "", label: "All Types" }, ...SUPPLIER_TYPE_OPTIONS]}
+            />
+          )}
           <SelectField
             label="Payment Status"
             value={paymentStatusFilter}
@@ -896,6 +904,7 @@ export function PurchasesRoute(): React.JSX.Element {
                         purchase={row.purchase}
                         canEdit={canEdit}
                         localOnly={localOnly}
+                        showSupplierType={seesInternational}
                         onOpen={() => void openView(row.purchase.id)}
                         onEdit={() => void openEditModal(row.purchase.id)}
                       />
@@ -971,7 +980,8 @@ export function PurchasesRoute(): React.JSX.Element {
         editingPurchase={editingPurchase}
         suppliers={suppliers}
         products={products}
-        locations={localOnly && session?.branch ? locations.filter((location) => location.id === session.branch?.id) : locations}
+        locations={locations}
+        lockedLocationId={session?.branch?.id ?? null}
         localOnly={localOnly}
         onSupplierCreated={handleSupplierCreated}
         onProductCreated={handleProductCreated}

@@ -1,3 +1,4 @@
+import { assertSupplierVisible } from "@main/services/supplier-service";
 import { randomUUID } from "node:crypto";
 import { runInTransaction } from "@main/database/connection";
 import * as employeeRepository from "@main/database/repositories/employee-repository";
@@ -62,6 +63,7 @@ function resolveEmployeeName(employeeId: string | null): string | null {
  * purchase-service.ts; this is the only one a person creates directly. */
 export function adjustSupplierBalance(supplierId: string, input: unknown): SupplierBalanceEntry {
   requirePermission("suppliers", "edit");
+  assertSupplierVisible(supplierId);
   const parsed = supplierBalanceAdjustSchema.parse(input);
   const { tenantId } = getCurrentTenant();
   const employeeId = getCurrentEmployeeId();
@@ -98,6 +100,7 @@ export function adjustSupplierBalance(supplierId: string, input: unknown): Suppl
  * statement. Most recent first. */
 export function listSupplierBalanceEntries(supplierId: string): SupplierBalanceEntry[] {
   requirePermission("suppliers", "view");
+  assertSupplierVisible(supplierId);
   return supplierBalanceRepository
     .findBalanceEntryRowsForSupplier(supplierId)
     .map((row) => supplierBalanceRepository.mapBalanceEntryRow(row, resolveEmployeeName(row.performed_by)));

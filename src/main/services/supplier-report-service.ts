@@ -1,3 +1,4 @@
+import { assertSupplierVisible, isSupplierHidden } from "@main/services/supplier-service";
 import * as supplierReportRepository from "@main/database/repositories/supplier-report-repository";
 import { getCurrentBranchScope, requirePermission, requirePermissionAnyOf, resolveReportLocationScope } from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
@@ -40,7 +41,7 @@ export function getSupplierSpendBreakdown(input: unknown): SupplierSpendRow[] {
   const startIso = startOfDayIso(startDate);
   const endIsoExclusive = startOfDayIso(addDaysIso(endDate, 1));
 
-  const rows = supplierReportRepository.findSupplierSpendInRange(tenantId, locationId, startIso, endIsoExclusive);
+  const rows = supplierReportRepository.findSupplierSpendInRange(tenantId, locationId, startIso, endIsoExclusive).filter((row) => !isSupplierHidden(row.supplier_id));
   const totalCents = rows.reduce((sum, row) => sum + row.total_spent_cents, 0);
 
   return rows.map((row) => ({
@@ -66,7 +67,7 @@ export function getOutstandingPurchases(input: unknown): OutstandingPurchasesSum
   const locationId = resolveReportLocationScope(explicitLocationId);
 
   const now = Date.now();
-  const rows = supplierReportRepository.findOutstandingPurchases(tenantId, locationId);
+  const rows = supplierReportRepository.findOutstandingPurchases(tenantId, locationId).filter((row) => !isSupplierHidden(row.supplier_id));
 
   const purchases: OutstandingPurchaseRow[] = rows
     .map((row) => {
@@ -101,6 +102,7 @@ export function getOutstandingPurchases(input: unknown): OutstandingPurchasesSum
 export function getSupplierPurchaseHistory(input: unknown): SupplierPurchaseHistoryEntry[] {
   requirePermission("reports", "view");
   const { supplierId } = supplierPurchaseHistoryInputSchema.parse(input);
+  assertSupplierVisible(supplierId);
   const { tenantId } = getCurrentTenant();
   const locationId = getCurrentBranchScope();
 

@@ -35,7 +35,11 @@ function assertUniqueBusinessName(tenantId: string, businessName: string, exclud
 export function listSuppliers(): Supplier[] {
   requirePermission("suppliers", "view");
   const { tenantId } = getCurrentTenant();
-  return supplierRepository.findAllSupplierRows(tenantId).map(supplierRepository.mapSupplierRow);
+  const seesInternational = canSeeInternationalSuppliers();
+  return supplierRepository
+    .findAllSupplierRows(tenantId)
+    .map(supplierRepository.mapSupplierRow)
+    .filter((supplier) => seesInternational || supplier.supplierType === "local");
 }
 
 /** Powers the "local/outsourced-source" supplier picker on Checkout/Invoices/Quotations — a role
@@ -47,6 +51,7 @@ export function listSupplierPickerOptions(): SupplierPickerOption[] {
     ["suppliers", "view"],
     ["sales", "view"],
     ["quotations", "view"],
+    ["purchases", "view"],
     ["local_credit_purchases", "view"]
   ]);
   const { tenantId } = getCurrentTenant();
@@ -58,13 +63,24 @@ export function listSupplierPickerOptions(): SupplierPickerOption[] {
     .map(({ id, businessName, phone1, status, supplierType }) => ({ id, businessName, phone1, status, supplierType }));
 }
 
-/** International suppliers are for people with real supplier or purchase access — not a Cashier. */
-function canSeeInternationalSuppliers(): boolean {
-  return hasPermission("suppliers", "view") || hasPermission("purchases", "view");
+/** Without this a role only ever sees local suppliers and their purchases, whatever else it's ticked for. */
+export function canSeeInternationalSuppliers(): boolean {
+  return hasPermission("international_suppliers", "view");
+}
+
+/** For filtering any row that names a supplier. */
+export function isSupplierHidden(supplierId: string): boolean {
+  return !canSeeInternationalSuppliers() && supplierRepository.findSupplierRowById(supplierId)?.supplier_type !== "local";
+}
+
+/** A hidden supplier reads as not existing, rather than announcing itself. */
+export function assertSupplierVisible(supplierId: string): void {
+  if (isSupplierHidden(supplierId)) throw new Error("Supplier not found");
 }
 
 export function getSupplier(id: string): Supplier {
   requirePermission("suppliers", "view");
+  assertSupplierVisible(id);
   const row = supplierRepository.findSupplierRowById(id);
   if (!row) {
     throw new Error("Supplier not found");
@@ -101,6 +117,7 @@ export function createSupplier(input: unknown): Supplier {
 
 export function updateSupplier(id: string, input: unknown): Supplier {
   requirePermission("suppliers", "edit");
+  assertSupplierVisible(id);
   const parsed = supplierInputSchema.parse(input);
   const existing = supplierRepository.findSupplierRowById(id);
   if (!existing) {
@@ -111,7 +128,7 @@ export function updateSupplier(id: string, input: unknown): Supplier {
 
   const row = supplierRepository.updateSupplierRow(id, {
     ...parsed,
-    supplierType: parsed.supplierType ?? (existing.supplier_type as SupplierType)
+    supplierType: canSeeInternationalSuppliers() ? (parsed.supplierType ?? (existing.supplier_type as SupplierType)) : "local"
   });
   return supplierRepository.mapSupplierRow(row);
 }
@@ -120,6 +137,7 @@ export function updateSupplier(id: string, input: unknown): Supplier {
  * id, so only their visibility toggles. */
 export function setSupplierStatus(id: string, status: SupplierStatus): Supplier {
   requirePermission("suppliers", "edit");
+  assertSupplierVisible(id);
   const row = supplierRepository.setSupplierStatusRow(id, status);
   return supplierRepository.mapSupplierRow(row);
 }
