@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
 import {
   Ban,
   CheckCircle2,
-  ClipboardPen,
-  Clock,
-  Eye,
   Link2,
+  Pencil,
   Loader2,
   PackagePlus,
   Plus,
@@ -15,14 +12,13 @@ import {
   Trash2,
   XCircle
 } from "lucide-react";
-import { PurchaseFormModal, type PurchaseFromRequisition } from "@renderer/app/routes/purchases/PurchaseFormModal";
+import { PurchaseFormModal, type PurchaseFromRequisition } from "./PurchaseFormModal";
 import { Button } from "@renderer/shared/components/Button";
 import { useConfirm } from "@renderer/shared/components/ConfirmModal";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { QuickCreateProductModal } from "@renderer/shared/components/QuickCreateProductModal";
-import { StatTile } from "@renderer/shared/components/StatTile";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
@@ -37,19 +33,11 @@ import type {
 } from "@shared/types/purchase-requisition";
 import type { Supplier } from "@shared/types/supplier";
 
-type FilterTab = "all" | PurchaseRequisitionStatus;
-
-const FILTER_TABS: Array<{ value: FilterTab; label: string }> = [
-  { value: "all", label: "All" },
-  { value: "pending", label: "Pending" },
-  { value: "approved", label: "Approved" },
-  { value: "rejected", label: "Rejected" },
-  { value: "cancelled", label: "Cancelled" }
-];
-
 /** A line in the New Requisition form — a catalog product (productId) or a free-text item. */
 type DraftLine = {
   key: string;
+  /** The existing line's id while editing a requisition — kept so the same line is updated. */
+  id?: string;
   productId: string | null;
   itemName: string;
   sku: string | null;
@@ -139,7 +127,26 @@ function ProductSearch({
   );
 }
 
-export function PurchaseRequisitionsRoute(): React.JSX.Element {
+export type RequisitionWorkflow = {
+  requisitions: PurchaseRequisitionListItem[] | null;
+  loadError: string | null;
+  reload: () => Promise<void>;
+  canCreate: boolean;
+  canApprove: boolean;
+  openCreate: () => void;
+  openView: (id: string) => Promise<void>;
+  /** Every requisition modal (create/edit, review, reject, approve-as-purchase) — render once. */
+  elements: React.JSX.Element;
+};
+
+/**
+ * The whole purchase-requisition workflow, hosted by the merged Purchases screen (PurchasesRoute):
+ * raise one, edit it (requester or Super Admin, while pending), review it (link/create products),
+ * reject it, or approve it — which opens the normal purchase form pre-filled and turns the
+ * requisition into that purchase. Owns its own data and modals; the screen only lists rows and calls
+ * openCreate/openView. `onConverted` lets the host refresh its purchase list after an approval.
+ */
+export function useRequisitionWorkflow({ onConverted }: { onConverted?: () => void } = {}): RequisitionWorkflow {
   const { can, session } = usePermissions();
   const confirm = useConfirm();
   const canCreate = can("purchase_requisitions", "create");
@@ -148,6 +155,7 @@ export function PurchaseRequisitionsRoute(): React.JSX.Element {
   const canConvert = canApprove && can("purchases", "create");
   const needsStorefrontPicker = session?.branch == null;
   const employeeId = session?.employee.id ?? null;
+  const isSuperAdmin = session?.role?.isSuperAdmin ?? false;
 
   const [requisitions, setRequisitions] = useState<PurchaseRequisitionListItem[] | null>(null);
   const [products, setProducts] = useState<ProductListItem[]>([]);
@@ -155,11 +163,9 @@ export function PurchaseRequisitionsRoute(): React.JSX.Element {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<FilterTab>("all");
-  const [locationFilter, setLocationFilter] = useState("");
-
   const [createOpen, setCreateOpen] = useState(false);
+  // Non-null while the form is editing an existing pending requisition instead of raising a new one.
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [createStorefrontId, setCreateStorefrontId] = useState("");
   const [createNotes, setCreateNotes] = useState("");
   const [createLines, setCreateLines] = useState<DraftLine[]>([]);
@@ -184,14 +190,20 @@ export function PurchaseRequisitionsRoute(): React.JSX.Element {
   );
   const productById = useMemo(() => new Map(products.map((product) => [product.id, product])), [products]);
 
+  const canView = can("purchase_requisitions", "view");
+
   const loadRequisitions = useCallback(async (): Promise<void> => {
+    if (!canView) {
+      setRequisitions([]);
+      return;
+    }
     try {
       setRequisitions(await window.blueLedger.purchaseRequisition.list());
       setLoadError(null);
     } catch (err) {
       setLoadError(getErrorMessage(err, "Failed to load requisitions"));
     }
-  }, []);
+  }, [canView]);
 
   useEffect(() => {
     void loadRequisitions();
@@ -204,31 +216,36 @@ export function PurchaseRequisitionsRoute(): React.JSX.Element {
     }
   }, [loadRequisitions, canConvert]);
 
-  const counts = useMemo(() => {
-    const list = requisitions ?? [];
-    return {
-      total: list.length,
-      pending: list.filter((r) => r.status === "pending").length,
-      approved: list.filter((r) => r.status === "approved").length,
-      closed: list.filter((r) => r.status === "rejected" || r.status === "cancelled").length
-    };
-  }, [requisitions]);
-
-  const filtered = useMemo(() => {
-    const needle = searchTerm.trim().toLowerCase();
-    return (requisitions ?? []).filter((r) => {
-      if (statusFilter !== "all" && r.status !== statusFilter) return false;
-      if (locationFilter && r.storefrontId !== locationFilter) return false;
-      if (!needle) return true;
-      return `${r.requisitionNumber} ${r.storefrontName} ${r.requestedByName} ${r.purchaseNumber ?? ""}`
-        .toLowerCase()
-        .includes(needle);
-    });
-  }, [requisitions, searchTerm, statusFilter, locationFilter]);
-
   // ---- New requisition -------------------------------------------------------------------------
 
+  /** Client rule: only whoever raised a requisition (or a Super Admin) may edit or withdraw it. */
+  function canModify(requisition: PurchaseRequisitionListItem): boolean {
+    return requisition.status === "pending" && (requisition.requestedBy === employeeId || isSuperAdmin);
+  }
+
+  function openEdit(requisition: PurchaseRequisition): void {
+    setEditingId(requisition.id);
+    setCreateStorefrontId(requisition.storefrontId);
+    setCreateNotes(requisition.notes ?? "");
+    setCreateLines(
+      requisition.items.map((item) => ({
+        key: item.id,
+        id: item.id,
+        productId: item.productId,
+        itemName: item.itemName,
+        sku: item.sku,
+        quantity: item.quantityRequested,
+        notes: item.notes ?? ""
+      }))
+    );
+    setFreeTextName("");
+    setCreateError(null);
+    setViewing(null);
+    setCreateOpen(true);
+  }
+
   function openCreate(): void {
+    setEditingId(null);
     setCreateStorefrontId("");
     setCreateNotes("");
     setCreateLines([]);
@@ -261,7 +278,7 @@ export function PurchaseRequisitionsRoute(): React.JSX.Element {
 
   async function submitCreate(): Promise<void> {
     setCreateError(null);
-    if (needsStorefrontPicker && !createStorefrontId) {
+    if (!editingId && needsStorefrontPicker && !createStorefrontId) {
       setCreateError("Choose which storefront this requisition is for");
       return;
     }
@@ -271,17 +288,24 @@ export function PurchaseRequisitionsRoute(): React.JSX.Element {
     }
     setCreateSaving(true);
     try {
-      const created = await window.blueLedger.purchaseRequisition.create({
-        storefrontId: needsStorefrontPicker ? createStorefrontId : null,
-        notes: createNotes,
-        items: createLines.map((line) => ({
-          productId: line.productId,
-          itemName: line.itemName,
-          quantity: line.quantity,
-          notes: line.notes
-        }))
-      });
-      showSuccessToast(`Requisition ${created.requisitionNumber} sent for approval`);
+      const items = createLines.map((line) => ({
+        id: line.id ?? null,
+        productId: line.productId,
+        itemName: line.itemName,
+        quantity: line.quantity,
+        notes: line.notes
+      }));
+      if (editingId) {
+        const updated = await window.blueLedger.purchaseRequisition.update(editingId, { notes: createNotes, items });
+        showSuccessToast(`${updated.requisitionNumber} updated`);
+      } else {
+        const created = await window.blueLedger.purchaseRequisition.create({
+          storefrontId: needsStorefrontPicker ? createStorefrontId : null,
+          notes: createNotes,
+          items
+        });
+        showSuccessToast(`Requisition ${created.requisitionNumber} sent for approval`);
+      }
       setCreateOpen(false);
       await loadRequisitions();
     } catch (err) {
@@ -390,213 +414,17 @@ export function PurchaseRequisitionsRoute(): React.JSX.Element {
     const id = converting?.requisitionId;
     setConverting(null);
     await loadRequisitions();
+    onConverted?.();
     if (id && viewing?.id === id) await openView(id);
   }
 
-  // ---- Render ----------------------------------------------------------------------------------
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25 }}
-      className="relative mt-6 space-y-5 pb-10 pl-4"
-    >
-      <span
-        className="pointer-events-none absolute -left-[5px] top-2 size-2.5 rounded-full border-2 border-line bg-app"
-        aria-hidden="true"
-      />
-      <div
-        className="pointer-events-none absolute bottom-2 left-0 top-2 border-l-2 border-dashed border-line"
-        aria-hidden="true"
-      />
-      <span
-        className="pointer-events-none absolute -left-[5px] bottom-2 size-2.5 rounded-full border-2 border-line bg-app"
-        aria-hidden="true"
-      />
-
-      <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Inventory</p>
-            <h2 className="mt-1 flex items-center gap-2 text-xl font-extrabold">
-              <ClipboardPen className="size-5 text-primary" aria-hidden="true" />
-              Purchase Requisitions
-            </h2>
-            <p className="mt-1 text-xs font-semibold text-muted">
-              {canApprove
-                ? "Requests to buy stock. Approve one to turn it into a purchase."
-                : "Ask for stock to be bought for your storefront — a manager approves it into a purchase."}
-            </p>
-          </div>
-          {canCreate && (
-            <Button type="button" onClick={openCreate} className="h-9 text-xs">
-              <Plus className="mr-1.5 size-4" aria-hidden="true" />
-              New Requisition
-            </Button>
-          )}
-        </div>
-
-        {loadError && (
-          <div className="mt-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
-            {loadError}
-          </div>
-        )}
-
-        {requisitions !== null && requisitions.length > 0 && (
-          <>
-            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <StatTile icon={ClipboardPen} label="Total" value={String(counts.total)} tone="primary" />
-              <StatTile icon={Clock} label="Pending" value={String(counts.pending)} tone="warning" />
-              <StatTile icon={CheckCircle2} label="Approved" value={String(counts.approved)} tone="success" />
-              <StatTile icon={XCircle} label="Rejected / Cancelled" value={String(counts.closed)} tone="danger" />
-            </div>
-
-            <div className="mt-4 flex flex-wrap items-end gap-3">
-              <label className="block sm:max-w-xs sm:flex-1">
-                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Search</span>
-                <div className="relative mt-1.5">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden="true" />
-                  <input
-                    type="text"
-                    value={searchTerm}
-                    onChange={(event) => setSearchTerm(event.target.value)}
-                    placeholder="Requisition #, storefront, requester, PO #"
-                    className="h-10 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm font-semibold text-ink outline-none transition placeholder:font-normal placeholder:text-muted/60 focus:border-accent focus:ring-4 focus:ring-accent/15"
-                  />
-                </div>
-              </label>
-              {needsStorefrontPicker && (
-                <SelectField
-                  label="Storefront"
-                  value={locationFilter}
-                  onChange={setLocationFilter}
-                  options={[
-                    { value: "", label: "All Storefronts" },
-                    ...storefronts.map((location) => ({ value: location.id, label: location.locationName }))
-                  ]}
-                  className="w-44"
-                />
-              )}
-              <div className="flex flex-wrap gap-1.5 rounded-lg border border-line bg-soft px-1 py-0.5">
-                {FILTER_TABS.map((tab) => (
-                  <button
-                    key={tab.value}
-                    type="button"
-                    onClick={() => setStatusFilter(tab.value)}
-                    className={cn(
-                      "rounded-md px-3 py-1.5 text-[11px] font-extrabold transition cursor-pointer",
-                      statusFilter === tab.value ? "bg-primary text-white" : "text-muted hover:bg-white"
-                    )}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </>
-        )}
-
-        <div className="mt-5">
-          {requisitions === null && !loadError ? (
-            <div className="flex min-h-[240px] items-center justify-center text-muted">
-              <Loader2 className="size-6 animate-spin" aria-hidden="true" />
-            </div>
-          ) : requisitions !== null && requisitions.length === 0 ? (
-            <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-line bg-soft/60 p-10 text-center">
-              <div className="grid size-14 place-items-center rounded-2xl bg-soft text-primary">
-                <ClipboardPen className="size-7" aria-hidden="true" />
-              </div>
-              <h3 className="mt-4 text-lg font-extrabold">No requisitions yet</h3>
-              <p className="mt-1 max-w-sm text-sm font-semibold text-muted">
-                Running low on something, or need a product the shop doesn't stock yet? Raise a requisition and a
-                manager will approve it into a purchase.
-              </p>
-              {canCreate && (
-                <Button type="button" onClick={openCreate} className="mt-5 h-9 text-xs">
-                  <Plus className="mr-1.5 size-4" aria-hidden="true" />
-                  New Requisition
-                </Button>
-              )}
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="flex min-h-[200px] flex-col items-center justify-center rounded-lg border border-dashed border-line bg-soft/60 p-10 text-center">
-              <Search className="size-7 text-muted" aria-hidden="true" />
-              <h3 className="mt-4 text-lg font-extrabold">No requisitions match your filters</h3>
-            </div>
-          ) : (
-            <div className="overflow-x-auto rounded-lg border border-line">
-              <table className="w-full border-collapse text-sm">
-                <thead>
-                  <tr className="bg-primary text-white">
-                    <Th>Requisition #</Th>
-                    <Th>Requested By</Th>
-                    <Th>Items</Th>
-                    <Th>Status</Th>
-                    <Th className="text-right">Actions</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((r) => (
-                    <tr key={r.id} className="border-t border-line odd:bg-white even:bg-soft/50">
-                      <td className="px-4 py-3 text-xs font-bold tabular-nums text-muted">
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-ink">{r.requisitionNumber}</span>
-                          <span>{formatDateTime(r.requestedAt)}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 font-extrabold">
-                        <div className="flex flex-col gap-0.5">
-                          <span>{r.requestedByName}</span>
-                          <span className="text-xs font-semibold text-muted">{r.storefrontName}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-xs font-bold tabular-nums text-muted">
-                        {r.itemCount} item{r.itemCount === 1 ? "" : "s"} · {r.totalQuantityRequested} unit
-                        {r.totalQuantityRequested === 1 ? "" : "s"}
-                        {r.status === "pending" && r.unlinkedItemCount > 0 && (
-                          <span className="ml-1.5 text-accent">
-                            · {r.unlinkedItemCount} new item{r.unlinkedItemCount === 1 ? "" : "s"}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <DashedPill tone={statusTone(r.status)}>{r.status}</DashedPill>
-                          {r.purchaseNumber && (
-                            <DashedPill tone="accent">
-                              {r.purchaseNumber} · {purchaseStatusLabel(r.purchaseStatus)}
-                            </DashedPill>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end">
-                          <button
-                            type="button"
-                            onClick={() => void openView(r.id)}
-                            aria-label={`View ${r.requisitionNumber}`}
-                            title={canApprove && r.status === "pending" ? "Review" : "View details"}
-                            className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-ink cursor-pointer"
-                          >
-                            <Eye className="size-3.5" aria-hidden="true" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </section>
-
+  const elements = (
+    <>
       {/* ---- New requisition ---- */}
       <Modal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        title="New Purchase Requisition"
+        title={editingId ? "Edit Requisition" : "New Purchase Requisition"}
         description="List what needs to be bought. Pick products from the catalog, or describe something the shop doesn't stock yet."
         widthClassName="max-w-3xl"
       >
@@ -606,7 +434,7 @@ export function PurchaseRequisitionsRoute(): React.JSX.Element {
           </div>
         )}
 
-        {needsStorefrontPicker && (
+        {needsStorefrontPicker && !editingId && (
           <SelectField
             label="Storefront"
             value={createStorefrontId}
@@ -739,7 +567,7 @@ export function PurchaseRequisitionsRoute(): React.JSX.Element {
             className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50"
           >
             {createSaving && <Loader2 className="mr-1.5 size-4 animate-spin" aria-hidden="true" />}
-            Send for Approval
+            {editingId ? "Save Changes" : "Send for Approval"}
           </Button>
         </div>
       </Modal>
@@ -845,16 +673,27 @@ export function PurchaseRequisitionsRoute(): React.JSX.Element {
             {viewing.status === "pending" && (
               <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
                 <div>
-                  {(viewing.requestedBy === employeeId || canApprove) && (
-                    <Button
-                      type="button"
-                      onClick={() => void handleCancel(viewing)}
-                      disabled={viewBusy}
-                      className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft disabled:opacity-50"
-                    >
-                      <Ban className="mr-1.5 size-4" aria-hidden="true" />
-                      Cancel Requisition
-                    </Button>
+                  {canModify(viewing) && (
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        onClick={() => openEdit(viewing)}
+                        disabled={viewBusy}
+                        className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft disabled:opacity-50"
+                      >
+                        <Pencil className="mr-1.5 size-4" aria-hidden="true" />
+                        Edit
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={() => void handleCancel(viewing)}
+                        disabled={viewBusy}
+                        className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft disabled:opacity-50"
+                      >
+                        <Ban className="mr-1.5 size-4" aria-hidden="true" />
+                        Cancel Requisition
+                      </Button>
+                    </div>
                   )}
                 </div>
                 {canApprove && (
@@ -953,6 +792,17 @@ export function PurchaseRequisitionsRoute(): React.JSX.Element {
           <Loader2 className="size-6 animate-spin text-white" aria-hidden="true" />
         </div>
       )}
-    </motion.div>
+    </>
   );
+
+  return {
+    requisitions,
+    loadError,
+    reload: loadRequisitions,
+    canCreate,
+    canApprove,
+    openCreate,
+    openView,
+    elements
+  };
 }

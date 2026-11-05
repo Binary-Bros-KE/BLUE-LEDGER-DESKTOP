@@ -1,3 +1,4 @@
+import { assertStrictVerification, stampSaleVerifications } from "@main/services/mpesa-verification-local";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import * as customerRepository from "@main/database/repositories/customer-repository";
@@ -358,6 +359,11 @@ export function getInvoiceSummary(): InvoiceSummary {
 export function createInvoice(input: unknown): Sale {
   requirePermission("sales", "create");
   const parsed: CreateInvoiceInput = createInvoiceSchema.parse(input);
+  assertStrictVerification(requireActiveSession(parsed.locationId).locationId, input);
+  return stampSaleVerifications(createInvoiceCore(parsed), input);
+}
+
+function createInvoiceCore(parsed: CreateInvoiceInput): Sale {
   const { tenantId, employeeId, locationId } = requireActiveSession(parsed.locationId);
 
   const customer = customerRepository.findCustomerRowById(parsed.customerId);
@@ -533,7 +539,8 @@ export function recordInvoicePayment(saleId: string, input: unknown): Sale {
   requirePermission("sales", "edit");
   const parsed = recordPaymentSchema.parse(input);
   const { tenantId } = getCurrentTenant();
-  return applyPayment(tenantId, saleId, parsed);
+  assertStrictVerification(requireInvoiceRow(saleId, tenantId).location_id, input);
+  return stampSaleVerifications(applyPayment(tenantId, saleId, parsed), input);
 }
 
 /** Records a final payment for the exact remaining balance, keeping the payment ledger complete. */
@@ -542,13 +549,17 @@ export function markInvoicePaid(saleId: string, input: unknown): Sale {
   const parsed = markPaidSchema.parse(input);
   const { tenantId } = getCurrentTenant();
   const row = requireInvoiceRow(saleId, tenantId);
+  assertStrictVerification(row.location_id, input);
 
-  return applyPayment(tenantId, saleId, {
-    paymentMethodId: parsed.paymentMethodId,
-    amountCents: row.balance_due_cents,
-    reference: parsed.reference,
-    notes: parsed.notes
-  });
+  return stampSaleVerifications(
+    applyPayment(tenantId, saleId, {
+      paymentMethodId: parsed.paymentMethodId,
+      amountCents: row.balance_due_cents,
+      reference: parsed.reference,
+      notes: parsed.notes
+    }),
+    input
+  );
 }
 
 // Direct invoice cancellation (restock + refund) now lives in invoice-cancellation-service.ts's

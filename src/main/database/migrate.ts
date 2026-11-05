@@ -3661,7 +3661,34 @@ const migrations = [
     `
   },
   {
-    version: 106,
+    // 106 belongs to the dropshipping branch.
+    version: 107,
+    name: "sale_mpesa_verifications",
+    sql: `
+      -- JSON: M-Pesa code -> {status, verifiedAt, payerName, amountCents}. NULL when verification wasn't
+      -- in play, which is what hides the indicator for shops that don't use it. See
+      -- services/mpesa-verification-local.ts.
+      ALTER TABLE sales ADD COLUMN mpesa_verifications TEXT;
+    `
+  },
+  {
+    version: 108,
+    name: "supplier_type",
+    sql: `
+      -- Local or international. Existing suppliers: Kenya or no country = local, any other country =
+      -- international. SERVER's migration applies the same rule to its copy, so updated_at isn't
+      -- bumped: nothing needs pushing, and a bump would make every device's copy conflict.
+      ALTER TABLE suppliers ADD COLUMN supplier_type TEXT NOT NULL DEFAULT 'local';
+      UPDATE suppliers
+      SET supplier_type = 'international'
+      WHERE TRIM(COALESCE(country, '')) <> ''
+        AND LOWER(TRIM(country)) NOT IN ('kenya', 'ke');
+    `
+  },
+  {
+    // 110, not 109: the unreleased product-units branch already claims 109. Applied migrations are
+    // tracked as a set (see migrateDatabase), so 109 arriving after this one is fine.
+    version: 110,
     name: "dropship_links_local_only",
     sql: `
       -- Which products follow a dropship supplier's stock (see dropship-repository.ts). LOCAL-ONLY BY

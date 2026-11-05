@@ -121,7 +121,7 @@ export function SupplierPicker({
         open={quickCreateOpen}
         onClose={() => setQuickCreateOpen(false)}
         onCreated={(supplier) => {
-          onSupplierCreated({ id: supplier.id, businessName: supplier.businessName, phone1: supplier.phone1, status: supplier.status });
+          onSupplierCreated({ id: supplier.id, businessName: supplier.businessName, phone1: supplier.phone1, status: supplier.status, supplierType: supplier.supplierType });
           onChange(supplier.id);
           setQuickCreateOpen(false);
         }}

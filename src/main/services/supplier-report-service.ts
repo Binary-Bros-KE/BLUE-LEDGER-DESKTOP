@@ -76,6 +76,7 @@ export function getOutstandingPurchases(input: unknown): OutstandingPurchasesSum
         purchaseId: row.purchase_id,
         supplierId: row.supplier_id,
         supplierName: row.supplier_name,
+        supplierType: row.supplier_type === "international" ? ("international" as const) : ("local" as const),
         phone: row.phone,
         purchaseNumber: row.purchase_number,
         status: row.status,

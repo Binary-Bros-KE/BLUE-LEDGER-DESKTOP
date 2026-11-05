@@ -13,7 +13,15 @@ import type { InventoryBalance, LocationStockLevel } from "./inventory";
 import type { InventoryReportData, StockAsOfDateData } from "./inventory-report";
 import type { InvoiceListItem, InvoiceSummary } from "./invoice";
 import type { Location, LocationStatus } from "./location";
-import type { MpesaStatusResult, MpesaStkPushResult, MpesaTillSettings } from "./mpesa";
+import type {
+  MpesaPaymentMatch,
+  MpesaStatusResult,
+  MpesaStkPushResult,
+  MpesaTillSettings,
+  MpesaVerificationMode,
+  MpesaVerificationState,
+  MpesaVerifyResult
+} from "./mpesa";
 import type { PaymentMethod } from "./payment-method";
 import type { WorkingHoursLockStatus } from "../lib/working-hours-lock";
 import type { WorkingHours, WorkingHoursStorefrontEntry } from "./working-hours";
@@ -239,6 +247,13 @@ export type IpcInvokeMap = {
     args: [string];
     result: string | null;
   };
+  "mpesa:verification-state": { args: [string]; result: MpesaVerificationState };
+  "mpesa:verification-save-mode": { args: [string, MpesaVerificationMode]; result: MpesaVerificationState };
+  "mpesa:verification-connect": { args: [string]; result: MpesaVerificationState };
+  "mpesa:check-payment": { args: [{ locationId: string; amountCents: number; claimKey: string }]; result: MpesaPaymentMatch[] };
+  "mpesa:verify-code": { args: [{ locationId: string; code: string; amountCents: number | null; claimKey: string }]; result: MpesaVerifyResult };
+  "mpesa:attach-claim": { args: [{ claimKey: string; saleId: string }]; result: void };
+  "mpesa:verify-sale-code": { args: [{ saleId: string; code: string; replacesCode: string | null }]; result: MpesaVerifyResult };
   "mpesa:get-settings": {
     args: [string];
     result: MpesaTillSettings | null;
@@ -1308,6 +1323,10 @@ export type IpcInvokeMap = {
     args: [string];
     result: PurchaseRequisition;
   };
+  "purchase-requisition:update": {
+    args: [string, Record<string, unknown>];
+    result: PurchaseRequisition;
+  };
   "purchase-requisition:reject": {
     args: [string, Record<string, unknown>];
     result: PurchaseRequisition;
@@ -1618,6 +1637,14 @@ export type BlueLedgerApi = {
       input: Record<string, unknown>
     ) => Promise<IpcInvokeMap["mpesa:save-settings"]["result"]>;
     isConfigured: (locationId: string) => Promise<IpcInvokeMap["mpesa:is-configured"]["result"]>;
+    verificationState: (locationId: string) => Promise<MpesaVerificationState>;
+    saveVerificationMode: (locationId: string, mode: MpesaVerificationMode) => Promise<MpesaVerificationState>;
+    connectVerification: (locationId: string) => Promise<MpesaVerificationState>;
+    checkPayment: (input: { locationId: string; amountCents: number; claimKey: string }) => Promise<MpesaPaymentMatch[]>;
+    verifyCode: (input: { locationId: string; code: string; amountCents: number | null; claimKey: string }) => Promise<MpesaVerifyResult>;
+    attachClaim: (input: { claimKey: string; saleId: string }) => Promise<void>;
+    /** replacesCode set = an admin trying a different code; the sale keeps its old code unless the new one verifies. */
+    verifySaleCode: (input: { saleId: string; code: string; replacesCode: string | null }) => Promise<MpesaVerifyResult>;
     sendStkPush: (input: {
       locationId: string;
       phone: string;
@@ -2221,6 +2248,8 @@ export type BlueLedgerApi = {
     get: (id: string) => Promise<PurchaseRequisition>;
     create: (input: Record<string, unknown>) => Promise<PurchaseRequisition>;
     cancel: (id: string) => Promise<PurchaseRequisition>;
+    /** Requester or Super Admin, pending only. */
+    update: (id: string, input: Record<string, unknown>) => Promise<PurchaseRequisition>;
     reject: (id: string, input: Record<string, unknown>) => Promise<PurchaseRequisition>;
     linkItem: (id: string, input: Record<string, unknown>) => Promise<PurchaseRequisition>;
     /** input = the same payload the Purchase form sends for a new purchase (locationId is ignored —

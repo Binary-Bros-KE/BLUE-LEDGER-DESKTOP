@@ -1,7 +1,9 @@
+import { usePermissions } from "@renderer/shared/hooks/use-permissions";
+import { SUPPLIER_TYPE_OPTIONS, type SupplierType } from "@shared/types/supplier";
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
-import { Field } from "@renderer/shared/components/form-fields";
+import { Field, SelectField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
@@ -24,6 +26,10 @@ export function QuickCreateSupplierModal({
   const [phone1, setPhone1] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [supplierType, setSupplierType] = useState<SupplierType>("local");
+  // Only someone who can see international suppliers can make one; everyone else's is simply Local.
+  const { can } = usePermissions();
+  const canChooseType = can("suppliers", "view") || can("purchases", "view");
 
   function reset(): void {
     setBusinessName("");
@@ -41,6 +47,7 @@ export function QuickCreateSupplierModal({
         businessName,
         contactPerson,
         phone1,
+        supplierType,
         paymentOption: "cash"
       });
       showSuccessToast(`Supplier "${supplier.businessName}" created`);
@@ -89,6 +96,14 @@ export function QuickCreateSupplierModal({
             required
           />
           <Field label="Phone 1" value={phone1} onChange={setPhone1} placeholder="e.g. 0712 345 678" required />
+          {canChooseType && (
+            <SelectField
+              label="Supplier Type"
+              value={supplierType}
+              onChange={(value) => setSupplierType(value as SupplierType)}
+              options={SUPPLIER_TYPE_OPTIONS}
+            />
+          )}
         </div>
 
         <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">

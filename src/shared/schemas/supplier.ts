@@ -56,6 +56,9 @@ export const supplierInputSchema = z.object({
   county: optionalText(100),
   town: optionalText(100),
   physicalAddress: optionalText(500),
+  // Optional so a save that doesn't mention it (a spreadsheet import, an older screen) can't reset it;
+  // supplier-service.ts resolves it to the existing value, or "local" on create.
+  supplierType: z.enum(["local", "international"]).optional(),
   paymentOption: z.enum(paymentOptionValues),
   mpesaName: optionalText(150),
   mpesaNumber: optionalPhone,

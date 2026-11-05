@@ -1,3 +1,4 @@
+import { mpesaStatusForCode, parseMpesaVerifications } from "@shared/lib/mpesa-verification";
 import * as locationRepository from "@main/database/repositories/location-repository";
 import * as purchaseRepository from "@main/database/repositories/purchase-repository";
 import * as reportRepository from "@main/database/repositories/report-repository";
@@ -491,6 +492,7 @@ export function getSalesFinancialOverview(input: unknown): SalesFinancialOvervie
     name: row.supplier_name,
     balanceCents: row.balance_cents,
     documentCount: row.document_count,
+    supplierType: row.supplier_type === "international" ? "international" : "local",
   }));
   const totalDebtCents = debtors.reduce((sum, d) => sum + d.balanceCents, 0);
   const totalCreditCents = creditors.reduce((sum, c) => sum + c.balanceCents, 0);
@@ -750,12 +752,14 @@ export function getPaymentTransactions(input: unknown): PaymentTransactionRow[] 
   for (const row of saleRows) {
     const status = row.is_voided ? "failed" : "complete";
     const partyName = row.customer_name ?? "Walk-in customer";
+    const verifications = parseMpesaVerifications(row.mpesa_verifications);
 
     if (row.invoice_number !== null) {
       for (const payment of parseSalePaymentsJson(row.payments)) {
         results.push({
           id: `${row.id}:${payment.id}`,
           transactionCode: payment.reference ?? row.invoice_number ?? row.id,
+          mpesaVerification: mpesaStatusForCode(verifications, payment.reference),
           occurredAt: payment.receivedAt,
           locationName: row.location_name,
           paymentMethodName: payment.paymentMethodName,
@@ -777,6 +781,7 @@ export function getPaymentTransactions(input: unknown): PaymentTransactionRow[] 
           results.push({
             id: `${row.id}:${payment.id}`,
             transactionCode: payment.reference ?? row.receipt_number ?? row.id,
+            mpesaVerification: mpesaStatusForCode(verifications, payment.reference),
             occurredAt: row.completed_at,
             locationName: row.location_name,
             paymentMethodName: payment.paymentMethodName,
@@ -794,6 +799,7 @@ export function getPaymentTransactions(input: unknown): PaymentTransactionRow[] 
         results.push({
           id: row.id,
           transactionCode: row.payment_reference ?? row.receipt_number ?? row.id,
+          mpesaVerification: mpesaStatusForCode(verifications, row.payment_reference),
           occurredAt: row.completed_at,
           locationName: row.location_name,
           paymentMethodName: row.payment_method_name,

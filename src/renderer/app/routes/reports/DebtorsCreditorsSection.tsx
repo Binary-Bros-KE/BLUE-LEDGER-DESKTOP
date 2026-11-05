@@ -57,6 +57,10 @@ export function DebtorsCreditorsSection({
   totalCreditCents: number;
   expectedProfitCents: number;
 }): React.JSX.Element {
+  const localCreditors = creditors.filter((party) => party.supplierType !== "international");
+  const internationalCreditors = creditors.filter((party) => party.supplierType === "international");
+  const sum = (parties: SalesLedgerParty[]) => parties.reduce((total, party) => total + party.balanceCents, 0);
+
   return (
     <div className="space-y-4">
       <div>
@@ -82,7 +86,9 @@ export function DebtorsCreditorsSection({
           valueCents={totalCreditCents}
           formula="Unpaid balances you owe to suppliers"
           footnote={
-            creditors.length === 0 ? "No outstanding supplier debt" : `You owe ${creditors.length} supplier${creditors.length === 1 ? "" : "s"}`
+            creditors.length === 0
+              ? "No outstanding supplier debt"
+              : `Local ${money(sum(localCreditors))} · International ${money(sum(internationalCreditors))}`
           }
         />
         <OverviewCard
@@ -94,7 +100,7 @@ export function DebtorsCreditorsSection({
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-3">
         <div className="rounded-lg border border-line bg-white p-4">
           <p className="text-[11px] font-bold uppercase tracking-wide text-muted">Who owes you</p>
           <div className="mt-3">
@@ -102,9 +108,21 @@ export function DebtorsCreditorsSection({
           </div>
         </div>
         <div className="rounded-lg border border-line bg-white p-4">
-          <p className="text-[11px] font-bold uppercase tracking-wide text-muted">Who you owe</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-muted">You owe locally</p>
+            <p className="text-xs font-extrabold tabular-nums text-danger">{money(sum(localCreditors))}</p>
+          </div>
           <div className="mt-3">
-            <PartyList parties={creditors} emptyMessage="You don't currently owe any supplier money." />
+            <PartyList parties={localCreditors} emptyMessage="You don't currently owe any local supplier." />
+          </div>
+        </div>
+        <div className="rounded-lg border border-line bg-white p-4">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-muted">You owe internationally</p>
+            <p className="text-xs font-extrabold tabular-nums text-danger">{money(sum(internationalCreditors))}</p>
+          </div>
+          <div className="mt-3">
+            <PartyList parties={internationalCreditors} emptyMessage="You don't currently owe any international supplier." />
           </div>
         </div>
       </div>

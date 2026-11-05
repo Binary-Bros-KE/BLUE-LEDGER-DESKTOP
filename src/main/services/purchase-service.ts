@@ -6,9 +6,10 @@ import * as locationRepository from "@main/database/repositories/location-reposi
 import * as paymentMethodRepository from "@main/database/repositories/payment-method-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
 import * as purchaseRepository from "@main/database/repositories/purchase-repository";
+import * as requisitionRepository from "@main/database/repositories/purchase-requisition-repository";
 import type { PurchaseRow } from "@main/database/repositories/purchase-repository";
 import * as supplierRepository from "@main/database/repositories/supplier-repository";
-import { getCurrentBranchScope, getCurrentEmployeeId, getSession, requirePermission } from "@main/services/auth-service";
+import { getCurrentBranchScope, getCurrentEmployeeId, getSession, hasPermission, requirePermission } from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
 import { createShippingCostExpenseIfNeeded, deleteShippingCostExpenseIfExists } from "@main/services/expense-service";
 import { deleteManagedPurchaseAttachment } from "@main/services/image-service";
@@ -71,6 +72,22 @@ function generatePurchaseNumber(tenantId: string): string {
     digits: 6,
     existingNumbers: purchaseRepository.findMaxPurchaseNumberRow(tenantId)
   });
+}
+
+/** Who may do what to purchases. "all" is the full Purchases module. "local" is Local Credit Purchases
+ * (goods taken on credit, e.g. by a Cashier): only local suppliers, only their own storefront, and only
+ * create and receive. They set the buying price but never the selling price. No drafts, editing,
+ * cancelling or paying. */
+function requirePurchaseAccess(action: "view" | "create" | "edit"): "all" | "local" {
+  if (hasPermission("purchases", action)) return "all";
+  requirePermission("local_credit_purchases", action);
+  return "local";
+}
+
+function canLocalRoleAccess(purchase: { supplierId: string; locationId: string; status: string }): boolean {
+  const supplier = supplierRepository.findSupplierRowById(purchase.supplierId);
+  const branch = getCurrentBranchScope();
+  return supplier?.supplier_type === "local" && purchase.status !== "draft" && (!branch || purchase.locationId === branch);
 }
 
 function assertSupplierExists(tenantId: string, supplierId: string): void {
@@ -190,16 +207,30 @@ export function getPurchaseDetail(id: string): Purchase {
     throw new Error("Purchase not found");
   }
   const items = purchaseRepository.findPurchaseItemDetailRowsForPurchase(id).map(purchaseRepository.mapPurchaseItemDetailRow);
-  return purchaseRepository.mapPurchaseDetailRow(row, items);
+  const requisition = requisitionRepository.findRequisitionRowByPurchaseId(id);
+  return {
+    ...purchaseRepository.mapPurchaseDetailRow(row, items),
+    origin: requisition
+      ? {
+          requisitionId: requisition.id,
+          requisitionNumber: requisition.requisition_number,
+          requestedByName: requisition.requested_by_name,
+          requestedAt: requisition.requested_at,
+          approvedByName: requisition.reviewed_by_name,
+          approvedAt: requisition.reviewed_at
+        }
+      : null
+  };
 }
 
 /** Tenant-wide by default; branch-scoped to the caller's assigned location like Sales/Invoices/Quotations —
  * a super-admin with no assigned branch sees every storefront's purchase orders. */
 export function listPurchases(): PurchaseListItem[] {
-  requirePermission("purchases", "view");
+  const access = requirePurchaseAccess("view");
   const { tenantId } = getCurrentTenant();
   const locationId = getCurrentBranchScope();
-  return purchaseRepository.findAllPurchaseListRows(tenantId, locationId).map(purchaseRepository.mapPurchaseListRow);
+  const rows = purchaseRepository.findAllPurchaseListRows(tenantId, locationId).map(purchaseRepository.mapPurchaseListRow);
+  return access === "local" ? rows.filter((row) => row.supplierType === "local" && row.status !== "draft") : rows;
 }
 
 export function getPurchaseSummary(): PurchaseSummary {
@@ -210,8 +241,10 @@ export function getPurchaseSummary(): PurchaseSummary {
 }
 
 export function getPurchase(id: string): Purchase {
-  requirePermission("purchases", "view");
-  return getPurchaseDetail(id);
+  const access = requirePurchaseAccess("view");
+  const purchase = getPurchaseDetail(id);
+  if (access === "local" && !canLocalRoleAccess(purchase)) throw new Error("Purchase not found");
+  return purchase;
 }
 
 /** Creates a purchase order — stock never moves here. Goods only enter inventory via receivePurchaseGoods. */
@@ -225,7 +258,7 @@ export function createPurchase(input: unknown): Purchase {
  * which is why this is a hook rather than the caller wrapping createPurchase in its own transaction.
  * Every validation/permission check below still applies unchanged. */
 export function createPurchaseWithHook(input: unknown, afterInsert?: (purchaseId: string) => void): Purchase {
-  requirePermission("purchases", "create");
+  const localOnly = requirePurchaseAccess("create") === "local";
   const parsed: PurchaseCreateInput = purchaseCreateSchema.parse(input);
   const { tenantId } = getCurrentTenant();
   const employeeId = getCurrentEmployeeId();
@@ -233,8 +266,16 @@ export function createPurchaseWithHook(input: unknown, afterInsert?: (purchaseId
   assertSupplierExists(tenantId, parsed.supplierId);
   assertLocationBelongsToTenant(tenantId, parsed.locationId);
   assertUniqueSupplierInvoiceNumber(tenantId, parsed.supplierId, parsed.supplierInvoiceNumber);
+  if (localOnly) {
+    const branch = getCurrentBranchScope();
+    if (supplierRepository.findSupplierRowById(parsed.supplierId)?.supplier_type !== "local") throw new Error("You can only record purchases from local suppliers");
+    if (parsed.intent !== "ordered") throw new Error("Save this as Ordered rather than a draft");
+    if (parsed.shippingExpenseCents > 0) throw new Error("You can't book a shipping cost as an expense");
+    if (branch && parsed.locationId !== branch) throw new Error("You can only receive purchases into your own storefront");
+  }
+  const lines = localOnly ? parsed.items.map((item) => ({ ...item, sellingPriceCents: undefined })) : parsed.items;
 
-  const cart = prepareCart(tenantId, parsed.items, parsed.shippingCostCents, parsed.shippingExpenseCents);
+  const cart = prepareCart(tenantId, lines, parsed.shippingCostCents, parsed.shippingExpenseCents);
   const purchaseId = `purchase_${randomUUID()}`;
   const now = new Date().toISOString();
 
@@ -500,7 +541,7 @@ export function cancelPurchase(id: string): Purchase {
  * accurate. Supports repeated partial receiving sessions until every line is fully received.
  */
 export function receivePurchaseGoods(id: string, input: unknown): Purchase {
-  requirePermission("purchases", "edit");
+  if (requirePurchaseAccess("edit") === "local" && !canLocalRoleAccess(getPurchaseDetail(id))) throw new Error("Purchase not found");
   const parsed = receiveGoodsSchema.parse(input);
   const { tenantId } = getCurrentTenant();
   const employeeId = getCurrentEmployeeId();

@@ -32,7 +32,10 @@ import { SupplierStatementModal } from "./purchases/SupplierStatementModal";
 import {
   SUPPLIER_PAYMENT_OPTION_OPTIONS,
   type Supplier,
-  type SupplierPaymentOption
+  SUPPLIER_TYPE_OPTIONS,
+  supplierTypeLabel,
+  type SupplierPaymentOption,
+  type SupplierType
 } from "@shared/types/supplier";
 import { SupplierBalanceAdjustmentModal } from "./suppliers/SupplierBalanceAdjustmentModal";
 import { SupplierBalanceHistoryModal } from "./suppliers/SupplierBalanceHistoryModal";
@@ -52,6 +55,7 @@ type FormState = {
   county: string;
   town: string;
   physicalAddress: string;
+  supplierType: SupplierType;
   paymentOption: SupplierPaymentOption;
   mpesaName: string;
   mpesaNumber: string;
@@ -76,6 +80,7 @@ function emptyForm(): FormState {
     county: "",
     town: "",
     physicalAddress: "",
+    supplierType: "local",
     paymentOption: "cash",
     mpesaName: "",
     mpesaNumber: "",
@@ -101,6 +106,7 @@ function toFormState(supplier: Supplier): FormState {
     county: supplier.county ?? "",
     town: supplier.town ?? "",
     physicalAddress: supplier.physicalAddress ?? "",
+    supplierType: supplier.supplierType,
     paymentOption: supplier.paymentOption,
     mpesaName: supplier.mpesaName ?? "",
     mpesaNumber: supplier.mpesaNumber ?? "",
@@ -141,6 +147,7 @@ export function SuppliersRoute(): React.JSX.Element {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [paymentOptionFilter, setPaymentOptionFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
 
   const loadSuppliers = useCallback(async () => {
     setLoadError(null);
@@ -173,7 +180,9 @@ export function SuppliersRoute(): React.JSX.Element {
     const active = suppliers?.filter((supplier) => supplier.status === "active").length ?? 0;
     const inactive = total - active;
     const totalOwedCents = suppliers?.reduce((sum, supplier) => sum + supplier.balanceCents, 0) ?? 0;
-    return { total, active, inactive, totalOwedCents };
+    const owedInternationalCents =
+      suppliers?.filter((supplier) => supplier.supplierType === "international").reduce((sum, supplier) => sum + supplier.balanceCents, 0) ?? 0;
+    return { total, active, inactive, totalOwedCents, owedInternationalCents, owedLocalCents: totalOwedCents - owedInternationalCents };
   }, [suppliers]);
 
   const filteredSuppliers = useMemo(() => {
@@ -186,6 +195,9 @@ export function SuppliersRoute(): React.JSX.Element {
     if (paymentOptionFilter) {
       list = list.filter((supplier) => supplier.paymentOption === paymentOptionFilter);
     }
+    if (typeFilter) {
+      list = list.filter((supplier) => supplier.supplierType === typeFilter);
+    }
     const term = searchTerm.trim().toLowerCase();
     if (term) {
       list = list.filter((supplier) => {
@@ -194,13 +206,14 @@ export function SuppliersRoute(): React.JSX.Element {
       });
     }
     return list;
-  }, [suppliers, statusFilter, paymentOptionFilter, searchTerm]);
+  }, [suppliers, statusFilter, paymentOptionFilter, typeFilter, searchTerm]);
 
   const exportRequest = useMemo<ExportListRequest | null>(() => {
     if (!filteredSuppliers) return null;
     const filterParts: string[] = [];
     if (statusFilter !== "all") filterParts.push(`Status: ${statusFilter}`);
     if (paymentOptionFilter) filterParts.push(`Payment Option: ${paymentOptionLabel(paymentOptionFilter)}`);
+    if (typeFilter) filterParts.push(`Type: ${supplierTypeLabel(typeFilter as SupplierType)}`);
     if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
 
     return {
@@ -212,6 +225,7 @@ export function SuppliersRoute(): React.JSX.Element {
         { key: "businessName", header: "Business Name" },
         { key: "contactPerson", header: "Contact Person" },
         { key: "phone", header: "Phone" },
+        { key: "supplierType", header: "Type" },
         { key: "paymentOption", header: "Payment Option" },
         { key: "balance", header: "Balance", align: "right" },
         { key: "creditLimit", header: "Credit Limit", align: "right" },
@@ -222,6 +236,7 @@ export function SuppliersRoute(): React.JSX.Element {
         businessName: supplier.businessName,
         contactPerson: supplier.contactPerson ?? "—",
         phone: supplier.phone1,
+        supplierType: supplierTypeLabel(supplier.supplierType),
         paymentOption: paymentOptionLabel(supplier.paymentOption),
         balance: formatCents(supplier.balanceCents),
         creditLimit: supplier.creditLimitCents !== null ? formatCents(supplier.creditLimitCents) : "—",
@@ -238,7 +253,7 @@ export function SuppliersRoute(): React.JSX.Element {
       ],
       fileBaseName: `Suppliers_${new Date().toISOString().slice(0, 10)}`
     };
-  }, [filteredSuppliers, stats, statusFilter, paymentOptionFilter, searchTerm]);
+  }, [filteredSuppliers, stats, statusFilter, paymentOptionFilter, typeFilter, searchTerm]);
 
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]): void {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -277,6 +292,7 @@ export function SuppliersRoute(): React.JSX.Element {
       county: form.county,
       town: form.town,
       physicalAddress: form.physicalAddress,
+      supplierType: form.supplierType,
       paymentOption: form.paymentOption,
       mpesaName: form.mpesaName,
       mpesaNumber: form.mpesaNumber,
@@ -344,11 +360,13 @@ export function SuppliersRoute(): React.JSX.Element {
         aria-hidden="true"
       />
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 xl:grid-cols-6">
         <StatTile icon={Truck} label="Total Suppliers" value={String(stats.total)} tone="primary" />
         <StatTile icon={CheckCircle2} label="Active Suppliers" value={String(stats.active)} tone="success" />
         <StatTile icon={XCircle} label="Inactive Suppliers" value={String(stats.inactive)} tone="warning" />
         <StatTile icon={Wallet} label="Total Owed" value={formatCents(stats.totalOwedCents)} tone="danger" />
+        <StatTile icon={Wallet} label="Owed Locally" value={formatCents(stats.owedLocalCents)} tone="danger" />
+        <StatTile icon={Wallet} label="Owed Internationally" value={formatCents(stats.owedInternationalCents)} tone="danger" />
       </div>
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
@@ -429,6 +447,13 @@ export function SuppliersRoute(): React.JSX.Element {
               onChange={setPaymentOptionFilter}
               options={[{ value: "", label: "All Payment Options" }, ...SUPPLIER_PAYMENT_OPTION_OPTIONS]}
               className="w-full sm:w-48"
+            />
+            <SelectField
+              label="Type"
+              value={typeFilter}
+              onChange={setTypeFilter}
+              options={[{ value: "", label: "All Types" }, ...SUPPLIER_TYPE_OPTIONS]}
+              className="w-full sm:w-40"
             />
           </div>
         )}
@@ -519,6 +544,9 @@ export function SuppliersRoute(): React.JSX.Element {
                           </span>
                           <span className="text-xs font-semibold text-muted">
                             {supplier.phone1}
+                          </span>
+                          <span className="text-[10px] font-extrabold uppercase tracking-wide text-primary/80">
+                            {supplierTypeLabel(supplier.supplierType)}
                           </span>
                         </div>
                       </td>
@@ -712,6 +740,16 @@ export function SuppliersRoute(): React.JSX.Element {
               className="mt-4"
               rows={2}
             />
+            <SelectField
+              label="Supplier Type"
+              value={form.supplierType}
+              onChange={(value) => updateField("supplierType", value as SupplierType)}
+              options={SUPPLIER_TYPE_OPTIONS}
+              className="mt-4 sm:max-w-xs"
+            />
+            <p className="mt-1 text-[11px] font-semibold text-muted">
+              Roles with only Local Credit Purchases (usually Cashiers) never see International suppliers or their purchases.
+            </p>
           </div>
 
           <div className="mt-5 border-t border-line pt-4">

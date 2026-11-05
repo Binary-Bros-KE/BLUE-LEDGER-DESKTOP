@@ -84,6 +84,10 @@ export type PurchaseListRow = {
   created_at: string;
   shipment_departed_at: string | null;
   shipment_eta: string | null;
+  /** Only selected by findAllPurchaseListRows — other list queries leave it undefined (→ null). */
+  requisition_number?: string | null;
+  /** Same: other list queries leave it undefined (→ local). */
+  supplier_type?: string;
 };
 
 export type PurchaseItemRow = {
@@ -132,7 +136,9 @@ export function findAllPurchaseListRows(tenantId: string, locationId: string | n
         p.received_at,
         p.created_at,
         p.shipment_departed_at,
-        p.shipment_eta
+        p.shipment_eta,
+        s.supplier_type,
+        (SELECT pr.requisition_number FROM purchase_requisitions pr WHERE pr.purchase_id = p.id LIMIT 1) AS requisition_number
       FROM purchases p
       JOIN suppliers s ON s.id = p.supplier_id
       JOIN locations l ON l.id = p.location_id
@@ -278,6 +284,7 @@ export function mapPurchaseListRow(row: PurchaseListRow): PurchaseListItem {
     purchaseNumber: row.purchase_number,
     supplierId: row.supplier_id,
     supplierName: row.supplier_name,
+    supplierType: row.supplier_type === "international" ? "international" : "local",
     supplierInvoiceNumber: row.supplier_invoice_number,
     locationId: row.location_id,
     locationName: row.location_name,
@@ -292,7 +299,8 @@ export function mapPurchaseListRow(row: PurchaseListRow): PurchaseListItem {
     receivedAt: row.received_at,
     createdAt: row.created_at,
     shipmentDepartedAt: row.shipment_departed_at,
-    shipmentEta: row.shipment_eta
+    shipmentEta: row.shipment_eta,
+    requisitionNumber: row.requisition_number ?? null
   };
 }
 

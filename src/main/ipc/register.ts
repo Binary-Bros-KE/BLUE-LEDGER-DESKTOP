@@ -77,8 +77,16 @@ import {
   getStkStatus,
   isMpesaConfigured,
   saveMpesaTillSettings,
-  sendStkPush
+  sendStkPush,
+  attachClaim,
+  checkPayment,
+  connectVerification,
+  getVerificationState,
+  saveVerificationMode,
+  verifyCode,
+  verifySaleCode
 } from "@main/services/mpesa-service";
+import type { MpesaVerificationMode } from "@shared/types/mpesa";
 import {
   createPaymentMethod,
   deletePaymentMethod,
@@ -161,7 +169,8 @@ import {
   linkPurchaseRequisitionItem,
   listPendingPurchaseRequisitions,
   listPurchaseRequisitions,
-  rejectPurchaseRequisition
+  rejectPurchaseRequisition,
+  updatePurchaseRequisition
 } from "@main/services/purchase-requisition-service";
 import {
   deleteInvoiceDraft,
@@ -503,6 +512,21 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.locationPickLogo, () => pickAndStoreLocationLogo());
   ipcMain.handle(ipcChannels.locationReadLogoPreview, (_event, relativePath: string) =>
     readManagedLocationLogoPreview(relativePath)
+  );
+  ipcMain.handle(ipcChannels.mpesaVerificationState, (_event, locationId: string) => getVerificationState(locationId));
+  ipcMain.handle(ipcChannels.mpesaVerificationSaveMode, (_event, locationId: string, mode: MpesaVerificationMode) =>
+    saveVerificationMode(locationId, mode)
+  );
+  ipcMain.handle(ipcChannels.mpesaVerificationConnect, (_event, locationId: string) => connectVerification(locationId));
+  ipcMain.handle(ipcChannels.mpesaCheckPayment, (_event, input: { locationId: string; amountCents: number; claimKey: string }) =>
+    checkPayment(input)
+  );
+  ipcMain.handle(ipcChannels.mpesaVerifyCode, (_event, input: { locationId: string; code: string; amountCents: number | null; claimKey: string }) =>
+    verifyCode(input)
+  );
+  ipcMain.handle(ipcChannels.mpesaAttachClaim, (_event, input: { claimKey: string; saleId: string }) => attachClaim(input));
+  ipcMain.handle(ipcChannels.mpesaVerifySaleCode, (_event, input: { saleId: string; code: string; replacesCode: string | null }) =>
+    verifySaleCode(input)
   );
   ipcMain.handle(ipcChannels.mpesaGetSettings, (_event, locationId: string) => getMpesaTillSettings(locationId));
   ipcMain.handle(ipcChannels.mpesaSaveSettings, (_event, locationId: string, input: unknown) =>
@@ -1067,6 +1091,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.purchaseRequisitionGet, (_event, id: string) => getPurchaseRequisition(id));
   ipcMain.handle(ipcChannels.purchaseRequisitionCreate, (_event, input: unknown) => createPurchaseRequisition(input));
   ipcMain.handle(ipcChannels.purchaseRequisitionCancel, (_event, id: string) => cancelPurchaseRequisition(id));
+  ipcMain.handle(ipcChannels.purchaseRequisitionUpdate, (_event, id: string, input: unknown) => updatePurchaseRequisition(id, input));
   ipcMain.handle(ipcChannels.purchaseRequisitionReject, (_event, id: string, input: unknown) => rejectPurchaseRequisition(id, input));
   ipcMain.handle(ipcChannels.purchaseRequisitionLinkItem, (_event, id: string, input: unknown) =>
     linkPurchaseRequisitionItem(id, input)

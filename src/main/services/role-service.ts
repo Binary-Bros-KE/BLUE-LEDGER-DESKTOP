@@ -115,7 +115,9 @@ const DEFAULT_SYSTEM_ROLES: Array<{
       // Small day-to-day buys (tape, delivery bags) — deliberately NOT "expenses" itself, which stays
       // Manager/Super Admin only (rent, wifi, salary-as-expense entries, etc.). See
       // local-purchase-service.ts for why this is safe: it's a hard, query-level filter, not a UI hide.
-      local_purchases: ["view", "create", "edit", "delete"]
+      local_purchases: ["view", "create", "edit", "delete"],
+      // Goods taken on credit: local suppliers only, see purchase-service.ts requirePurchaseAccess.
+      local_credit_purchases: ["view", "create", "edit"]
     }
   },
   {

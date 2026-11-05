@@ -1,3 +1,5 @@
+import { mpesaStatusForSale, parseMpesaVerifications } from "@shared/lib/mpesa-verification";
+import type { MpesaVerifications } from "@shared/types/mpesa";
 import { getDatabase } from "@main/database/connection";
 import type { NotesSection } from "@shared/lib/document-sections";
 import { computePaymentStatus } from "@shared/lib/invoice";
@@ -42,6 +44,7 @@ export type SaleRow = {
   grand_total_cents: number;
   payment_method_id: string | null;
   payment_reference: string | null;
+  mpesa_verifications?: string | null;
   amount_received_cents: number | null;
   change_given_cents: number | null;
   notes: string | null;
@@ -143,6 +146,7 @@ export type SaleSummaryRow = {
   /** NULL when the sale has no delivery attached at all; 0/1 (delivery_notes.is_delivered) otherwise. */
   delivery_is_delivered: number | null;
   location_id: string;
+  mpesa_verifications: string | null;
 };
 
 /** Pass null for locationId to see every branch's receipts (e.g. a super-admin with no assigned branch). */
@@ -164,7 +168,8 @@ export function findAllSaleSummaryRows(tenantId: string, locationId: string | nu
         s.completed_at,
         s.created_at,
         (SELECT dn.is_delivered FROM delivery_notes dn WHERE dn.sale_id = s.id) AS delivery_is_delivered,
-        s.location_id
+        s.location_id,
+        s.mpesa_verifications
       FROM sales s
       JOIN employees e ON e.id = s.employee_id
       JOIN locations l ON l.id = s.location_id
@@ -193,7 +198,8 @@ export function mapSaleSummaryRow(row: SaleSummaryRow): SaleListItem {
     createdAt: row.created_at,
     hasDeliveryNote: row.delivery_is_delivered !== null,
     deliveryIsDelivered: row.delivery_is_delivered === null ? null : row.delivery_is_delivered === 1,
-    locationId: row.location_id
+    locationId: row.location_id,
+    mpesaVerification: mpesaStatusForSale(parseMpesaVerifications(row.mpesa_verifications))
   };
 }
 
@@ -766,6 +772,25 @@ export function updateSaleIncludeTaxBreakdownRow(id: string, includeTaxBreakdown
   return row;
 }
 
+/** Bumps updated_at so the sales sync trigger pushes the change to the other tills. */
+export function updateSaleMpesaVerificationsRow(id: string, verifications: MpesaVerifications): void {
+  const now = new Date().toISOString();
+  getDatabase()
+    .prepare("UPDATE sales SET mpesa_verifications = ?, sync_status = 'pending', updated_at = ? WHERE id = ?")
+    .run(JSON.stringify(verifications), now, id);
+}
+
+/** An admin's corrected code: swaps it everywhere the sale records it, with the new verification. */
+export function replaceSaleMpesaCodeRow(
+  id: string,
+  input: { paymentReference: string | null; paymentsJson: string; verifications: MpesaVerifications }
+): void {
+  const now = new Date().toISOString();
+  getDatabase()
+    .prepare("UPDATE sales SET payment_reference = ?, payments = ?, mpesa_verifications = ?, sync_status = 'pending', updated_at = ? WHERE id = ?")
+    .run(input.paymentReference, input.paymentsJson, JSON.stringify(input.verifications), now, id);
+}
+
 export function updateSaleIncludeBusinessInfoRow(id: string, includeBusinessInfo: boolean): SaleRow {
   const now = new Date().toISOString();
 
@@ -938,6 +963,7 @@ export function mapSaleDetailRow(
     paymentMethodId: row.payment_method_id,
     paymentMethodName: row.payment_method_name,
     paymentReference: row.payment_reference,
+    mpesaVerifications: parseMpesaVerifications(row.mpesa_verifications),
     amountReceivedCents: row.amount_received_cents,
     changeGivenCents: row.change_given_cents,
     notes: row.notes,

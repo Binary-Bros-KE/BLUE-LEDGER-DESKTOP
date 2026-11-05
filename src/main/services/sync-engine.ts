@@ -28,6 +28,7 @@ import * as serviceChargeRepository from "@main/database/repositories/service-ch
 import * as stockMovementRepository from "@main/database/repositories/stock-movement-repository";
 import * as stockReceiptRepository from "@main/database/repositories/stock-receipt-repository";
 import * as stockRequestRepository from "@main/database/repositories/stock-request-repository";
+import { parseMpesaVerifications } from "@shared/lib/mpesa-verification";
 import * as purchaseRequisitionRepository from "@main/database/repositories/purchase-requisition-repository";
 import * as supplierBalanceRepository from "@main/database/repositories/supplier-balance-repository";
 import * as supplierRepository from "@main/database/repositories/supplier-repository";
@@ -425,6 +426,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       county: s.county,
       town: s.town,
       physicalAddress: s.physicalAddress,
+      supplierType: s.supplierType,
       paymentOption: s.paymentOption,
       mpesaName: s.mpesaName,
       mpesaNumber: s.mpesaNumber,
@@ -1021,6 +1023,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       includeTaxBreakdown: Boolean(row.include_tax_breakdown),
       includeBusinessInfo: Boolean(row.include_business_info),
       payments: JSON.parse(row.payments) as unknown,
+      mpesaVerifications: parseMpesaVerifications(row.mpesa_verifications),
       items,
       serviceCharges,
       delivery,
@@ -1818,6 +1821,7 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       { local: "county", cloud: "county" },
       { local: "town", cloud: "town" },
       { local: "physical_address", cloud: "physicalAddress" },
+      { local: "supplier_type", cloud: "supplierType" },
       { local: "payment_option", cloud: "paymentOption" },
       { local: "mpesa_name", cloud: "mpesaName" },
       { local: "mpesa_number", cloud: "mpesaNumber" },
@@ -2469,6 +2473,7 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         "tenant_id",
         ...SALE_HEADER_COLUMNS.map((c) => c.local),
         "payments",
+        "mpesa_verifications",
         "notes_sections",
         "include_tax_breakdown",
         "include_business_info",
@@ -2489,6 +2494,7 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
               : (row[c.cloud] as SQLInputValue)) ?? null
         ),
         JSON.stringify(row.payments ?? []),
+        row.mpesaVerifications ? JSON.stringify(row.mpesaVerifications) : null,
         // Same "bound separately, older payload predates this field entirely" treatment as payments
         // above — defaults to [], matching the column's own DEFAULT '[]'.
         JSON.stringify(row.notesSections ?? []),
@@ -2510,6 +2516,7 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
       const setClauses = [
         ...SALE_HEADER_COLUMNS.map((c) => `${c.local} = ?`),
         "payments = ?",
+        "mpesa_verifications = ?",
         "notes_sections = ?",
         "include_tax_breakdown = ?",
         "include_business_info = ?",
@@ -2526,6 +2533,7 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
               : (row[c.cloud] as SQLInputValue)) ?? null
         ),
         JSON.stringify(row.payments ?? []),
+        row.mpesaVerifications ? JSON.stringify(row.mpesaVerifications) : null,
         JSON.stringify(row.notesSections ?? []),
         row.includeTaxBreakdown === false ? 0 : 1,
         row.includeBusinessInfo === false ? 0 : 1,

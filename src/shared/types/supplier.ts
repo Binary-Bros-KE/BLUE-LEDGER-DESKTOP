@@ -16,6 +16,18 @@ export const SUPPLIER_STATUS_OPTIONS = [
 
 export type SupplierStatus = (typeof SUPPLIER_STATUS_OPTIONS)[number]["value"];
 
+/** What a Local Credit Purchases role may see, and the split in "what we owe". */
+export const SUPPLIER_TYPE_OPTIONS = [
+  { value: "local", label: "Local" },
+  { value: "international", label: "International" }
+] as const;
+
+export type SupplierType = (typeof SUPPLIER_TYPE_OPTIONS)[number]["value"];
+
+export function supplierTypeLabel(type: SupplierType): string {
+  return type === "international" ? "International" : "Local";
+}
+
 export type SupplierSyncStatus = "pending" | "synced" | "syncing" | "error";
 
 export type SupplierInputFields = {
@@ -30,6 +42,7 @@ export type SupplierInputFields = {
   county: string | null;
   town: string | null;
   physicalAddress: string | null;
+  supplierType: SupplierType;
   paymentOption: SupplierPaymentOption;
   mpesaName: string | null;
   mpesaNumber: string | null;
@@ -75,4 +88,5 @@ export type SupplierPickerOption = {
   businessName: string;
   phone1: string;
   status: SupplierStatus;
+  supplierType: SupplierType;
 };

@@ -8,6 +8,7 @@ import { DeliveryNotePreview } from "@renderer/shared/components/DeliveryNotePre
 import { ExportMenu } from "@renderer/shared/components/ExportMenu";
 import { Field, SelectField, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
+import { MpesaSaleCodeActions, MpesaStatusPill } from "@renderer/shared/components/MpesaVerification";
 import { ReceiptPreview } from "@renderer/shared/components/ReceiptPreview";
 import { StatTile } from "@renderer/shared/components/StatTile";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
@@ -673,6 +674,7 @@ export function ReceiptsRoute(): React.JSX.Element {
                         <td className="truncate px-4 py-3 text-xs font-bold tabular-nums text-muted">
                           <div>
                           <span>{sale.receiptNumber ?? "—"}</span>
+                          <MpesaStatusPill status={sale.mpesaVerification} />
                           <span className="block text-[10px] font-normal text-muted">
                             {formatDate(sale.completedAt)}
                           </span>
@@ -768,6 +770,21 @@ export function ReceiptsRoute(): React.JSX.Element {
         ) : viewingSale ? (
           <div>
             {tenantContext && <ReceiptPreview sale={viewingSale} tenant={tenantContext} />}
+
+            {Object.keys(viewingSale.mpesaVerifications ?? {}).map((code) => (
+              <div key={code} className="mt-3 rounded-lg border border-line px-3 py-2">
+                <p className="text-xs font-extrabold text-ink">M-Pesa {code}</p>
+                <MpesaSaleCodeActions
+                  saleId={viewingSale.id}
+                  code={code}
+                  verifications={viewingSale.mpesaVerifications}
+                  onChanged={async () => {
+                    setViewingSale(await window.blueLedger.sale.get(viewingSale.id));
+                    await loadAll();
+                  }}
+                />
+              </div>
+            ))}
 
             {viewingSale.items.some((item) => item.isLocallySourced) && (
               <div className="mt-4 rounded-lg border border-line bg-soft px-3.5 py-3">

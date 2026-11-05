@@ -5,7 +5,7 @@ import * as requisitionRepository from "@main/database/repositories/purchase-req
 import {
   getCurrentBranchScope,
   getCurrentEmployeeId,
-  hasPermission,
+  getCurrentIsSuperAdmin,
   requirePermission
 } from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
@@ -15,7 +15,8 @@ import { getCurrentTenant } from "@main/services/tenant-service";
 import {
   purchaseRequisitionCreateSchema,
   purchaseRequisitionLinkItemSchema,
-  purchaseRequisitionRejectSchema
+  purchaseRequisitionRejectSchema,
+  purchaseRequisitionUpdateSchema
 } from "@shared/schemas/purchase-requisition";
 import { isStorefrontType, type LocationType } from "@shared/types/location";
 import type {
@@ -174,15 +175,45 @@ export function createPurchaseRequisition(input: unknown): PurchaseRequisition {
   return buildRequisition(requisitionId);
 }
 
-/** The requester can withdraw their own pending requisition; an approver can withdraw anyone's. */
+/** Client rule: a requisition belongs to whoever raised it — only they (or a Super Admin) may edit or
+ * withdraw it. Approvers act on it through Approve/Reject instead. */
+function requireOwnerOrSuperAdmin(row: requisitionRepository.PurchaseRequisitionRow, employeeId: string, verb: string): void {
+  if (row.requested_by !== employeeId && !getCurrentIsSuperAdmin()) {
+    throw new Error(`Only the person who raised this requisition (or a Super Admin) can ${verb} it`);
+  }
+}
+
+/** Rewrites a PENDING requisition's notes and lines (requester or Super Admin). Catalog lines
+ * re-snapshot the product's current name; a free-text line keeps what was typed. */
+export function updatePurchaseRequisition(id: string, input: unknown): PurchaseRequisition {
+  requirePermission("purchase_requisitions", "view");
+  const parsed = purchaseRequisitionUpdateSchema.parse(input);
+  const employeeId = requireEmployeeId();
+  const row = requireVisibleRow(id);
+  requirePending(row);
+  requireOwnerOrSuperAdmin(row, employeeId, "edit");
+
+  const lines = parsed.items.map((item) => {
+    if (!item.productId) {
+      return { id: item.id ?? null, productId: null, itemName: item.itemName, quantityRequested: item.quantity, notes: item.notes };
+    }
+    const product = productRepository.findProductRowById(item.productId);
+    if (!product || product.tenant_id !== row.tenant_id) {
+      throw new Error("One of the selected products was not found");
+    }
+    return { id: item.id ?? null, productId: product.id, itemName: product.name, quantityRequested: item.quantity, notes: item.notes };
+  });
+
+  runInTransaction(() => requisitionRepository.replaceRequisitionContentRows(id, parsed.notes, lines));
+  return buildRequisition(id);
+}
+
 export async function cancelPurchaseRequisition(id: string): Promise<PurchaseRequisition> {
   requirePermission("purchase_requisitions", "view");
   const employeeId = requireEmployeeId();
   const row = requireVisibleRow(id);
   requirePending(row);
-  if (row.requested_by !== employeeId && !hasPermission("purchase_requisitions", "approve")) {
-    throw new Error("Only the person who raised this requisition (or an approver) can cancel it");
-  }
+  requireOwnerOrSuperAdmin(row, employeeId, "cancel");
   await assertNotAlreadyDecidedRemotely("purchase_requisitions", id, "pending");
 
   requisitionRepository.updateRequisitionDecisionRow(id, {

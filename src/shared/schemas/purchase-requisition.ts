@@ -27,6 +27,29 @@ export const purchaseRequisitionCreateSchema = z.object({
 
 export type PurchaseRequisitionCreateInput = z.infer<typeof purchaseRequisitionCreateSchema>;
 
+/** Editing a PENDING requisition — requester or Super Admin only (purchase-requisition-service.ts).
+ * The full line list again; a line carrying its existing `id` is kept as the same line. */
+export const purchaseRequisitionUpdateSchema = z.object({
+  notes: optionalText(1000),
+  items: z
+    .array(
+      z
+        .object({
+          id: z.string().trim().min(1).nullable().optional(),
+          productId: z.string().trim().min(1).nullable().optional(),
+          itemName: z.string().trim().max(200).optional().default(""),
+          quantity: z.coerce.number().int().positive("Quantity must be greater than 0"),
+          notes: optionalText(300)
+        })
+        .refine((item) => Boolean(item.productId) || item.itemName.length > 0, {
+          message: "Pick a product or describe the item"
+        })
+    )
+    .min(1, "Add at least one item")
+});
+
+export type PurchaseRequisitionUpdateInput = z.infer<typeof purchaseRequisitionUpdateSchema>;
+
 export const purchaseRequisitionRejectSchema = z.object({
   reason: z.string().trim().min(1, "A reason is required").max(500)
 });

@@ -1,3 +1,4 @@
+import type { SupplierType } from "@shared/types/supplier";
 import type { ProductTaxType } from "./product";
 
 export type PurchaseId = string;
@@ -98,6 +99,8 @@ export type PurchaseItem = {
 /** A purchase order recording inventory entering the business. Stock only enters inventory once
  * goods are explicitly received — creating or ordering a purchase never touches stock by itself. */
 export type Purchase = {
+  /** Only populated by getPurchaseDetail (purchase-service.ts) — the requisition this came from. */
+  origin?: PurchaseOrigin | null;
   id: PurchaseId;
   tenantId: string;
   purchaseNumber: string;
@@ -165,12 +168,24 @@ export type Purchase = {
   items: PurchaseItem[];
 };
 
+/** The purchase requisition a purchase was approved from — the merged Purchases screen shows the
+ * two as one document moving through its stages (Requested → Approved → Ordered → Received). */
+export type PurchaseOrigin = {
+  requisitionId: string;
+  requisitionNumber: string;
+  requestedByName: string;
+  requestedAt: string;
+  approvedByName: string | null;
+  approvedAt: string | null;
+};
+
 /** Lightweight row for the Purchases table — no line items, just enough to list and filter. */
 export type PurchaseListItem = {
   id: PurchaseId;
   purchaseNumber: string;
   supplierId: string;
   supplierName: string;
+  supplierType: SupplierType;
   supplierInvoiceNumber: string | null;
   locationId: string;
   locationName: string;
@@ -188,6 +203,8 @@ export type PurchaseListItem = {
   createdAt: string;
   shipmentDepartedAt: string | null;
   shipmentEta: string | null;
+  /** Set when this purchase came from a requisition ("from REQ-…"); null for a direct purchase. */
+  requisitionNumber: string | null;
 };
 
 export type PurchaseSummary = {

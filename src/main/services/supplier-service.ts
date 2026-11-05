@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import * as supplierRepository from "@main/database/repositories/supplier-repository";
-import { requirePermission, requirePermissionAnyOf } from "@main/services/auth-service";
+import { hasPermission, requirePermission, requirePermissionAnyOf } from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { supplierInputSchema } from "@shared/schemas/supplier";
-import type { Supplier, SupplierPickerOption, SupplierStatus } from "@shared/types/supplier";
+import type { Supplier, SupplierPickerOption, SupplierStatus, SupplierType } from "@shared/types/supplier";
 
 /** SUP-D1-000001, SUP-D1-000002, ... — generated once at creation and never editable afterward.
  * Device-tagged (see generateDocumentNumber's own doc comment) — two offline devices independently
@@ -46,13 +46,21 @@ export function listSupplierPickerOptions(): SupplierPickerOption[] {
   requirePermissionAnyOf([
     ["suppliers", "view"],
     ["sales", "view"],
-    ["quotations", "view"]
+    ["quotations", "view"],
+    ["local_credit_purchases", "view"]
   ]);
   const { tenantId } = getCurrentTenant();
+  const seesInternational = canSeeInternationalSuppliers();
   return supplierRepository
     .findAllSupplierRows(tenantId)
     .map(supplierRepository.mapSupplierRow)
-    .map(({ id, businessName, phone1, status }) => ({ id, businessName, phone1, status }));
+    .filter((supplier) => seesInternational || supplier.supplierType === "local")
+    .map(({ id, businessName, phone1, status, supplierType }) => ({ id, businessName, phone1, status, supplierType }));
+}
+
+/** International suppliers are for people with real supplier or purchase access — not a Cashier. */
+function canSeeInternationalSuppliers(): boolean {
+  return hasPermission("suppliers", "view") || hasPermission("purchases", "view");
 }
 
 export function getSupplier(id: string): Supplier {
@@ -73,7 +81,8 @@ export function createSupplier(input: unknown): Supplier {
   requirePermissionAnyOf([
     ["suppliers", "create"],
     ["sales", "create"],
-    ["quotations", "create"]
+    ["quotations", "create"],
+    ["local_credit_purchases", "create"]
   ]);
   const parsed = supplierInputSchema.parse(input);
   const { tenantId } = getCurrentTenant();
@@ -82,6 +91,7 @@ export function createSupplier(input: unknown): Supplier {
 
   const row = supplierRepository.insertSupplierRow({
     ...parsed,
+    supplierType: canSeeInternationalSuppliers() ? (parsed.supplierType ?? "local") : "local",
     id: `supplier_${randomUUID()}`,
     tenantId,
     supplierCode: generateSupplierCode(tenantId)
@@ -99,7 +109,10 @@ export function updateSupplier(id: string, input: unknown): Supplier {
 
   assertUniqueBusinessName(existing.tenant_id, parsed.businessName, id);
 
-  const row = supplierRepository.updateSupplierRow(id, parsed);
+  const row = supplierRepository.updateSupplierRow(id, {
+    ...parsed,
+    supplierType: parsed.supplierType ?? (existing.supplier_type as SupplierType)
+  });
   return supplierRepository.mapSupplierRow(row);
 }
 

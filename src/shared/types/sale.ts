@@ -1,3 +1,4 @@
+import type { MpesaVerifications, MpesaVerificationSummary } from "./mpesa";
 import type { DeliveryInput, ServiceChargeTaxType } from "@shared/schemas/charges";
 import type { NotesSection } from "@shared/lib/document-sections";
 import type { ProductTaxType } from "@shared/types/product";
@@ -148,6 +149,8 @@ export type SaleItem = {
 
 /** A completed or pending sale, with its line items and the display names of everything it references. */
 export type Sale = {
+  /** M-Pesa code -> verification record. Null when verification wasn't in play for this sale. */
+  mpesaVerifications: MpesaVerifications | null;
   id: SaleId;
   tenantId: string;
   receiptNumber: string | null;
@@ -249,4 +252,6 @@ export type SaleListItem = {
   /** null when there's no delivery attached at all; otherwise whether it's been marked delivered. */
   deliveryIsDelivered: boolean | null;
   locationId: string;
+  /** Receipts list indicator — null shows nothing. */
+  mpesaVerification: MpesaVerificationSummary;
 };

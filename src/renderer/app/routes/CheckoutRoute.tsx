@@ -34,9 +34,12 @@ import { Modal } from "@renderer/shared/components/Modal";
 import { ProductInfoModal } from "@renderer/shared/components/ProductInfoModal";
 import { QuickCreateCustomerModal } from "@renderer/shared/components/QuickCreateCustomerModal";
 import { ReceiptPreview } from "@renderer/shared/components/ReceiptPreview";
+import { MpesaVerifyControl, mpesaVerificationActive, useMpesaVerificationState } from "@renderer/shared/components/MpesaVerification";
 import { StampBadge } from "@renderer/shared/components/StampBadge";
 import { StorefrontPicker } from "@renderer/shared/components/StorefrontPicker";
 import { useUiStore } from "@renderer/shared/stores/ui-store";
+import { mpesaCodeKey, mpesaStatusForCode } from "@shared/lib/mpesa-verification";
+import type { MpesaVerificationRecord, MpesaVerifications } from "@shared/types/mpesa";
 import { SupplierPicker } from "@renderer/shared/components/SupplierPicker";
 import { TaxBreakdownTable } from "@renderer/shared/components/TaxBreakdownTable";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
@@ -131,6 +134,10 @@ type OpenSaleDraft = {
    * these are payments 2, 3, ... Empty means an ordinary single-method sale. Not saved when a sale
    * is suspended: saved as heldPayments and restored on resume. */
   splitPayments: SplitPaymentDraft[];
+  /** M-Pesa codes verified for this sale so far, kept through hold/resume. */
+  mpesaVerifications: MpesaVerifications;
+  /** Reserves those codes on SERVER while the sale is being rung up. */
+  mpesaClaimKey: string;
   // Per-draft, same reasoning as paymentMethodId above — carried through suspend/resume so a cashier
   // who already unchecked this before holding the sale doesn't have to redo it.
   includeTaxBreakdown: boolean;
@@ -216,6 +223,7 @@ export function CheckoutRoute(): React.JSX.Element {
   // Same fallback the rest of checkout already uses for a session with no assigned branch — the
   // cashier's StorefrontPicker choice below stands in for it.
   const effectiveLocationId = branchId ?? (storefrontId || null);
+  const mpesaVerification = useMpesaVerificationState(effectiveLocationId);
 
   // Client-reported bug: a cashier switching to another tab (or logging out) while a sale still had
   // items typed in but was never explicitly held/deleted lost that entire cart outright —
@@ -388,6 +396,8 @@ export function CheckoutRoute(): React.JSX.Element {
                 : null,
               paymentMethodId: full.paymentMethodId ?? "",
               paymentReference: full.paymentReference ?? "",
+              mpesaVerifications: full.mpesaVerifications ?? {},
+              mpesaClaimKey: `claim_${crypto.randomUUID()}`,
               amountReceived: full.amountReceivedCents !== null ? fromCents(full.amountReceivedCents) : "",
               splitPayments: full.payments.map((payment) => ({
                 key: `split_${crypto.randomUUID()}`,
@@ -602,7 +612,10 @@ export function CheckoutRoute(): React.JSX.Element {
           if (result.status === "success") {
             setMpesaState("success");
             setMpesaMessage(mpesaFriendlyMessage(result.status));
-            if (result.mpesaReceiptNumber) updateActivePaymentReference(result.mpesaReceiptNumber);
+            if (result.mpesaReceiptNumber) {
+              updateActivePaymentReference(result.mpesaReceiptNumber);
+              void claimStkReceipt(result.mpesaReceiptNumber);
+            }
           } else {
             setMpesaState("error");
             setMpesaMessage(mpesaFriendlyMessage(result.status));
@@ -630,7 +643,10 @@ export function CheckoutRoute(): React.JSX.Element {
       if (result.status === "success") {
         setMpesaState("success");
         setMpesaMessage(mpesaFriendlyMessage(result.status));
-        if (result.mpesaReceiptNumber) updateActivePaymentReference(result.mpesaReceiptNumber);
+        if (result.mpesaReceiptNumber) {
+          updateActivePaymentReference(result.mpesaReceiptNumber);
+          void claimStkReceipt(result.mpesaReceiptNumber);
+        }
       } else if (result.status !== "pending") {
         setMpesaState("error");
         setMpesaMessage(mpesaFriendlyMessage(result.status));
@@ -705,6 +721,8 @@ export function CheckoutRoute(): React.JSX.Element {
       paymentReference: "",
       amountReceived: "",
       splitPayments: [],
+      mpesaVerifications: {},
+      mpesaClaimKey: `claim_${crypto.randomUUID()}`,
       includeTaxBreakdown: true,
       includeBusinessInfo: defaultIncludeBusinessInfoRef.current,
       createdAt: Date.now()
@@ -899,6 +917,31 @@ export function CheckoutRoute(): React.JSX.Element {
     setOpenSales((prev) => prev.map((draft) => (draft.key === activeKey ? { ...draft, paymentMethodId: value } : draft)));
   }
 
+  function recordMpesaVerification(code: string, record: MpesaVerificationRecord): void {
+    setOpenSales((prev) =>
+      prev.map((draft) =>
+        draft.key === activeKey ? { ...draft, mpesaVerifications: { ...draft.mpesaVerifications, [mpesaCodeKey(code)]: record } } : draft
+      )
+    );
+  }
+
+  /** An STK receipt is already real money on this till, so claim it without the cashier doing anything.
+   * The server records the receipt a moment after reporting success, hence the one retry. */
+  async function claimStkReceipt(code: string): Promise<void> {
+    if (!activeDraft || !effectiveLocationId || !mpesaVerificationActive(mpesaVerification)) return;
+    const claim = { locationId: effectiveLocationId, code, amountCents: null, claimKey: activeDraft.mpesaClaimKey };
+    try {
+      let result = await window.blueLedger.mpesa.verifyCode(claim);
+      if (result.outcome === "not_found") {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        result = await window.blueLedger.mpesa.verifyCode(claim);
+      }
+      if (result.outcome === "verified" && result.record) recordMpesaVerification(result.code, result.record);
+    } catch {
+      // The Verify button is still there; a blip here costs nothing.
+    }
+  }
+
   function updateActivePaymentReference(value: string): void {
     if (!activeKey) return;
     setOpenSales((prev) => prev.map((draft) => (draft.key === activeKey ? { ...draft, paymentReference: value } : draft)));
@@ -1080,6 +1123,7 @@ export function CheckoutRoute(): React.JSX.Element {
       })),
       includeTaxBreakdown: draft.includeTaxBreakdown,
       includeBusinessInfo: draft.includeBusinessInfo,
+      mpesaVerifications: draft.mpesaVerifications,
       locationId
     };
   }
@@ -1099,6 +1143,9 @@ export function CheckoutRoute(): React.JSX.Element {
         buildSuspendPayload(activeDraft, session && !session.branch ? storefrontId : undefined)
       );
       const suspendedKey = activeDraft.key;
+      if (Object.keys(activeDraft.mpesaVerifications).length > 0) {
+        void window.blueLedger.mpesa.attachClaim({ claimKey: activeDraft.mpesaClaimKey, saleId: result.id }).catch(() => undefined);
+      }
       setOpenSales((prev) =>
         prev.map((draft) =>
           draft.key === suspendedKey ? { ...draft, key: `db_${result.id}`, dbSaleId: result.id, status: "suspended" } : draft
@@ -1187,11 +1234,15 @@ export function CheckoutRoute(): React.JSX.Element {
         paymentReference: activeDraft.paymentReference,
         amountReceivedCents: activeDraft.amountReceived.trim() === "" ? null : toCents(activeDraft.amountReceived),
         payments: splitPaymentsPayload,
+        mpesaVerifications: activeDraft.mpesaVerifications,
         includeTaxBreakdown: activeDraft.includeTaxBreakdown,
         includeBusinessInfo: activeDraft.includeBusinessInfo,
         locationId: session && !session.branch ? storefrontId : undefined
       });
       const completedKey = activeDraft.key;
+      if (Object.keys(activeDraft.mpesaVerifications).length > 0) {
+        void window.blueLedger.mpesa.attachClaim({ claimKey: activeDraft.mpesaClaimKey, saleId: sale.id }).catch(() => undefined);
+      }
       setOpenSales((prev) => prev.filter((draft) => draft.key !== completedKey));
       setActiveKey(null);
       setCompletedSale(sale);
@@ -1225,6 +1276,37 @@ export function CheckoutRoute(): React.JSX.Element {
     (amountReceivedCents ?? 0) +
     (activeDraft?.splitPayments ?? []).reduce((sum, row) => sum + (row.amount.trim() ? toCents(row.amount) : 0), 0);
   const splitRemainingCents = activeTotals ? activeTotals.grandTotalCents - splitPaidCents : 0;
+
+  // Strict: every M-Pesa payment on this sale needs a verified code before Charge unlocks. The main
+  // process enforces the same from its cached mode, which also covers this screen being offline.
+  const mpesaStrictUnmet =
+    mpesaVerification?.mode === "strict" &&
+    mpesaVerification.available &&
+    activeDraft !== null &&
+    [
+      { methodId: activeDraft.paymentMethodId, reference: activeDraft.paymentReference },
+      ...activeDraft.splitPayments.map((row) => ({ methodId: row.methodId, reference: row.reference }))
+    ].some(
+      (entry) =>
+        activePaymentMethods.find((method) => method.id === entry.methodId)?.code === "MPESA" &&
+        mpesaStatusForCode(activeDraft.mpesaVerifications, entry.reference) !== "verified"
+    );
+
+  function renderMpesaVerify(code: string, amountCents: number | null, onUseCode: (code: string) => void): React.JSX.Element | null {
+    if (!activeDraft || !effectiveLocationId || !mpesaVerification || !mpesaVerificationActive(mpesaVerification)) return null;
+    return (
+      <MpesaVerifyControl
+        locationId={effectiveLocationId}
+        state={mpesaVerification}
+        amountCents={amountCents}
+        code={code}
+        claimKey={activeDraft.mpesaClaimKey}
+        verifications={activeDraft.mpesaVerifications}
+        onUseCode={onUseCode}
+        onVerified={recordMpesaVerification}
+      />
+    );
+  }
 
   // Everything open except the sale on screen — mostly held (suspended) sales, plus any unsaved
   // draft the cashier switched away from. Reached through the "Held Sales" button/modal.
@@ -1849,6 +1931,12 @@ export function CheckoutRoute(): React.JSX.Element {
                       className="mt-3"
                     />
                   )}
+                  {selectedPaymentMethod?.code === "MPESA" &&
+                    renderMpesaVerify(
+                      activeDraft?.paymentReference ?? "",
+                      isSplit ? amountReceivedCents : (activeTotals?.grandTotalCents ?? null),
+                      updateActivePaymentReference
+                    )}
 
                   {(activeDraft?.splitPayments ?? []).map((row, index) => {
                     const rowMethod = activePaymentMethods.find((method) => method.id === row.methodId) ?? null;
@@ -1891,6 +1979,10 @@ export function CheckoutRoute(): React.JSX.Element {
                             />
                           )}
                         </div>
+                        {rowMethod?.code === "MPESA" &&
+                          renderMpesaVerify(row.reference, row.amount.trim() ? toCents(row.amount) : null, (code) =>
+                            updateSplitPayment(row.key, { reference: code })
+                          )}
                       </div>
                     );
                   })}
@@ -1968,6 +2060,7 @@ export function CheckoutRoute(): React.JSX.Element {
                         totals.lines.length === 0 ||
                         completing ||
                         !activeDraft?.paymentMethodId ||
+                        mpesaStrictUnmet ||
                         (isSplit && splitRemainingCents > 0)
                       }
                       className="h-9 bg-teal text-xs hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
@@ -2603,6 +2696,12 @@ export function CheckoutRoute(): React.JSX.Element {
                       className="mt-3"
                     />
                   )}
+                  {selectedPaymentMethod?.code === "MPESA" &&
+                    renderMpesaVerify(
+                      activeDraft?.paymentReference ?? "",
+                      isSplit ? amountReceivedCents : (activeTotals?.grandTotalCents ?? null),
+                      updateActivePaymentReference
+                    )}
 
                   <div className={cn("mt-3 grid gap-3", isSplit ? "grid-cols-1" : "grid-cols-2")}>
                     <Field
@@ -2668,6 +2767,10 @@ export function CheckoutRoute(): React.JSX.Element {
                             />
                           )}
                         </div>
+                        {rowMethod?.code === "MPESA" &&
+                          renderMpesaVerify(row.reference, row.amount.trim() ? toCents(row.amount) : null, (code) =>
+                            updateSplitPayment(row.key, { reference: code })
+                          )}
                       </div>
                     );
                   })}
@@ -2732,6 +2835,7 @@ export function CheckoutRoute(): React.JSX.Element {
                         totals.lines.length === 0 ||
                         completing ||
                         !activeDraft?.paymentMethodId ||
+                        mpesaStrictUnmet ||
                         (isSplit && splitRemainingCents > 0)
                       }
                       className="h-10 bg-teal text-xs hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"

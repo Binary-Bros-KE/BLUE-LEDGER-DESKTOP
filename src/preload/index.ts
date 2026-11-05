@@ -63,7 +63,14 @@ const api: BlueLedgerApi = {
     isConfigured: (locationId) => invoke("mpesa:is-configured", locationId),
     sendStkPush: (input) => invoke("mpesa:send-stk-push", input),
     getStkStatus: (checkoutRequestId) => invoke("mpesa:get-stk-status", checkoutRequestId),
-    checkStkStatus: (checkoutRequestId) => invoke("mpesa:check-stk-status", checkoutRequestId)
+    checkStkStatus: (checkoutRequestId) => invoke("mpesa:check-stk-status", checkoutRequestId),
+    verificationState: (locationId) => invoke("mpesa:verification-state", locationId),
+    saveVerificationMode: (locationId, mode) => invoke("mpesa:verification-save-mode", locationId, mode),
+    connectVerification: (locationId) => invoke("mpesa:verification-connect", locationId),
+    checkPayment: (input) => invoke("mpesa:check-payment", input),
+    verifyCode: (input) => invoke("mpesa:verify-code", input),
+    attachClaim: (input) => invoke("mpesa:attach-claim", input),
+    verifySaleCode: (input) => invoke("mpesa:verify-sale-code", input)
   },
   category: {
     list: () => invoke("category:list"),
@@ -407,6 +414,7 @@ const api: BlueLedgerApi = {
     get: (id) => invoke("purchase-requisition:get", id),
     create: (input) => invoke("purchase-requisition:create", input),
     cancel: (id) => invoke("purchase-requisition:cancel", id),
+    update: (id, input) => invoke("purchase-requisition:update", id, input),
     reject: (id, input) => invoke("purchase-requisition:reject", id, input),
     linkItem: (id, input) => invoke("purchase-requisition:link-item", id, input),
     approve: (id, input) => invoke("purchase-requisition:approve", id, input)

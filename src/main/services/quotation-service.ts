@@ -1,3 +1,4 @@
+import { assertStrictVerification, stampSaleVerifications } from "@main/services/mpesa-verification-local";
 import { randomUUID } from "node:crypto";
 import { runInTransaction } from "@main/database/connection";
 import * as customerRepository from "@main/database/repositories/customer-repository";
@@ -548,6 +549,11 @@ function requireAcceptedQuotationAtActiveBranch(id: string): {
 /** Converts an accepted quotation into a completed retail sale, preserving its quoted prices while
  * re-validating stock fresh. The quotation itself is never touched inventory-wise — only the new sale is. */
 export function convertQuotationToSale(id: string, input: unknown): Sale {
+  assertStrictVerification(requireAcceptedQuotationAtActiveBranch(id).locationId, input);
+  return stampSaleVerifications(convertQuotationToSaleCore(id, input), input);
+}
+
+function convertQuotationToSaleCore(id: string, input: unknown): Sale {
   requirePermission("quotations", "edit");
   requirePermission("sales", "create");
   const parsed: ConvertToSaleInput = convertToSaleSchema.parse(input);

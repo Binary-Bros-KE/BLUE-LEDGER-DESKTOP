@@ -8,7 +8,6 @@ import {
   Building2,
   ClipboardCheck,
   ClipboardList,
-  ClipboardPen,
   CreditCard,
   FileSpreadsheet,
   FileText,
@@ -46,8 +45,16 @@ export type NavItem = {
   icon: LucideIcon;
   /** Which permission module governs visibility/access for this item. */
   permissionModule: PermissionModuleKey;
+  /** A second module whose "view" also opens this item — for a screen that hosts two modules' work
+   * (Purchases also carries purchase requisitions, so a requisition-only Cashier still gets it). */
+  alsoVisibleWith?: PermissionModuleKey[];
   badge?: string;
 };
+
+/** The one visibility rule for a nav item — shared by Sidebar and App's route guard. */
+export function canViewNavItem(item: NavItem, can: (module: PermissionModuleKey, action: "view") => boolean): boolean {
+  return can(item.permissionModule, "view") || (item.alsoVisibleWith?.some((module) => can(module, "view")) ?? false);
+}
 
 export type NavGroup = {
   title: string;
@@ -188,18 +195,13 @@ export const navGroups: NavGroup[] = [
         permissionModule: "suppliers"
       },
       {
-        key: "purchase-requisitions",
-        label: "Requisitions",
-        description: "Ask for stock to be bought — approved ones become purchases",
-        icon: ClipboardPen,
-        permissionModule: "purchase_requisitions"
-      },
-      {
+        // Requisitions live here too (client request: one document, Requisition → Received).
         key: "purchases",
         label: "Purchases",
-        description: "Purchase orders & receiving",
+        description: "Requisitions, purchase orders & receiving",
         icon: ShoppingBag,
-        permissionModule: "purchases"
+        permissionModule: "purchases",
+        alsoVisibleWith: ["purchase_requisitions", "local_credit_purchases"]
       },
       {
         key: "local-purchases",

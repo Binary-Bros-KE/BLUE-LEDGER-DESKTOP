@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import {
   Boxes,
   CheckCircle2,
+  ClipboardPen,
   Eye,
   FileBarChart,
   FileClock,
@@ -47,12 +48,35 @@ import {
   type PurchaseStatus,
   type PurchaseSummary
 } from "@shared/types/purchase";
-import type { Supplier } from "@shared/types/supplier";
+import type { PurchaseRequisitionListItem } from "@shared/types/purchase-requisition";
+import { SUPPLIER_TYPE_OPTIONS, supplierTypeLabel, type Supplier, type SupplierPickerOption, type SupplierType } from "@shared/types/supplier";
 import { PurchaseDetailModal } from "./purchases/PurchaseDetailModal";
 import { PurchaseFormModal } from "./purchases/PurchaseFormModal";
 import { SupplierStatementModal } from "./purchases/SupplierStatementModal";
+import { useRequisitionWorkflow } from "./purchases/useRequisitionWorkflow";
 
-type StatusFilter = "all" | PurchaseStatus;
+/** "requisitions" = still waiting for approval; "requisitions_closed" = rejected or cancelled. */
+type StatusFilter = "all" | PurchaseStatus | "requisitions" | "requisitions_closed";
+
+/** One row of the merged list — a purchase, or a requisition that hasn't become one. */
+type Row =
+  | { kind: "purchase"; at: string; purchase: PurchaseListItem }
+  | { kind: "requisition"; at: string; requisition: PurchaseRequisitionListItem };
+
+/** Where a requisition sits in the one-document lifecycle. Once approved it IS its purchase, so it
+ * takes that purchase's stage (what a requisition-only viewer, who never sees the purchase row, sees). */
+function requisitionStage(requisition: PurchaseRequisitionListItem): {
+  label: string;
+  tone: "success" | "warning" | "danger" | "neutral" | "accent";
+} {
+  if (requisition.status === "pending") return { label: "Requisition", tone: "warning" };
+  if (requisition.status === "rejected") return { label: "Rejected", tone: "danger" };
+  if (requisition.status === "cancelled") return { label: "Cancelled", tone: "neutral" };
+  if (requisition.purchaseStatus) {
+    return { label: statusLabel(requisition.purchaseStatus), tone: statusTone(requisition.purchaseStatus) };
+  }
+  return { label: "Approved", tone: "success" };
+}
 type PaymentStatusFilter = "all" | PurchasePaymentStatus;
 type ShipmentFilter = "all" | "overdue";
 
@@ -64,6 +88,12 @@ function isShipmentOverdue(purchase: PurchaseListItem): boolean {
       isFullyReceived: purchase.status === "received"
     }).stage === "overdue"
   );
+}
+
+function filterLabel(filter: StatusFilter): string {
+  if (filter === "requisitions") return "Requisitions";
+  if (filter === "requisitions_closed") return "Rejected / Cancelled requisitions";
+  return filter === "all" ? "All" : statusLabel(filter);
 }
 
 function statusLabel(status: PurchaseStatus): string {
@@ -101,16 +131,117 @@ function Th({ children, className }: { children: React.ReactNode; className?: st
   );
 }
 
+/** A purchase in the merged list. A purchase approved from a requisition carries "from REQ-…", so it
+ * reads as the same document having moved on a stage. */
+function PurchaseRow({
+  purchase,
+  canEdit,
+  localOnly,
+  onOpen,
+  onEdit
+}: {
+  purchase: PurchaseListItem;
+  canEdit: boolean;
+  /** A local-credit role sees no payment figures, and every row is local anyway. */
+  localOnly: boolean;
+  onOpen: () => void;
+  onEdit: () => void;
+}): React.JSX.Element {
+  return (
+    <tr onClick={onOpen} className="cursor-pointer border-t border-line odd:bg-white even:bg-soft/50 hover:bg-soft">
+      <td className="truncate px-3 py-2.5 text-xs font-bold tabular-nums text-ink">
+        <div className="flex flex-col gap-0.5">
+          <span>{purchase.purchaseNumber}</span>
+          {purchase.requisitionNumber && (
+            <span className="text-[10px] font-semibold text-muted">from {purchase.requisitionNumber}</span>
+          )}
+        </div>
+      </td>
+      <td className="truncate px-3 py-2.5 font-extrabold">
+        <div className="flex flex-col gap-0.5">
+          <span>{purchase.supplierName}</span>
+          <span className="text-xs font-semibold text-primary/80">{purchase.locationName}</span>
+          {!localOnly && (
+            <span className="text-[10px] font-extrabold uppercase tracking-wide text-muted">{supplierTypeLabel(purchase.supplierType)}</span>
+          )}
+        </div>
+      </td>
+      <td className="px-3 py-2.5">
+        <DashedPill tone={statusTone(purchase.status)}>{statusLabel(purchase.status)}</DashedPill>
+      </td>
+      <td className="px-3 py-2.5 text-right text-xs font-bold tabular-nums text-ink">{formatCents(purchase.grandTotalCents)}</td>
+      <td className="px-3 py-2.5">
+        {localOnly ? (
+          <span className="text-xs font-semibold text-muted">—</span>
+        ) : (
+          <DashedPill tone={paymentStatusTone(purchase.paymentStatus)}>
+            {purchase.paymentStatus === "partially_paid" ? "Partially Paid" : purchase.paymentStatus}
+          </DashedPill>
+        )}
+      </td>
+      <td className="px-3 py-2.5">
+        {purchase.shipmentDepartedAt ? (
+          <ShipmentProgressBar
+            shipmentDepartedAt={purchase.shipmentDepartedAt}
+            shipmentEta={purchase.shipmentEta}
+            isFullyReceived={purchase.status === "received"}
+            compact
+          />
+        ) : (
+          <span className="text-xs font-semibold text-muted">—</span>
+        )}
+      </td>
+      <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">{formatDate(purchase.orderedAt)}</td>
+      <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">{formatDate(purchase.receivedAt)}</td>
+      <td className="px-3 py-2.5">
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpen();
+            }}
+            aria-label="View purchase"
+            className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-ink cursor-pointer"
+          >
+            <Eye className="size-3.5" aria-hidden="true" />
+          </button>
+          {canEdit && (purchase.status === "draft" || (purchase.status === "ordered" && purchase.amountPaidCents === 0)) && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onEdit();
+              }}
+              aria-label="Edit purchase"
+              className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-ink cursor-pointer"
+            >
+              <Pencil className="size-3.5" aria-hidden="true" />
+            </button>
+          )}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 export function PurchasesRoute(): React.JSX.Element {
   const { can, session } = usePermissions();
   const showStorefrontFilter = session?.branch == null;
-  const canCreate = can("purchases", "create");
+  // Client request: one Purchases tab for the whole Requisition → Received document. Someone who can
+  // only requisition (e.g. a Cashier) gets the same tab with everything purchase-side hidden — no
+  // suppliers, costs, totals or statements; their requisitions show the stage they've reached.
+  const canViewPurchases = can("purchases", "view") || can("local_credit_purchases", "view");
+  // Goods on credit from local suppliers only — see purchase-service.ts requirePurchaseAccess.
+  const localOnly = !can("purchases", "view") && can("local_credit_purchases", "view");
+  const canCreate = can("purchases", "create") || can("local_credit_purchases", "create");
   const canEdit = can("purchases", "edit");
+  const canReceiveGoods = can("purchases", "edit") || can("local_credit_purchases", "edit");
   const canExport = can("purchases", "export");
 
   const [summary, setSummary] = useState<PurchaseSummary | null>(null);
   const [purchases, setPurchases] = useState<PurchaseListItem[] | null>(null);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [suppliers, setSuppliers] = useState<SupplierPickerOption[]>([]);
   const [products, setProducts] = useState<ProductListItem[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
@@ -122,6 +253,7 @@ export function PurchasesRoute(): React.JSX.Element {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [supplierFilter, setSupplierFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
   const [locationFilter, setLocationFilter] = useState("");
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<PaymentStatusFilter>("all");
   const [shipmentFilter, setShipmentFilter] = useState<ShipmentFilter>("all");
@@ -137,7 +269,24 @@ export function PurchasesRoute(): React.JSX.Element {
 
   const loadAll = useCallback(async () => {
     setLoadError(null);
+    if (!canViewPurchases) {
+      setPurchases([]);
+      return;
+    }
     try {
+      if (localOnly) {
+        const [purchaseList, supplierOptions, productList, locationList] = await Promise.all([
+          window.blueLedger.purchase.list(),
+          window.blueLedger.supplier.listPickerOptions(),
+          window.blueLedger.product.list(),
+          window.blueLedger.location.list()
+        ]);
+        setPurchases(purchaseList);
+        setSuppliers(supplierOptions);
+        setProducts(productList);
+        setLocations(locationList);
+        return;
+      }
       const [summaryResult, purchaseList, supplierList, productList, locationList, methodList] = await Promise.all([
         window.blueLedger.purchase.summary(),
         window.blueLedger.purchase.list(),
@@ -157,11 +306,14 @@ export function PurchasesRoute(): React.JSX.Element {
       setLoadError(message);
       showErrorToast(message);
     }
-  }, []);
+  }, [canViewPurchases, localOnly]);
 
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  const requisitionFlow = useRequisitionWorkflow({ onConverted: () => void loadAll() });
+  const requisitions = requisitionFlow.requisitions;
 
   useEffect(() => {
     if (!actionError) return undefined;
@@ -170,15 +322,21 @@ export function PurchasesRoute(): React.JSX.Element {
   }, [actionError]);
 
   const availableYears = useMemo(
-    () => buildAvailableYears((purchases ?? []).map((purchase) => purchase.createdAt)),
-    [purchases]
+    () =>
+      buildAvailableYears([
+        ...(purchases ?? []).map((purchase) => purchase.createdAt),
+        ...(requisitions ?? []).map((requisition) => requisition.requestedAt)
+      ]),
+    [purchases, requisitions]
   );
 
   const filteredPurchases = useMemo(() => {
     if (!purchases) return null;
     let list = purchases;
 
-    if (statusFilter !== "all") {
+    if (statusFilter === "requisitions" || statusFilter === "requisitions_closed") {
+      list = [];
+    } else if (statusFilter !== "all") {
       list = list.filter((purchase) => purchase.status === statusFilter);
     } else {
       // Client request: a cancelled purchase has no hard-delete mechanism (see this app's own
@@ -189,6 +347,9 @@ export function PurchasesRoute(): React.JSX.Element {
     }
     if (supplierFilter) {
       list = list.filter((purchase) => purchase.supplierId === supplierFilter);
+    }
+    if (typeFilter) {
+      list = list.filter((purchase) => purchase.supplierType === typeFilter);
     }
     if (locationFilter) {
       list = list.filter((purchase) => purchase.locationId === locationFilter);
@@ -214,7 +375,7 @@ export function PurchasesRoute(): React.JSX.Element {
     if (term) {
       list = list.filter((purchase) => {
         const haystack =
-          `${purchase.purchaseNumber} ${purchase.supplierName} ${purchase.supplierInvoiceNumber ?? ""} ${purchase.locationName}`.toLowerCase();
+          `${purchase.purchaseNumber} ${purchase.supplierName} ${purchase.supplierInvoiceNumber ?? ""} ${purchase.locationName} ${purchase.requisitionNumber ?? ""}`.toLowerCase();
         return haystack.includes(term);
       });
     }
@@ -224,6 +385,7 @@ export function PurchasesRoute(): React.JSX.Element {
     purchases,
     statusFilter,
     supplierFilter,
+    typeFilter,
     locationFilter,
     paymentStatusFilter,
     shipmentFilter,
@@ -233,14 +395,77 @@ export function PurchasesRoute(): React.JSX.Element {
     searchTerm
   ]);
 
+  const filteredRequisitions = useMemo(() => {
+    if (!requisitions) return [];
+    // Supplier / payment / shipment only describe purchases — a requisition has none of them yet.
+    if (supplierFilter || typeFilter || paymentStatusFilter !== "all" || shipmentFilter !== "all") return [];
+    const shownPurchaseIds = new Set((purchases ?? []).map((purchase) => purchase.id));
+    const fromTime = dateFrom ? new Date(dateFrom).getTime() : null;
+    const toTime = dateTo ? new Date(dateTo).getTime() + 24 * 60 * 60 * 1000 - 1 : null;
+    const term = searchTerm.trim().toLowerCase();
+
+    return requisitions.filter((requisition) => {
+      // An approved requisition IS its purchase from here on — the purchase row stands in for it
+      // (unless that purchase isn't on this device yet, or this viewer can't see purchases).
+      if (requisition.status === "approved" && requisition.purchaseId && shownPurchaseIds.has(requisition.purchaseId)) {
+        return false;
+      }
+      if (statusFilter === "requisitions") {
+        if (requisition.status !== "pending") return false;
+      } else if (statusFilter === "requisitions_closed") {
+        if (requisition.status !== "rejected" && requisition.status !== "cancelled") return false;
+      } else if (statusFilter === "all") {
+        // Same as cancelled purchases: withdrawn requisitions drop out of the everyday view.
+        if (requisition.status === "cancelled") return false;
+      } else if (requisition.purchaseStatus !== statusFilter) {
+        return false;
+      }
+      if (locationFilter && requisition.storefrontId !== locationFilter) return false;
+      const at = new Date(requisition.requestedAt).getTime();
+      if (fromTime !== null && at < fromTime) return false;
+      if (toTime !== null && at > toTime) return false;
+      if (!matchesYearFilter(requisition.requestedAt, yearFilter)) return false;
+      if (!term) return true;
+      return `${requisition.requisitionNumber} ${requisition.requestedByName} ${requisition.storefrontName} ${requisition.purchaseNumber ?? ""}`
+        .toLowerCase()
+        .includes(term);
+    });
+  }, [
+    requisitions,
+    purchases,
+    statusFilter,
+    supplierFilter,
+    typeFilter,
+    locationFilter,
+    paymentStatusFilter,
+    shipmentFilter,
+    dateFrom,
+    dateTo,
+    yearFilter,
+    searchTerm
+  ]);
+
+  const rows = useMemo<Row[]>(() => {
+    const merged: Row[] = [
+      ...(filteredPurchases ?? []).map((purchase) => ({ kind: "purchase" as const, at: purchase.createdAt, purchase })),
+      ...filteredRequisitions.map((requisition) => ({ kind: "requisition" as const, at: requisition.requestedAt, requisition }))
+    ];
+    return merged.sort((a, b) => b.at.localeCompare(a.at));
+  }, [filteredPurchases, filteredRequisitions]);
+
+  const pendingRequisitionCount = (requisitions ?? []).filter((requisition) => requisition.status === "pending").length;
+  const isLoading = (canViewPurchases && purchases === null) || requisitions === null;
+  const hasAnything = (purchases?.length ?? 0) > 0 || (requisitions?.length ?? 0) > 0;
+
   const exportRequest = useMemo<ExportListRequest | null>(() => {
     if (!filteredPurchases) return null;
     const filterParts: string[] = [];
-    if (statusFilter !== "all") filterParts.push(`Status: ${statusLabel(statusFilter)}`);
+    if (statusFilter !== "all") filterParts.push(`Status: ${filterLabel(statusFilter)}`);
     if (paymentStatusFilter !== "all") filterParts.push(`Payment Status: ${paymentStatusFilter}`);
     if (supplierFilter) {
       filterParts.push(`Supplier: ${suppliers.find((s) => s.id === supplierFilter)?.businessName ?? supplierFilter}`);
     }
+    if (typeFilter) filterParts.push(`Type: ${supplierTypeLabel(typeFilter as SupplierType)}`);
     if (locationFilter) {
       filterParts.push(`Destination: ${locations.find((l) => l.id === locationFilter)?.locationName ?? locationFilter}`);
     }
@@ -292,6 +517,7 @@ export function PurchasesRoute(): React.JSX.Element {
     statusFilter,
     paymentStatusFilter,
     supplierFilter,
+    typeFilter,
     locationFilter,
     dateFrom,
     dateTo,
@@ -387,8 +613,9 @@ export function PurchasesRoute(): React.JSX.Element {
         aria-hidden="true"
       />
 
-      {summary && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      {canViewPurchases && summary && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+          <StatTile icon={ClipboardPen} label="Requisitions" value={String(pendingRequisitionCount)} tone="warning" />
           <StatTile icon={ShoppingBag} label="Total Purchases" value={String(summary.totalPurchases)} tone="primary" />
           <StatTile icon={FileClock} label="Draft" value={String(summary.draftCount)} tone="warning" />
           <StatTile icon={Boxes} label="Ordered" value={String(summary.orderedCount)} tone="accent" />
@@ -404,22 +631,39 @@ export function PurchasesRoute(): React.JSX.Element {
             <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Purchases</p>
             <h2 className="mt-1 flex items-center gap-2 text-xl font-extrabold">
               <ShoppingBag className="size-5 text-primary" aria-hidden="true" />
-              Purchase Orders
+              {canViewPurchases ? "Purchases" : "Requisitions"}
             </h2>
             <p className="mt-1 text-xs font-semibold text-muted">
-              Order stock from suppliers.
+              {canViewPurchases
+                ? "From requisition to received stock — approve a requisition to turn it into a purchase."
+                : "Ask for stock to be bought for your storefront. Follow it here until it's received."}
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {canExport && exportRequest && <ExportMenu request={exportRequest} />}
-            <Button
-              type="button"
-              onClick={() => setStatementOpen(true)}
-              className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
-            >
-              <FileBarChart className="mr-1.5 size-4" aria-hidden="true" />
-              Statement
-            </Button>
+            {canViewPurchases && canExport && exportRequest && <ExportMenu request={exportRequest} />}
+            {canViewPurchases && !localOnly && (
+              <Button
+                type="button"
+                onClick={() => setStatementOpen(true)}
+                className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+              >
+                <FileBarChart className="mr-1.5 size-4" aria-hidden="true" />
+                Statement
+              </Button>
+            )}
+            {requisitionFlow.canCreate && (
+              <Button
+                type="button"
+                onClick={requisitionFlow.openCreate}
+                className={cn(
+                  "h-9 text-xs",
+                  canCreate && "border border-line bg-white text-ink shadow-none hover:bg-soft"
+                )}
+              >
+                <ClipboardPen className="mr-1.5 size-4" aria-hidden="true" />
+                New Requisition
+              </Button>
+            )}
             {canCreate && (
               <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
                 <Plus className="mr-1.5 size-4" aria-hidden="true" />
@@ -429,9 +673,9 @@ export function PurchasesRoute(): React.JSX.Element {
           </div>
         </div>
 
-        {(loadError ?? actionError) && (
+        {(loadError ?? requisitionFlow.loadError ?? actionError) && (
           <div className="mt-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
-            {loadError ?? actionError}
+            {loadError ?? requisitionFlow.loadError ?? actionError}
           </div>
         )}
 
@@ -447,19 +691,32 @@ export function PurchasesRoute(): React.JSX.Element {
                 type="text"
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
-                placeholder="Search PO #, supplier, invoice #"
+                placeholder={canViewPurchases ? "Search PO #, REQ #, supplier, invoice #" : "Search REQ #, requester"}
                 className="h-10 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm font-semibold text-ink outline-none transition placeholder:font-normal placeholder:text-muted/60 focus:border-accent focus:ring-4 focus:ring-accent/15"
               />
             </div>
           </label>
 
           <SelectField
-            label="Status"
+            label="Stage"
             value={statusFilter}
             onChange={(value) => setStatusFilter(value as StatusFilter)}
-            options={[{ value: "all", label: "All Statuses" }, ...PURCHASE_STATUS_OPTIONS]}
+            options={[
+              { value: "all", label: "All Stages" },
+              { value: "requisitions", label: "Requisitions (awaiting approval)" },
+              ...PURCHASE_STATUS_OPTIONS.filter((option) => (canViewPurchases && !localOnly) || option.value !== "draft"),
+              { value: "requisitions_closed", label: "Rejected / Cancelled requisitions" }
+            ]}
           />
           <SelectField label="Year" value={yearFilter} onChange={setYearFilter} options={yearFilterOptions(availableYears)} />
+          {canViewPurchases && !localOnly && (
+          <>
+          <SelectField
+            label="Supplier Type"
+            value={typeFilter}
+            onChange={setTypeFilter}
+            options={[{ value: "", label: "All Types" }, ...SUPPLIER_TYPE_OPTIONS]}
+          />
           <SelectField
             label="Payment Status"
             value={paymentStatusFilter}
@@ -484,6 +741,8 @@ export function PurchasesRoute(): React.JSX.Element {
               ...suppliers.map((supplier) => ({ value: supplier.id, label: supplier.businessName }))
             ]}
           />
+          </>
+          )}
           {showStorefrontFilter && (
             <SelectField
               label="Storefront"
@@ -516,56 +775,66 @@ export function PurchasesRoute(): React.JSX.Element {
         </div>
 
         <div className="mt-5">
-          {purchases === null ? (
+          {isLoading ? (
             <div className="flex min-h-[240px] items-center justify-center text-muted">
               <Loader2 className="size-6 animate-spin" aria-hidden="true" />
             </div>
-          ) : purchases.length === 0 ? (
+          ) : !hasAnything ? (
             <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-line bg-soft/60 p-10 text-center">
               <div className="grid size-14 place-items-center rounded-2xl bg-soft text-primary">
                 <ShoppingBag className="size-7" aria-hidden="true" />
               </div>
-              <h3 className="mt-4 text-lg font-extrabold">No purchases yet</h3>
+              <h3 className="mt-4 text-lg font-extrabold">Nothing here yet</h3>
               <p className="mt-1 max-w-sm text-sm font-semibold text-muted">
-                Create your first purchase order to start recording inventory from suppliers.
+                {canViewPurchases
+                  ? "Raise a requisition, or create a purchase order directly, to start recording stock from suppliers."
+                  : "Need stock bought for your storefront? Raise a requisition and a manager will approve it."}
               </p>
-              {canCreate && (
-                <Button type="button" onClick={openCreateModal} className="mt-5 h-9 text-xs">
-                  <Plus className="mr-1.5 size-4" aria-hidden="true" />
-                  New Purchase
-                </Button>
-              )}
+              <div className="mt-5 flex gap-2">
+                {requisitionFlow.canCreate && (
+                  <Button type="button" onClick={requisitionFlow.openCreate} className="h-9 text-xs">
+                    <ClipboardPen className="mr-1.5 size-4" aria-hidden="true" />
+                    New Requisition
+                  </Button>
+                )}
+                {canCreate && (
+                  <Button type="button" onClick={openCreateModal} className="h-9 text-xs">
+                    <Plus className="mr-1.5 size-4" aria-hidden="true" />
+                    New Purchase
+                  </Button>
+                )}
+              </div>
             </div>
-          ) : filteredPurchases && filteredPurchases.length === 0 ? (
+          ) : rows.length === 0 ? (
             <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-line bg-soft/60 p-10 text-center">
               <div className="grid size-14 place-items-center rounded-2xl bg-soft text-primary">
                 <Search className="size-7" aria-hidden="true" />
               </div>
-              <h3 className="mt-4 text-lg font-extrabold">No purchases match your filters</h3>
+              <h3 className="mt-4 text-lg font-extrabold">Nothing matches your filters</h3>
               <p className="mt-1 max-w-sm text-sm font-semibold text-muted">Try a different filter combination.</p>
               <Button type="button" onClick={clearFilters} className="mt-5 h-9 text-xs">
                 Clear filters
               </Button>
             </div>
-          ) : (
+          ) : canViewPurchases ? (
             <div className="overflow-x-auto rounded-lg border border-line">
               <table className="w-full table-fixed border-collapse text-sm">
                 <colgroup>
-                  <col className="w-[9%]" />
+                  <col className="w-[10%]" />
                   <col className="w-[17%]" />
-                  <col className="w-[9%]" />
+                  <col className="w-[10%]" />
                   <col className="w-[9%]" />
                   <col className="w-[9%]" />
                   <col className="w-[10%]" />
                   <col className="w-[8%]" />
                   <col className="w-[8%]" />
-                  <col className="w-[10%]" />
+                  <col className="w-[9%]" />
                 </colgroup>
                 <thead>
                   <tr className="bg-primary text-white">
-                    <Th>PO #</Th>
+                    <Th>Document #</Th>
                     <Th>Supplier</Th>
-                    <Th>Status</Th>
+                    <Th>Stage</Th>
                     <Th className="text-right">Total Amount</Th>
                     <Th>Payment Status</Th>
                     <Th>Shipment</Th>
@@ -575,84 +844,120 @@ export function PurchasesRoute(): React.JSX.Element {
                   </tr>
                 </thead>
                 <tbody>
-                  {(filteredPurchases ?? []).map((purchase) => (
-                    <tr
-                      key={purchase.id}
-                      onClick={() => void openView(purchase.id)}
-                      className="cursor-pointer border-t border-line odd:bg-white even:bg-soft/50 hover:bg-soft"
-                    >
-                      <td className="truncate px-3 py-2.5 text-xs font-bold tabular-nums text-ink">
-                        {purchase.purchaseNumber}
-                      </td>
-                      <td className="truncate px-3 py-2.5 font-extrabold">
-                        <div className="flex flex-col gap-0.5">
-                          <span>
-                            {purchase.supplierName}
-                          </span>
-                          <span className="text-xs font-semibold text-primary/80">
-                            {purchase.locationName}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <DashedPill tone={statusTone(purchase.status)}>{statusLabel(purchase.status)}</DashedPill>
-                      </td>
-                      <td className="px-3 py-2.5 text-right text-xs font-bold tabular-nums text-ink">
-                        {formatCents(purchase.grandTotalCents)}
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <DashedPill tone={paymentStatusTone(purchase.paymentStatus)}>
-                          {purchase.paymentStatus === "partially_paid" ? "Partially Paid" : purchase.paymentStatus}
-                        </DashedPill>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        {purchase.shipmentDepartedAt ? (
-                          <ShipmentProgressBar
-                            shipmentDepartedAt={purchase.shipmentDepartedAt}
-                            shipmentEta={purchase.shipmentEta}
-                            isFullyReceived={purchase.status === "received"}
-                            compact
-                          />
-                        ) : (
-                          <span className="text-xs font-semibold text-muted">—</span>
-                        )}
-                      </td>
-                      <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">
-                        {formatDate(purchase.orderedAt)}
-                      </td>
-                      <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">
-                        {formatDate(purchase.receivedAt)}
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <div className="flex items-center justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void openView(purchase.id);
-                            }}
-                            aria-label="View purchase"
-                            className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-ink cursor-pointer"
-                          >
-                            <Eye className="size-3.5" aria-hidden="true" />
-                          </button>
-                          {canEdit && (purchase.status === "draft" || (purchase.status === "ordered" && purchase.amountPaidCents === 0)) && (
+                  {rows.map((row) =>
+                    row.kind === "requisition" ? (
+                      <tr
+                        key={row.requisition.id}
+                        onClick={() => void requisitionFlow.openView(row.requisition.id)}
+                        className="cursor-pointer border-t border-line bg-warning/5 hover:bg-soft"
+                      >
+                        <td className="truncate px-3 py-2.5 text-xs font-bold tabular-nums text-ink">
+                          <div className="flex flex-col gap-0.5">
+                            <span>{row.requisition.requisitionNumber}</span>
+                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-warning">Requisition</span>
+                          </div>
+                        </td>
+                        <td className="truncate px-3 py-2.5 font-extrabold">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-xs font-semibold text-muted">Requested by {row.requisition.requestedByName}</span>
+                            <span className="text-xs font-semibold text-primary/80">{row.requisition.storefrontName}</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <DashedPill tone={requisitionStage(row.requisition).tone}>{requisitionStage(row.requisition).label}</DashedPill>
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-xs font-semibold text-muted">
+                          {row.requisition.itemCount} item{row.requisition.itemCount === 1 ? "" : "s"}
+                        </td>
+                        <td className="px-3 py-2.5 text-xs font-semibold text-muted">—</td>
+                        <td className="px-3 py-2.5 text-xs font-semibold text-muted">—</td>
+                        <td className="truncate px-3 py-2.5 text-xs font-semibold text-muted">{formatDate(row.requisition.requestedAt)}</td>
+                        <td className="px-3 py-2.5 text-xs font-semibold text-muted">—</td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center justify-end">
                             <button
                               type="button"
                               onClick={(event) => {
                                 event.stopPropagation();
-                                void openEditModal(purchase.id);
+                                void requisitionFlow.openView(row.requisition.id);
                               }}
-                              aria-label="Edit purchase"
+                              aria-label="View requisition"
+                              title={requisitionFlow.canApprove && row.requisition.status === "pending" ? "Review" : "View"}
                               className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-ink cursor-pointer"
                             >
-                              <Pencil className="size-3.5" aria-hidden="true" />
+                              <Eye className="size-3.5" aria-hidden="true" />
                             </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      <PurchaseRow
+                        key={row.purchase.id}
+                        purchase={row.purchase}
+                        canEdit={canEdit}
+                        localOnly={localOnly}
+                        onOpen={() => void openView(row.purchase.id)}
+                        onEdit={() => void openEditModal(row.purchase.id)}
+                      />
+                    )
+                  )}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-line">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="bg-primary text-white">
+                    <Th>Requisition #</Th>
+                    <Th>Requested By</Th>
+                    <Th>Items</Th>
+                    <Th>Stage</Th>
+                    <Th>Requested</Th>
+                    <Th className="text-right">Actions</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) =>
+                    row.kind === "requisition" ? (
+                      <tr
+                        key={row.requisition.id}
+                        onClick={() => void requisitionFlow.openView(row.requisition.id)}
+                        className="cursor-pointer border-t border-line odd:bg-white even:bg-soft/50 hover:bg-soft"
+                      >
+                        <td className="px-3 py-2.5 text-xs font-bold tabular-nums text-ink">{row.requisition.requisitionNumber}</td>
+                        <td className="px-3 py-2.5 font-extrabold">
+                          <div className="flex flex-col gap-0.5">
+                            <span>{row.requisition.requestedByName}</span>
+                            <span className="text-xs font-semibold text-primary/80">{row.requisition.storefrontName}</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5 text-xs font-bold tabular-nums text-muted">
+                          {row.requisition.itemCount} item{row.requisition.itemCount === 1 ? "" : "s"} ·{" "}
+                          {row.requisition.totalQuantityRequested} unit{row.requisition.totalQuantityRequested === 1 ? "" : "s"}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <DashedPill tone={requisitionStage(row.requisition).tone}>{requisitionStage(row.requisition).label}</DashedPill>
+                        </td>
+                        <td className="px-3 py-2.5 text-xs font-semibold text-muted">{formatDate(row.requisition.requestedAt)}</td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center justify-end">
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void requisitionFlow.openView(row.requisition.id);
+                              }}
+                              aria-label="View requisition"
+                              className="grid size-8 place-items-center rounded-lg border border-line text-muted transition hover:bg-soft hover:text-ink cursor-pointer"
+                            >
+                              <Eye className="size-3.5" aria-hidden="true" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null
+                  )}
                 </tbody>
               </table>
             </div>
@@ -666,7 +971,8 @@ export function PurchasesRoute(): React.JSX.Element {
         editingPurchase={editingPurchase}
         suppliers={suppliers}
         products={products}
-        locations={locations}
+        locations={localOnly && session?.branch ? locations.filter((location) => location.id === session.branch?.id) : locations}
+        localOnly={localOnly}
         onSupplierCreated={handleSupplierCreated}
         onProductCreated={handleProductCreated}
         onSaved={loadAll}
@@ -683,14 +989,18 @@ export function PurchasesRoute(): React.JSX.Element {
           purchase={viewingPurchase}
           paymentMethods={paymentMethods}
           canEdit={canEdit}
+          canReceiveGoods={canReceiveGoods}
+          localOnly={localOnly}
           onClose={closeView}
           onEdit={() => void openEditModal(viewingPurchase.id)}
           onChanged={refreshViewing}
         />
       )}
 
+      {requisitionFlow.elements}
+
       <SupplierStatementModal
-        open={statementOpen}
+        open={canViewPurchases && statementOpen}
         onClose={() => setStatementOpen(false)}
         suppliers={suppliers}
         paymentMethods={paymentMethods}

@@ -12,6 +12,7 @@ export type OutstandingPurchaseRowRaw = {
   purchase_id: string;
   supplier_id: string;
   supplier_name: string;
+  supplier_type: string;
   phone: string;
   purchase_number: string;
   status: string;
@@ -28,7 +29,7 @@ export function findOutstandingPurchases(tenantId: string, locationId: string | 
     .prepare(
       `
       SELECT
-        p.id AS purchase_id, p.supplier_id, s.business_name AS supplier_name, s.phone_1 AS phone,
+        p.id AS purchase_id, p.supplier_id, s.business_name AS supplier_name, s.supplier_type, s.phone_1 AS phone,
         p.purchase_number, p.status, p.ordered_at, p.created_at,
         p.grand_total_cents, p.amount_paid_cents
       FROM purchases p

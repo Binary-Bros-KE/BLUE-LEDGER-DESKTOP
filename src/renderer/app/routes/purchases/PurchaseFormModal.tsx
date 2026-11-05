@@ -1,3 +1,4 @@
+import type { SupplierPickerOption } from "@shared/types/supplier";
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, Paperclip, Plus, Search, X } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
@@ -38,13 +39,14 @@ type ItemLine = {
   taxType: ProductTaxType;
 };
 
-function emptyItemLine(product: Product | ProductListItem): ItemLine {
+function emptyItemLine(product: Product | ProductListItem, localOnly: boolean): ItemLine {
   return {
     productId: product.id,
     name: product.name,
     sku: product.sku,
     orderedQuantity: 1,
-    unitCost: fromCents(product.buyingPriceCents),
+    // A local-credit role types what the supplier charged; it doesn't get to see the buying price.
+    unitCost: localOnly ? "" : fromCents(product.buyingPriceCents),
     sellingPrice: fromCents(product.sellingPriceCents),
     discount: "0.00",
     taxType: product.taxType
@@ -97,6 +99,7 @@ export function PurchaseFormModal({
   suppliers,
   products,
   locations,
+  localOnly = false,
   onSupplierCreated,
   onProductCreated,
   onSaved
@@ -105,9 +108,11 @@ export function PurchaseFormModal({
   onClose: () => void;
   editingPurchase: Purchase | null;
   fromRequisition?: PurchaseFromRequisition | null;
-  suppliers: Supplier[];
+  suppliers: SupplierPickerOption[];
   products: ProductListItem[];
   locations: Location[];
+  /** Goods on credit from a local supplier: buying price only, no drafts or shipping expense (the service enforces this). */
+  localOnly?: boolean;
   onSupplierCreated: (supplier: Supplier) => void;
   onProductCreated: (product: Product) => void;
   onSaved: () => Promise<void>;
@@ -179,7 +184,7 @@ export function PurchaseFormModal({
       setAttachmentPath(null);
       setItems(
         fromRequisition
-          ? fromRequisition.items.map(({ product, quantity }) => ({ ...emptyItemLine(product), orderedQuantity: quantity }))
+          ? fromRequisition.items.map(({ product, quantity }) => ({ ...emptyItemLine(product, localOnly), orderedQuantity: quantity }))
           : []
       );
     }
@@ -250,7 +255,7 @@ export function PurchaseFormModal({
   function addItemLine(product: ProductListItem): void {
     setItems((prev) => {
       if (prev.some((line) => line.productId === product.id)) return prev;
-      return [...prev, emptyItemLine(product)];
+      return [...prev, emptyItemLine(product, localOnly)];
     });
     setProductSearch("");
   }
@@ -497,7 +502,7 @@ export function PurchaseFormModal({
                       className="flex w-full items-center justify-between px-3.5 py-2 text-left text-sm hover:bg-soft cursor-pointer"
                     >
                       <span className="font-bold text-ink">{product.name}</span>
-                      <span className="text-xs font-semibold text-muted">{formatCents(product.buyingPriceCents)}</span>
+                      {!localOnly && <span className="text-xs font-semibold text-muted">{formatCents(product.buyingPriceCents)}</span>}
                     </button>
                   ))}
                 </div>
@@ -512,19 +517,23 @@ export function PurchaseFormModal({
               onChange={setShippingCost}
               placeholder="0.00"
             />
-            <Field
-              label="Shipping Cost"
-              type="number"
-              value={shippingExpense}
-              onChange={setShippingExpense}
-              placeholder="0.00"
-            />
+            {!localOnly && (
+              <Field
+                label="Shipping Cost"
+                type="number"
+                value={shippingExpense}
+                onChange={setShippingExpense}
+                placeholder="0.00"
+              />
+            )}
           </div>
-          <p className="mt-1 max-w-md text-[11px] font-semibold text-muted">
-            Fee is owed to the supplier and added to the total. Cost is your own out-of-pocket cost
-            (e.g. paying a courier) — booked separately as a "Shipping Costs" expense, never added to
-            the total.
-          </p>
+          {!localOnly && (
+            <p className="mt-1 max-w-md text-[11px] font-semibold text-muted">
+              Fee is owed to the supplier and added to the total. Cost is your own out-of-pocket cost
+              (e.g. paying a courier) — booked separately as a "Shipping Costs" expense, never added to
+              the total.
+            </p>
+          )}
 
           <div className="mt-4">
             <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
@@ -670,20 +679,22 @@ export function PurchaseFormModal({
                           className="h-7 w-24 rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
                         />
                       </label>
-                      <label
-                        className="flex items-center gap-1 text-[10px] font-bold text-muted"
-                        title="Saved as this product's new selling price when this purchase is saved as Ordered"
-                      >
-                        Selling
-                        <input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={line.sellingPrice}
-                          onChange={(event) => updateItemLine(line.productId, { sellingPrice: event.target.value })}
-                          className="h-7 w-24 rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
-                        />
-                      </label>
+                      {!localOnly && (
+                        <label
+                          className="flex items-center gap-1 text-[10px] font-bold text-muted"
+                          title="Saved as this product's new selling price when this purchase is saved as Ordered"
+                        >
+                          Selling
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={line.sellingPrice}
+                            onChange={(event) => updateItemLine(line.productId, { sellingPrice: event.target.value })}
+                            className="h-7 w-24 rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
+                          />
+                        </label>
+                      )}
                       <label className="flex items-center gap-1 text-[10px] font-bold text-muted">
                         Disc.
                         <input
@@ -768,15 +779,17 @@ export function PurchaseFormModal({
               </Button>
             ) : (
               <>
-                <Button
-                  type="button"
-                  onClick={() => void handleSubmit("draft")}
-                  disabled={saving !== null}
-                  className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {saving === "draft" ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
-                  Save as Draft
-                </Button>
+                {!localOnly && (
+                  <Button
+                    type="button"
+                    onClick={() => void handleSubmit("draft")}
+                    disabled={saving !== null}
+                    className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {saving === "draft" ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
+                    Save as Draft
+                  </Button>
+                )}
                 <Button
                   type="button"
                   onClick={() => void handleSubmit("ordered")}
