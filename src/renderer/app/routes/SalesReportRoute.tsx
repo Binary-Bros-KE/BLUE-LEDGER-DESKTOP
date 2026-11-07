@@ -24,6 +24,7 @@ import type {
   SalesByPaymentMethodRow,
   SalesByStorefrontRow,
   SalesFinancialOverview,
+  SalesProductSold,
   SalesReportMode,
   SalesTransactionRow,
   SalesTrendWindowResult,
@@ -215,6 +216,34 @@ export function SalesReportRoute(): React.JSX.Element {
       return rows.map((row) => Math.max(2, (getValue(row) / max) * 100));
     }
 
+    function productsSoldSection(title: string, products: SalesProductSold[]): ReportExportSection {
+      return {
+        type: "table",
+        title,
+        description: `Every distinct product sold ${resolvedRange.startDate} to ${resolvedRange.endDate}, most revenue first`,
+        columns: [
+          { key: "number", header: "#", align: "right" },
+          { key: "product", header: "Product" },
+          { key: "qty", header: "Units Sold", align: "right" },
+          { key: "revenue", header: "Revenue", align: "right" },
+          { key: "cost", header: "Cost", align: "right" },
+          { key: "margin", header: "Margin", align: "right" },
+          { key: "marginPercent", header: "Margin %", align: "right" },
+          { key: "percentOfRevenue", header: "% of Revenue", align: "right" }
+        ],
+        rows: products.map((product, index) => ({
+          number: String(index + 1),
+          product: product.productName,
+          qty: String(product.quantitySold),
+          revenue: money(product.revenueCents),
+          cost: money(product.costCents),
+          margin: money(product.marginCents),
+          marginPercent: `${product.marginPercent.toFixed(1)}%`,
+          percentOfRevenue: `${product.percentOfRevenue.toFixed(1)}%`
+        }))
+      };
+    }
+
     const rawSections: Array<ReportExportSection | false> = [
       {
         type: "cards",
@@ -279,31 +308,11 @@ export function SalesReportRoute(): React.JSX.Element {
           color: categoricalColor(index)
         }))
       },
-      overview.productsSold.length > 0 && {
-        type: "table",
-        title: "Products Sold",
-        description: `Every distinct product sold ${resolvedRange.startDate} to ${resolvedRange.endDate}, most revenue first`,
-        columns: [
-          { key: "number", header: "#", align: "right" },
-          { key: "product", header: "Product" },
-          { key: "qty", header: "Units Sold", align: "right" },
-          { key: "revenue", header: "Revenue", align: "right" },
-          { key: "cost", header: "Cost", align: "right" },
-          { key: "margin", header: "Margin", align: "right" },
-          { key: "marginPercent", header: "Margin %", align: "right" },
-          { key: "percentOfRevenue", header: "% of Revenue", align: "right" }
-        ],
-        rows: overview.productsSold.map((product, index) => ({
-          number: String(index + 1),
-          product: product.productName,
-          qty: String(product.quantitySold),
-          revenue: money(product.revenueCents),
-          cost: money(product.costCents),
-          margin: money(product.marginCents),
-          marginPercent: `${product.marginPercent.toFixed(1)}%`,
-          percentOfRevenue: `${product.percentOfRevenue.toFixed(1)}%`
-        }))
-      },
+      // Every storefront in one report: one Products Sold table per storefront that sold anything,
+      // so each branch's own best and worst sellers read separately. One storefront: a single table.
+      ...(locationFilter.locationId === null && overview.productsSoldByStorefront.length > 1
+        ? overview.productsSoldByStorefront.map((storefront) => productsSoldSection(`Products Sold — ${storefront.locationName}`, storefront.products))
+        : [overview.productsSold.length > 0 && productsSoldSection("Products Sold", overview.productsSold)]),
       {
         type: "bars",
         title: "Sales by Storefront",
@@ -550,7 +559,7 @@ export function SalesReportRoute(): React.JSX.Element {
       sections,
       fileBaseName: `SalesReport_${resolvedRange.startDate}_to_${resolvedRange.endDate}`
     };
-  }, [overview, byStorefront, byEmployee, byPaymentMethod, taxReport, localSourcingReport, resolvedRange]);
+  }, [overview, byStorefront, byEmployee, byPaymentMethod, taxReport, localSourcingReport, resolvedRange, locationFilter.locationId]);
 
   return (
     <motion.div

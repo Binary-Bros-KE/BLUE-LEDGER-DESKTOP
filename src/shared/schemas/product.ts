@@ -85,6 +85,17 @@ const productFieldsSchema = z.object({
  * price under it, with no way to complete the transaction. Rejected here at the source instead of
  * letting a broken product ever get saved — equal is fine (selling exactly at the floor isn't
  * "below" it), only strictly above is blocked. */
+/** Selling below cost turns every sale into a loss on the reports (a real client's negative margins
+ * came from exactly this — a per-gram buying price typed ten times too high). */
+function buyingNotAboveSelling(data: { buyingPriceCents: number; sellingPriceCents: number }): boolean {
+  return data.buyingPriceCents <= data.sellingPriceCents;
+}
+
+const BUYING_PRICE_REFINEMENT_OPTS = {
+  message: "Buying price can't be higher than the selling price — every sale would be a loss",
+  path: ["buyingPriceCents"] as PropertyKey[]
+};
+
 function minimumPriceNotAboveSelling(data: { minimumPriceCents: number | null; sellingPriceCents: number }): boolean {
   return data.minimumPriceCents === null || data.minimumPriceCents <= data.sellingPriceCents;
 }
@@ -105,9 +116,12 @@ export const productCreateSchema = productFieldsSchema
     // Products-tab form.
     isQuickCreate: z.boolean().optional().default(false)
   })
-  .refine(minimumPriceNotAboveSelling, MINIMUM_PRICE_REFINEMENT_OPTS);
+  .refine(minimumPriceNotAboveSelling, MINIMUM_PRICE_REFINEMENT_OPTS)
+  .refine(buyingNotAboveSelling, BUYING_PRICE_REFINEMENT_OPTS);
 
-export const productUpdateSchema = productFieldsSchema.refine(minimumPriceNotAboveSelling, MINIMUM_PRICE_REFINEMENT_OPTS);
+export const productUpdateSchema = productFieldsSchema
+  .refine(minimumPriceNotAboveSelling, MINIMUM_PRICE_REFINEMENT_OPTS)
+  .refine(buyingNotAboveSelling, BUYING_PRICE_REFINEMENT_OPTS);
 
 /** Backfill tool for a tenant onboarded before tax categories existed — every product bulk-set to
  * one category in a few clicks instead of one-by-one, or a re-import that would just create

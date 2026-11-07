@@ -141,6 +141,9 @@ export type SalesFinancialOverview = {
   averageDailyRevenueCents: number;
   topProducts: SalesTopProduct[];
   productsSold: SalesProductSold[];
+  /** productsSold again, one list per storefront that sold anything (most revenue first) — the PDF
+   * prints these separately when the report covers every storefront. */
+  productsSoldByStorefront: Array<{ locationId: string; locationName: string; products: SalesProductSold[] }>;
   paymentSplit: SalesPaymentSplitEntry[];
 
   // --- Revenue breakdown: what Total Revenue is actually built from ---
