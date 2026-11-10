@@ -443,6 +443,40 @@ export function getSalesFinancialOverview(input: unknown): SalesFinancialOvervie
   const itemsSold = itemRows.reduce((sum, item) => sum + item.quantity, 0);
   const averageDailyRevenueCents = span > 0 ? Math.round(grossSalesCents / span) : 0;
 
+  /** Every distinct product in `rows`, most revenue first, with cost/margin/share — DESKTOP's
+   * "Products Sold". Shared by the whole-report list and the per-storefront ones. */
+  function productsSoldFrom(rows: typeof itemRows): SalesProductSold[] {
+    const byProduct = new Map<string, { productId: string; productName: string; quantitySold: number; revenueCents: number; costCents: number }>();
+    for (const item of rows) {
+      const entry = byProduct.get(item.product_id) ?? { productId: item.product_id, productName: item.product_name, quantitySold: 0, revenueCents: 0, costCents: 0 };
+      entry.quantitySold += item.quantity;
+      entry.revenueCents += item.line_total_cents;
+      entry.costCents += item.quantity * item.buying_price_cents;
+      byProduct.set(item.product_id, entry);
+    }
+    const sorted = [...byProduct.values()].sort((a, b) => b.revenueCents - a.revenueCents);
+    const total = sorted.reduce((sum, p) => sum + p.revenueCents, 0);
+    return sorted.map((product) => {
+      const marginCents = product.revenueCents - product.costCents;
+      return {
+        ...product,
+        marginCents,
+        marginPercent: product.revenueCents > 0 ? (marginCents / product.revenueCents) * 100 : 0,
+        percentOfRevenue: total > 0 ? (product.revenueCents / total) * 100 : 0,
+      };
+    });
+  }
+
+  const rowsByStorefront = new Map<string, { locationName: string; rows: typeof itemRows }>();
+  for (const item of itemRows) {
+    const bucket = rowsByStorefront.get(item.location_id) ?? { locationName: item.location_name ?? "Unknown storefront", rows: [] };
+    bucket.rows.push(item);
+    rowsByStorefront.set(item.location_id, bucket);
+  }
+  const productsSoldByStorefront = [...rowsByStorefront.entries()]
+    .map(([locationId, bucket]) => ({ locationId, locationName: bucket.locationName, products: productsSoldFrom(bucket.rows) }))
+    .sort((a, b) => b.products.reduce((s, p) => s + p.revenueCents, 0) - a.products.reduce((s, p) => s + p.revenueCents, 0));
+
   const productMap = new Map<string, SalesTopProduct & { costCents: number }>();
   for (const item of itemRows) {
     const existing = productMap.get(item.product_id) ?? {
@@ -530,6 +564,7 @@ export function getSalesFinancialOverview(input: unknown): SalesFinancialOvervie
     averageDailyRevenueCents,
     topProducts,
     productsSold,
+    productsSoldByStorefront,
     paymentSplit: currentCash.paymentSplit,
     retailWholesaleRevenueCents: currentCash.retailWholesaleCents,
     retailWholesaleDocumentCount: currentCash.retailWholesaleDocumentCount,

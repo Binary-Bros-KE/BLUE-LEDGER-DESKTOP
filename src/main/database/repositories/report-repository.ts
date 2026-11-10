@@ -280,6 +280,9 @@ export function findApprovedReturnTransactionRows(
 
 export type SaleItemProfitRow = {
   sale_id: string;
+  /** The sale's storefront — for Products Sold split per storefront. */
+  location_id: string;
+  location_name: string | null;
   product_id: string;
   product_name: string;
   quantity: number;
@@ -302,6 +305,8 @@ export function findSaleItemRowsInRange(
       `
       SELECT
         si.sale_id,
+        s.location_id,
+        (SELECT l.location_name FROM locations l WHERE l.id = s.location_id) AS location_name,
         si.product_id,
         p.name AS product_name,
         (si.quantity - COALESCE(ret.returned_quantity, 0)) AS quantity,

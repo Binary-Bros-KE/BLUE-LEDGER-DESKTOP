@@ -193,6 +193,17 @@ function prepareCart(
  * Stock Before/After freeze pattern). See product-repository.ts's updatePricingFromPurchaseRow for
  * the actual column-level behavior (minimum price always pinned to the new buying price). */
 function syncProductPricingFromOrder(items: Array<{ productId: string; unitCostCents: number; sellingPriceCents: number | null }>): void {
+  // Placing the order makes the cost the product's buying price — never let that go above what it
+  // sells for (the same rule the product form enforces). Checked for every line before any is written.
+  for (const item of items) {
+    const product = productRepository.findProductRowById(item.productId);
+    const sellingPriceCents = item.sellingPriceCents ?? product?.selling_price_cents ?? 0;
+    if (product && item.unitCostCents > sellingPriceCents) {
+      throw new Error(
+        `"${product.name}" would cost ${(item.unitCostCents / 100).toFixed(2)} but sell for ${(sellingPriceCents / 100).toFixed(2)} — raise its selling price on this order first`
+      );
+    }
+  }
   for (const item of items) {
     productRepository.updatePricingFromPurchaseRow(item.productId, {
       buyingPriceCents: item.unitCostCents,
