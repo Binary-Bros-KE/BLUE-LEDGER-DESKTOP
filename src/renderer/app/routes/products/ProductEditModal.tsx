@@ -1,4 +1,6 @@
 import { BrandField } from "@renderer/shared/components/BrandField";
+import { ProductUnitsSection, useProductUnits } from "./ProductUnitsSection";
+import { baseToAmount, displayPriceCents } from "@shared/lib/product-units";
 import { useEffect, useMemo, useState } from "react";
 import { ImagePlus, Loader2, Package, X } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
@@ -57,14 +59,15 @@ function toFormState(product: Product): FormState {
     categoryId: product.categoryId ?? "",
     storefrontId: product.storefrontId ?? "",
     unitOfMeasure: product.unitOfMeasure ?? "",
-    buyingPrice: fromCents(product.buyingPriceCents),
-    sellingPrice: fromCents(product.sellingPriceCents),
-    wholesalePrice: product.wholesalePriceCents !== null ? fromCents(product.wholesalePriceCents) : "",
-    wholesaleMinQuantity: String(product.wholesaleMinQuantity),
-    minimumPrice: product.minimumPriceCents !== null ? fromCents(product.minimumPriceCents) : "",
+    // Read per the price unit (per kg) — stored per base unit (per g). See shared/lib/product-units.ts.
+    buyingPrice: fromCents(displayPriceCents(product.buyingPriceCents, product.unitConfig)),
+    sellingPrice: fromCents(displayPriceCents(product.sellingPriceCents, product.unitConfig)),
+    wholesalePrice: product.wholesalePriceCents !== null ? fromCents(displayPriceCents(product.wholesalePriceCents, product.unitConfig)) : "",
+    wholesaleMinQuantity: String(baseToAmount(product.wholesaleMinQuantity, product.unitConfig, product.unitConfig?.priceUnit ?? null)),
+    minimumPrice: product.minimumPriceCents !== null ? fromCents(displayPriceCents(product.minimumPriceCents, product.unitConfig)) : "",
     taxType: product.taxType,
     taxMode: product.pricesTaxInclusive === null ? "inherit" : product.pricesTaxInclusive ? "inclusive" : "exclusive",
-    reorderLevel: String(product.reorderLevel),
+    reorderLevel: String(baseToAmount(product.reorderLevel, product.unitConfig, product.unitConfig?.priceUnit ?? null)),
     trackStock: product.trackStock,
     allowNegativeStock: product.allowNegativeStock,
     imagePath: product.imagePath
@@ -138,6 +141,28 @@ export function ProductEditModal({
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
+  const units = useProductUnits(product);
+
+  /** Re-expresses typed prices and amounts when "Sold as" changes — see useProductUnits. */
+  function handleUnitsKindChange(next: string): void {
+    const { baseUnit, ratio } = units.changeKind(next, form.unitOfMeasure, form.sellingPrice);
+    const scalePrice = (text: string) => (text.trim() ? (Number.parseFloat(text) * ratio).toFixed(2) : text);
+    const scaleCount = (text: string) => {
+      const count = Number.parseFloat(text);
+      return Number.isFinite(count) ? String(Math.round((count / ratio) * 1000) / 1000) : text;
+    };
+    setForm((prev) => ({
+      ...prev,
+      unitOfMeasure: baseUnit,
+      buyingPrice: scalePrice(prev.buyingPrice),
+      sellingPrice: scalePrice(prev.sellingPrice),
+      wholesalePrice: scalePrice(prev.wholesalePrice),
+      minimumPrice: scalePrice(prev.minimumPrice),
+      wholesaleMinQuantity: scaleCount(prev.wholesaleMinQuantity),
+      reorderLevel: scaleCount(prev.reorderLevel)
+    }));
+  }
+
   async function handlePickImage(): Promise<void> {
     setImageBusy(true);
     try {
@@ -166,6 +191,13 @@ export function ProductEditModal({
       return;
     }
 
+    const unitConfig = units.buildConfig();
+    if (typeof unitConfig === "string") {
+      setError(unitConfig);
+      showErrorToast(unitConfig);
+      return;
+    }
+
     setSaving(true);
 
     try {
@@ -180,17 +212,19 @@ export function ProductEditModal({
         categoryId: form.categoryId ? form.categoryId : null,
         storefrontId: form.storefrontId ? form.storefrontId : null,
         unitOfMeasure: form.unitOfMeasure ? form.unitOfMeasure : null,
-        buyingPriceCents: toCents(form.buyingPrice),
-        sellingPriceCents: toCents(form.sellingPrice),
-        wholesalePriceCents: form.wholesalePrice.trim() ? toCents(form.wholesalePrice) : null,
-        wholesaleMinQuantity: Number(form.wholesaleMinQuantity) || 0,
-        minimumPriceCents: form.minimumPrice.trim() ? toCents(form.minimumPrice) : null,
+        unitConfig,
+        // Typed per the price unit (per kg); stored per base unit (per g) — shared/lib/product-units.ts.
+        buyingPriceCents: toCents(form.buyingPrice) / units.priceFactor,
+        sellingPriceCents: toCents(form.sellingPrice) / units.priceFactor,
+        wholesalePriceCents: form.wholesalePrice.trim() ? toCents(form.wholesalePrice) / units.priceFactor : null,
+        wholesaleMinQuantity: Math.round((Number(form.wholesaleMinQuantity) || 0) * units.priceFactor),
+        minimumPriceCents: form.minimumPrice.trim() ? toCents(form.minimumPrice) / units.priceFactor : null,
         // taxRate is no longer the calculation driver (see tax-calculation.ts) — kept in sync with
         // taxType purely for any old code/report still reading it directly.
         taxRate: form.taxType === "vat" ? vatRatePercent : 0,
         taxType: form.taxType,
         pricesTaxInclusive: form.taxMode === "inherit" ? null : form.taxMode === "inclusive",
-        reorderLevel: Number(form.reorderLevel) || 0,
+        reorderLevel: Math.round((Number(form.reorderLevel) || 0) * units.priceFactor),
         trackStock: form.trackStock,
         allowNegativeStock: form.allowNegativeStock,
         imagePath: form.imagePath
@@ -317,6 +351,7 @@ export function ProductEditModal({
             value={form.unitOfMeasure}
             onChange={(value) => updateField("unitOfMeasure", value)}
             options={[{ value: "", label: "Not set" }, ...UNIT_OF_MEASURE_OPTIONS]}
+            disabled={units.family !== undefined}
           />
           <TextAreaField
             label="Description"
@@ -327,11 +362,15 @@ export function ProductEditModal({
           />
         </div>
 
+        {product.variantGroupId === null && product.variantConfig === null && (
+          <ProductUnitsSection units={units} baseUnit={form.unitOfMeasure} onKindChange={handleUnitsKindChange} />
+        )}
+
         <div className="mt-5 border-t border-line pt-5">
           <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Pricing</p>
           <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-5">
             <Field
-              label="Buying Price"
+              label={`Buying Price${units.priceLabel}`}
               type="number"
               value={form.buyingPrice}
               onChange={(value) => updateField("buyingPrice", value)}
@@ -339,7 +378,7 @@ export function ProductEditModal({
               required
             />
             <Field
-              label="Selling Price"
+              label={`Selling Price${units.priceLabel}`}
               type="number"
               value={form.sellingPrice}
               onChange={(value) => updateField("sellingPrice", value)}

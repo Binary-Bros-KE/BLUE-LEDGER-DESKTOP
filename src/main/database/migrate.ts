@@ -3686,6 +3686,20 @@ const migrations = [
     `
   },
   {
+    version: 109,
+    name: "product_units",
+    sql: `
+      -- Selling in several units (kg and g, carton and piece) — see shared/lib/product-units.ts. Prices
+      -- stay per base unit and may now be fractional (these columns have INTEGER affinity, which keeps
+      -- a real value as-is). A line remembers the unit it was sold in, only for how it prints.
+      ALTER TABLE products ADD COLUMN unit_config_json TEXT;
+      ALTER TABLE sale_items ADD COLUMN unit_code TEXT;
+      ALTER TABLE sale_items ADD COLUMN unit_factor INTEGER;
+      ALTER TABLE quotation_items ADD COLUMN unit_code TEXT;
+      ALTER TABLE quotation_items ADD COLUMN unit_factor INTEGER;
+    `
+  },
+  {
     // 110, not 109: the unreleased product-units branch already claims 109. Applied migrations are
     // tracked as a set (see migrateDatabase), so 109 arriving after this one is fine.
     version: 110,

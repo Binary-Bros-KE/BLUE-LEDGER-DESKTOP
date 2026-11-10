@@ -326,6 +326,7 @@ export function saveSeparateVariants(input: unknown): VariantGroupView {
         categoryId: template.categoryId,
         storefrontId: template.storefrontId,
         unitOfMeasure: template.unitOfMeasure,
+        unitConfig: null,
         buyingPriceCents: template.buyingPriceCents,
         sellingPriceCents: c.member.sellingPriceCents,
         wholesalePriceCents: template.wholesalePriceCents,

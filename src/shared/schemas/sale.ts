@@ -9,7 +9,9 @@ const saleCartItemSchema = z.object({
   /** Cashier-entered price override for this line only — never written back to the product's own
    * sellingPriceCents. Omitted (not just 0) means "use the product's normal/wholesale price", so
    * this can't be used to accidentally zero out a price. See prepareCart in sale-service.ts. */
-  unitPriceCents: z.coerce.number().int().positive().max(100_000_000_000).optional(),
+  unitPriceCents: z.coerce.number().positive().max(100_000_000_000).optional(),
+  /** The unit this line is sold in (kg, carton); quantity is always in base units. */
+  unitCode: optionalText(30),
   /** See SaleItem's own doc comment (shared/types/sale.ts) — bought from another shop on the spot
    * rather than pulled from this shop's stock. localCostCents/localSupplierId are only meaningful
    * when this is true; prepareCart in sale-service.ts ignores them otherwise. A checked box requires

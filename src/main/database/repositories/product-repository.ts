@@ -1,4 +1,5 @@
 import { getDatabase } from "@main/database/connection";
+import { parseUnitConfig } from "@shared/lib/product-units";
 import type { ProductCreateInput, ProductUpdateInput } from "@shared/schemas/product";
 import type {
   OnlineContentBlock,
@@ -91,6 +92,7 @@ export type ProductRow = {
   category_id: string | null;
   storefront_id: string | null;
   unit_of_measure: string | null;
+  unit_config_json: string | null;
   buying_price_cents: number;
   selling_price_cents: number;
   wholesale_price_cents: number | null;
@@ -246,11 +248,11 @@ export function insertProductRow(
       `
       INSERT INTO products (
         id, tenant_id, sku, barcode, supplier_sku, name, short_name, description,
-        category_id, storefront_id, unit_of_measure, buying_price_cents, selling_price_cents, wholesale_price_cents,
+        category_id, storefront_id, unit_of_measure, unit_config_json, buying_price_cents, selling_price_cents, wholesale_price_cents,
         wholesale_min_quantity, minimum_price_cents, tax_rate, tax_type, prices_tax_inclusive, reorder_level, track_stock,
         allow_negative_stock, image_path, brand, status, created_at, updated_at, created_by, sync_status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending')
     `
     )
     .run(
@@ -265,6 +267,7 @@ export function insertProductRow(
       input.categoryId,
       input.storefrontId,
       input.unitOfMeasure,
+      input.unitConfig ? JSON.stringify(input.unitConfig) : null,
       input.buyingPriceCents,
       input.sellingPriceCents,
       input.wholesalePriceCents,
@@ -295,6 +298,9 @@ export function updateProductRow(
   input: ProductUpdateInput & { updatedBy: string | null }
 ): ProductRow {
   const now = new Date().toISOString();
+  // Absent = leave as is — see productFieldsSchema.
+  const unitConfigJson =
+    input.unitConfig === undefined ? (findProductRowById(id)?.unit_config_json ?? null) : input.unitConfig ? JSON.stringify(input.unitConfig) : null;
 
   getDatabase()
     .prepare(
@@ -309,6 +315,7 @@ export function updateProductRow(
         category_id = ?,
         storefront_id = ?,
         unit_of_measure = ?,
+        unit_config_json = ?,
         buying_price_cents = ?,
         selling_price_cents = ?,
         wholesale_price_cents = ?,
@@ -338,6 +345,7 @@ export function updateProductRow(
       input.categoryId,
       input.storefrontId,
       input.unitOfMeasure,
+      unitConfigJson,
       input.buyingPriceCents,
       input.sellingPriceCents,
       input.wholesalePriceCents,
@@ -530,6 +538,15 @@ function parseVariantOptions(raw: string | null | undefined): Record<string, str
   }
 }
 
+function parseUnitConfigJson(raw: string | null | undefined): Product["unitConfig"] {
+  if (!raw) return null;
+  try {
+    return parseUnitConfig(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
 /** variant_config_json — see ProductVariantConfig. Null (or malformed) = no variants. */
 function parseVariantConfig(raw: string | null | undefined): Product["variantConfig"] {
   if (!raw) return null;
@@ -581,6 +598,7 @@ export function mapProductRow(row: ProductRow): Product {
     categoryId: row.category_id,
     storefrontId: row.storefront_id,
     unitOfMeasure: row.unit_of_measure as Product["unitOfMeasure"],
+    unitConfig: parseUnitConfigJson(row.unit_config_json),
     buyingPriceCents: row.buying_price_cents,
     sellingPriceCents: row.selling_price_cents,
     wholesalePriceCents: row.wholesale_price_cents,
@@ -732,4 +750,9 @@ export function findProductsWithVariantConfigRows(tenantId: string): Array<{ id:
 /** Exported for the variants service's shared-variant code scan. */
 export function parseVariantConfigJson(raw: string | null | undefined): Product["variantConfig"] {
   return parseVariantConfig(raw);
+}
+
+/** Has any stock ever moved for this product? */
+export function hasStockMovementRows(productId: string): boolean {
+  return getDatabase().prepare("SELECT 1 FROM stock_movements WHERE product_id = ? LIMIT 1").get(productId) !== undefined;
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { displayPriceCents, priceUnitSuffix } from "@shared/lib/product-units";
 import { Loader2, Package } from "lucide-react";
 import { Modal } from "@renderer/shared/components/Modal";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
@@ -102,7 +103,7 @@ export function ProductInfoModal({ product, onClose }: { product: ProductListIte
         <div>
           <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Pricing</p>
           <div className="mt-2 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-            <InfoRow label="Selling Price" value={formatCents(product.sellingPriceCents)} />
+            <InfoRow label="Selling Price" value={`${formatCents(displayPriceCents(product.sellingPriceCents, product.unitConfig))}${priceUnitSuffix(product.unitConfig)}`} />
             <InfoRow
               label="Wholesale Price"
               value={

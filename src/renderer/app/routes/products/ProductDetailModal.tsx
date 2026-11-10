@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { displayPriceCents, priceUnitSuffix } from "@shared/lib/product-units";
 import { format } from "date-fns";
 import { ArrowLeftRight, Loader2, PackagePlus } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
@@ -623,7 +624,7 @@ export function ProductDetailModal({
 
           <div className="flex items-center justify-between border-t border-line pt-4 text-xs font-semibold text-muted">
             <span>
-              Selling price: {currency} {formatCents(product.sellingPriceCents)}
+              Selling price: {currency} {formatCents(displayPriceCents(product.sellingPriceCents, product.unitConfig))}{priceUnitSuffix(product.unitConfig)}
             </span>
             <Button
               type="button"

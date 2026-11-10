@@ -1,3 +1,4 @@
+import type { ProductUnitConfig } from "@shared/lib/product-units";
 export type ProductId = string;
 
 /** Fixed list, not free text — keeps the field usable as a real dropdown everywhere it appears
@@ -80,6 +81,9 @@ export type ProductInputFields = {
   /** Null is a real, expected state — not every product has a known unit yet (especially one
    * created via bulk import from a migration file that never tracked this). */
   unitOfMeasure: UnitOfMeasure | null;
+  /** Selling in several units — see shared/lib/product-units.ts. Null = one unit only. Prices on this
+   * product are per unitOfMeasure and may be fractional (KES 175/kg = 17.5 cents per gram). */
+  unitConfig: ProductUnitConfig | null;
   buyingPriceCents: number;
   sellingPriceCents: number;
   wholesalePriceCents: number | null;

@@ -79,7 +79,7 @@ export function requestSaleReturn(input: unknown): SaleReturn {
       productId: saleItem.product_id,
       quantity: item.quantity,
       unitPriceCents: saleItem.unit_price_cents,
-      lineTotalCents: saleItem.unit_price_cents * item.quantity
+      lineTotalCents: Math.round(saleItem.unit_price_cents * item.quantity)
     };
   });
 

@@ -44,6 +44,9 @@ export type QuotationItem = {
    * appended ("Travel Mug — Red"), so every receipt/document/report shows it without extra work. */
   variantKey: string | null;
   variantLabel: string | null;
+  /** See SaleItem["unitCode"]. */
+  unitCode: string | null;
+  unitFactor: number | null;
   createdAt: string;
 };
 

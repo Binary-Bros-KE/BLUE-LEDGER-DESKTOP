@@ -1,4 +1,5 @@
 import { formatDocumentDateTime } from "@shared/lib/date";
+import { displayLine } from "@shared/lib/product-units";
 import { computeAddedTaxCents, computeTaxBreakdown, withTaxableServiceCharges, type TaxBreakdownEntry } from "@shared/lib/tax-calculation";
 import type { Sale } from "@shared/types/sale";
 
@@ -92,9 +93,9 @@ export function buildReceiptViewModel(sale: Sale, business: ReceiptBusinessInfo)
     branchName: showBusinessInfo ? sale.locationName : "",
     customerName: sale.customerName,
     items: sale.items.map((item) => ({
-      name: item.productName,
-      quantity: item.quantity,
-      unitPriceCents: item.unitPriceCents,
+      name: item.unitCode ? `${item.productName} (${item.unitCode})` : item.productName,
+      quantity: displayLine(item).quantity,
+      unitPriceCents: displayLine(item).unitPriceCents,
       lineTotalCents: item.lineTotalCents
     })),
     extraLines: [

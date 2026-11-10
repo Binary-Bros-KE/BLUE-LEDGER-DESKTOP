@@ -103,6 +103,10 @@ export type SaleDelivery = {
 };
 
 export type SaleItem = {
+  /** The unit this line was sold in (kg, carton) and how many base units that is — only for how it
+   * prints; quantity and unitPriceCents stay in the base unit. See shared/lib/product-units.ts. */
+  unitCode: string | null;
+  unitFactor: number | null;
   id: SaleItemId;
   saleId: string;
   productId: string;

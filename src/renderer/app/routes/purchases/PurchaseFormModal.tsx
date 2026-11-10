@@ -1,4 +1,5 @@
 import type { SupplierPickerOption } from "@shared/types/supplier";
+import { displayPriceCents, unitFactor } from "@shared/lib/product-units";
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, Paperclip, Plus, Search, X } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
@@ -20,6 +21,12 @@ type ItemLine = {
   productId: string;
   name: string;
   sku: string;
+  /** For a product sold by measure, everything on this line reads per its price unit (per kg): base
+   * units in one of those, and its name. Typing per gram would round a fractional price to whole
+   * cents and overwrite the product's real one. 1 and "" otherwise. See shared/lib/product-units.ts. */
+  priceFactor: number;
+  priceUnit: string;
+  /** Always in base units. */
   orderedQuantity: number;
   /** Raw decimal text, not cents — see CheckoutRoute's own `discount`/`priceOverride` fields for the
    * same pattern (and money.ts's fromCents/toCents split doc comment). Deriving a controlled input's
@@ -40,22 +47,29 @@ type ItemLine = {
 };
 
 function emptyItemLine(product: Product | ProductListItem, localOnly: boolean): ItemLine {
+  const priceFactor = unitFactor(product.unitConfig, product.unitConfig?.priceUnit);
   return {
     productId: product.id,
     name: product.name,
     sku: product.sku,
-    orderedQuantity: 1,
+    priceFactor,
+    priceUnit: product.unitConfig?.priceUnit ?? "",
+    orderedQuantity: priceFactor,
     // A local-credit role types what the supplier charged; it doesn't get to see the buying price.
-    unitCost: localOnly ? "" : fromCents(product.buyingPriceCents),
-    sellingPrice: fromCents(product.sellingPriceCents),
+    unitCost: localOnly ? "" : fromCents(displayPriceCents(product.buyingPriceCents, product.unitConfig)),
+    sellingPrice: fromCents(displayPriceCents(product.sellingPriceCents, product.unitConfig)),
     discount: "0.00",
     taxType: product.taxType
   };
 }
 
+function lineSubtotalCents(line: ItemLine): number {
+  return Math.round((line.orderedQuantity / line.priceFactor) * toCents(line.unitCost));
+}
+
 /** Net-of-discount amount before tax is applied — same convention as sale-service.ts's prepareCart. */
 function lineTaxableCents(line: ItemLine): number {
-  return line.orderedQuantity * toCents(line.unitCost) - toCents(line.discount);
+  return lineSubtotalCents(line) - toCents(line.discount);
 }
 
 /** Resolves this line's own product's inclusive/exclusive override (falling back to the tenant
@@ -157,18 +171,23 @@ export function PurchaseFormModal({
       setNotes(editingPurchase.notes ?? "");
       setAttachmentPath(editingPurchase.attachmentPath);
       setItems(
-        editingPurchase.items.map((item) => ({
+        editingPurchase.items.map((item) => {
+          const unitConfig = products.find((p) => p.id === item.productId)?.unitConfig ?? null;
+          return {
           productId: item.productId,
           name: item.productName,
           sku: item.sku,
+          priceFactor: unitFactor(unitConfig, unitConfig?.priceUnit),
+          priceUnit: unitConfig?.priceUnit ?? "",
           orderedQuantity: item.orderedQuantity,
-          unitCost: fromCents(item.unitCostCents),
+          unitCost: fromCents(displayPriceCents(item.unitCostCents, unitConfig)),
           // Historical lines never recorded a selling price — fall back to the product's current
           // one so the field isn't just blank/zero when re-opening an old draft.
-          sellingPrice: fromCents(item.sellingPriceCents ?? products.find((p) => p.id === item.productId)?.sellingPriceCents ?? 0),
+          sellingPrice: fromCents(displayPriceCents(item.sellingPriceCents ?? products.find((p) => p.id === item.productId)?.sellingPriceCents ?? 0, unitConfig)),
           discount: fromCents(item.discountAmountCents),
           taxType: item.taxType
-        }))
+          };
+        })
       );
     } else {
       setSupplierId(null);
@@ -229,7 +248,7 @@ export function PurchaseFormModal({
     let lineGrossCentsSum = 0;
     for (const item of items) {
       const product = productById.get(item.productId);
-      subtotalCents += item.orderedQuantity * toCents(item.unitCost);
+      subtotalCents += lineSubtotalCents(item);
       discountAmountCents += toCents(item.discount);
       taxAmountCents += lineTaxCents(item, product, tenantTaxConfig);
       lineGrossCentsSum += lineGrossCents(item, product, tenantTaxConfig);
@@ -329,9 +348,9 @@ export function PurchaseFormModal({
       items: items.map((item) => ({
         productId: item.productId,
         orderedQuantity: item.orderedQuantity,
-        unitCostCents: toCents(item.unitCost),
+        unitCostCents: toCents(item.unitCost) / item.priceFactor,
         // 0 means "leave this product's selling price alone" — never send it as a real value.
-        sellingPriceCents: toCents(item.sellingPrice) > 0 ? toCents(item.sellingPrice) : undefined,
+        sellingPriceCents: toCents(item.sellingPrice) > 0 ? toCents(item.sellingPrice) / item.priceFactor : undefined,
         discountAmountCents: toCents(item.discount),
         taxType: item.taxType
       })),
@@ -644,32 +663,33 @@ export function PurchaseFormModal({
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
                       <label className="flex items-center gap-1 text-[10px] font-bold text-muted">
-                        Qty
+                        {line.priceUnit ? `Qty (${line.priceUnit})` : "Qty"}
                         <input
                           type="number"
-                          min={1}
+                          min={line.priceFactor > 1 ? 0 : 1}
+                          step={line.priceFactor > 1 ? "any" : 1}
                           // Renders "" instead of 0 while the field is mid-edit (cleared to type a new
                           // number) — a controlled input forced back to a number on every keystroke
                           // fights the user's own deletion, making it impossible to clear "1" and type
                           // "80" (see money.ts's own fromCents/toCents split for the same lesson
                           // applied to price fields). The clamp back to a minimum of 1 only happens on
                           // blur, once the user is done typing.
-                          value={line.orderedQuantity === 0 ? "" : line.orderedQuantity}
+                          value={line.orderedQuantity === 0 ? "" : Math.round((line.orderedQuantity / line.priceFactor) * 1000) / 1000}
                           onChange={(event) => {
                             const raw = event.target.value;
-                            const parsed = raw === "" ? 0 : Math.floor(Number(raw));
+                            const parsed = raw === "" ? 0 : Math.floor(Number(raw) * line.priceFactor + 1e-9);
                             updateItemLine(line.productId, {
                               orderedQuantity: Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
                             });
                           }}
                           onBlur={() => {
-                            if (line.orderedQuantity <= 0) updateItemLine(line.productId, { orderedQuantity: 1 });
+                            if (line.orderedQuantity <= 0) updateItemLine(line.productId, { orderedQuantity: line.priceFactor });
                           }}
                           className="h-7 w-14 rounded-md border border-line px-1 text-center text-xs font-bold outline-none focus:border-accent"
                         />
                       </label>
                       <label className="flex items-center gap-1 text-[10px] font-bold text-muted">
-                        Unit Cost
+                        {line.priceUnit ? `Cost/${line.priceUnit}` : "Unit Cost"}
                         <input
                           type="number"
                           min={0}
@@ -684,7 +704,7 @@ export function PurchaseFormModal({
                           className="flex items-center gap-1 text-[10px] font-bold text-muted"
                           title="Saved as this product's new selling price when this purchase is saved as Ordered"
                         >
-                          Selling
+                          {line.priceUnit ? `Selling/${line.priceUnit}` : "Selling"}
                           <input
                             type="number"
                             min={0}

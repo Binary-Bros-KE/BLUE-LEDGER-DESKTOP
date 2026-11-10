@@ -1,4 +1,5 @@
 import type { ServiceChargeTaxType } from "@shared/schemas/charges";
+import { findUnit, unitFactor } from "@shared/lib/product-units";
 import { computeLineTax, resolveProductTaxConfig, type TenantTaxConfig } from "@shared/lib/tax-calculation";
 import type { ProductListItem } from "@shared/types/product";
 
@@ -37,18 +38,24 @@ export function computeLinePricing(
    * pricing for this document only — null (the default) means "use this product's own effective
    * setting" exactly as before; see prepareCart's own taxInclusiveOverride doc comment in
    * sale-service.ts (the server-side twin of this same override, applied identically). */
-  taxInclusiveOverride?: boolean | null
+  taxInclusiveOverride?: boolean | null,
+  /** The unit the line is sold in — a pack can carry its own price, which beats wholesale, same as
+   * prepareCart. See shared/lib/product-units.ts. */
+  unitCode?: string | null
 ): LinePricing {
+  const saleUnit = findUnit(product.unitConfig, unitCode);
+  const unitOwnPriceCents = saleUnit?.priceCents != null ? saleUnit.priceCents / saleUnit.factor : null;
   const useWholesale =
     product.wholesalePriceCents !== null &&
     product.wholesaleMinQuantity > 0 &&
     quantity >= product.wholesaleMinQuantity;
   const unitPriceCents =
-    priceOverrideCents ?? (useWholesale ? (product.wholesalePriceCents as number) : product.sellingPriceCents);
-  const lineSubtotalCents = unitPriceCents * quantity;
+    priceOverrideCents ?? unitOwnPriceCents ?? (useWholesale ? (product.wholesalePriceCents as number) : product.sellingPriceCents);
+  // Rounded: a fractional per-gram price times grams can land between cents.
+  const lineSubtotalCents = Math.round(unitPriceCents * quantity);
   // A discount can never push the line below the product's own minimum price (if one is set) —
   // the floor a discount is allowed to reach, in total across this line's quantity.
-  const floorCents = product.minimumPriceCents !== null ? product.minimumPriceCents * quantity : 0;
+  const floorCents = product.minimumPriceCents !== null ? Math.round(product.minimumPriceCents * quantity) : 0;
   const maxDiscountCents = Math.max(0, lineSubtotalCents - floorCents);
   const clampedDiscountCents = Math.max(0, Math.min(discountAmountCents, lineSubtotalCents, maxDiscountCents));
   const taxableCents = lineSubtotalCents - clampedDiscountCents;
@@ -93,4 +100,18 @@ export function computeServiceChargeAmount(
   };
   const { grossCents, taxCents } = computeLineTax(feeCents, taxType, effectiveConfig);
   return { taxAmountCents: taxCents, lineTotalCents: grossCents };
+}
+
+/** A line's typed price (per the unit it's sold in) as a price per base unit, or null when none is typed. */
+export function lineOverrideCents(
+  line: { priceOverride: string; unitCode?: string | null },
+  product: Pick<ProductListItem, "unitConfig">,
+  toCents: (text: string) => number
+): number | null {
+  return line.priceOverride.trim() ? toCents(line.priceOverride) / unitFactor(product.unitConfig, line.unitCode) : null;
+}
+
+/** A per-base price as this line shows it: per kg when it's sold by the kg. */
+export function linePriceInSaleUnit(basePriceCents: number, product: Pick<ProductListItem, "unitConfig">, unitCode: string | null | undefined): number {
+  return Math.round(basePriceCents * unitFactor(product.unitConfig, unitCode));
 }

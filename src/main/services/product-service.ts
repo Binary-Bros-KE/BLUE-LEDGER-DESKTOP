@@ -286,6 +286,18 @@ export function updateProduct(id: string, input: unknown): Product {
   assertStorefrontBelongsToTenant(parsed.storefrontId, tenantId);
   assertProductStorefrontUpdateAllowed(parsed.storefrontId, existing.storefront_id, getCurrentBranchScope());
   assertUniqueFields(tenantId, parsed, id);
+  if (parsed.unitConfig) {
+    if (existing.variant_group_id !== null || existing.variant_config_json !== null) {
+      throw new Error("A product with variants can't also be sold in several units");
+    }
+    // Stock is counted in the base unit: "2" would silently go from 2 kg to 2 g. A new base unit is
+    // only safe before any stock has moved.
+    if (parsed.unitOfMeasure !== existing.unit_of_measure && productRepository.hasStockMovementRows(id)) {
+      throw new Error(
+        `This product's stock is already counted in ${existing.unit_of_measure ?? "units"}, so it can't switch to counting in ${parsed.unitOfMeasure ?? "units"}. Create a new product for it instead.`
+      );
+    }
+  }
 
   // Same rename-to-id treatment as createProduct — see finalizeProductImagePath's own doc comment.
   const finalizedImagePath = finalizeProductImagePath(parsed.imagePath, id);
