@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Loader2, Lock, Pencil, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { Loader2, Lock, Pencil, Plus, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { Field, TextAreaField } from "@renderer/shared/components/form-fields";
 import { Modal } from "@renderer/shared/components/Modal";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
+import { defaultPermissionsForRole } from "@shared/lib/default-roles";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import {
@@ -378,6 +379,23 @@ export function RolesRoute(): React.JSX.Element {
                 ? "Super Admin always has every permission — including any module added in a future update. It can't be restricted; create a custom role for limited access."
                 : "This is a system role — its name is locked, but you can still tune its permissions."}
             </p>
+          )}
+
+          {editingRole?.isSystemRole && !lockedFullAccess && defaultPermissionsForRole(editingRole.roleName) && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-soft px-3 py-2">
+              <p className="text-[11px] font-semibold text-muted">Puts every toggle back to how this role came out of the box. Nothing is saved until you click Save changes.</p>
+              <Button
+                type="button"
+                onClick={() => {
+                  const defaults = defaultPermissionsForRole(editingRole.roleName);
+                  if (defaults) setForm((prev) => ({ ...prev, permissions: defaults }));
+                }}
+                className="h-8 flex-none border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+              >
+                <RotateCcw className="mr-1.5 size-3.5" aria-hidden="true" />
+                Restore defaults
+              </Button>
+            </div>
           )}
 
           <div className="mt-5 border-t border-line pt-5">
