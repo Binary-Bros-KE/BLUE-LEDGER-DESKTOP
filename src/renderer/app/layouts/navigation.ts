@@ -210,6 +210,14 @@ export const navGroups: NavGroup[] = [
         permissionModule: "suppliers"
       },
       {
+        key: "suppliers",
+        label: "International Suppliers",
+        description: "Suppliers you import from",
+        icon: Globe,
+        permissionModule: "suppliers",
+        requires: "international_suppliers"
+      },
+      {
         // Requisitions live here too (client request: one document, Requisition → Received).
         key: "local-supplier-purchases",
         label: "Local Purchases",
@@ -217,14 +225,6 @@ export const navGroups: NavGroup[] = [
         icon: ShoppingBag,
         permissionModule: "purchases",
         alsoVisibleWith: ["purchase_requisitions", "local_credit_purchases"]
-      },
-      {
-        key: "suppliers",
-        label: "International Suppliers",
-        description: "Suppliers you import from",
-        icon: Globe,
-        permissionModule: "suppliers",
-        requires: "international_suppliers"
       },
       {
         key: "purchases",
