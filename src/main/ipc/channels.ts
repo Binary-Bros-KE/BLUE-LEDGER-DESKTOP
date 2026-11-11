@@ -219,6 +219,8 @@ export const ipcChannels = {
   saleReturnRequest: "sale-return:request",
   saleReturnApprove: "sale-return:approve",
   saleReturnReject: "sale-return:reject",
+  saleReturnIssueCreditNote: "sale-return:issue-credit-note",
+  saleReturnCreditNote: "sale-return:credit-note",
   invoiceList: "invoice:list",
   invoiceSummary: "invoice:summary",
   invoiceCreate: "invoice:create",

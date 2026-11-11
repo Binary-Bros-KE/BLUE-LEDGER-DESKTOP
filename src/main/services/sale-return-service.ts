@@ -3,12 +3,17 @@ import { runInTransaction } from "@main/database/connection";
 import * as saleRepository from "@main/database/repositories/sale-repository";
 import * as saleReturnRepository from "@main/database/repositories/sale-return-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
+import * as customerRepository from "@main/database/repositories/customer-repository";
+import * as locationRepository from "@main/database/repositories/location-repository";
 import { restockInvoiceLineStock } from "@main/services/invoice-stock";
+import { generateDocumentNumber } from "@main/services/document-number-service";
+import { invoiceBalanceCents, splitCredit } from "@shared/lib/credit-note";
+import { computePaymentStatus } from "@shared/lib/invoice";
 import { assertNotAlreadyDecidedRemotely } from "@main/services/sync-engine";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { approvalDecisionSchema } from "@shared/schemas/sale-void";
 import { saleReturnRequestSchema } from "@shared/schemas/sale-return";
-import type { SaleReturn } from "@shared/types/sale-return";
+import type { CreditNoteDocument, SaleReturn } from "@shared/types/sale-return";
 
 function requireEmployeeId(): string {
   const employeeId = getCurrentEmployeeId();
@@ -63,6 +68,9 @@ export function requestSaleReturn(input: unknown): SaleReturn {
   if (sale.sale_status !== "completed") {
     throw new Error("Only completed sales can have returns");
   }
+  if (sale.invoice_number && sale.payment_status === "cancelled") {
+    throw new Error("This invoice has been cancelled");
+  }
 
   const preparedItems = parsed.items.map((item) => {
     const saleItem = saleRepository.findSaleItemRowById(item.saleItemId);
@@ -111,7 +119,19 @@ export function requestSaleReturn(input: unknown): SaleReturn {
   });
 }
 
-/** Manager approval: restocks the returned quantities (as a 'return' movement) and marks the request approved. */
+function nextCreditNoteNumber(tenantId: string): string {
+  return generateDocumentNumber({
+    tenantId,
+    prefix: "CN",
+    digits: 6,
+    existingNumbers: saleReturnRepository.findCreditNoteNumberRows(tenantId)
+  });
+}
+
+/** Manager approval: restocks the returned quantities (as a 'return' movement) and marks the request
+ * approved. On an INVOICE this is a credit note (client spec): it reduces what's still owed first and
+ * refunds only the rest (shared/lib/credit-note.ts), sets the invoice's new balance and status, and
+ * gets its CN number straight away. A receipt return refunds its whole value as it always has. */
 export async function approveSaleReturn(id: string, input: unknown): Promise<SaleReturn> {
   requirePermission("approvals", "approve");
   const parsed = approvalDecisionSchema.parse(input);
@@ -151,10 +171,91 @@ export async function approveSaleReturn(id: string, input: unknown): Promise<Sal
         referenceId: id
       });
     }
-    saleReturnRepository.updateSaleReturnStatusRow(id, "approved", approverId, parsed.notes);
+    if (sale.invoice_number) {
+      // Read before this return is approved, so it isn't counted in "already credited".
+      const split = splitCredit({
+        grandTotalCents: sale.grand_total_cents,
+        amountPaidCents: sale.amount_paid_cents,
+        previouslyCreditedCents: saleReturnRepository.findCreditedValueForSale(sale.id),
+        creditCents: items.reduce((sum, item) => sum + item.line_total_cents, 0)
+      });
+      saleRepository.updateInvoiceBalanceRow(
+        sale.id,
+        split.balanceAfterCents,
+        computePaymentStatus({
+          balanceDueCents: split.balanceAfterCents,
+          amountPaidCents: sale.amount_paid_cents,
+          dueDate: sale.due_date,
+          cancelled: false
+        })
+      );
+      saleReturnRepository.updateSaleReturnStatusRow(id, "approved", approverId, parsed.notes);
+      saleReturnRepository.updateSaleReturnCreditNoteRow(id, { creditNoteNumber: nextCreditNoteNumber(tenantId), refundCents: split.refundCents });
+    } else {
+      saleReturnRepository.updateSaleReturnStatusRow(id, "approved", approverId, parsed.notes);
+    }
   });
 
   return getSaleReturnDetail(id);
+}
+
+/** "Credit Note" on an approved return: gives it a CN number the first time (a receipt return only
+ * gets one when asked; an invoice credit note already has one) and returns the document. Display only:
+ * stock and money were already settled when the return was approved. */
+export function issueCreditNote(id: string): CreditNoteDocument {
+  requirePermission("sales", "view");
+  const { tenantId } = getCurrentTenant();
+  const row = saleReturnRepository.findSaleReturnRowById(id);
+  if (!row || row.tenant_id !== tenantId) throw new Error("Return not found");
+  if (row.status !== "approved") throw new Error("A credit note can only be issued once the return is approved");
+  if (!row.credit_note_number) {
+    saleReturnRepository.updateSaleReturnCreditNoteRow(id, { creditNoteNumber: nextCreditNoteNumber(tenantId), refundCents: row.refund_cents });
+  }
+  return getCreditNote(id);
+}
+
+/** The credit note document for an approved return that has a CN number. */
+export function getCreditNote(id: string): CreditNoteDocument {
+  requirePermission("sales", "view");
+  const { tenantId, businessName } = getCurrentTenant();
+  const detail = saleReturnRepository.findSaleReturnDetailRowById(id);
+  if (!detail || detail.tenant_id !== tenantId) throw new Error("Return not found");
+  if (!detail.credit_note_number || detail.status !== "approved") throw new Error("No credit note has been issued for this return yet");
+  const sale = saleRepository.findSaleRowById(detail.sale_id);
+  if (!sale) throw new Error("Sale not found");
+  const location = locationRepository.findLocationRowById(sale.location_id);
+  const customer = sale.customer_id ? customerRepository.findCustomerRowById(sale.customer_id) : undefined;
+  const items = saleReturnRepository.findSaleReturnItemDetailRows(id);
+  const totalCents = items.reduce((sum, item) => sum + item.line_total_cents, 0);
+  const refundCents = detail.refund_cents ?? totalCents;
+  return {
+    returnId: id,
+    creditNoteNumber: detail.credit_note_number,
+    issuedAt: detail.approved_at ?? detail.updated_at,
+    businessName,
+    locationName: detail.location_name,
+    locationPhone: location?.phone ?? null,
+    locationAddress: location?.physical_address ?? null,
+    againstKind: sale.invoice_number ? "invoice" : "receipt",
+    againstNumber: sale.invoice_number ?? sale.receipt_number,
+    customerName: customer?.name ?? null,
+    customerPhone: customer?.phone ?? null,
+    reason: detail.reason,
+    notes: detail.notes,
+    approvedByName: detail.approved_by_name,
+    items: items.map((item) => ({
+      productName: item.product_name,
+      quantity: item.quantity,
+      unitPriceCents: item.unit_price_cents,
+      lineTotalCents: item.line_total_cents
+    })),
+    totalCents,
+    balanceReductionCents: totalCents - refundCents,
+    refundCents,
+    invoiceBalanceCents: sale.invoice_number
+      ? invoiceBalanceCents(sale.grand_total_cents, sale.amount_paid_cents, saleReturnRepository.findCreditedValueForSale(sale.id))
+      : null
+  };
 }
 
 export async function rejectSaleReturn(id: string, input: unknown): Promise<SaleReturn> {

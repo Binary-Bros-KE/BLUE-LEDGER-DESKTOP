@@ -89,7 +89,7 @@ import type { Rider, RiderStatus } from "./rider";
 import type { DeliveryInput } from "../schemas/charges";
 import type { StatementFiltersInput } from "../schemas/statement";
 import type { PendingSaleListItem, Sale, SaleDelivery, SaleListItem } from "./sale";
-import type { SaleReturn } from "./sale-return";
+import type { CreditNoteDocument, SaleReturn } from "./sale-return";
 import type { SaleVoid } from "./sale-void";
 import type { InvoiceCancellation } from "./invoice-cancellation";
 import type { RecurringBill } from "./recurring-bill";
@@ -974,6 +974,14 @@ export type IpcInvokeMap = {
   "sale-return:approve": {
     args: [string, Record<string, unknown>];
     result: SaleReturn;
+  };
+  "sale-return:issue-credit-note": {
+    args: [string];
+    result: CreditNoteDocument;
+  };
+  "sale-return:credit-note": {
+    args: [string];
+    result: CreditNoteDocument;
   };
   "sale-return:reject": {
     args: [string, Record<string, unknown>];
@@ -2016,6 +2024,8 @@ export type BlueLedgerApi = {
     list: () => Promise<IpcInvokeMap["sale-return:list"]["result"]>;
     get: (id: string) => Promise<IpcInvokeMap["sale-return:get"]["result"]>;
     request: (input: Record<string, unknown>) => Promise<IpcInvokeMap["sale-return:request"]["result"]>;
+    issueCreditNote: (id: string) => Promise<IpcInvokeMap["sale-return:issue-credit-note"]["result"]>;
+    creditNote: (id: string) => Promise<IpcInvokeMap["sale-return:credit-note"]["result"]>;
     approve: (
       id: string,
       input: Record<string, unknown>

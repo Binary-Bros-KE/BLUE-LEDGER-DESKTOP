@@ -1182,6 +1182,8 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       requestedAt: row.requested_at,
       approvedBy: row.approved_by,
       approvedAt: row.approved_at,
+      creditNoteNumber: row.credit_note_number,
+      refundCents: row.refund_cents,
       items: itemRows.map((i) => ({
         id: i.id,
         saleItemId: i.sale_item_id,
@@ -3115,7 +3117,9 @@ const SALE_RETURN_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntit
   { local: "requested_by", cloud: "requestedBy", refEntity: "employees", refNotNull: true },
   { local: "requested_at", cloud: "requestedAt" },
   { local: "approved_by", cloud: "approvedBy", refEntity: "employees" },
-  { local: "approved_at", cloud: "approvedAt" }
+  { local: "approved_at", cloud: "approvedAt" },
+  { local: "credit_note_number", cloud: "creditNoteNumber" },
+  { local: "refund_cents", cloud: "refundCents" }
 ];
 
 function applySaleReturnPulledRow(row: Record<string, unknown>, force: boolean): void {
@@ -4422,7 +4426,7 @@ const CONFLICT_LABEL_BUILDERS: Partial<Record<SyncEntity, (entityId: string) => 
   },
   sale_returns: (id) => {
     const row = saleReturnRepository.findSaleReturnDetailRowById(id);
-    return row ? `Return — Receipt ${row.receipt_number ?? "?"}` : id;
+    return row ? (row.invoice_number ? `Credit note — Invoice ${row.invoice_number}` : `Return — Receipt ${row.receipt_number ?? "?"}`) : id;
   },
   sale_voids: (id) => {
     const row = saleVoidRepository.findSaleVoidDetailRowById(id);

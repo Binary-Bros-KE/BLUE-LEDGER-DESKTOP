@@ -1024,3 +1024,10 @@ export function findSaleByNoteMarkerRow(
     )
     .get(tenantId, `%${marker}%`) as { id: string; receipt_number: string | null } | undefined;
 }
+
+/** An invoice's balance and status after a credit note (see sale-return-service.ts approveSaleReturn). */
+export function updateInvoiceBalanceRow(id: string, balanceDueCents: number, paymentStatus: PaymentStatus): void {
+  getDatabase()
+    .prepare("UPDATE sales SET balance_due_cents = ?, payment_status = ?, sync_status = 'pending', updated_at = ? WHERE id = ?")
+    .run(balanceDueCents, paymentStatus, new Date().toISOString(), id);
+}

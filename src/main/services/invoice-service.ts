@@ -1,3 +1,5 @@
+import * as saleReturnRepository from "@main/database/repositories/sale-return-repository";
+import { invoiceBalanceCents } from "@shared/lib/credit-note";
 import { assertStrictVerification, stampSaleVerifications } from "@main/services/mpesa-verification-local";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -145,7 +147,8 @@ function applyPayment(
   const payments = [...existingPayments, newPayment];
 
   const amountPaidCents = payments.reduce((sum, entry) => sum + entry.amountCents, 0);
-  const balanceDueCents = row.grand_total_cents - amountPaidCents;
+  // Credit notes already took their share off what's owed (shared/lib/credit-note.ts).
+  const balanceDueCents = invoiceBalanceCents(row.grand_total_cents, amountPaidCents, saleReturnRepository.findCreditedValueForSale(saleId));
   const paymentStatus = computePaymentStatus({
     balanceDueCents,
     amountPaidCents,
@@ -404,6 +407,10 @@ function requireEditableUnpaidInvoice(id: string, tenantId: string): SaleRow {
   }
   if (row.amount_paid_cents > 0) {
     throw new Error("This invoice has payments recorded against it and can no longer be edited");
+  }
+  // Editing restocks every line and deducts the new ones: lines already credited would be counted twice.
+  if (saleReturnRepository.countOpenReturnsForSale(id) > 0) {
+    throw new Error("This invoice has a credit note and can no longer be edited — issue another credit note instead.");
   }
   return row;
 }

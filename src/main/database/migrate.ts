@@ -3718,6 +3718,22 @@ const migrations = [
       -- {version, suppliers} from the last heartbeat; NULL for every tenant without dropshipping.
       ALTER TABLE tenant ADD COLUMN dropship_state_json TEXT;
     `
+  },
+  {
+    // 112, not 111: the unreleased subscriptions branch already claims 111. Applied migrations are
+    // tracked as a set (see migrateDatabase), so they can arrive in either order.
+    version: 112,
+    name: "credit_notes",
+    sql: `
+      -- A credit note is an approved return that has been given a number (CN-...): on an invoice it
+      -- gets one when approved (see sale-return-service.ts approveSaleReturn); on a receipt only when
+      -- someone asks for the document. refund_cents is the money actually paid back. NULL = the whole
+      -- returned value, which is what every receipt return (and every return from before credit
+      -- notes) always meant; an invoice credit note stores what was refunded after first reducing
+      -- what the customer still owed (shared/lib/credit-note.ts).
+      ALTER TABLE sale_returns ADD COLUMN credit_note_number TEXT;
+      ALTER TABLE sale_returns ADD COLUMN refund_cents INTEGER;
+    `
   }
 ] as const;
 

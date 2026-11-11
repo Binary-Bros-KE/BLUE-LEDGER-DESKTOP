@@ -1,3 +1,4 @@
+import * as saleReturnRepository from "@main/database/repositories/sale-return-repository";
 import { randomUUID } from "node:crypto";
 import { runInTransaction } from "@main/database/connection";
 import * as invoiceCancellationRepository from "@main/database/repositories/invoice-cancellation-repository";
@@ -63,6 +64,14 @@ function requireEmployeeId(): string {
  * exists" approach stock-receipt-repository.ts's is_transfer took, for the same reason (no new
  * synced field on `sales` to keep correct, no risk of retroactively fabricating refund history for
  * invoices cancelled before this feature existed). */
+/** Cancelling restocks every line and refunds every payment: on an invoice with a credit note that would
+ * restock and refund the credited part a second time. Credit the remaining items instead. */
+function assertNoCreditNotes(saleId: string): void {
+  if (saleReturnRepository.countOpenReturnsForSale(saleId) > 0) {
+    throw new Error("This invoice has a credit note and can't be cancelled — issue a credit note for the remaining items instead.");
+  }
+}
+
 function restockAndMarkCancelled(tenantId: string, saleId: string, cancellationId: string, actorId: string): void {
   const sale = saleRepository.findSaleRowById(saleId);
   if (!sale) {
@@ -120,6 +129,7 @@ export function cancelInvoiceDirect(saleId: string, input: unknown): Sale {
   if (invoiceCancellationRepository.findPendingInvoiceCancellationForSaleRow(saleId)) {
     throw new Error("This invoice already has a cancellation request awaiting approval");
   }
+  assertNoCreditNotes(saleId);
 
   const cancellationId = `invoice_cancel_${randomUUID()}`;
 
@@ -154,6 +164,7 @@ export function requestInvoiceCancel(input: unknown): InvoiceCancellation {
   if (invoiceCancellationRepository.findPendingInvoiceCancellationForSaleRow(parsed.saleId)) {
     throw new Error("This invoice already has a cancellation request awaiting approval");
   }
+  assertNoCreditNotes(parsed.saleId);
 
   const row = invoiceCancellationRepository.insertInvoiceCancellationRow({
     id: `invoice_cancel_${randomUUID()}`,
@@ -182,6 +193,7 @@ export async function approveInvoiceCancel(id: string, input: unknown): Promise<
     throw new Error("This request has already been decided");
   }
   await assertNotAlreadyDecidedRemotely("invoice_cancellations", id, "pending_approval");
+  assertNoCreditNotes(cancellationRow.sale_id);
 
   runInTransaction(() => {
     restockAndMarkCancelled(tenantId, cancellationRow.sale_id, id, approverId);

@@ -31,6 +31,12 @@ export type SaleReturn = {
   tenantId: string;
   saleId: string;
   receiptNumber: string | null;
+  /** Set when the return is against an invoice: it's then a credit note on that invoice. */
+  invoiceNumber: string | null;
+  /** CN-... once a credit note has been issued for this return. */
+  creditNoteNumber: string | null;
+  /** Money paid back. Null = the whole returned value (every receipt return). */
+  refundCents: number | null;
   locationId: string;
   locationName: string;
   status: SaleReturnStatus;
@@ -47,4 +53,32 @@ export type SaleReturn = {
   syncStatus: SaleReturnSyncStatus;
   lastSyncedAt: string | null;
   items: SaleReturnItem[];
+};
+
+/** A credit note as a document: what was credited, against which receipt or invoice, and how the money
+ * was settled. Built from an approved return — see sale-return-service.ts getCreditNote. */
+export type CreditNoteDocument = {
+  returnId: string;
+  creditNoteNumber: string;
+  issuedAt: string;
+  businessName: string;
+  locationName: string;
+  locationPhone: string | null;
+  locationAddress: string | null;
+  /** "invoice" or "receipt", and its number. */
+  againstKind: "invoice" | "receipt";
+  againstNumber: string | null;
+  customerName: string | null;
+  customerPhone: string | null;
+  reason: string;
+  notes: string | null;
+  approvedByName: string | null;
+  items: Array<{ productName: string; quantity: number; unitPriceCents: number; lineTotalCents: number }>;
+  totalCents: number;
+  /** Taken off what the customer still owed (invoice credit notes only). */
+  balanceReductionCents: number;
+  /** Paid back to the customer. */
+  refundCents: number;
+  /** For an invoice: what's still owed after this and every other credit note. */
+  invoiceBalanceCents: number | null;
 };

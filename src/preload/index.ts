@@ -293,6 +293,8 @@ const api: BlueLedgerApi = {
     list: () => invoke("sale-return:list"),
     get: (id) => invoke("sale-return:get", id),
     request: (input) => invoke("sale-return:request", input),
+    issueCreditNote: (id) => invoke("sale-return:issue-credit-note", id),
+    creditNote: (id) => invoke("sale-return:credit-note", id),
     approve: (id, input) => invoke("sale-return:approve", id, input),
     reject: (id, input) => invoke("sale-return:reject", id, input)
   },

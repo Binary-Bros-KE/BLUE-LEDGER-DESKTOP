@@ -321,7 +321,9 @@ import {
 import { createBorrow, getBorrow, getBorrowSummary, listBorrows, recordBorrowReturn } from "@main/services/borrow-service";
 import {
   approveSaleReturn,
+  getCreditNote,
   getSaleReturn,
+  issueCreditNote,
   listSaleReturns,
   rejectSaleReturn,
   requestSaleReturn
@@ -911,6 +913,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.saleReturnReject, (_event, id: string, input: unknown) =>
     rejectSaleReturn(id, input)
   );
+  ipcMain.handle(ipcChannels.saleReturnIssueCreditNote, (_event, id: string) => issueCreditNote(id));
+  ipcMain.handle(ipcChannels.saleReturnCreditNote, (_event, id: string) => getCreditNote(id));
   ipcMain.handle(ipcChannels.invoiceList, () => listInvoices());
   ipcMain.handle(ipcChannels.invoiceSummary, () => getInvoiceSummary());
   ipcMain.handle(ipcChannels.invoiceCreate, (_event, input: unknown) => createInvoice(input));
