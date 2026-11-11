@@ -151,7 +151,7 @@ export function mapRoleRow(row: RoleRow): Role {
     tenantId: row.tenant_id,
     roleName: row.role_name,
     description: row.description,
-    permissions: withLaterModuleDefaults(parsePermissions(row.permissions_json)),
+    permissions: withLaterModuleDefaults(parsePermissions(row.permissions_json), row.role_name),
     isSystemRole: Boolean(row.is_system_role),
     isSuperAdmin: Boolean(row.is_super_admin),
     createdAt: row.created_at,

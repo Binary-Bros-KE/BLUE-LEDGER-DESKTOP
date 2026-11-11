@@ -1,3 +1,4 @@
+import { canSeeInternationalSuppliers, isSupplierHidden } from "@main/services/supplier-service";
 import { randomUUID } from "node:crypto";
 import { runInTransaction } from "@main/database/connection";
 import * as dropshipRepository from "@main/database/repositories/dropship-repository";
@@ -82,6 +83,12 @@ function requirePurchaseAccess(action: "view" | "create" | "edit"): "all" | "loc
   if (hasPermission("purchases", action)) return "all";
   requirePermission("local_credit_purchases", action);
   return "local";
+}
+
+/** International purchases read as not existing to a role that can't see international suppliers. */
+function assertPurchaseVisible(purchaseId: string): void {
+  const row = purchaseRepository.findPurchaseRowById(purchaseId);
+  if (row && isSupplierHidden(row.supplier_id)) throw new Error("Purchase not found");
 }
 
 function canLocalRoleAccess(purchase: { supplierId: string; locationId: string; status: string }): boolean {
@@ -240,7 +247,10 @@ export function listPurchases(): PurchaseListItem[] {
   const access = requirePurchaseAccess("view");
   const { tenantId } = getCurrentTenant();
   const locationId = getCurrentBranchScope();
-  const rows = purchaseRepository.findAllPurchaseListRows(tenantId, locationId).map(purchaseRepository.mapPurchaseListRow);
+  const rows = purchaseRepository
+    .findAllPurchaseListRows(tenantId, locationId)
+    .map(purchaseRepository.mapPurchaseListRow)
+    .filter((row) => canSeeInternationalSuppliers() || row.supplierType === "local");
   return access === "local" ? rows.filter((row) => row.supplierType === "local" && row.status !== "draft") : rows;
 }
 
@@ -248,11 +258,12 @@ export function getPurchaseSummary(): PurchaseSummary {
   requirePermission("purchases", "view");
   const { tenantId } = getCurrentTenant();
   const locationId = getCurrentBranchScope();
-  return purchaseRepository.mapPurchaseSummaryRow(purchaseRepository.findPurchaseSummaryRow(tenantId, locationId));
+  return purchaseRepository.mapPurchaseSummaryRow(purchaseRepository.findPurchaseSummaryRow(tenantId, locationId, !canSeeInternationalSuppliers()));
 }
 
 export function getPurchase(id: string): Purchase {
   const access = requirePurchaseAccess("view");
+  assertPurchaseVisible(id);
   const purchase = getPurchaseDetail(id);
   if (access === "local" && !canLocalRoleAccess(purchase)) throw new Error("Purchase not found");
   return purchase;
@@ -277,6 +288,7 @@ export function createPurchaseWithHook(input: unknown, afterInsert?: (purchaseId
   assertSupplierExists(tenantId, parsed.supplierId);
   assertLocationBelongsToTenant(tenantId, parsed.locationId);
   assertUniqueSupplierInvoiceNumber(tenantId, parsed.supplierId, parsed.supplierInvoiceNumber);
+  if (isSupplierHidden(parsed.supplierId)) throw new Error("You can only record purchases from local suppliers");
   if (localOnly) {
     const branch = getCurrentBranchScope();
     if (supplierRepository.findSupplierRowById(parsed.supplierId)?.supplier_type !== "local") throw new Error("You can only record purchases from local suppliers");
@@ -384,7 +396,9 @@ function requireEditablePurchase(id: string, tenantId: string): PurchaseRow {
  * receivePurchaseGoods's own "purchase_received" hook for the only thing that does now). */
 export function updatePurchase(id: string, input: unknown): Purchase {
   requirePermission("purchases", "edit");
+  assertPurchaseVisible(id);
   const parsed: PurchaseUpdateInput = purchaseUpdateSchema.parse(input);
+  if (isSupplierHidden(parsed.supplierId)) throw new Error("You can only record purchases from local suppliers");
   const { tenantId } = getCurrentTenant();
   const employeeId = getCurrentEmployeeId();
   const existing = requireEditablePurchase(id, tenantId);
@@ -471,6 +485,7 @@ export function updatePurchase(id: string, input: unknown): Purchase {
  * hand; Partially Received/Received are derived automatically from what's actually been received. */
 export function markPurchaseOrdered(id: string): Purchase {
   requirePermission("purchases", "edit");
+  assertPurchaseVisible(id);
   const { tenantId } = getCurrentTenant();
   const employeeId = getCurrentEmployeeId();
   const row = purchaseRepository.findPurchaseRowById(id);
@@ -516,6 +531,7 @@ export function markPurchaseOrdered(id: string): Purchase {
  * would leave inventory with no clean reversal path — use a return workflow instead in that case. */
 export function cancelPurchase(id: string): Purchase {
   requirePermission("purchases", "edit");
+  assertPurchaseVisible(id);
   const { tenantId } = getCurrentTenant();
   const row = purchaseRepository.findPurchaseRowById(id);
   if (!row || row.tenant_id !== tenantId) {
@@ -553,6 +569,7 @@ export function cancelPurchase(id: string): Purchase {
  */
 export function receivePurchaseGoods(id: string, input: unknown): Purchase {
   if (requirePurchaseAccess("edit") === "local" && !canLocalRoleAccess(getPurchaseDetail(id))) throw new Error("Purchase not found");
+  assertPurchaseVisible(id);
   const parsed = receiveGoodsSchema.parse(input);
   const { tenantId } = getCurrentTenant();
   const employeeId = getCurrentEmployeeId();
@@ -803,6 +820,7 @@ function applyPayment(
 /** Records a supplier payment against the purchase's outstanding balance. */
 export function recordPurchasePayment(purchaseId: string, input: unknown): Purchase {
   requirePermission("purchases", "edit");
+  assertPurchaseVisible(purchaseId);
   const parsed = recordPurchasePaymentSchema.parse(input);
   const { tenantId } = getCurrentTenant();
   return applyPayment(tenantId, purchaseId, parsed);
@@ -811,6 +829,7 @@ export function recordPurchasePayment(purchaseId: string, input: unknown): Purch
 /** Records a final payment for the exact remaining balance — a one-click "pay it off" action. */
 export function markPurchasePaid(purchaseId: string, input: unknown): Purchase {
   requirePermission("purchases", "edit");
+  assertPurchaseVisible(purchaseId);
   const parsed = markPurchasePaidSchema.parse(input);
   const { tenantId } = getCurrentTenant();
   const row = purchaseRepository.findPurchaseRowById(purchaseId);

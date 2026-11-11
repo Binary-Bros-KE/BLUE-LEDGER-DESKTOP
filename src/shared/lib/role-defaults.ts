@@ -13,7 +13,19 @@ import type { PermissionAction, PermissionsMap } from "@shared/types/role";
  * editor keeps an empty array when everything is unticked — see RolesRoute's toggleAction), and an
  * explicit value — even [] — is always left exactly as saved.
  */
-export function withLaterModuleDefaults(permissions: PermissionsMap): PermissionsMap {
+export function withLaterModuleDefaults(permissions: PermissionsMap, roleName: string): PermissionsMap {
+  return withInternationalSuppliersDefault(withRequisitionsDefault(permissions), roleName);
+}
+
+/** Whoever could already see suppliers keeps seeing all of them, except a Cashier: cashiers are local
+ * only (client spec) even with Suppliers or Purchases ticked, unless an admin ticks this for them. */
+function withInternationalSuppliersDefault(permissions: PermissionsMap, roleName: string): PermissionsMap {
+  if (permissions.international_suppliers !== undefined) return permissions;
+  const hadAccess = (["suppliers", "purchases", "reports"] as const).some((module) => permissions[module]?.includes("view"));
+  return { ...permissions, international_suppliers: hadAccess && !/cashier/i.test(roleName) ? ["view"] : [] };
+}
+
+function withRequisitionsDefault(permissions: PermissionsMap): PermissionsMap {
   if (permissions.purchase_requisitions !== undefined) return permissions;
 
   // Client spec: anybody can raise a requisition; only higher roles approve. "Can already approve

@@ -1,3 +1,4 @@
+import { isSupplierHidden } from "@main/services/supplier-service";
 import { mpesaStatusForCode, parseMpesaVerifications } from "@shared/lib/mpesa-verification";
 import * as locationRepository from "@main/database/repositories/location-repository";
 import * as purchaseRepository from "@main/database/repositories/purchase-repository";
@@ -514,7 +515,7 @@ export function getSalesFinancialOverview(input: unknown): SalesFinancialOvervie
   const discountGivenCents = rows.reduce((sum, row) => sum + row.discount_amount_cents, 0);
 
   const debtorRows = reportRepository.findOutstandingDebtors(tenantId, locationId);
-  const creditorRows = reportRepository.findOutstandingCreditors(tenantId, locationId);
+  const creditorRows = reportRepository.findOutstandingCreditors(tenantId, locationId).filter((row) => !isSupplierHidden(row.supplier_id));
   const debtors: SalesLedgerParty[] = debtorRows.map((row) => ({
     id: row.customer_id,
     name: row.customer_name,
@@ -585,7 +586,7 @@ export function getSalesFinancialOverview(input: unknown): SalesFinancialOvervie
     serviceChargeCostsCents,
     serviceChargeCostsDocumentCount,
     expensesByCategory,
-    purchasesBySupplier,
+    purchasesBySupplier: purchasesBySupplier.filter((entry) => !isSupplierHidden(entry.id)),
     salariesByEmployee,
     debtors,
     totalDebtCents,

@@ -128,6 +128,8 @@ export function SuppliersRoute(): React.JSX.Element {
   const canCreate = can("suppliers", "create");
   const canEdit = can("suppliers", "edit");
   const canExport = can("suppliers", "export");
+  // Without it the list is local suppliers only (the service filters), so there's nothing to tell apart.
+  const seesInternational = can("international_suppliers", "view");
 
   const [suppliers, setSuppliers] = useState<Supplier[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -360,13 +362,13 @@ export function SuppliersRoute(): React.JSX.Element {
         aria-hidden="true"
       />
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+      <div className={cn("grid grid-cols-1 gap-3", seesInternational ? "sm:grid-cols-3 xl:grid-cols-6" : "sm:grid-cols-4")}>
         <StatTile icon={Truck} label="Total Suppliers" value={String(stats.total)} tone="primary" />
         <StatTile icon={CheckCircle2} label="Active Suppliers" value={String(stats.active)} tone="success" />
         <StatTile icon={XCircle} label="Inactive Suppliers" value={String(stats.inactive)} tone="warning" />
         <StatTile icon={Wallet} label="Total Owed" value={formatCents(stats.totalOwedCents)} tone="danger" />
-        <StatTile icon={Wallet} label="Owed Locally" value={formatCents(stats.owedLocalCents)} tone="danger" />
-        <StatTile icon={Wallet} label="Owed Internationally" value={formatCents(stats.owedInternationalCents)} tone="danger" />
+        {seesInternational && <StatTile icon={Wallet} label="Owed Locally" value={formatCents(stats.owedLocalCents)} tone="danger" />}
+        {seesInternational && <StatTile icon={Wallet} label="Owed Internationally" value={formatCents(stats.owedInternationalCents)} tone="danger" />}
       </div>
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
@@ -448,13 +450,15 @@ export function SuppliersRoute(): React.JSX.Element {
               options={[{ value: "", label: "All Payment Options" }, ...SUPPLIER_PAYMENT_OPTION_OPTIONS]}
               className="w-full sm:w-48"
             />
-            <SelectField
-              label="Type"
-              value={typeFilter}
-              onChange={setTypeFilter}
-              options={[{ value: "", label: "All Types" }, ...SUPPLIER_TYPE_OPTIONS]}
-              className="w-full sm:w-40"
-            />
+            {seesInternational && (
+              <SelectField
+                label="Type"
+                value={typeFilter}
+                onChange={setTypeFilter}
+                options={[{ value: "", label: "All Types" }, ...SUPPLIER_TYPE_OPTIONS]}
+                className="w-full sm:w-40"
+              />
+            )}
           </div>
         )}
 
@@ -545,9 +549,11 @@ export function SuppliersRoute(): React.JSX.Element {
                           <span className="text-xs font-semibold text-muted">
                             {supplier.phone1}
                           </span>
-                          <span className="text-[10px] font-extrabold uppercase tracking-wide text-primary/80">
-                            {supplierTypeLabel(supplier.supplierType)}
-                          </span>
+                          {seesInternational && (
+                            <span className="text-[10px] font-extrabold uppercase tracking-wide text-primary/80">
+                              {supplierTypeLabel(supplier.supplierType)}
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td
@@ -740,16 +746,20 @@ export function SuppliersRoute(): React.JSX.Element {
               className="mt-4"
               rows={2}
             />
-            <SelectField
-              label="Supplier Type"
-              value={form.supplierType}
-              onChange={(value) => updateField("supplierType", value as SupplierType)}
-              options={SUPPLIER_TYPE_OPTIONS}
-              className="mt-4 sm:max-w-xs"
-            />
-            <p className="mt-1 text-[11px] font-semibold text-muted">
-              Roles with only Local Credit Purchases (usually Cashiers) never see International suppliers or their purchases.
-            </p>
+            {seesInternational && (
+              <>
+                <SelectField
+                  label="Supplier Type"
+                  value={form.supplierType}
+                  onChange={(value) => updateField("supplierType", value as SupplierType)}
+                  options={SUPPLIER_TYPE_OPTIONS}
+                  className="mt-4 sm:max-w-xs"
+                />
+                <p className="mt-1 text-[11px] font-semibold text-muted">
+                  Only roles with International Suppliers ticked can see International suppliers or their purchases.
+                </p>
+              </>
+            )}
           </div>
 
           <div className="mt-5 border-t border-line pt-4">

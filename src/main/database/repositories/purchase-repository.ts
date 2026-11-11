@@ -313,7 +313,7 @@ export type PurchaseSummaryRow = {
   outstanding_supplier_payments_cents: number;
 };
 
-export function findPurchaseSummaryRow(tenantId: string, locationId: string | null): PurchaseSummaryRow {
+export function findPurchaseSummaryRow(tenantId: string, locationId: string | null, localSuppliersOnly: boolean): PurchaseSummaryRow {
   return getDatabase()
     .prepare(
       `
@@ -331,9 +331,10 @@ export function findPurchaseSummaryRow(tenantId: string, locationId: string | nu
           ELSE 0 END), 0) AS outstanding_supplier_payments_cents
       FROM purchases
       WHERE tenant_id = ? AND (? IS NULL OR location_id = ?)
+        AND (? = 0 OR supplier_id IN (SELECT id FROM suppliers WHERE supplier_type = 'local'))
     `
     )
-    .get(tenantId, locationId, locationId) as PurchaseSummaryRow;
+    .get(tenantId, locationId, locationId, localSuppliersOnly ? 1 : 0) as PurchaseSummaryRow;
 }
 
 export function mapPurchaseSummaryRow(row: PurchaseSummaryRow): PurchaseSummary {

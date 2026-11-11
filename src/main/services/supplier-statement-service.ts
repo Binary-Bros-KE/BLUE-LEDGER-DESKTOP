@@ -1,3 +1,4 @@
+import { assertSupplierVisible } from "@main/services/supplier-service";
 import * as purchaseRepository from "@main/database/repositories/purchase-repository";
 import * as supplierRepository from "@main/database/repositories/supplier-repository";
 import { requirePermission } from "@main/services/auth-service";
@@ -47,6 +48,7 @@ function addDaysIso(dateStr: string, days: number): string {
  * date range — see statementFiltersSchema. */
 export function getSupplierStatement(supplierId: string, filtersInput: unknown = {}): SupplierStatementViewModel {
   requirePermission("purchases", "view");
+  assertSupplierVisible(supplierId);
   const filters = statementFiltersSchema.parse(filtersInput);
   const tenant = getCurrentTenant();
 
