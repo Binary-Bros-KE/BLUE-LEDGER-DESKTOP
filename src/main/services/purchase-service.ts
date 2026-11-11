@@ -1,3 +1,4 @@
+import type { SupplierType } from "@shared/types/supplier";
 import { canSeeInternationalSuppliers, isSupplierHidden } from "@main/services/supplier-service";
 import { randomUUID } from "node:crypto";
 import { runInTransaction } from "@main/database/connection";
@@ -254,11 +255,14 @@ export function listPurchases(): PurchaseListItem[] {
   return access === "local" ? rows.filter((row) => row.supplierType === "local" && row.status !== "draft") : rows;
 }
 
-export function getPurchaseSummary(): PurchaseSummary {
+/** supplierType: the Local Purchases / Purchases tab asking for its own cards (omitted = both).
+ * Without International Suppliers it's local whatever was asked for. */
+export function getPurchaseSummary(supplierType?: SupplierType): PurchaseSummary {
   requirePermission("purchases", "view");
   const { tenantId } = getCurrentTenant();
   const locationId = getCurrentBranchScope();
-  return purchaseRepository.mapPurchaseSummaryRow(purchaseRepository.findPurchaseSummaryRow(tenantId, locationId, !canSeeInternationalSuppliers()));
+  const scope = canSeeInternationalSuppliers() ? (supplierType ?? null) : "local";
+  return purchaseRepository.mapPurchaseSummaryRow(purchaseRepository.findPurchaseSummaryRow(tenantId, locationId, scope));
 }
 
 export function getPurchase(id: string): Purchase {

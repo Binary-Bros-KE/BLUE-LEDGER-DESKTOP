@@ -15,18 +15,21 @@ import type { Supplier } from "@shared/types/supplier";
 export function QuickCreateSupplierModal({
   open,
   onClose,
-  onCreated
+  onCreated,
+  defaultType = "local"
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: (supplier: Supplier) => void;
+  /** Where it was opened from (the International Purchases tab starts on International). */
+  defaultType?: SupplierType;
 }): React.JSX.Element {
   const [businessName, setBusinessName] = useState("");
   const [contactPerson, setContactPerson] = useState("");
   const [phone1, setPhone1] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [supplierType, setSupplierType] = useState<SupplierType>("local");
+  const [supplierType, setSupplierType] = useState<SupplierType>(defaultType);
   // Only someone who can see international suppliers can make one; everyone else's is simply Local.
   const { can } = usePermissions();
   const canChooseType = can("international_suppliers", "view");
@@ -35,6 +38,7 @@ export function QuickCreateSupplierModal({
     setBusinessName("");
     setContactPerson("");
     setPhone1("");
+    setSupplierType(defaultType);
     setError(null);
   }
 

@@ -25,6 +25,7 @@ import {
   ReceiptText,
   RefreshCw,
   Settings,
+  Ship,
   ShieldCheck,
   ShoppingBag,
   ShoppingCart,
@@ -49,11 +50,14 @@ export type NavItem = {
   /** A second module whose "view" also opens this item — for a screen that hosts two modules' work
    * (Purchases also carries purchase requisitions, so a requisition-only Cashier still gets it). */
   alsoVisibleWith?: PermissionModuleKey[];
+  /** Also needed on top of the above (the International tabs need International Suppliers). */
+  requires?: PermissionModuleKey;
   badge?: string;
 };
 
 /** The one visibility rule for a nav item — shared by Sidebar and App's route guard. */
 export function canViewNavItem(item: NavItem, can: (module: PermissionModuleKey, action: "view") => boolean): boolean {
+  if (item.requires && !can(item.requires, "view")) return false;
   return can(item.permissionModule, "view") || (item.alsoVisibleWith?.some((module) => can(module, "view")) ?? false);
 }
 
@@ -195,21 +199,40 @@ export const navGroups: NavGroup[] = [
         icon: PackageCheck,
         permissionModule: "inventory"
       },
+      // Client request: local and international suppliers/purchases on separate tabs. Same screens
+      // and services, each scoped to one supplier type; a role without International Suppliers only
+      // ever gets the Local pair (the services filter the rest out regardless).
       {
-        key: "suppliers",
-        label: "Suppliers",
-        description: "Vendors & purchase orders",
+        key: "local-suppliers",
+        label: "Local Suppliers",
+        description: "Suppliers you buy from locally",
         icon: Truck,
         permissionModule: "suppliers"
       },
       {
         // Requisitions live here too (client request: one document, Requisition → Received).
-        key: "purchases",
-        label: "Purchases",
-        description: "Requisitions, purchase orders & receiving",
+        key: "local-supplier-purchases",
+        label: "Local Purchases",
+        description: "Requisitions, local purchase orders & receiving",
         icon: ShoppingBag,
         permissionModule: "purchases",
         alsoVisibleWith: ["purchase_requisitions", "local_credit_purchases"]
+      },
+      {
+        key: "suppliers",
+        label: "International Suppliers",
+        description: "Suppliers you import from",
+        icon: Globe,
+        permissionModule: "suppliers",
+        requires: "international_suppliers"
+      },
+      {
+        key: "purchases",
+        label: "International Purchases",
+        description: "Imports — purchase orders, shipping & receiving",
+        icon: Ship,
+        permissionModule: "purchases",
+        requires: "international_suppliers"
       },
       {
         key: "local-purchases",

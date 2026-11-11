@@ -64,7 +64,7 @@ export function usePurchaseRequisitionAlerts(): void {
             const notification = new Notification(title, { body });
             notification.onclick = () => {
               window.focus();
-              setActiveNavKey("purchases");
+              setActiveNavKey("local-supplier-purchases");
             };
           } catch {
             // Notifications unavailable — the in-app toast and badge still cover it.

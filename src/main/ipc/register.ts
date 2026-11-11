@@ -832,7 +832,9 @@ export function registerIpcHandlers(): void {
     setRiderStatus(id, status)
   );
   ipcMain.handle(ipcChannels.purchaseList, () => listPurchases());
-  ipcMain.handle(ipcChannels.purchaseSummary, () => getPurchaseSummary());
+  ipcMain.handle(ipcChannels.purchaseSummary, (_event, supplierType?: unknown) =>
+    getPurchaseSummary(supplierType === "local" || supplierType === "international" ? supplierType : undefined)
+  );
   ipcMain.handle(ipcChannels.purchaseGet, (_event, id: string) => getPurchase(id));
   ipcMain.handle(ipcChannels.purchaseCreate, (_event, input: unknown) => createPurchase(input));
   ipcMain.handle(ipcChannels.purchaseUpdate, (_event, id: string, input: unknown) => updatePurchase(id, input));

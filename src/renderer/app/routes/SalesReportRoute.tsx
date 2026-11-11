@@ -631,7 +631,7 @@ export function SalesReportRoute(): React.JSX.Element {
                 overview={overview}
                 onNavigateToProducts={() => setActiveNavKey("reports-products")}
                 onNavigateToExpenses={() => setActiveNavKey("expenses")}
-                onNavigateToPurchases={() => setActiveNavKey("purchases")}
+                onNavigateToPurchases={() => setActiveNavKey("local-supplier-purchases")}
                 onNavigateToSalaries={() => setActiveNavKey("salaries")}
               />
             </>

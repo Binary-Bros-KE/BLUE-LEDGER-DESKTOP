@@ -189,12 +189,16 @@ export function App(): React.JSX.Element {
         <CustomersRoute />
       ) : activeNavKey === "subscriptions" ? (
         <SubscriptionsRoute />
+      ) : activeNavKey === "local-suppliers" ? (
+        <SuppliersRoute key="local" scope="local" />
       ) : activeNavKey === "suppliers" ? (
-        <SuppliersRoute />
+        <SuppliersRoute key="international" scope="international" />
       ) : activeNavKey === "riders" ? (
         <RidersRoute />
+      ) : activeNavKey === "local-supplier-purchases" ? (
+        <PurchasesRoute key="local" scope="local" />
       ) : activeNavKey === "purchases" ? (
-        <PurchasesRoute />
+        <PurchasesRoute key="international" scope="international" />
       ) : activeNavKey === "local-purchases" ? (
         <LocalPurchasesRoute />
       ) : activeNavKey === "borrows" ? (

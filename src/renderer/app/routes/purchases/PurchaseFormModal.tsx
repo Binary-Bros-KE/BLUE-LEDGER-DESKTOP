@@ -12,7 +12,7 @@ import { computeLineTax, resolveProductTaxConfig, type TenantTaxConfig } from "@
 import type { Location } from "@shared/types/location";
 import { TAX_TYPE_OPTIONS, type Product, type ProductListItem, type ProductTaxType } from "@shared/types/product";
 import type { Purchase } from "@shared/types/purchase";
-import type { Supplier } from "@shared/types/supplier";
+import type { Supplier, SupplierType } from "@shared/types/supplier";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { QuickCreateProductModal } from "@renderer/shared/components/QuickCreateProductModal";
 import { QuickCreateSupplierModal } from "@renderer/shared/components/QuickCreateSupplierModal";
@@ -115,6 +115,7 @@ export function PurchaseFormModal({
   locations,
   localOnly = false,
   lockedLocationId = null,
+  supplierType = "local",
   onSupplierCreated,
   onProductCreated,
   onSaved
@@ -130,6 +131,8 @@ export function PurchaseFormModal({
   localOnly?: boolean;
   /** The storefront this employee is assigned to: goods go there, so there's nothing to choose. */
   lockedLocationId?: string | null;
+  /** Which tab it was opened from — a supplier quick-created here starts on that type. */
+  supplierType?: SupplierType;
   onSupplierCreated: (supplier: Supplier) => void;
   onProductCreated: (product: Product) => void;
   onSaved: () => Promise<void>;
@@ -828,6 +831,7 @@ export function PurchaseFormModal({
       <QuickCreateSupplierModal
         open={quickCreateSupplierOpen}
         onClose={() => setQuickCreateSupplierOpen(false)}
+        defaultType={supplierType}
         onCreated={(supplier) => {
           onSupplierCreated(supplier);
           setSupplierId(supplier.id);

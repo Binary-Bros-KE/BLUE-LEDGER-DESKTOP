@@ -213,7 +213,7 @@ const api: BlueLedgerApi = {
   },
   purchase: {
     list: () => invoke("purchase:list"),
-    summary: () => invoke("purchase:summary"),
+    summary: (supplierType) => invoke("purchase:summary", supplierType),
     get: (id) => invoke("purchase:get", id),
     create: (input) => invoke("purchase:create", input),
     update: (id, input) => invoke("purchase:update", id, input),

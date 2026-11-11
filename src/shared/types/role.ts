@@ -56,7 +56,7 @@ export const PERMISSION_MODULES = [
   },
   {
     key: "local_purchases",
-    label: "Local Purchases",
+    label: "Daily Expenses",
     actions: ["view", "create", "edit", "delete", "export"]
   },
   // Goods taken on credit from a LOCAL supplier, for a role without the Purchases module (e.g. a

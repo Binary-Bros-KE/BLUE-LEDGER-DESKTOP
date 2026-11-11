@@ -1,3 +1,4 @@
+import { useUiStore } from "@renderer/shared/stores/ui-store";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
@@ -33,7 +34,6 @@ import {
   SUPPLIER_PAYMENT_OPTION_OPTIONS,
   type Supplier,
   SUPPLIER_TYPE_OPTIONS,
-  supplierTypeLabel,
   type SupplierPaymentOption,
   type SupplierType
 } from "@shared/types/supplier";
@@ -123,13 +123,15 @@ function paymentOptionLabel(value: string): string {
   return SUPPLIER_PAYMENT_OPTION_OPTIONS.find((option) => option.value === value)?.label ?? value;
 }
 
-export function SuppliersRoute(): React.JSX.Element {
+/** One supplier type per tab: Local Suppliers or International Suppliers (navigation.ts). */
+export function SuppliersRoute({ scope }: { scope: SupplierType }): React.JSX.Element {
   const { can } = usePermissions();
   const canCreate = can("suppliers", "create");
   const canEdit = can("suppliers", "edit");
   const canExport = can("suppliers", "export");
-  // Without it the list is local suppliers only (the service filters), so there's nothing to tell apart.
+  // Without it the service only returns local suppliers, and the form can't make anything else.
   const seesInternational = can("international_suppliers", "view");
+  const scopeLabel = scope === "local" ? "Local" : "International";
 
   const [suppliers, setSuppliers] = useState<Supplier[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -149,7 +151,6 @@ export function SuppliersRoute(): React.JSX.Element {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [paymentOptionFilter, setPaymentOptionFilter] = useState("");
-  const [typeFilter, setTypeFilter] = useState("");
 
   const loadSuppliers = useCallback(async () => {
     setLoadError(null);
@@ -158,14 +159,14 @@ export function SuppliersRoute(): React.JSX.Element {
         window.blueLedger.supplier.list(),
         window.blueLedger.paymentMethod.list()
       ]);
-      setSuppliers(list);
+      setSuppliers(list.filter((supplier) => supplier.supplierType === scope));
       setPaymentMethods(methodList);
     } catch (err) {
       const message = getErrorMessage(err, "Failed to load suppliers");
       setLoadError(message);
       showErrorToast(message);
     }
-  }, []);
+  }, [scope]);
 
   useEffect(() => {
     void loadSuppliers();
@@ -181,10 +182,9 @@ export function SuppliersRoute(): React.JSX.Element {
     const total = suppliers?.length ?? 0;
     const active = suppliers?.filter((supplier) => supplier.status === "active").length ?? 0;
     const inactive = total - active;
-    const totalOwedCents = suppliers?.reduce((sum, supplier) => sum + supplier.balanceCents, 0) ?? 0;
-    const owedInternationalCents =
-      suppliers?.filter((supplier) => supplier.supplierType === "international").reduce((sum, supplier) => sum + supplier.balanceCents, 0) ?? 0;
-    return { total, active, inactive, totalOwedCents, owedInternationalCents, owedLocalCents: totalOwedCents - owedInternationalCents };
+    const totalOwedCents =
+      suppliers?.reduce((sum, supplier) => sum + supplier.balanceCents, 0) ?? 0;
+    return { total, active, inactive, totalOwedCents };
   }, [suppliers]);
 
   const filteredSuppliers = useMemo(() => {
@@ -197,37 +197,34 @@ export function SuppliersRoute(): React.JSX.Element {
     if (paymentOptionFilter) {
       list = list.filter((supplier) => supplier.paymentOption === paymentOptionFilter);
     }
-    if (typeFilter) {
-      list = list.filter((supplier) => supplier.supplierType === typeFilter);
-    }
     const term = searchTerm.trim().toLowerCase();
     if (term) {
       list = list.filter((supplier) => {
-        const haystack = `${supplier.supplierCode} ${supplier.businessName} ${supplier.contactPerson ?? ""} ${supplier.phone1} ${supplier.phone2 ?? ""} ${supplier.email ?? ""}`.toLowerCase();
+        const haystack =
+          `${supplier.supplierCode} ${supplier.businessName} ${supplier.contactPerson ?? ""} ${supplier.phone1} ${supplier.phone2 ?? ""} ${supplier.email ?? ""}`.toLowerCase();
         return haystack.includes(term);
       });
     }
     return list;
-  }, [suppliers, statusFilter, paymentOptionFilter, typeFilter, searchTerm]);
+  }, [suppliers, statusFilter, paymentOptionFilter, searchTerm]);
 
   const exportRequest = useMemo<ExportListRequest | null>(() => {
     if (!filteredSuppliers) return null;
     const filterParts: string[] = [];
     if (statusFilter !== "all") filterParts.push(`Status: ${statusFilter}`);
-    if (paymentOptionFilter) filterParts.push(`Payment Option: ${paymentOptionLabel(paymentOptionFilter)}`);
-    if (typeFilter) filterParts.push(`Type: ${supplierTypeLabel(typeFilter as SupplierType)}`);
+    if (paymentOptionFilter)
+      filterParts.push(`Payment Option: ${paymentOptionLabel(paymentOptionFilter)}`);
     if (searchTerm.trim()) filterParts.push(`Search: "${searchTerm.trim()}"`);
 
     return {
       module: "suppliers",
-      title: "Suppliers",
-      subtitle: filterParts.length > 0 ? filterParts.join(" · ") : "Full supplier directory",
+      title: `${scopeLabel} Suppliers`,
+      subtitle: filterParts.length > 0 ? filterParts.join(" · ") : `All ${scopeLabel.toLowerCase()} suppliers`,
       columns: [
         { key: "code", header: "Code" },
         { key: "businessName", header: "Business Name" },
         { key: "contactPerson", header: "Contact Person" },
         { key: "phone", header: "Phone" },
-        { key: "supplierType", header: "Type" },
         { key: "paymentOption", header: "Payment Option" },
         { key: "balance", header: "Balance", align: "right" },
         { key: "creditLimit", header: "Credit Limit", align: "right" },
@@ -238,10 +235,10 @@ export function SuppliersRoute(): React.JSX.Element {
         businessName: supplier.businessName,
         contactPerson: supplier.contactPerson ?? "—",
         phone: supplier.phone1,
-        supplierType: supplierTypeLabel(supplier.supplierType),
         paymentOption: paymentOptionLabel(supplier.paymentOption),
         balance: formatCents(supplier.balanceCents),
-        creditLimit: supplier.creditLimitCents !== null ? formatCents(supplier.creditLimitCents) : "—",
+        creditLimit:
+          supplier.creditLimitCents !== null ? formatCents(supplier.creditLimitCents) : "—",
         status: supplier.status === "active" ? "Active" : "Inactive"
       })),
       stats: [
@@ -253,9 +250,9 @@ export function SuppliersRoute(): React.JSX.Element {
           value: formatCents(filteredSuppliers.reduce((sum, s) => sum + s.balanceCents, 0))
         }
       ],
-      fileBaseName: `Suppliers_${new Date().toISOString().slice(0, 10)}`
+      fileBaseName: `${scopeLabel}_Suppliers_${new Date().toISOString().slice(0, 10)}`
     };
-  }, [filteredSuppliers, stats, statusFilter, paymentOptionFilter, typeFilter, searchTerm]);
+  }, [filteredSuppliers, stats, statusFilter, paymentOptionFilter, searchTerm, scopeLabel]);
 
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]): void {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -263,7 +260,7 @@ export function SuppliersRoute(): React.JSX.Element {
 
   function openCreateModal(): void {
     setEditingSupplier(null);
-    setForm(emptyForm());
+    setForm({ ...emptyForm(), supplierType: scope });
     setError(null);
     setShowBalanceAdjustModal(false);
     setModalOpen(true);
@@ -330,7 +327,9 @@ export function SuppliersRoute(): React.JSX.Element {
     try {
       const nextStatus = supplier.status === "active" ? "inactive" : "active";
       await window.blueLedger.supplier.setStatus(supplier.id, nextStatus);
-      showSuccessToast(`"${supplier.businessName}" ${nextStatus === "active" ? "activated" : "deactivated"}`);
+      showSuccessToast(
+        `"${supplier.businessName}" ${nextStatus === "active" ? "activated" : "deactivated"}`
+      );
       await loadSuppliers();
     } catch (err) {
       const message = getErrorMessage(err, "Failed to update status");
@@ -362,28 +361,55 @@ export function SuppliersRoute(): React.JSX.Element {
         aria-hidden="true"
       />
 
-      <div className={cn("grid grid-cols-1 gap-3", seesInternational ? "sm:grid-cols-3 xl:grid-cols-6" : "sm:grid-cols-4")}>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
         <StatTile icon={Truck} label="Total Suppliers" value={String(stats.total)} tone="primary" />
-        <StatTile icon={CheckCircle2} label="Active Suppliers" value={String(stats.active)} tone="success" />
-        <StatTile icon={XCircle} label="Inactive Suppliers" value={String(stats.inactive)} tone="warning" />
-        <StatTile icon={Wallet} label="Total Owed" value={formatCents(stats.totalOwedCents)} tone="danger" />
-        {seesInternational && <StatTile icon={Wallet} label="Owed Locally" value={formatCents(stats.owedLocalCents)} tone="danger" />}
-        {seesInternational && <StatTile icon={Wallet} label="Owed Internationally" value={formatCents(stats.owedInternationalCents)} tone="danger" />}
+        <StatTile
+          icon={CheckCircle2}
+          label="Active Suppliers"
+          value={String(stats.active)}
+          tone="success"
+        />
+        <StatTile
+          icon={XCircle}
+          label="Inactive Suppliers"
+          value={String(stats.inactive)}
+          tone="warning"
+        />
+        <StatTile
+          icon={Wallet}
+          label="Total Owed"
+          value={formatCents(stats.totalOwedCents)}
+          tone="danger"
+        />
       </div>
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Suppliers</p>
+            <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">
+              {scopeLabel} Suppliers
+            </p>
             <h2 className="mt-1 flex items-center gap-2 text-xl font-extrabold">
               <Truck className="size-5 text-primary" aria-hidden="true" />
-              Supplier Directory
+              {scopeLabel} Supplier Directory
             </h2>
             <p className="mt-1 text-xs font-semibold text-muted">
-              The master list of businesses you purchase from.
+              {scope === "local"
+                ? "The businesses you buy from locally."
+                : "The businesses you import from. Only roles with International Suppliers ticked see this tab."}
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {can("reports", "view") && (
+              <Button
+                type="button"
+                onClick={() => useUiStore.getState().setActiveNavKey("reports-suppliers")}
+                className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+              >
+                <FileBarChart className="mr-1.5 size-4" aria-hidden="true" />
+                Report
+              </Button>
+            )}
             {canExport && exportRequest && <ExportMenu request={exportRequest} />}
             <Button
               type="button"
@@ -411,7 +437,9 @@ export function SuppliersRoute(): React.JSX.Element {
         {suppliers !== null && suppliers.length > 0 && (
           <div className="mt-4 flex flex-wrap items-end gap-3">
             <label className="block flex-1 sm:max-w-xs">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Search</span>
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
+                Search
+              </span>
               <div className="relative mt-1.5">
                 <Search
                   className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted"
@@ -447,18 +475,12 @@ export function SuppliersRoute(): React.JSX.Element {
               label="Payment Option"
               value={paymentOptionFilter}
               onChange={setPaymentOptionFilter}
-              options={[{ value: "", label: "All Payment Options" }, ...SUPPLIER_PAYMENT_OPTION_OPTIONS]}
+              options={[
+                { value: "", label: "All Payment Options" },
+                ...SUPPLIER_PAYMENT_OPTION_OPTIONS
+              ]}
               className="w-full sm:w-48"
             />
-            {seesInternational && (
-              <SelectField
-                label="Type"
-                value={typeFilter}
-                onChange={setTypeFilter}
-                options={[{ value: "", label: "All Types" }, ...SUPPLIER_TYPE_OPTIONS]}
-                className="w-full sm:w-40"
-              />
-            )}
           </div>
         )}
 
@@ -466,7 +488,11 @@ export function SuppliersRoute(): React.JSX.Element {
           {loadError ? (
             <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-danger/30 bg-danger-soft/40 p-10 text-center">
               <p className="text-sm font-bold text-danger">{loadError}</p>
-              <Button type="button" onClick={() => void loadSuppliers()} className="mt-4 h-9 text-xs">
+              <Button
+                type="button"
+                onClick={() => void loadSuppliers()}
+                className="mt-4 h-9 text-xs"
+              >
                 Retry
               </Button>
             </div>
@@ -534,26 +560,22 @@ export function SuppliersRoute(): React.JSX.Element {
                 </thead>
                 <tbody>
                   {(filteredSuppliers ?? []).map((supplier) => (
-                    <tr key={supplier.id} className="border-t border-line odd:bg-white even:bg-soft/50">
+                    <tr
+                      key={supplier.id}
+                      className="border-t border-line odd:bg-white even:bg-soft/50"
+                    >
                       <td className="truncate px-4 py-3 text-xs font-bold tabular-nums text-muted">
                         {supplier.supplierCode}
                       </td>
                       <td className="truncate px-4 py-3 font-extrabold">
                         <div className="flex flex-col gap-0.5">
-                          <span>
-                            {supplier.businessName}
-                          </span>
+                          <span>{supplier.businessName}</span>
                           <span className="text-xs font-semibold text-muted">
                             {supplier.contactPerson ?? "—"}
                           </span>
                           <span className="text-xs font-semibold text-muted">
                             {supplier.phone1}
                           </span>
-                          {seesInternational && (
-                            <span className="text-[10px] font-extrabold uppercase tracking-wide text-primary/80">
-                              {supplierTypeLabel(supplier.supplierType)}
-                            </span>
-                          )}
                         </div>
                       </td>
                       <td
@@ -717,7 +739,9 @@ export function SuppliersRoute(): React.JSX.Element {
           </div>
 
           <div className="mt-5 border-t border-line pt-4">
-            <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Address</p>
+            <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
+              Address
+            </p>
             <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field
                 label="Country"
@@ -756,14 +780,18 @@ export function SuppliersRoute(): React.JSX.Element {
                   className="mt-4 sm:max-w-xs"
                 />
                 <p className="mt-1 text-[11px] font-semibold text-muted">
-                  Only roles with International Suppliers ticked can see International suppliers or their purchases.
+                  Changing it moves the supplier, and its purchases, to the{" "}
+                  {form.supplierType === "local" ? "Local" : "International"} tabs. Only roles with
+                  International Suppliers ticked can see International ones.
                 </p>
               </>
             )}
           </div>
 
           <div className="mt-5 border-t border-line pt-4">
-            <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Payment Details</p>
+            <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
+              Payment Details
+            </p>
             <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <SelectField
                 label="Payment Option"
@@ -838,7 +866,9 @@ export function SuppliersRoute(): React.JSX.Element {
           {editingSupplier && (
             <div className="mt-5 border-t border-line pt-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Balance</p>
+                <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
+                  Balance
+                </p>
                 <Button
                   type="button"
                   onClick={() => setShowBalanceAdjustModal(true)}
@@ -849,7 +879,9 @@ export function SuppliersRoute(): React.JSX.Element {
                 </Button>
               </div>
               <div className="mt-2 rounded-lg border border-line bg-soft px-3 py-2.5">
-                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Owed to this supplier</p>
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">
+                  Owed to this supplier
+                </p>
                 <p
                   className={cn(
                     "mt-0.5 text-lg font-extrabold",
@@ -896,7 +928,10 @@ export function SuppliersRoute(): React.JSX.Element {
       )}
 
       {balanceHistorySupplier && (
-        <SupplierBalanceHistoryModal supplier={balanceHistorySupplier} onClose={() => setBalanceHistorySupplier(null)} />
+        <SupplierBalanceHistoryModal
+          supplier={balanceHistorySupplier}
+          onClose={() => setBalanceHistorySupplier(null)}
+        />
       )}
 
       {showBalanceAdjustModal && editingSupplier && (
@@ -904,9 +939,14 @@ export function SuppliersRoute(): React.JSX.Element {
           supplier={editingSupplier}
           onClose={() => setShowBalanceAdjustModal(false)}
           onSaved={(updatedBalanceCents) => {
-            setEditingSupplier((prev) => (prev ? { ...prev, balanceCents: updatedBalanceCents } : prev));
-            setSuppliers((prev) =>
-              prev?.map((s) => (s.id === editingSupplier.id ? { ...s, balanceCents: updatedBalanceCents } : s)) ?? prev
+            setEditingSupplier((prev) =>
+              prev ? { ...prev, balanceCents: updatedBalanceCents } : prev
+            );
+            setSuppliers(
+              (prev) =>
+                prev?.map((s) =>
+                  s.id === editingSupplier.id ? { ...s, balanceCents: updatedBalanceCents } : s
+                ) ?? prev
             );
           }}
         />
@@ -923,9 +963,20 @@ export function SuppliersRoute(): React.JSX.Element {
   );
 }
 
-function Th({ children, className }: { children: React.ReactNode; className?: string }): React.JSX.Element {
+function Th({
+  children,
+  className
+}: {
+  children: React.ReactNode;
+  className?: string;
+}): React.JSX.Element {
   return (
-    <th className={cn("px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider", className)}>
+    <th
+      className={cn(
+        "px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider",
+        className
+      )}
+    >
       {children}
     </th>
   );

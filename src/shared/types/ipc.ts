@@ -83,7 +83,7 @@ import type {
 } from "./report";
 import type { Quotation, QuotationListItem, QuotationStatus, QuotationStockCheckItem, QuotationSummary } from "./quotation";
 import type { Role, RoleListItem, RolePickerItem } from "./role";
-import type { Supplier, SupplierPickerOption, SupplierStatus } from "./supplier";
+import type { Supplier, SupplierPickerOption, SupplierStatus, SupplierType } from "./supplier";
 import type { SupplierBalanceEntry } from "./supplier-balance";
 import type { Rider, RiderStatus } from "./rider";
 import type { DeliveryInput } from "../schemas/charges";
@@ -717,7 +717,7 @@ export type IpcInvokeMap = {
     result: PurchaseListItem[];
   };
   "purchase:summary": {
-    args: [];
+    args: [SupplierType?];
     result: PurchaseSummary;
   };
   "purchase:get": {
@@ -1961,7 +1961,7 @@ export type BlueLedgerApi = {
   };
   purchase: {
     list: () => Promise<IpcInvokeMap["purchase:list"]["result"]>;
-    summary: () => Promise<IpcInvokeMap["purchase:summary"]["result"]>;
+    summary: (supplierType?: SupplierType) => Promise<IpcInvokeMap["purchase:summary"]["result"]>;
     get: (id: string) => Promise<IpcInvokeMap["purchase:get"]["result"]>;
     create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["purchase:create"]["result"]>;
     update: (

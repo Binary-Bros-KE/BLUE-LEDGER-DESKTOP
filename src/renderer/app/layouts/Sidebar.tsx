@@ -187,7 +187,7 @@ export function Sidebar(): React.JSX.Element {
                       badgeCount={
                         item.key === "stock-requests"
                           ? pendingStockRequestCount
-                          : item.key === "purchases"
+                          : item.key === "local-supplier-purchases"
                             ? pendingRequisitionCount
                           : item.key === "online-orders"
                             ? newOnlineOrderCount
