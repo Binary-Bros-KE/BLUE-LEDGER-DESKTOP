@@ -1,3 +1,5 @@
+import { getCreditNote } from "@main/services/sale-return-service";
+import type { CreditNoteDocument } from "@shared/types/sale-return";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { unlink, writeFile } from "node:fs/promises";
@@ -1369,6 +1371,99 @@ function buildInvoiceHtml(
   </div>
 </body>
 </html>`;
+}
+
+/** A credit note on the invoice letterhead: what came off, against which document, and how the money
+ * was settled (taken off what was owed, then refunded). */
+function buildCreditNoteHtml(doc: CreditNoteDocument, business: DocumentBusinessInfo, logo: DocumentLogo): string {
+  const money = (cents: number | null): string => `${business.currency} ${formatReceiptCents(cents)}`;
+  const itemRows = doc.items
+    .map(
+      (item, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${escapeHtml(item.productName)}</td>
+        <td class="center">${item.quantity}</td>
+        <td class="right">${money(item.unitPriceCents)}</td>
+        <td class="right">${money(item.lineTotalCents)}</td>
+      </tr>`
+    )
+    .join("");
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>${LETTERHEAD_STYLES}</style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="header">
+      <div class="header-row">
+        <div>
+          ${logo.logoDataUrl ? `<img src="${logo.logoDataUrl}" class="logo" alt="" />` : ""}
+          <p class="business-name">${escapeHtml(business.businessName)}</p>
+          ${business.physicalAddress ? `<p class="muted">${escapeHtml(business.physicalAddress)}</p>` : ""}
+          ${business.primaryPhone ? `<p class="muted">${escapeHtml(business.primaryPhone)}</p>` : ""}
+        </div>
+        <div>
+          <p class="invoice-title">CREDIT NOTE</p>
+          <p class="muted" style="text-align:right;">${escapeHtml(doc.creditNoteNumber)}</p>
+        </div>
+      </div>
+      ${business.kraPin ? `<p class="doc-vat">Our VAT No. ${escapeHtml(business.kraPin)}</p>` : ""}
+    </div>
+
+    <div class="bill-to">
+      <p class="label">Credited To:</p>
+      <p class="name">${escapeHtml(doc.customerName ?? "Walk-in Customer")}</p>
+    </div>
+
+    <table class="meta-table">
+      <thead>
+        <tr><th>Date</th><th>Against ${doc.againstKind === "invoice" ? "Invoice" : "Receipt"}</th><th>Approved By</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>${formatInvoiceDate(doc.issuedAt)}</td>
+          <td>${escapeHtml(doc.againstNumber ?? "-")}</td>
+          <td>${escapeHtml(doc.approvedByName ?? "-")}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="items-frame">
+      <table class="items-table">
+        <thead>
+          <tr><th>#</th><th>Product</th><th class="center">Qty</th><th class="right">Unit Price</th><th class="right">Line Total</th></tr>
+        </thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+      <div class="items-spacer"></div>
+      <table class="totals-table">
+        <tr class="grand"><td>Total Credited</td><td>${money(doc.totalCents)}</td></tr>
+        ${doc.againstKind === "invoice" ? `<tr><td>Taken Off Amount Owed</td><td>${money(doc.balanceReductionCents)}</td></tr>` : ""}
+        <tr><td>Refunded</td><td>${money(doc.refundCents)}</td></tr>
+        ${doc.invoiceBalanceCents !== null ? `<tr class="balance"><td>Invoice Balance Now</td><td>${money(doc.invoiceBalanceCents)}</td></tr>` : ""}
+      </table>
+    </div>
+
+    <div class="notes"><strong>Reason</strong><p>${escapeHtml(doc.reason)}</p></div>
+    <div class="footer">${escapeHtml(business.invoiceFooter ?? "Thank you for your business!")}</div>
+  </div>
+</body>
+</html>`;
+}
+
+/** Opens the credit note as a PDF in the preview window (print or save from there). */
+export async function previewCreditNotePdf(returnId: string): Promise<void> {
+  requirePermission("sales", "view");
+  const doc = getCreditNote(returnId);
+  const { sale, business } = loadReceiptData(doc.saleId);
+  const tenantRow = tenantRepository.findTenantRow();
+  const logo = tenantRow && sale.includeBusinessInfo ? await resolveDocumentLogo(sale.locationId, tenantRow) : { logoDataUrl: null, logoRatio: null };
+  const effectiveBusiness = sale.includeBusinessInfo ? business : suppressBusinessInfo(business, "CREDIT NOTE");
+  const buffer = await renderHtmlToPdfBuffer(buildCreditNoteHtml(doc, effectiveBusiness, logo));
+  await openPdfPreviewWindow(buffer, `${doc.creditNoteNumber}.pdf`, `Credit Note ${doc.creditNoteNumber}`);
 }
 
 /** Renders the invoice to PDF and prompts the user for a save location. Returns the saved path, or null if cancelled. */

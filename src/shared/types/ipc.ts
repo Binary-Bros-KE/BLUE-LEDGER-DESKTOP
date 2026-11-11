@@ -983,6 +983,10 @@ export type IpcInvokeMap = {
     args: [string];
     result: CreditNoteDocument;
   };
+  "printer:preview-credit-note-pdf": {
+    args: [string];
+    result: void;
+  };
   "sale-return:reject": {
     args: [string, Record<string, unknown>];
     result: SaleReturn;
@@ -2114,6 +2118,7 @@ export type BlueLedgerApi = {
     previewReceiptPdf: (saleId: string) => Promise<IpcInvokeMap["printer:preview-receipt-pdf"]["result"]>;
     generateInvoicePdf: (saleId: string) => Promise<IpcInvokeMap["printer:generate-invoice-pdf"]["result"]>;
     previewInvoicePdf: (saleId: string) => Promise<IpcInvokeMap["printer:preview-invoice-pdf"]["result"]>;
+    previewCreditNotePdf: (returnId: string) => Promise<IpcInvokeMap["printer:preview-credit-note-pdf"]["result"]>;
     printInvoiceDocument: (
       saleId: string
     ) => Promise<IpcInvokeMap["printer:print-invoice-document"]["result"]>;

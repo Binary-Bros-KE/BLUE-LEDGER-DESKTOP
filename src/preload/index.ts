@@ -341,6 +341,7 @@ const api: BlueLedgerApi = {
     previewReceiptPdf: (saleId) => invoke("printer:preview-receipt-pdf", saleId),
     generateInvoicePdf: (saleId) => invoke("printer:generate-invoice-pdf", saleId),
     previewInvoicePdf: (saleId) => invoke("printer:preview-invoice-pdf", saleId),
+    previewCreditNotePdf: (returnId) => invoke("printer:preview-credit-note-pdf", returnId),
     printInvoiceDocument: (saleId) => invoke("printer:print-invoice-document", saleId),
     printInvoiceThermal: (saleId) => invoke("printer:print-invoice-thermal", saleId),
     generateQuotationPdf: (quotationId) => invoke("printer:generate-quotation-pdf", quotationId),

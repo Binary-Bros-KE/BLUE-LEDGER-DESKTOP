@@ -221,6 +221,7 @@ export const ipcChannels = {
   saleReturnReject: "sale-return:reject",
   saleReturnIssueCreditNote: "sale-return:issue-credit-note",
   saleReturnCreditNote: "sale-return:credit-note",
+  printerPreviewCreditNotePdf: "printer:preview-credit-note-pdf",
   invoiceList: "invoice:list",
   invoiceSummary: "invoice:summary",
   invoiceCreate: "invoice:create",

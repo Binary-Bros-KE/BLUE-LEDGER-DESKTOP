@@ -59,6 +59,8 @@ export type SaleReturn = {
  * was settled. Built from an approved return — see sale-return-service.ts getCreditNote. */
 export type CreditNoteDocument = {
   returnId: string;
+  saleId: string;
+  customerId: string | null;
   creditNoteNumber: string;
   issuedAt: string;
   businessName: string;

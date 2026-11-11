@@ -230,6 +230,8 @@ export function getCreditNote(id: string): CreditNoteDocument {
   const refundCents = detail.refund_cents ?? totalCents;
   return {
     returnId: id,
+    saleId: sale.id,
+    customerId: sale.customer_id,
     creditNoteNumber: detail.credit_note_number,
     issuedAt: detail.approved_at ?? detail.updated_at,
     businessName,

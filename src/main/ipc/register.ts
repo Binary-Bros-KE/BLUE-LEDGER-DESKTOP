@@ -117,6 +117,7 @@ import {
   downloadPdfPreview,
   previewDeliveryNotePdf,
   previewInvoicePdf,
+  previewCreditNotePdf,
   previewQuotationPdf,
   previewReceiptPdf,
   previewSalaryPdf,
@@ -915,6 +916,7 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.saleReturnIssueCreditNote, (_event, id: string) => issueCreditNote(id));
   ipcMain.handle(ipcChannels.saleReturnCreditNote, (_event, id: string) => getCreditNote(id));
+  ipcMain.handle(ipcChannels.printerPreviewCreditNotePdf, (_event, id: string) => previewCreditNotePdf(id));
   ipcMain.handle(ipcChannels.invoiceList, () => listInvoices());
   ipcMain.handle(ipcChannels.invoiceSummary, () => getInvoiceSummary());
   ipcMain.handle(ipcChannels.invoiceCreate, (_event, input: unknown) => createInvoice(input));
