@@ -9,6 +9,7 @@ import { formatCents } from "@renderer/shared/lib/money";
 import { showErrorToast } from "@renderer/shared/lib/toast";
 import { CUSTOMER_TYPE_OPTIONS, type Customer } from "@shared/types/customer";
 import type { CustomerPurchaseHistoryEntry } from "@shared/types/customer-report";
+import { CustomerSubscriptionsSection } from "./CustomerSubscriptionsSection";
 
 const KIND_LABEL: Record<string, string> = {
   retail_sale: "Retail Sale",
@@ -104,6 +105,8 @@ export function CustomerDetailModal({
           <InfoRow label="Current Balance" value={formatCents(customer.currentBalanceCents)} />
           <InfoRow label="Notes" value={customer.notes ?? "—"} />
         </Section>
+
+        <CustomerSubscriptionsSection customerId={customer.id} />
 
         <div>
           <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">

@@ -434,6 +434,21 @@ const api: BlueLedgerApi = {
     markPaid: (id, input) => invoke("recurring-bill:mark-paid", id, input),
     delete: (id) => invoke("recurring-bill:delete", id)
   },
+  subscription: {
+    list: () => invoke("subscription:list"),
+    pendingCount: () => invoke("subscription:pending-count"),
+    get: (id) => invoke("subscription:get", id),
+    customerHistory: (customerId) => invoke("subscription:customer-history", customerId),
+    serviceSuggestions: () => invoke("subscription:service-suggestions"),
+    create: (input) => invoke("subscription:create", input),
+    update: (id, input) => invoke("subscription:update", id, input),
+    renewalDefaults: (id) => invoke("subscription:renewal-defaults", id),
+    renew: (id, input) => invoke("subscription:renew", id, input),
+    setStatus: (id, status) => invoke("subscription:set-status", id, status),
+    delete: (id) => invoke("subscription:delete", id),
+    recordNotice: (id, input) => invoke("subscription:record-notice", id, input)
+  },
+
   sync: {
     getSnapshot: () => invoke("sync:get-snapshot"),
     listQueue: (input) => invoke("sync:list-queue", input ?? {}),

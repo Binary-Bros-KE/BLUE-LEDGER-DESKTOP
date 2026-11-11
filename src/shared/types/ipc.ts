@@ -93,6 +93,7 @@ import type { SaleReturn } from "./sale-return";
 import type { SaleVoid } from "./sale-void";
 import type { InvoiceCancellation } from "./invoice-cancellation";
 import type { RecurringBill } from "./recurring-bill";
+import type { Subscription, SubscriptionServiceSuggestion } from "./subscription";
 import type {
   StockLedgerFeed,
   StockMovement,
@@ -1399,6 +1400,54 @@ export type IpcInvokeMap = {
     args: [string];
     result: void;
   };
+  "subscription:list": {
+    args: [];
+    result: Subscription[];
+  };
+  "subscription:pending-count": {
+    args: [];
+    result: number;
+  };
+  "subscription:get": {
+    args: [string];
+    result: Subscription;
+  };
+  "subscription:customer-history": {
+    args: [string];
+    result: Subscription[];
+  };
+  "subscription:service-suggestions": {
+    args: [];
+    result: SubscriptionServiceSuggestion[];
+  };
+  "subscription:create": {
+    args: [Record<string, unknown>];
+    result: Subscription;
+  };
+  "subscription:update": {
+    args: [string, Record<string, unknown>];
+    result: Subscription;
+  };
+  "subscription:renewal-defaults": {
+    args: [string];
+    result: { startDate: string; periodDays: number; amountCents: number | null };
+  };
+  "subscription:renew": {
+    args: [string, Record<string, unknown>];
+    result: Subscription;
+  };
+  "subscription:set-status": {
+    args: [string, "active" | "cancelled"];
+    result: Subscription;
+  };
+  "subscription:delete": {
+    args: [string];
+    result: void;
+  };
+  "subscription:record-notice": {
+    args: [string, Record<string, unknown>];
+    result: Subscription;
+  };
   "sync:get-snapshot": {
     args: [];
     result: SyncSnapshot;
@@ -2279,6 +2328,20 @@ export type BlueLedgerApi = {
       input: Record<string, unknown>
     ) => Promise<IpcInvokeMap["recurring-bill:mark-paid"]["result"]>;
     delete: (id: string) => Promise<IpcInvokeMap["recurring-bill:delete"]["result"]>;
+  };
+  subscription: {
+    list: () => Promise<IpcInvokeMap["subscription:list"]["result"]>;
+    pendingCount: () => Promise<IpcInvokeMap["subscription:pending-count"]["result"]>;
+    get: (id: string) => Promise<IpcInvokeMap["subscription:get"]["result"]>;
+    customerHistory: (customerId: string) => Promise<IpcInvokeMap["subscription:customer-history"]["result"]>;
+    serviceSuggestions: () => Promise<IpcInvokeMap["subscription:service-suggestions"]["result"]>;
+    create: (input: Record<string, unknown>) => Promise<IpcInvokeMap["subscription:create"]["result"]>;
+    update: (id: string, input: Record<string, unknown>) => Promise<IpcInvokeMap["subscription:update"]["result"]>;
+    renewalDefaults: (id: string) => Promise<IpcInvokeMap["subscription:renewal-defaults"]["result"]>;
+    renew: (id: string, input: Record<string, unknown>) => Promise<IpcInvokeMap["subscription:renew"]["result"]>;
+    setStatus: (id: string, status: "active" | "cancelled") => Promise<IpcInvokeMap["subscription:set-status"]["result"]>;
+    delete: (id: string) => Promise<IpcInvokeMap["subscription:delete"]["result"]>;
+    recordNotice: (id: string, input: Record<string, unknown>) => Promise<IpcInvokeMap["subscription:record-notice"]["result"]>;
   };
   sync: {
     getSnapshot: () => Promise<IpcInvokeMap["sync:get-snapshot"]["result"]>;

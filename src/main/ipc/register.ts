@@ -189,6 +189,20 @@ import {
   updateRecurringBill
 } from "@main/services/recurring-bill-service";
 import {
+  countPendingSubscriptionNotices,
+  createSubscription,
+  deleteSubscription,
+  getSubscription,
+  getSubscriptionRenewalDefaults,
+  listCustomerSubscriptions,
+  listSubscriptionServiceSuggestions,
+  listSubscriptions,
+  recordSubscriptionNotice,
+  renewSubscription,
+  setSubscriptionStatus,
+  updateSubscription
+} from "@main/services/subscription-service";
+import {
   completeSalary,
   createSalary,
   createSalaryAdvance,
@@ -1112,6 +1126,18 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.recurringBillAdvance, (_event, id: string) => advanceRecurringBill(id));
   ipcMain.handle(ipcChannels.recurringBillMarkPaid, (_event, id: string, input: unknown) => markRecurringBillPaid(id, input));
   ipcMain.handle(ipcChannels.recurringBillDelete, (_event, id: string) => deleteRecurringBill(id));
+  ipcMain.handle(ipcChannels.subscriptionList, () => listSubscriptions());
+  ipcMain.handle(ipcChannels.subscriptionPendingCount, () => countPendingSubscriptionNotices());
+  ipcMain.handle(ipcChannels.subscriptionGet, (_event, id: string) => getSubscription(id));
+  ipcMain.handle(ipcChannels.subscriptionCustomerHistory, (_event, customerId: string) => listCustomerSubscriptions(customerId));
+  ipcMain.handle(ipcChannels.subscriptionServiceSuggestions, () => listSubscriptionServiceSuggestions());
+  ipcMain.handle(ipcChannels.subscriptionCreate, (_event, input: unknown) => createSubscription(input));
+  ipcMain.handle(ipcChannels.subscriptionUpdate, (_event, id: string, input: unknown) => updateSubscription(id, input));
+  ipcMain.handle(ipcChannels.subscriptionRenewalDefaults, (_event, id: string) => getSubscriptionRenewalDefaults(id));
+  ipcMain.handle(ipcChannels.subscriptionRenew, (_event, id: string, input: unknown) => renewSubscription(id, input));
+  ipcMain.handle(ipcChannels.subscriptionSetStatus, (_event, id: string, status: "active" | "cancelled") => setSubscriptionStatus(id, status));
+  ipcMain.handle(ipcChannels.subscriptionDelete, (_event, id: string) => deleteSubscription(id));
+  ipcMain.handle(ipcChannels.subscriptionRecordNotice, (_event, id: string, input: unknown) => recordSubscriptionNotice(id, input));
   ipcMain.handle(ipcChannels.syncGetSnapshot, () => getSyncSnapshot());
   ipcMain.handle(ipcChannels.syncRunNow, () => runSyncNow());
   ipcMain.handle(ipcChannels.syncRetryOrphans, () => retryOrphanedRecords());

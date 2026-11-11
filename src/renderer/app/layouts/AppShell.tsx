@@ -13,6 +13,7 @@ import { useSyncStatusWidget } from "./useSyncStatusWidget";
 import { useOnlineOrderAlerts } from "./useOnlineOrderAlerts";
 import { useStockRequestAlerts } from "./useStockRequestAlerts";
 import { usePurchaseRequisitionAlerts } from "./usePurchaseRequisitionAlerts";
+import { useSubscriptionReminderAlerts } from "./useSubscriptionReminderAlerts";
 import { useUpdateStatusWidget } from "./useUpdateStatusWidget";
 
 export function AppShell({ children }: PropsWithChildren): React.JSX.Element {
@@ -49,6 +50,7 @@ export function AppShell({ children }: PropsWithChildren): React.JSX.Element {
   const updateStatus = useUpdateStatusWidget();
   useStockRequestAlerts();
   usePurchaseRequisitionAlerts();
+  useSubscriptionReminderAlerts();
   useOnlineOrderAlerts();
 
   // A MONTHLY tenant past grace never reaches this component at all (App.tsx routes to

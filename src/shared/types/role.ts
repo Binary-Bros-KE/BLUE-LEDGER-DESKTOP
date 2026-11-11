@@ -67,6 +67,11 @@ export const PERMISSION_MODULES = [
   // for (Suppliers, Purchases, Reports). Saved roles get a computed default — see withLaterModuleDefaults.
   { key: "international_suppliers", label: "International Suppliers", actions: ["view"] },
   {
+    key: "subscriptions",
+    label: "Subscriptions",
+    actions: ["view", "create", "edit", "delete", "export"]
+  },
+  {
     key: "borrows",
     label: "Borrow & Lend",
     actions: ["view", "create", "edit", "export"]

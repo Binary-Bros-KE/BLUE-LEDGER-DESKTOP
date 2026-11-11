@@ -22,6 +22,8 @@ export type SyncEntity =
   | "expenses"
   | "salaries"
   | "recurring_bills"
+  | "customer_subscriptions"
+  | "customer_subscription_notices"
   | "sale_voids"
   | "sale_returns"
   | "invoice_cancellations"
