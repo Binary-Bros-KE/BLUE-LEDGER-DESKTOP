@@ -1344,6 +1344,7 @@ function buildInvoiceHtml(
         ${sale.discountAmountCents > 0 ? `<tr><td>Discount</td><td>-${money(sale.discountAmountCents)}</td></tr>` : ""}
         ${sale.includeTaxBreakdown && computeAddedTaxCents(withTaxableServiceCharges(sale.items, sale.serviceCharges)) > 0 ? `<tr><td>Total Tax</td><td>${money(computeAddedTaxCents(withTaxableServiceCharges(sale.items, sale.serviceCharges)))}</td></tr>` : ""}
         <tr class="grand"><td>Total</td><td>${money(sale.grandTotalCents)}</td></tr>
+        ${sale.creditedCents > 0 ? `<tr><td>Credit Notes</td><td>-${money(sale.creditedCents)}</td></tr>` : ""}
         <tr><td>Amount Paid</td><td>${money(sale.amountPaidCents)}</td></tr>
         <tr class="balance"><td>Balance Due</td><td>${money(sale.balanceDueCents)}</td></tr>
       </table>
@@ -1645,6 +1646,7 @@ function buildInvoiceThermalHtml(sale: Sale, business: DocumentBusinessInfo): st
       ${sale.discountAmountCents > 0 ? `<tr><td class="label">Discount</td><td class="right">-${money(sale.discountAmountCents)}</td></tr>` : ""}
       ${sale.includeTaxBreakdown && computeAddedTaxCents(withTaxableServiceCharges(sale.items, sale.serviceCharges)) > 0 ? `<tr><td class="label">Total Tax</td><td class="right">${money(computeAddedTaxCents(withTaxableServiceCharges(sale.items, sale.serviceCharges)))}</td></tr>` : ""}
       <tr class="grand"><td class="label">Total</td><td class="right">${money(sale.grandTotalCents)}</td></tr>
+      ${sale.creditedCents > 0 ? `<tr><td class="label">Credit Notes</td><td class="right">-${money(sale.creditedCents)}</td></tr>` : ""}
       <tr><td class="label">Amount Paid</td><td class="right">${money(sale.amountPaidCents)}</td></tr>
       <tr class="balance"><td class="label">Balance Due</td><td class="right">${money(sale.balanceDueCents)}</td></tr>
     </table>

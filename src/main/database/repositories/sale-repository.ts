@@ -1,3 +1,4 @@
+import { findCreditedValueForSale } from "@main/database/repositories/sale-return-repository";
 import { mpesaStatusForSale, parseMpesaVerifications } from "@shared/lib/mpesa-verification";
 import type { MpesaVerifications } from "@shared/types/mpesa";
 import { getDatabase } from "@main/database/connection";
@@ -945,6 +946,7 @@ export function mapSaleDetailRow(
   delivery: SaleDelivery | null
 ): Sale {
   return {
+    creditedCents: row.invoice_number ? findCreditedValueForSale(row.id) : 0,
     id: row.id,
     tenantId: row.tenant_id,
     receiptNumber: row.receipt_number,

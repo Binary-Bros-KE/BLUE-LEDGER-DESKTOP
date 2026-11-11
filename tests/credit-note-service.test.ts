@@ -200,3 +200,12 @@ test("after a credit note, payments are capped at the reduced balance", async ()
   assert.equal(sale(saleId).balance_due_cents, 0);
   assert.equal(sale(saleId).payment_status, "paid");
 });
+
+test("an invoice's own totals add up after credit notes: total − credited − paid = balance", async () => {
+  const { findSaleDetailRowById, mapSaleDetailRow } = await import("../src/main/database/repositories/sale-repository.ts");
+  const { saleId, saleItemId } = makeInvoice(4_000);
+  await credit(saleId, saleItemId, 3);
+  const invoice = mapSaleDetailRow(findSaleDetailRowById(saleId)!, [], [], null);
+  assert.equal(invoice.creditedCents, 3_000);
+  assert.equal(invoice.grandTotalCents - invoice.creditedCents - invoice.amountPaidCents, invoice.balanceDueCents);
+});
