@@ -9,7 +9,8 @@ const SRC = new URL("../src/", import.meta.url);
 const STUBS = {
   "main/database/connection.ts": new URL("./stubs/connection.ts", import.meta.url),
   "main/services/auth-service.ts": new URL("./stubs/auth-service.ts", import.meta.url),
-  "main/services/tenant-service.ts": new URL("./stubs/tenant-service.ts", import.meta.url)
+  "main/services/tenant-service.ts": new URL("./stubs/tenant-service.ts", import.meta.url),
+  "main/services/sync-engine.ts": new URL("./stubs/sync-engine.ts", import.meta.url)
 };
 
 function withTsExtension(url) {

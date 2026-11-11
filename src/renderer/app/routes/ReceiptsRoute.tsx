@@ -1,3 +1,4 @@
+import { CreditNoteModal } from "@renderer/shared/components/CreditNoteModal";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Ban, Eye, Layers, Loader2, Package, PackagePlus, ReceiptText, Search, Undo2, Wallet } from "lucide-react";
@@ -117,6 +118,7 @@ export function ReceiptsRoute(): React.JSX.Element {
   const [attachingDeliverySale, setAttachingDeliverySale] = useState<SaleListItem | null>(null);
 
   const [returnModalSale, setReturnModalSale] = useState<Sale | null>(null);
+  const [creditNoteReturnId, setCreditNoteReturnId] = useState<string | null>(null);
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
   const [returnReason, setReturnReason] = useState("");
   const [returnNotes, setReturnNotes] = useState("");
@@ -756,6 +758,8 @@ export function ReceiptsRoute(): React.JSX.Element {
         </div>
       </section>
 
+      <CreditNoteModal returnId={creditNoteReturnId} onClose={() => setCreditNoteReturnId(null)} />
+
       <Modal
         open={viewingSale !== null || viewLoading}
         onClose={() => setViewingSale(null)}
@@ -808,6 +812,30 @@ export function ReceiptsRoute(): React.JSX.Element {
                         <span className="mt-0.5 flex-none font-bold tabular-nums text-ink">
                           Unit Cost {item.localCostCents !== null ? formatCents(Math.round(item.localCostCents / item.quantity)) : "—"}
                         </span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+
+            {returns.some((entry) => entry.saleId === viewingSale.id && entry.status === "approved") && (
+              <div className="mt-4 rounded-lg border border-line p-3">
+                <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Returns</p>
+                <div className="mt-2 space-y-1.5">
+                  {returns
+                    .filter((entry) => entry.saleId === viewingSale.id && entry.status === "approved")
+                    .map((entry) => (
+                      <div key={entry.id} className="flex items-center justify-between gap-2 rounded-md bg-soft px-2.5 py-1.5 text-xs">
+                        <span className="min-w-0 truncate font-bold text-ink">
+                          {entry.items.map((item) => `${item.quantity} × ${item.productName}`).join(", ")}
+                        </span>
+                        <Button
+                          type="button"
+                          onClick={() => setCreditNoteReturnId(entry.id)}
+                          className="h-7 flex-none border border-line bg-white px-2 text-[11px] text-ink shadow-none hover:bg-white"
+                        >
+                          {entry.creditNoteNumber ?? "Credit Note"}
+                        </Button>
                       </div>
                     ))}
                 </div>

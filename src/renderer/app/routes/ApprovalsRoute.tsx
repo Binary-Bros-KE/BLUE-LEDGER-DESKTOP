@@ -1,3 +1,4 @@
+import { CreditNoteModal } from "@renderer/shared/components/CreditNoteModal";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Ban, CheckCircle2, ClipboardCheck, Eye, FileX2, Loader2, Undo2, XCircle } from "lucide-react";
@@ -44,7 +45,8 @@ function entryAmountCents(entry: ApprovalEntry): number {
  * the field `invoiceNumber` for clarity rather than reusing a misleading "receipt" name. This is the
  * one place that difference needs bridging, rather than every JSX call site below doing it inline. */
 function entryDocumentNumber(entry: ApprovalEntry): string | null {
-  return entry.kind === "invoice_cancellation" ? entry.data.invoiceNumber : entry.data.receiptNumber;
+  if (entry.kind === "invoice_cancellation") return entry.data.invoiceNumber;
+  return entry.kind === "return" ? (entry.data.invoiceNumber ?? entry.data.receiptNumber) : entry.data.receiptNumber;
 }
 
 export function ApprovalsRoute(): React.JSX.Element {
@@ -53,6 +55,7 @@ export function ApprovalsRoute(): React.JSX.Element {
   const showStorefrontFilter = session?.branch == null;
 
   const [returns, setReturns] = useState<SaleReturn[] | null>(null);
+  const [creditNoteReturnId, setCreditNoteReturnId] = useState<string | null>(null);
   const [voids, setVoids] = useState<SaleVoid[] | null>(null);
   const [invoiceCancellations, setInvoiceCancellations] = useState<InvoiceCancellation[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -276,7 +279,9 @@ export function ApprovalsRoute(): React.JSX.Element {
                           {entry.kind === "void"
                             ? "Void Request"
                             : entry.kind === "return"
-                              ? "Return Request"
+                              ? entry.data.invoiceNumber
+                                ? "Credit Note Request"
+                                : "Return Request"
                               : "Cancellation Request"}
                         </DashedPill>
                         <span className="text-xs font-bold tabular-nums text-muted">
@@ -364,6 +369,15 @@ export function ApprovalsRoute(): React.JSX.Element {
                     {entry.data.status === "approved" ? "Approved" : "Rejected"}
                   </DashedPill>
                   <span className="text-[11px] font-semibold text-muted">{entry.data.approvedByName ?? "—"}</span>
+                  {entry.kind === "return" && entry.data.status === "approved" && (
+                    <Button
+                      type="button"
+                      onClick={() => setCreditNoteReturnId(entry.id)}
+                      className="h-7 border border-line bg-white px-2 text-[11px] text-ink shadow-none hover:bg-soft"
+                    >
+                      {entry.data.creditNoteNumber ?? "Credit Note"}
+                    </Button>
+                  )}
                   <button
                     type="button"
                     onClick={() => void openView(entry)}
@@ -378,6 +392,8 @@ export function ApprovalsRoute(): React.JSX.Element {
           </div>
         </section>
       )}
+
+      <CreditNoteModal returnId={creditNoteReturnId} onClose={() => setCreditNoteReturnId(null)} />
 
       <Modal
         open={viewingEntry !== null}
@@ -399,7 +415,9 @@ export function ApprovalsRoute(): React.JSX.Element {
                     {viewingEntry.kind === "void"
                       ? "Void Request"
                       : viewingEntry.kind === "return"
-                        ? "Return Request"
+                        ? viewingEntry.data.invoiceNumber
+                          ? "Credit Note Request"
+                          : "Return Request"
                         : "Cancellation Request"}
                   </DashedPill>
                   <DashedPill
@@ -432,12 +450,8 @@ export function ApprovalsRoute(): React.JSX.Element {
                   )}
                 </div>
 
-                {tenantContext && viewingEntry.kind === "invoice_cancellation" && (
-                  <InvoicePreview sale={viewingSale} tenant={tenantContext} />
-                )}
-                {tenantContext && viewingEntry.kind !== "invoice_cancellation" && (
-                  <ReceiptPreview sale={viewingSale} tenant={tenantContext} />
-                )}
+                {tenantContext && viewingSale.invoiceNumber && <InvoicePreview sale={viewingSale} tenant={tenantContext} />}
+                {tenantContext && !viewingSale.invoiceNumber && <ReceiptPreview sale={viewingSale} tenant={tenantContext} />}
 
                 {viewingEntry.data.status === "pending_approval" && (
                   <div className="mt-4 grid grid-cols-2 gap-2 border-t border-line pt-4">

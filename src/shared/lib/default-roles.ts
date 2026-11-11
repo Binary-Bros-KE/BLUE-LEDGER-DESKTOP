@@ -117,5 +117,5 @@ export const DEFAULT_SYSTEM_ROLES: Array<{
  * reads them anyway (withLaterModuleDefaults), so a restored role matches a brand-new tenant's. */
 export function defaultPermissionsForRole(roleName: string): PermissionsMap | null {
   const role = DEFAULT_SYSTEM_ROLES.find((r) => r.roleName.toLowerCase() === roleName.trim().toLowerCase());
-  return role ? withLaterModuleDefaults(structuredClone(role.permissions)) : null;
+  return role ? withLaterModuleDefaults(structuredClone(role.permissions), role.roleName) : null;
 }

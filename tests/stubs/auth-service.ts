@@ -32,3 +32,20 @@ export function getCurrentEmployeeId(): string | null {
 export function getCurrentEmployeeName(): string | null {
   return session?.employeeId ? "Test Employee" : null;
 }
+
+export function requireSignedIn(): void {
+  if (!session) throw new Error("You must be signed in to do that");
+}
+
+export function getSession(): { employee: { id: string; firstName: string; lastName: string }; branch: { id: string } | null } | null {
+  if (!session) return null;
+  return { employee: { id: session.employeeId ?? "", firstName: "Test", lastName: "Employee" }, branch: session.branchId ? { id: session.branchId } : null };
+}
+
+export function getCurrentIsSuperAdmin(): boolean {
+  return false;
+}
+
+export function resolveReportLocationScope(explicitLocationId: string | null | undefined): string | null {
+  return session?.branchId ?? explicitLocationId ?? null;
+}

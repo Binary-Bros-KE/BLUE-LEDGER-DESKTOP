@@ -3723,7 +3723,7 @@ const migrations = [
     version: 111,
     name: "customer_subscriptions",
     sql: `
-      -- Customer customer_subscriptions sold by the shop (DStv, GOtv...). One row per PAID PERIOD: renewing marks
+      -- Customer subscriptions sold by the shop (DStv, GOtv...). One row per PAID PERIOD: renewing marks
       -- the old row 'renewed' and inserts a new one pointing back at it, so history and reminders are
       -- per period. end_date is stored (start_date + period_days, see shared/lib/subscription-schedule.ts)
       -- but days remaining and the stage never are: they depend on today. Track only, no money moves.
@@ -3798,6 +3798,22 @@ const migrations = [
         INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
         VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'customer_subscription_notices', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
       END;
+    `
+  },
+  {
+    // 112, not 111: the unreleased subscriptions branch already claims 111. Applied migrations are
+    // tracked as a set (see migrateDatabase), so they can arrive in either order.
+    version: 112,
+    name: "credit_notes",
+    sql: `
+      -- A credit note is an approved return that has been given a number (CN-...): on an invoice it
+      -- gets one when approved (see sale-return-service.ts approveSaleReturn); on a receipt only when
+      -- someone asks for the document. refund_cents is the money actually paid back. NULL = the whole
+      -- returned value, which is what every receipt return (and every return from before credit
+      -- notes) always meant; an invoice credit note stores what was refunded after first reducing
+      -- what the customer still owed (shared/lib/credit-note.ts).
+      ALTER TABLE sale_returns ADD COLUMN credit_note_number TEXT;
+      ALTER TABLE sale_returns ADD COLUMN refund_cents INTEGER;
     `
   }
 ] as const;

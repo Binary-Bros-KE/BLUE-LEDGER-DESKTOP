@@ -203,6 +203,8 @@ export type Sale = {
   dueDate: string | null;
   amountPaidCents: number;
   balanceDueCents: number;
+  /** Approved credit notes on an invoice (0 otherwise): Total − this − amountPaid = balanceDue. */
+  creditedCents: number;
   invoiceNotes: string | null;
   /** Client request: any number of additional titled note blocks below the plain notes/invoiceNotes
    * above (e.g. "Installation Instructions") — see NotesSection's own doc comment

@@ -261,7 +261,8 @@ export function findApprovedReturnTransactionRows(
         COALESCE(s.invoice_number, s.receipt_number) AS document_number,
         pm.name AS payment_method_name,
         s.payments AS sale_payments,
-        COALESCE((SELECT SUM(sri.line_total_cents) FROM sale_return_items sri WHERE sri.sale_return_id = sr.id), 0)
+        -- The money-out amount (see findApprovedReturnRefundRows): refunded, not the whole value.
+        COALESCE(sr.refund_cents, (SELECT SUM(sri.line_total_cents) FROM sale_return_items sri WHERE sri.sale_return_id = sr.id), 0)
           AS returned_value_cents
       FROM sale_returns sr
       JOIN sales s ON s.id = sr.sale_id
@@ -713,7 +714,9 @@ export function findApprovedReturnRefundRows(tenantId: string, locationId: strin
     .prepare(
       `
       SELECT sr.id AS return_id, sr.approved_at,
-        COALESCE((SELECT SUM(sri.line_total_cents) FROM sale_return_items sri WHERE sri.sale_return_id = sr.id), 0)
+        -- Money actually paid back: an invoice credit note may refund less than its value (it reduces
+        -- what's owed first); NULL refund_cents = the whole value (every receipt return).
+        COALESCE(sr.refund_cents, (SELECT SUM(sri.line_total_cents) FROM sale_return_items sri WHERE sri.sale_return_id = sr.id), 0)
           AS returned_value_cents
       FROM sale_returns sr
       JOIN sales s ON s.id = sr.sale_id

@@ -293,6 +293,8 @@ const api: BlueLedgerApi = {
     list: () => invoke("sale-return:list"),
     get: (id) => invoke("sale-return:get", id),
     request: (input) => invoke("sale-return:request", input),
+    issueCreditNote: (id) => invoke("sale-return:issue-credit-note", id),
+    creditNote: (id) => invoke("sale-return:credit-note", id),
     approve: (id, input) => invoke("sale-return:approve", id, input),
     reject: (id, input) => invoke("sale-return:reject", id, input)
   },
@@ -339,6 +341,7 @@ const api: BlueLedgerApi = {
     previewReceiptPdf: (saleId) => invoke("printer:preview-receipt-pdf", saleId),
     generateInvoicePdf: (saleId) => invoke("printer:generate-invoice-pdf", saleId),
     previewInvoicePdf: (saleId) => invoke("printer:preview-invoice-pdf", saleId),
+    previewCreditNotePdf: (returnId) => invoke("printer:preview-credit-note-pdf", returnId),
     printInvoiceDocument: (saleId) => invoke("printer:print-invoice-document", saleId),
     printInvoiceThermal: (saleId) => invoke("printer:print-invoice-thermal", saleId),
     generateQuotationPdf: (quotationId) => invoke("printer:generate-quotation-pdf", quotationId),

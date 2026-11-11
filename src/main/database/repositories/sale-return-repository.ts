@@ -17,10 +17,13 @@ export type SaleReturnRow = {
   sync_status: string;
   last_synced_at: string | null;
   synced_updated_at: string | null;
+  credit_note_number: string | null;
+  refund_cents: number | null;
 };
 
 export type SaleReturnDetailRow = SaleReturnRow & {
   receipt_number: string | null;
+  invoice_number: string | null;
   location_id: string;
   location_name: string;
   requested_by_name: string;
@@ -50,6 +53,7 @@ export function findAllSaleReturnRows(tenantId: string, locationId: string | nul
       SELECT
         r.*,
         s.receipt_number AS receipt_number,
+        s.invoice_number AS invoice_number,
         s.location_id AS location_id,
         l.location_name AS location_name,
         (req.first_name || ' ' || req.last_name) AS requested_by_name,
@@ -80,6 +84,7 @@ export function findSaleReturnDetailRowById(id: string): SaleReturnDetailRow | u
       SELECT
         r.*,
         s.receipt_number AS receipt_number,
+        s.invoice_number AS invoice_number,
         s.location_id AS location_id,
         l.location_name AS location_name,
         (req.first_name || ' ' || req.last_name) AS requested_by_name,
@@ -250,6 +255,9 @@ export function mapSaleReturnDetailRow(row: SaleReturnDetailRow, items: SaleRetu
     tenantId: row.tenant_id,
     saleId: row.sale_id,
     receiptNumber: row.receipt_number,
+    invoiceNumber: row.invoice_number,
+    creditNoteNumber: row.credit_note_number,
+    refundCents: row.refund_cents,
     locationId: row.location_id,
     locationName: row.location_name,
     status: row.status as SaleReturnStatus,
@@ -267,4 +275,42 @@ export function mapSaleReturnDetailRow(row: SaleReturnDetailRow, items: SaleRetu
     lastSyncedAt: row.last_synced_at,
     items
   };
+}
+
+/** Value of every APPROVED return on a sale — for an invoice, what its credit notes have taken off. */
+export function findCreditedValueForSale(saleId: string): number {
+  const row = getDatabase()
+    .prepare(
+      `
+      SELECT COALESCE(SUM(ri.line_total_cents), 0) AS total
+      FROM sale_return_items ri
+      JOIN sale_returns r ON r.id = ri.sale_return_id
+      WHERE r.sale_id = ? AND r.status = 'approved'
+    `
+    )
+    .get(saleId) as { total: number };
+  return row.total;
+}
+
+/** Returns on a sale that aren't rejected (pending or approved): an invoice with any can no longer be
+ * edited or cancelled, since both would count the credited items a second time. */
+export function countOpenReturnsForSale(saleId: string): number {
+  const row = getDatabase()
+    .prepare("SELECT COUNT(*) AS n FROM sale_returns WHERE sale_id = ? AND status != 'rejected'")
+    .get(saleId) as { n: number };
+  return row.n;
+}
+
+export function findCreditNoteNumberRows(tenantId: string): string[] {
+  return (
+    getDatabase()
+      .prepare("SELECT credit_note_number FROM sale_returns WHERE tenant_id = ? AND credit_note_number LIKE 'CN-%'")
+      .all(tenantId) as Array<{ credit_note_number: string }>
+  ).map((row) => row.credit_note_number);
+}
+
+export function updateSaleReturnCreditNoteRow(id: string, input: { creditNoteNumber: string; refundCents: number | null }): void {
+  getDatabase()
+    .prepare("UPDATE sale_returns SET credit_note_number = ?, refund_cents = ?, sync_status = 'pending', updated_at = ? WHERE id = ?")
+    .run(input.creditNoteNumber, input.refundCents, new Date().toISOString(), id);
 }

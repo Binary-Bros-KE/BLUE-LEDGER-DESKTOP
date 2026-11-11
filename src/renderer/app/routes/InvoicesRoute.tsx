@@ -1,3 +1,4 @@
+import { InvoiceCreditNotes } from "./invoices/InvoiceCreditNotes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LineQuantityField } from "@renderer/shared/components/LineQuantityField";
 import { baseToAmount, displayLine, displayPriceCents, priceUnitSuffix, unitFactor } from "@shared/lib/product-units";
@@ -2223,6 +2224,12 @@ export function InvoicesRoute(): React.JSX.Element {
               )}
               Print via Receipt Printer
             </Button>
+
+            <InvoiceCreditNotes
+              invoice={viewingSale}
+              canRequest={canEdit}
+              onChanged={() => void window.blueLedger.sale.get(viewingSale.id).then(setViewingSale).catch(() => undefined)}
+            />
 
             <ShareModal
               open={sharing}

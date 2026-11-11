@@ -201,6 +201,12 @@ export function InvoicePreview({ sale, tenant }: { sale: Sale; tenant: TenantCon
               <td className="border border-ink bg-soft px-1.5 py-1 text-sm font-extrabold">Total</td>
               <td className="border border-ink px-1.5 py-1 text-right text-sm font-extrabold">{money(sale.grandTotalCents)}</td>
             </tr>
+            {sale.creditedCents > 0 && (
+              <tr>
+                <td className="border border-ink px-1.5 py-1 font-bold">Credit Notes</td>
+                <td className="border border-ink px-1.5 py-1 text-right">-{money(sale.creditedCents)}</td>
+              </tr>
+            )}
             <tr>
               <td className="border border-ink px-1.5 py-1 font-bold">Amount Paid</td>
               <td className="border border-ink px-1.5 py-1 text-right">{money(sale.amountPaidCents)}</td>
