@@ -11,6 +11,7 @@ import { CategoriesRoute } from "@renderer/app/routes/CategoriesRoute";
 import { CheckoutRoute } from "@renderer/app/routes/CheckoutRoute";
 import { CloudSyncRoute } from "@renderer/app/routes/CloudSyncRoute";
 import { CustomersRoute } from "@renderer/app/routes/CustomersRoute";
+import { SubscriptionsRoute } from "@renderer/app/routes/SubscriptionsRoute";
 import { DashboardRoute } from "@renderer/app/routes/DashboardRoute";
 import { EmployeesRoute } from "@renderer/app/routes/EmployeesRoute";
 import { ExpensesRoute } from "@renderer/app/routes/ExpensesRoute";
@@ -186,6 +187,8 @@ export function App(): React.JSX.Element {
         <PaymentMethodsRoute />
       ) : activeNavKey === "customers" ? (
         <CustomersRoute />
+      ) : activeNavKey === "subscriptions" ? (
+        <SubscriptionsRoute />
       ) : activeNavKey === "suppliers" ? (
         <SuppliersRoute />
       ) : activeNavKey === "riders" ? (

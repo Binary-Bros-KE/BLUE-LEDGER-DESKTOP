@@ -30,6 +30,7 @@ import {
   ShoppingCart,
   Store,
   Truck,
+  Tv,
   Users,
   UserCog,
   Wallet,
@@ -111,6 +112,13 @@ export const navGroups: NavGroup[] = [
         description: "Customer directory",
         icon: Users,
         permissionModule: "customers"
+      },
+      {
+        key: "subscriptions",
+        label: "Subscriptions",
+        description: "DStv, GOtv & renewal reminders",
+        icon: Tv,
+        permissionModule: "subscriptions"
       },
       {
         key: "riders",
