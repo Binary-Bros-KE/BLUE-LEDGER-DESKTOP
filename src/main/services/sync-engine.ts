@@ -18,6 +18,7 @@ import * as borrowRepository from "@main/database/repositories/borrow-repository
 import * as purchaseRepository from "@main/database/repositories/purchase-repository";
 import * as quotationRepository from "@main/database/repositories/quotation-repository";
 import * as recurringBillRepository from "@main/database/repositories/recurring-bill-repository";
+import * as subscriptionRepository from "@main/database/repositories/subscription-repository";
 import * as riderRepository from "@main/database/repositories/rider-repository";
 import * as roleRepository from "@main/database/repositories/role-repository";
 import * as saleRepository from "@main/database/repositories/sale-repository";
@@ -96,7 +97,10 @@ const SYNC_ENTITIES: SyncEntity[] = [
   "invoice_cancellations",
   "expenses",
   "salaries",
-  "recurring_bills"
+  "recurring_bills",
+  // After customers (customer_id) and before its own notices (subscription_id).
+  "customer_subscriptions",
+  "customer_subscription_notices"
 ];
 
 /** Entities whose PULL apply needs bespoke logic beyond the generic declarative column-map — a
@@ -150,6 +154,7 @@ const CONFLICT_AWARE_ENTITIES = new Set<SyncEntity>([
   "expenses",
   "salaries",
   "recurring_bills",
+  "customer_subscriptions",
   "sale_voids",
   "invoice_cancellations",
   "sales",
@@ -1099,6 +1104,44 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       localCreatedAt: row.created_at,
       localUpdatedAt: row.updated_at,
       baseUpdatedAt: row.synced_updated_at
+    };
+  },
+  customer_subscriptions: (id) => {
+    const row = subscriptionRepository.findSubscriptionRowById(id);
+    if (!row) return null;
+    return {
+      id: row.id,
+      customerId: row.customer_id,
+      locationId: row.location_id,
+      serviceName: row.service_name,
+      accountNumber: row.account_number,
+      startDate: row.start_date,
+      periodDays: row.period_days,
+      endDate: row.end_date,
+      amountCents: row.amount_cents,
+      status: row.status,
+      renewedFromId: row.renewed_from_id,
+      notes: row.notes,
+      createdBy: row.created_by,
+      localCreatedAt: row.created_at,
+      localUpdatedAt: row.updated_at,
+      baseUpdatedAt: row.synced_updated_at
+    };
+  },
+  // Append-only, so no baseUpdatedAt: two PCs recording the same reminder both keep their row.
+  customer_subscription_notices: (id) => {
+    const row = subscriptionRepository.findNoticeRowById(id);
+    if (!row) return null;
+    return {
+      id: row.id,
+      subscriptionId: row.subscription_id,
+      stage: row.stage,
+      channel: row.channel,
+      recipient: row.recipient,
+      sentBy: row.sent_by,
+      sentAt: row.sent_at,
+      localCreatedAt: row.created_at,
+      localUpdatedAt: row.updated_at
     };
   },
   recurring_bills: (id) => {
@@ -2096,6 +2139,36 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       { local: "notes", cloud: "notes" },
       { local: "allowances_json", cloud: "allowancesJson", type: "json" },
       { local: "deductions_json", cloud: "deductionsJson", type: "json" }
+    ]
+  },
+  customer_subscriptions: {
+    table: "customer_subscriptions",
+    columns: [
+      { local: "customer_id", cloud: "customerId", refEntity: "customers", refNotNull: true },
+      { local: "location_id", cloud: "locationId", refEntity: "locations" },
+      { local: "service_name", cloud: "serviceName" },
+      { local: "account_number", cloud: "accountNumber" },
+      { local: "start_date", cloud: "startDate" },
+      { local: "period_days", cloud: "periodDays" },
+      { local: "end_date", cloud: "endDate" },
+      { local: "amount_cents", cloud: "amountCents" },
+      { local: "status", cloud: "status" },
+      // Plain column, no FK: the previous period always arrives first anyway (older), and a missing
+      // one only loses the history link, never the subscription.
+      { local: "renewed_from_id", cloud: "renewedFromId" },
+      { local: "notes", cloud: "notes" },
+      { local: "created_by", cloud: "createdBy", refEntity: "employees" }
+    ]
+  },
+  customer_subscription_notices: {
+    table: "customer_subscription_notices",
+    columns: [
+      { local: "subscription_id", cloud: "subscriptionId", refEntity: "customer_subscriptions", refNotNull: true },
+      { local: "stage", cloud: "stage" },
+      { local: "channel", cloud: "channel" },
+      { local: "recipient", cloud: "recipient" },
+      { local: "sent_by", cloud: "sentBy", refEntity: "employees" },
+      { local: "sent_at", cloud: "sentAt" }
     ]
   },
   recurring_bills: {
@@ -4419,6 +4492,10 @@ const CONFLICT_LABEL_BUILDERS: Partial<Record<SyncEntity, (entityId: string) => 
   recurring_bills: (id) => {
     const row = recurringBillRepository.findRecurringBillRowById(id);
     return row ? row.name : id;
+  },
+  customer_subscriptions: (id) => {
+    const row = subscriptionRepository.findSubscriptionRowById(id);
+    return row ? `Subscription — ${row.service_name}, ${row.customer_name ?? "customer"}` : id;
   },
   sale_returns: (id) => {
     const row = saleReturnRepository.findSaleReturnDetailRowById(id);

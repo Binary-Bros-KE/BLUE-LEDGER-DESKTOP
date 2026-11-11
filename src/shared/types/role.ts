@@ -64,6 +64,11 @@ export const PERMISSION_MODULES = [
   // owner ticks this, a saved role has no access (it adds stock and debt).
   { key: "local_credit_purchases", label: "Local Credit Purchases (Edit = receive goods)", actions: ["view", "create", "edit"] },
   {
+    key: "subscriptions",
+    label: "Subscriptions",
+    actions: ["view", "create", "edit", "delete", "export"]
+  },
+  {
     key: "borrows",
     label: "Borrow & Lend",
     actions: ["view", "create", "edit", "export"]

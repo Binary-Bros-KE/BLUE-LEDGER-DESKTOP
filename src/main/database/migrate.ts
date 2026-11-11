@@ -3718,6 +3718,87 @@ const migrations = [
       -- {version, suppliers} from the last heartbeat; NULL for every tenant without dropshipping.
       ALTER TABLE tenant ADD COLUMN dropship_state_json TEXT;
     `
+  },
+  {
+    version: 111,
+    name: "customer_subscriptions",
+    sql: `
+      -- Customer customer_subscriptions sold by the shop (DStv, GOtv...). One row per PAID PERIOD: renewing marks
+      -- the old row 'renewed' and inserts a new one pointing back at it, so history and reminders are
+      -- per period. end_date is stored (start_date + period_days, see shared/lib/subscription-schedule.ts)
+      -- but days remaining and the stage never are: they depend on today. Track only, no money moves.
+      CREATE TABLE customer_subscriptions (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        customer_id TEXT NOT NULL,
+        location_id TEXT,
+        service_name TEXT NOT NULL,
+        account_number TEXT,
+        start_date TEXT NOT NULL,
+        period_days INTEGER NOT NULL CHECK (period_days > 0),
+        end_date TEXT NOT NULL,
+        amount_cents INTEGER,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'renewed', 'cancelled')),
+        renewed_from_id TEXT,
+        notes TEXT,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        synced_updated_at TEXT,
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (customer_id) REFERENCES customers(id)
+      );
+      CREATE INDEX idx_customer_subscriptions_tenant_end ON customer_subscriptions(tenant_id, status, end_date);
+      CREATE INDEX idx_customer_subscriptions_customer ON customer_subscriptions(customer_id);
+
+      -- Reminders sent for a period. Append-only on purpose: two PCs marking the same reminder before
+      -- they sync both keep their row (no overwrite to lose), and "already sent" is just "a row exists".
+      -- channel 'other' = told some other way (a call, in person).
+      CREATE TABLE customer_subscription_notices (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        subscription_id TEXT NOT NULL,
+        stage TEXT NOT NULL CHECK (stage IN ('week', 'three_days', 'due', 'expired')),
+        channel TEXT NOT NULL CHECK (channel IN ('whatsapp', 'email', 'other')),
+        recipient TEXT,
+        sent_by TEXT,
+        sent_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        last_synced_at TEXT,
+        FOREIGN KEY (tenant_id) REFERENCES tenant(id),
+        FOREIGN KEY (subscription_id) REFERENCES customer_subscriptions(id)
+      );
+      CREATE INDEX idx_customer_subscription_notices_subscription ON customer_subscription_notices(subscription_id);
+
+      CREATE TRIGGER trg_customer_subscriptions_sync_ai AFTER INSERT ON customer_subscriptions BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'customer_subscriptions', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_customer_subscriptions_sync_au AFTER UPDATE ON customer_subscriptions WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'customer_subscriptions', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_customer_subscriptions_sync_ad AFTER DELETE ON customer_subscriptions BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'customer_subscriptions', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_customer_subscription_notices_sync_ai AFTER INSERT ON customer_subscription_notices BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'customer_subscription_notices', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_customer_subscription_notices_sync_au AFTER UPDATE ON customer_subscription_notices WHEN NEW.updated_at != OLD.updated_at BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), NEW.tenant_id, (SELECT client_id FROM tenant WHERE id = NEW.tenant_id), 'customer_subscription_notices', NEW.id, 'upsert', 'push', 'queued', 0, '{}', NEW.id || ':' || NEW.updated_at || ':' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+      CREATE TRIGGER trg_customer_subscription_notices_sync_ad AFTER DELETE ON customer_subscription_notices BEGIN
+        INSERT INTO sync_outbox (id, tenant_id, client_id, entity, entity_id, operation, direction, status, attempt_count, payload_json, idempotency_key, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), OLD.tenant_id, (SELECT client_id FROM tenant WHERE id = OLD.tenant_id), 'customer_subscription_notices', OLD.id, 'delete', 'push', 'queued', 0, '{}', OLD.id || ':deleted:' || lower(hex(randomblob(4))), datetime('now'), datetime('now'));
+      END;
+    `
   }
 ] as const;
 
