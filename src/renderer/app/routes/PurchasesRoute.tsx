@@ -279,7 +279,12 @@ export function PurchasesRoute({ scope }: { scope: SupplierType }): React.JSX.El
   const localOnly = !can("purchases", "view") && can("local_credit_purchases", "view");
   const canCreate = can("purchases", "create") || can("local_credit_purchases", "create");
   const canEdit = can("purchases", "edit");
-  const canReceiveGoods = can("purchases", "edit") || can("local_credit_purchases", "edit");
+  // Whoever records purchases receives them too (own storefront) — purchase-service.ts assertCanReceive.
+  const canReceiveGoods =
+    can("purchases", "edit") ||
+    can("purchases", "create") ||
+    can("local_credit_purchases", "create") ||
+    can("local_credit_purchases", "edit");
   const canExport = can("purchases", "export");
   const isLocal = scope === "local";
   const scopeLabel = isLocal ? "Local" : "International";
@@ -1158,6 +1163,7 @@ export function PurchasesRoute({ scope }: { scope: SupplierType }): React.JSX.El
         lockedLocationId={session?.branch?.id ?? null}
         localOnly={localOnly}
         supplierType={scope}
+        canReceiveNow={canReceiveGoods}
         onSupplierCreated={handleSupplierCreated}
         onProductCreated={handleProductCreated}
         onSaved={loadAll}

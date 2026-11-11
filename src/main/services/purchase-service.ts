@@ -9,7 +9,7 @@ import * as paymentMethodRepository from "@main/database/repositories/payment-me
 import * as productRepository from "@main/database/repositories/product-repository";
 import * as purchaseRepository from "@main/database/repositories/purchase-repository";
 import * as requisitionRepository from "@main/database/repositories/purchase-requisition-repository";
-import type { PurchaseRow } from "@main/database/repositories/purchase-repository";
+import type { PurchaseItemDetailRow, PurchaseRow } from "@main/database/repositories/purchase-repository";
 import * as supplierRepository from "@main/database/repositories/supplier-repository";
 import { getCurrentBranchScope, getCurrentEmployeeId, getSession, hasPermission, requirePermission } from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
@@ -96,6 +96,20 @@ function canLocalRoleAccess(purchase: { supplierId: string; locationId: string; 
   const supplier = supplierRepository.findSupplierRowById(purchase.supplierId);
   const branch = getCurrentBranchScope();
   return supplier?.supplier_type === "local" && purchase.status !== "draft" && (!branch || purchase.locationId === branch);
+}
+
+/** Receiving: Purchases → Edit can receive anything. Otherwise whoever may record purchases
+ * (Purchases → Create, or Local Credit Purchases → Create/Edit, e.g. a Cashier) receives them too —
+ * otherwise they'd create orders nobody at their storefront could take in. Only into their own
+ * storefront, never a draft; Local Credit Purchases also only from local suppliers. */
+function assertCanReceive(purchase: { supplierId: string; locationId: string; status: string }): void {
+  if (hasPermission("purchases", "edit")) return;
+  const recordsPurchases = hasPermission("purchases", "create");
+  const localCredit = hasPermission("local_credit_purchases", "create") || hasPermission("local_credit_purchases", "edit");
+  if (!recordsPurchases && !localCredit) requirePermission("purchases", "edit");
+  const branch = getCurrentBranchScope();
+  if (purchase.status === "draft" || (branch && purchase.locationId !== branch)) throw new Error("Purchase not found");
+  if (!recordsPurchases && !canLocalRoleAccess(purchase)) throw new Error("Purchase not found");
 }
 
 function assertSupplierExists(tenantId: string, supplierId: string): void {
@@ -301,6 +315,12 @@ export function createPurchaseWithHook(input: unknown, afterInsert?: (purchaseId
     if (branch && parsed.locationId !== branch) throw new Error("You can only receive purchases into your own storefront");
   }
   const lines = localOnly ? parsed.items.map((item) => ({ ...item, sellingPriceCents: undefined })) : parsed.items;
+  // Create & Receive: receiving is checked like any other receive (assertCanReceive), as an order.
+  if (parsed.receiveNow) {
+    if (afterInsert) throw new Error("Receive the goods once the purchase exists");
+    parsed.intent = "ordered";
+    assertCanReceive({ supplierId: parsed.supplierId, locationId: parsed.locationId, status: "ordered" });
+  }
 
   const cart = prepareCart(tenantId, lines, parsed.shippingCostCents, parsed.shippingExpenseCents);
   const purchaseId = `purchase_${randomUUID()}`;
@@ -363,6 +383,20 @@ export function createPurchaseWithHook(input: unknown, afterInsert?: (purchaseId
     }
 
     afterInsert?.(purchaseId);
+
+    if (parsed.receiveNow) {
+      const purchase = purchaseRepository.findPurchaseRowById(purchaseId)!;
+      const itemRows = purchaseRepository.findPurchaseItemDetailRowsForPurchase(purchaseId);
+      const receiverName = getSession();
+      return applyReceivingBatch(
+        purchase,
+        new Map(itemRows.map((item) => [item.id, item])),
+        itemRows.map((item) => ({ purchaseItemId: item.id, receivingQuantity: item.remaining_quantity })),
+        tenantId,
+        employeeId,
+        receiverName ? `${receiverName.employee.firstName} ${receiverName.employee.lastName}` : "Unknown"
+      );
+    }
 
     return getPurchaseDetail(purchaseId);
   });
@@ -572,8 +606,8 @@ export function cancelPurchase(id: string): Purchase {
  * accurate. Supports repeated partial receiving sessions until every line is fully received.
  */
 export function receivePurchaseGoods(id: string, input: unknown): Purchase {
-  if (requirePurchaseAccess("edit") === "local" && !canLocalRoleAccess(getPurchaseDetail(id))) throw new Error("Purchase not found");
   assertPurchaseVisible(id);
+  assertCanReceive(getPurchaseDetail(id));
   const parsed = receiveGoodsSchema.parse(input);
   const { tenantId } = getCurrentTenant();
   const employeeId = getCurrentEmployeeId();
@@ -603,112 +637,126 @@ export function receivePurchaseGoods(id: string, input: unknown): Purchase {
     }
   }
 
-  return runInTransaction(() => {
-    const eventItems: PurchaseReceivingEventItem[] = [];
-    // Client request: the supplier balance only grows by exactly what THIS batch is actually worth
-    // — built purely from each item's own line_total_cents (never shippingCostCents, which lives
-    // only on the purchase header and is never touched here), proportional to how much of that
-    // line's ordered quantity this batch covers. Same formula migration 89's backfill used, so
-    // historical and future entries are computed identically.
-    let batchValueCents = 0;
+  return runInTransaction(() =>
+    applyReceivingBatch(purchase, itemById, parsed.items, tenantId, employeeId, receivedByName)
+  );
+}
 
-    for (const entry of parsed.items) {
-      const item = itemById.get(entry.purchaseItemId);
-      if (!item || entry.receivingQuantity <= 0) continue;
+/** One Receive Goods batch: stock in, the supplier now owed for it, the purchase's status. The caller
+ * has validated the quantities and holds the transaction (Receive Goods, or Create & Receive). */
+function applyReceivingBatch(
+  purchase: PurchaseRow,
+  itemById: Map<string, PurchaseItemDetailRow>,
+  items: Array<{ purchaseItemId: string; receivingQuantity: number }>,
+  tenantId: string,
+  employeeId: string | null,
+  receivedByName: string
+): Purchase {
+  const id = purchase.id;
+  const eventItems: PurchaseReceivingEventItem[] = [];
+  // Client request: the supplier balance only grows by exactly what THIS batch is actually worth
+  // — built purely from each item's own line_total_cents (never shippingCostCents, which lives
+  // only on the purchase header and is never touched here), proportional to how much of that
+  // line's ordered quantity this batch covers. Same formula migration 89's backfill used, so
+  // historical and future entries are computed identically.
+  let batchValueCents = 0;
 
-      const previousQuantity = inventoryRepository.findInventoryRow(item.product_id, purchase.location_id)?.quantity ?? 0;
-      // A dropship-linked product's stock stays the supplier's (see applyValidatedStockMovement).
-      const movesStock = dropshipRepository.findDropshipSupplierName(item.product_id) === null;
-      const newQuantity = movesStock ? previousQuantity + entry.receivingQuantity : previousQuantity;
+  for (const entry of items) {
+    const item = itemById.get(entry.purchaseItemId);
+    if (!item || entry.receivingQuantity <= 0) continue;
 
-      const newReceivedQuantity = item.received_quantity + entry.receivingQuantity;
-      purchaseRepository.updatePurchaseItemReceivedQuantityRow(item.id, newReceivedQuantity);
+    const previousQuantity = inventoryRepository.findInventoryRow(item.product_id, purchase.location_id)?.quantity ?? 0;
+    // A dropship-linked product's stock stays the supplier's (see applyValidatedStockMovement).
+    const movesStock = dropshipRepository.findDropshipSupplierName(item.product_id) === null;
+    const newQuantity = movesStock ? previousQuantity + entry.receivingQuantity : previousQuantity;
 
-      batchValueCents += Math.round((item.line_total_cents * entry.receivingQuantity) / item.ordered_quantity);
+    const newReceivedQuantity = item.received_quantity + entry.receivingQuantity;
+    purchaseRepository.updatePurchaseItemReceivedQuantityRow(item.id, newReceivedQuantity);
 
-      applyValidatedStockMovement(
-        {
-          productId: item.product_id,
-          locationId: purchase.location_id,
-          movementType: "purchase",
-          quantityChange: entry.receivingQuantity,
-          referenceType: "purchase",
-          referenceId: id,
-          performedBy: employeeId,
-          notes: null
-        },
-        tenantId
-      );
+    batchValueCents += Math.round((item.line_total_cents * entry.receivingQuantity) / item.ordered_quantity);
 
-      eventItems.push({
-        purchaseItemId: item.id,
+    applyValidatedStockMovement(
+      {
         productId: item.product_id,
-        productName: item.product_name,
-        sku: item.sku,
-        receivingQuantity: entry.receivingQuantity,
-        previousQuantity,
-        newQuantity
-      });
-    }
-
-    if (eventItems.length > 0) {
-      const existingEvents = JSON.parse(purchase.receiving_events) as PurchaseReceivingEvent[];
-      const newEvent: PurchaseReceivingEvent = {
-        id: `purchase_receiving_${randomUUID()}`,
-        receivedBy: employeeId ?? "",
-        receivedByName,
-        receivedAt: new Date().toISOString(),
-        items: eventItems
-      };
-      purchaseRepository.appendReceivingEventToPurchaseRow({
-        id,
-        receivingEvents: [...existingEvents, newEvent]
-      });
-    }
-
-    if (batchValueCents > 0) {
-      // Receiving more can retroactively flip an already-"paid" purchase back to "partially_paid"
-      // — more is now owed than before — so this recompute can't be skipped even though nothing
-      // about amount_paid_cents itself changed.
-      const newReceivedValueCents = purchase.received_value_cents + batchValueCents;
-      const newPaymentStatus = computePurchasePaymentStatus({
-        receivedValueCents: newReceivedValueCents,
-        shippingFeeCents: purchase.shipping_cost_cents,
-        amountPaidCents: purchase.amount_paid_cents
-      });
-      purchaseRepository.incrementPurchaseReceivedValueRow(id, batchValueCents, newPaymentStatus);
-      // Client-confirmed decision: the shipping fee becomes fully due the moment ANYTHING has been
-      // received — not gated further by how much — so the FIRST batch (purchase.received_value_cents
-      // was still 0 going in) also pulls the full fee onto the supplier balance in the same entry.
-      const feeNowDueCents = purchase.received_value_cents === 0 ? purchase.shipping_cost_cents : 0;
-      recordSupplierBalanceEntry({
-        tenantId,
-        supplierId: purchase.supplier_id,
-        entryType: "purchase_received",
-        amountCents: batchValueCents + feeNowDueCents,
+        locationId: purchase.location_id,
+        movementType: "purchase",
+        quantityChange: entry.receivingQuantity,
         referenceType: "purchase",
         referenceId: id,
-        notes: null,
-        performedBy: employeeId
-      });
-    }
-
-    const updatedItems = purchaseRepository.findPurchaseItemRowsForPurchase(id);
-    const newStatus = computePurchaseReceivingStatus({
-      items: updatedItems.map((item) => ({
-        orderedQuantity: item.ordered_quantity,
-        receivedQuantity: item.received_quantity
-      }))
-    });
-
-    purchaseRepository.updatePurchaseStatusRow(
-      id,
-      newStatus as PurchaseStatus,
-      newStatus === "received" ? { receivedAt: new Date().toISOString() } : undefined
+        performedBy: employeeId,
+        notes: null
+      },
+      tenantId
     );
 
-    return getPurchaseDetail(id);
+    eventItems.push({
+      purchaseItemId: item.id,
+      productId: item.product_id,
+      productName: item.product_name,
+      sku: item.sku,
+      receivingQuantity: entry.receivingQuantity,
+      previousQuantity,
+      newQuantity
+    });
+  }
+
+  if (eventItems.length > 0) {
+    const existingEvents = JSON.parse(purchase.receiving_events) as PurchaseReceivingEvent[];
+    const newEvent: PurchaseReceivingEvent = {
+      id: `purchase_receiving_${randomUUID()}`,
+      receivedBy: employeeId ?? "",
+      receivedByName,
+      receivedAt: new Date().toISOString(),
+      items: eventItems
+    };
+    purchaseRepository.appendReceivingEventToPurchaseRow({
+      id,
+      receivingEvents: [...existingEvents, newEvent]
+    });
+  }
+
+  if (batchValueCents > 0) {
+    // Receiving more can retroactively flip an already-"paid" purchase back to "partially_paid"
+    // — more is now owed than before — so this recompute can't be skipped even though nothing
+    // about amount_paid_cents itself changed.
+    const newReceivedValueCents = purchase.received_value_cents + batchValueCents;
+    const newPaymentStatus = computePurchasePaymentStatus({
+      receivedValueCents: newReceivedValueCents,
+      shippingFeeCents: purchase.shipping_cost_cents,
+      amountPaidCents: purchase.amount_paid_cents
+    });
+    purchaseRepository.incrementPurchaseReceivedValueRow(id, batchValueCents, newPaymentStatus);
+    // Client-confirmed decision: the shipping fee becomes fully due the moment ANYTHING has been
+    // received — not gated further by how much — so the FIRST batch (purchase.received_value_cents
+    // was still 0 going in) also pulls the full fee onto the supplier balance in the same entry.
+    const feeNowDueCents = purchase.received_value_cents === 0 ? purchase.shipping_cost_cents : 0;
+    recordSupplierBalanceEntry({
+      tenantId,
+      supplierId: purchase.supplier_id,
+      entryType: "purchase_received",
+      amountCents: batchValueCents + feeNowDueCents,
+      referenceType: "purchase",
+      referenceId: id,
+      notes: null,
+      performedBy: employeeId
+    });
+  }
+
+  const updatedItems = purchaseRepository.findPurchaseItemRowsForPurchase(id);
+  const newStatus = computePurchaseReceivingStatus({
+    items: updatedItems.map((item) => ({
+      orderedQuantity: item.ordered_quantity,
+      receivedQuantity: item.received_quantity
+    }))
   });
+
+  purchaseRepository.updatePurchaseStatusRow(
+    id,
+    newStatus as PurchaseStatus,
+    newStatus === "received" ? { receivedAt: new Date().toISOString() } : undefined
+  );
+
+  return getPurchaseDetail(id);
 }
 
 function requireActivePaymentMethod(

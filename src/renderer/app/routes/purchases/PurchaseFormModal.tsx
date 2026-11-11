@@ -116,6 +116,7 @@ export function PurchaseFormModal({
   localOnly = false,
   lockedLocationId = null,
   supplierType = "local",
+  canReceiveNow = false,
   onSupplierCreated,
   onProductCreated,
   onSaved
@@ -133,6 +134,8 @@ export function PurchaseFormModal({
   lockedLocationId?: string | null;
   /** Which tab it was opened from — a supplier quick-created here starts on that type. */
   supplierType?: SupplierType;
+  /** Offers "Create & Receive" on a new purchase: ordered and every line received in one go. */
+  canReceiveNow?: boolean;
   onSupplierCreated: (supplier: Supplier) => void;
   onProductCreated: (product: Product) => void;
   onSaved: () => Promise<void>;
@@ -159,7 +162,7 @@ export function PurchaseFormModal({
   const [quickCreateSupplierOpen, setQuickCreateSupplierOpen] = useState(false);
   const [quickCreateProductOpen, setQuickCreateProductOpen] = useState(false);
 
-  const [saving, setSaving] = useState<"draft" | "ordered" | null>(null);
+  const [saving, setSaving] = useState<"draft" | "ordered" | "received" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -319,7 +322,7 @@ export function PurchaseFormModal({
     }
   }
 
-  async function handleSubmit(intent: "draft" | "ordered"): Promise<void> {
+  async function handleSubmit(intent: "draft" | "ordered" | "received"): Promise<void> {
     setError(null);
 
     if (!supplierId) {
@@ -360,7 +363,8 @@ export function PurchaseFormModal({
         discountAmountCents: toCents(item.discount),
         taxType: item.taxType
       })),
-      intent
+      intent: intent === "draft" ? "draft" : "ordered",
+      receiveNow: intent === "received"
     };
 
     try {
@@ -376,7 +380,9 @@ export function PurchaseFormModal({
           ? "Purchase updated"
           : fromRequisition
             ? `${fromRequisition.requisitionNumber} approved — purchase created`
-            : "Purchase created"
+            : intent === "received"
+              ? "Purchase created — goods received into stock"
+              : "Purchase created"
       );
       await onSaved();
       onClose();
@@ -819,6 +825,18 @@ export function PurchaseFormModal({
                   {saving === "ordered" ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
                   Save as Ordered
                 </Button>
+                {canReceiveNow && !editingPurchase && !fromRequisition && (
+                  <Button
+                    type="button"
+                    onClick={() => void handleSubmit("received")}
+                    disabled={saving !== null}
+                    title="Save it as ordered and receive every line into stock now"
+                    className="h-9 bg-success text-xs hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {saving === "received" ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
+                    Create &amp; Receive
+                  </Button>
+                )}
               </>
             )}
               </div>

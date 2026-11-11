@@ -42,7 +42,9 @@ export const purchaseCreateSchema = z.object({
   shipmentDepartedAt: optionalText(40),
   shipmentEta: optionalText(40),
   items: z.array(purchaseItemInputSchema).min(1, "Add at least one product"),
-  intent: z.enum(["draft", "ordered"]).optional().default("draft")
+  intent: z.enum(["draft", "ordered"]).optional().default("draft"),
+  /** "Create & Receive": order it and receive every line in the same step. New purchases only. */
+  receiveNow: z.boolean().optional().default(false)
 });
 
 export type PurchaseCreateInput = z.infer<typeof purchaseCreateSchema>;
