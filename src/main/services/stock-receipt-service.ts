@@ -1,16 +1,34 @@
+import { getDatabase } from "@main/database/connection";
+import * as stockRequestRepository from "@main/database/repositories/stock-request-repository";
+import { reconcileFulfilledStockRequests } from "@main/database/repositories/stock-request-reconciliation";
+import { assertNotAlreadyDecidedRemotely } from "@main/services/sync-engine";
 import { runInTransaction } from "@main/database/connection";
 import * as inventoryRepository from "@main/database/repositories/inventory-repository";
 import * as locationRepository from "@main/database/repositories/location-repository";
 import * as mainStoreAllocationRepository from "@main/database/repositories/main-store-allocation-repository";
 import * as stockReceiptRepository from "@main/database/repositories/stock-receipt-repository";
-import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
+import {
+  getCurrentBranchScope,
+  getCurrentEmployeeId,
+  requirePermission
+} from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
 import { applyValidatedStockMovement } from "@main/services/inventory-service";
-import { deriveUnallocatedQuantity, distributeMainStoreStockCore } from "@main/services/main-store-service";
+import {
+  deriveUnallocatedQuantity,
+  distributeMainStoreStockCore
+} from "@main/services/main-store-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
-import { stockReceiptCreateSchema, type StockReceiptCreateInput } from "@shared/schemas/stock-receipt";
+import {
+  stockReceiptCreateSchema,
+  type StockReceiptCreateInput
+} from "@shared/schemas/stock-receipt";
 import { isStorefrontType, type LocationType } from "@shared/types/location";
-import type { StockReceipt, StockReceiptItem, StockReceiptListItem } from "@shared/types/stock-receipt";
+import type {
+  StockReceipt,
+  StockReceiptItem,
+  StockReceiptListItem
+} from "@shared/types/stock-receipt";
 
 /** GRN-D{n}-000001, GRN-D{n}-000002, ... — "Goods Received Note", the standard term for this document. */
 function generateStockReceiptNumber(tenantId: string): string {
@@ -28,10 +46,13 @@ function generateStockReceiptNumber(tenantId: string): string {
 const MAIN_STORE_LOCATION_TYPES = new Set(["warehouse", "distribution_center"]);
 
 function mapListRow(row: stockReceiptRepository.StockReceiptRow): StockReceiptListItem {
-  const isMainStoreSource = row.transfer_from_location_type != null && MAIN_STORE_LOCATION_TYPES.has(row.transfer_from_location_type);
+  const isMainStoreSource =
+    row.transfer_from_location_type != null &&
+    MAIN_STORE_LOCATION_TYPES.has(row.transfer_from_location_type);
   return {
     id: row.id,
     receiptNumber: row.receipt_number,
+    stockRequestId: row.stock_request_id,
     locationId: row.location_id,
     locationName: row.location_name,
     allocationStorefrontId: row.allocation_storefront_id,
@@ -39,7 +60,8 @@ function mapListRow(row: stockReceiptRepository.StockReceiptRow): StockReceiptLi
     receivedByName: row.received_by_name,
     itemCount: row.item_count,
     totalQuantityReceived: row.total_quantity_received,
-    sourceType: row.is_transfer === 0 ? "purchase" : isMainStoreSource ? "transfer" : "location_transfer",
+    sourceType:
+      row.is_transfer === 0 ? "purchase" : isMainStoreSource ? "transfer" : "location_transfer",
     transferFromLocationId: row.transfer_from_location_id,
     transferFromLocationName: row.transfer_from_location_name,
     notes: row.notes,
@@ -117,7 +139,7 @@ export function getStockReceipt(id: string): StockReceipt {
  * location's own on-hand stock (mirroring the "direct to storefront" case even for a transfer);
  * mainStorePreviousQuantity/mainStoreNewQuantity are the OTHER side of a transfer specifically — null
  * for a plain purchase, where there's no Main Store side to show. */
-export function createStockReceipt(input: unknown): StockReceipt {
+export async function createStockReceipt(input: unknown): Promise<StockReceipt> {
   requirePermission("inventory", "edit");
   const parsed: StockReceiptCreateInput = stockReceiptCreateSchema.parse(input);
   const { tenantId } = getCurrentTenant();
@@ -150,7 +172,11 @@ export function createStockReceipt(input: unknown): StockReceipt {
     allocationStorefrontId = parsed.allocationStorefrontId ?? null;
     if (allocationStorefrontId) {
       const bucket = locationRepository.findLocationRowById(allocationStorefrontId);
-      if (!bucket || bucket.tenant_id !== tenantId || !isStorefrontType(bucket.location_type as LocationType)) {
+      if (
+        !bucket ||
+        bucket.tenant_id !== tenantId ||
+        !isStorefrontType(bucket.location_type as LocationType)
+      ) {
         throw new Error("Storefront not found");
       }
     }
@@ -171,7 +197,11 @@ export function createStockReceipt(input: unknown): StockReceipt {
       throw new Error("Choose which storefront this receipt is for");
     }
     const location = locationRepository.findLocationRowById(storefrontId);
-    if (!location || location.tenant_id !== tenantId || !isStorefrontType(location.location_type as LocationType)) {
+    if (
+      !location ||
+      location.tenant_id !== tenantId ||
+      !isStorefrontType(location.location_type as LocationType)
+    ) {
       throw new Error("Storefront not found");
     }
     targetLocationId = storefrontId;
@@ -187,10 +217,41 @@ export function createStockReceipt(input: unknown): StockReceipt {
         throw new Error("Choose two different locations");
       }
       const fromLocation = locationRepository.findLocationRowById(fromId);
-      if (!fromLocation || fromLocation.tenant_id !== tenantId || !isStorefrontType(fromLocation.location_type as LocationType)) {
+      if (
+        !fromLocation ||
+        fromLocation.tenant_id !== tenantId ||
+        !isStorefrontType(fromLocation.location_type as LocationType)
+      ) {
         throw new Error("Source storefront not found");
       }
       transferFromLocationId = fromId;
+    }
+  }
+
+  let linkedItems: stockRequestRepository.StockRequestItemRow[] = [];
+  if (parsed.stockRequestId) {
+    requirePermission("stock_requests", "approve");
+    requirePermission("stock_requests", "view");
+    if (parsed.destination !== "main_store_transfer")
+      throw new Error("A stock request can only be fulfilled by a Main Store transfer");
+    reconcileFulfilledStockRequests(tenantId);
+    const request = stockRequestRepository.findStockRequestRowById(parsed.stockRequestId);
+    if (!request || request.tenant_id !== tenantId || request.storefront_id !== targetLocationId)
+      throw new Error("Stock request does not belong to this storefront");
+    if (request.status !== "pending") throw new Error("This request has already been reviewed");
+    await assertNotAlreadyDecidedRemotely("stock_requests", request.id, "pending");
+    linkedItems = stockRequestRepository.findStockRequestItemRows(request.id);
+    if (new Set(linkedItems.map((i) => i.product_id)).size !== linkedItems.length)
+      throw new Error("This request has duplicate product lines; fulfil it from Stock Requests");
+    if (new Set(parsed.items.map((i) => i.productId)).size !== parsed.items.length)
+      throw new Error("Each product can appear only once on a linked receipt");
+    const received = new Map<string, number>();
+    for (const item of parsed.items)
+      received.set(item.productId, (received.get(item.productId) ?? 0) + item.quantityReceived);
+    for (const [productId, quantity] of received) {
+      const line = linkedItems.find((i) => i.product_id === productId);
+      if (!line || quantity > line.quantity_requested)
+        throw new Error("Received quantities must belong to and not exceed the selected request");
     }
   }
 
@@ -198,9 +259,22 @@ export function createStockReceipt(input: unknown): StockReceipt {
   let receiptId = "";
 
   runInTransaction(() => {
+    if (parsed.stockRequestId) {
+      const current = stockRequestRepository.findStockRequestRowById(parsed.stockRequestId);
+      const moved = getDatabase()
+        .prepare(
+          "SELECT 1 FROM stock_movements WHERE tenant_id = ? AND reference_type = 'stock_request_fulfillment' AND reference_id = ? LIMIT 1"
+        )
+        .get(tenantId, parsed.stockRequestId);
+      if (!current || current.status !== "pending" || moved)
+        throw new Error(
+          "This request already has a decision or recorded stock transfer; refresh and review it before continuing"
+        );
+    }
     receiptId = stockReceiptRepository.insertStockReceiptRow({
       tenantId,
       receiptNumber,
+      stockRequestId: parsed.stockRequestId ?? null,
       locationId: targetLocationId,
       allocationStorefrontId,
       notes: parsed.notes,
@@ -215,9 +289,12 @@ export function createStockReceipt(input: unknown): StockReceipt {
       // return 0 post-migration, silently printing the wrong "previous quantity" on the receipt.
       const previousQuantity =
         parsed.destination === "main_store"
-          ? (allocationStorefrontId
-              ? (mainStoreAllocationRepository.findAllocationRow(item.productId, allocationStorefrontId)?.quantity ?? 0)
-              : deriveUnallocatedQuantity(item.productId, targetLocationId))
+          ? allocationStorefrontId
+            ? (mainStoreAllocationRepository.findAllocationRow(
+                item.productId,
+                allocationStorefrontId
+              )?.quantity ?? 0)
+            : deriveUnallocatedQuantity(item.productId, targetLocationId)
           : (inventoryRepository.findInventoryRow(item.productId, targetLocationId)?.quantity ?? 0);
 
       // The OTHER side's own physical on-hand quantity, captured BEFORE it's drawn down below — same
@@ -227,9 +304,11 @@ export function createStockReceipt(input: unknown): StockReceipt {
       // comment on the shared StockReceiptItem type for why it's reused rather than renamed).
       const mainStorePreviousQuantity =
         mainStoreLocationId != null
-          ? (inventoryRepository.findInventoryRow(item.productId, mainStoreLocationId)?.quantity ?? 0)
+          ? (inventoryRepository.findInventoryRow(item.productId, mainStoreLocationId)?.quantity ??
+            0)
           : transferFromLocationId != null
-            ? (inventoryRepository.findInventoryRow(item.productId, transferFromLocationId)?.quantity ?? 0)
+            ? (inventoryRepository.findInventoryRow(item.productId, transferFromLocationId)
+                ?.quantity ?? 0)
             : null;
 
       if (parsed.destination === "main_store_transfer") {
@@ -301,7 +380,38 @@ export function createStockReceipt(input: unknown): StockReceipt {
         previousQuantity,
         newQuantity: previousQuantity + item.quantityReceived,
         mainStorePreviousQuantity,
-        mainStoreNewQuantity: mainStorePreviousQuantity != null ? mainStorePreviousQuantity - item.quantityReceived : null
+        mainStoreNewQuantity:
+          mainStorePreviousQuantity != null
+            ? mainStorePreviousQuantity - item.quantityReceived
+            : null
+      });
+    }
+    if (parsed.stockRequestId) {
+      const received = stockReceiptRepository.findStockReceiptItemRows(receiptId);
+      for (const line of linkedItems) {
+        const entries = received.filter((i) => i.product_id === line.product_id);
+        const quantity = entries.reduce((sum, i) => sum + i.quantity_received, 0);
+        const first = entries[0];
+        const before =
+          inventoryRepository.findInventoryRow(line.product_id, targetLocationId)?.quantity ?? 0;
+        const main =
+          inventoryRepository.findInventoryRow(line.product_id, mainStoreLocationId!)?.quantity ??
+          0;
+        stockRequestRepository.updateStockRequestItemFulfillmentRow(line.id, {
+          quantityDispatched: quantity,
+          previousQuantity: first?.previous_quantity ?? before,
+          newQuantity: entries.length ? entries[entries.length - 1]!.new_quantity : before,
+          mainStorePreviousQuantity: first?.main_store_previous_quantity ?? main,
+          mainStoreNewQuantity: entries.length
+            ? (entries[entries.length - 1]!.main_store_new_quantity ?? main)
+            : main
+        });
+      }
+      stockRequestRepository.updateStockRequestStatusRow(parsed.stockRequestId, {
+        status: "approved",
+        rejectionReason: null,
+        fulfillmentNote: parsed.notes,
+        reviewedBy: employeeId
       });
     }
   });

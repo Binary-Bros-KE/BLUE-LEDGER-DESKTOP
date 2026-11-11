@@ -5,6 +5,7 @@ export type StockReceiptRow = {
   id: string;
   tenant_id: string;
   receipt_number: string;
+  stock_request_id: string | null;
   location_id: string;
   location_name: string;
   allocation_storefront_id: string | null;
@@ -81,20 +82,28 @@ const SELECT_WITH_JOINS = `
 export function findMaxStockReceiptNumberRow(tenantId: string): string[] {
   return (
     getDatabase()
-      .prepare("SELECT receipt_number FROM stock_receipts WHERE tenant_id = ? AND receipt_number LIKE 'GRN-%'")
+      .prepare(
+        "SELECT receipt_number FROM stock_receipts WHERE tenant_id = ? AND receipt_number LIKE 'GRN-%'"
+      )
       .all(tenantId) as Array<{ receipt_number: string }>
   ).map((row) => row.receipt_number);
 }
 
 export function findStockReceiptRowById(id: string): StockReceiptRow | undefined {
-  return getDatabase().prepare(`${SELECT_WITH_JOINS} WHERE sr.id = ?`).get(id) as StockReceiptRow | undefined;
+  return getDatabase().prepare(`${SELECT_WITH_JOINS} WHERE sr.id = ?`).get(id) as
+    StockReceiptRow | undefined;
 }
 
 /** locationId null returns every location's receipts (Storekeeper/Super Admin); non-null scopes to
  * one location (Cashier/Manager, matching getCurrentBranchScope()). */
-export function findAllStockReceiptRows(tenantId: string, locationId: string | null): StockReceiptRow[] {
+export function findAllStockReceiptRows(
+  tenantId: string,
+  locationId: string | null
+): StockReceiptRow[] {
   return getDatabase()
-    .prepare(`${SELECT_WITH_JOINS} WHERE sr.tenant_id = ? AND (? IS NULL OR sr.location_id = ?) ORDER BY sr.created_at DESC`)
+    .prepare(
+      `${SELECT_WITH_JOINS} WHERE sr.tenant_id = ? AND (? IS NULL OR sr.location_id = ?) ORDER BY sr.created_at DESC`
+    )
     .all(tenantId, locationId, locationId) as StockReceiptRow[];
 }
 
@@ -116,6 +125,7 @@ export function findStockReceiptItemRows(stockReceiptId: string): StockReceiptIt
 export function insertStockReceiptRow(input: {
   tenantId: string;
   receiptNumber: string;
+  stockRequestId?: string | null;
   locationId: string;
   allocationStorefrontId: string | null;
   notes: string | null;
@@ -129,9 +139,9 @@ export function insertStockReceiptRow(input: {
       `
       INSERT INTO stock_receipts (
         id, tenant_id, receipt_number, location_id, allocation_storefront_id, received_by, notes,
-        created_at, updated_at, sync_status, synced_updated_at
+        created_at, updated_at, sync_status, synced_updated_at, stock_request_id
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
     `
     )
     .run(
@@ -144,7 +154,8 @@ export function insertStockReceiptRow(input: {
       input.notes,
       now,
       now,
-      now
+      now,
+      input.stockRequestId ?? null
     );
 
   return id;

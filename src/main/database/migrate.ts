@@ -3815,6 +3815,14 @@ const migrations = [
       ALTER TABLE sale_returns ADD COLUMN credit_note_number TEXT;
       ALTER TABLE sale_returns ADD COLUMN refund_cents INTEGER;
     `
+  },
+  {
+    version: 113,
+    name: "stock_receipt_request_link",
+    sql: `
+    ALTER TABLE stock_receipts ADD COLUMN stock_request_id TEXT;
+    CREATE UNIQUE INDEX idx_stock_receipt_request ON stock_receipts(stock_request_id) WHERE stock_request_id IS NOT NULL;
+  `
   }
 ] as const;
 
@@ -3907,7 +3915,9 @@ export function migrateDatabase(): MigrationFailure[] {
       // table-rebuild) never leaves an orphaned intermediate table behind. Deliberately does NOT
       // rethrow — see this function's own doc comment above.
       const cause = error instanceof Error ? error.message : String(error);
-      console.error(`[migrate] Migration ${migration.version} (${migration.name}) failed — skipping, will retry next launch: ${cause}`);
+      console.error(
+        `[migrate] Migration ${migration.version} (${migration.name}) failed — skipping, will retry next launch: ${cause}`
+      );
       failures.push({ version: migration.version, name: migration.name, error: cause });
     } finally {
       // Always restore enforcement, even if the migration threw — connection.ts opened this

@@ -18,6 +18,7 @@ import { optionalText } from "@shared/schemas/common";
  * only when destination is "location_transfer". */
 export const stockReceiptCreateSchema = z.object({
   destination: z.enum(["main_store", "storefront", "main_store_transfer", "location_transfer"]),
+  stockRequestId: z.string().trim().min(1).nullable().optional(),
   locationId: z.string().trim().min(1).nullable().optional(),
   fromLocationId: z.string().trim().min(1).nullable().optional(),
   allocationStorefrontId: z.string().trim().min(1).nullable().optional(),

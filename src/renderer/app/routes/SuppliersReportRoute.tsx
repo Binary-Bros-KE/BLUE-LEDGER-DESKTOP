@@ -1,3 +1,6 @@
+import { Button } from "@renderer/shared/components/Button";
+import type { LocalSourcingReport } from "@shared/types/local-sourcing-report";
+import { LocalSourcingReportSection } from "./reports/LocalSourcingReportSection";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Loader2, Truck } from "lucide-react";
@@ -10,21 +13,22 @@ import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { formatCents } from "@renderer/shared/lib/money";
 import { showErrorToast } from "@renderer/shared/lib/toast";
-import { formatDocumentDate } from "@shared/lib/date";
 import type { DateRangeInput, SalesReportMode } from "@shared/types/report";
 import type { ReportExportRequest, ReportExportSection } from "@shared/types/report-export";
 import type { OutstandingPurchasesSummary, SupplierSpendRow } from "@shared/types/supplier-report";
-import { OutstandingPurchasesSection } from "./reports/OutstandingPurchasesSection";
-import { defaultAnchorForMode, rangeForAnchor, shiftAnchor, todayIso } from "./reports/salesReportDate";
+import {
+  OutstandingPurchasesSection,
+  supplierOutstandingSections
+} from "./reports/OutstandingPurchasesSection";
+import {
+  defaultAnchorForMode,
+  rangeForAnchor,
+  shiftAnchor,
+  todayIso
+} from "./reports/salesReportDate";
 import { SalesModeSelector } from "./reports/SalesModeSelector";
 import { SupplierPurchaseHistorySection } from "./reports/SupplierPurchaseHistorySection";
 import { SupplierSpendSection } from "./reports/SupplierSpendSection";
-
-const STATUS_LABEL: Record<string, string> = {
-  ordered: "Ordered",
-  partially_received: "Partially Received",
-  received: "Received",
-};
 
 function percentBars<T>(rows: T[], getValue: (row: T) => number): number[] {
   const max = Math.max(1, ...rows.map(getValue));
@@ -40,7 +44,7 @@ export function SuppliersReportRoute(): React.JSX.Element {
   const [anchor, setAnchor] = useState<string>(() => defaultAnchorForMode("monthly"));
   const [customRange, setCustomRange] = useState<DateRangeInput>(() => ({
     startDate: shiftAnchor("daily", todayIso(), -29),
-    endDate: todayIso(),
+    endDate: todayIso()
   }));
 
   function handleModeChange(nextMode: SalesReportMode): void {
@@ -55,6 +59,7 @@ export function SuppliersReportRoute(): React.JSX.Element {
 
   const [spendBreakdown, setSpendBreakdown] = useState<SupplierSpendRow[] | null>(null);
   const [outstanding, setOutstanding] = useState<OutstandingPurchasesSummary | null>(null);
+  const [localSourcingReport, setLocalSourcingReport] = useState<LocalSourcingReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -62,12 +67,14 @@ export function SuppliersReportRoute(): React.JSX.Element {
     setLoading(true);
     setError(null);
     try {
-      const [spendResult, outstandingResult] = await Promise.all([
+      const [spendResult, outstandingResult, localSourcingResult] = await Promise.all([
         window.blueLedger.report.supplierSpendBreakdown({ ...range, locationId }),
         window.blueLedger.report.outstandingPurchases({ locationId }),
+        window.blueLedger.report.localSourcing({ ...range, locationId })
       ]);
       setSpendBreakdown(spendResult);
       setOutstanding(outstandingResult);
+      setLocalSourcingReport(localSourcingResult);
     } catch (err) {
       const message = getErrorMessage(err, "Failed to load the suppliers report");
       setError(message);
@@ -81,8 +88,91 @@ export function SuppliersReportRoute(): React.JSX.Element {
     void load(resolvedRange, locationFilter.locationId);
   }, [resolvedRange.startDate, resolvedRange.endDate, locationFilter.locationId, load]);
 
+  const [printingLocalPurchases, setPrintingLocalPurchases] = useState(false);
+  const localPurchaseExportRequest = useMemo<ReportExportRequest | null>(() => {
+    if (!localSourcingReport) return null;
+    return {
+      module: "reports",
+      title: "Local Purchase Sales",
+      subtitle: resolvedRange.startDate + " to " + resolvedRange.endDate,
+      fileBaseName:
+        "LocalPurchaseSales_" + resolvedRange.startDate + "_to_" + resolvedRange.endDate,
+      sections: [
+        {
+          type: "cards",
+          title: "Local Purchase Sales",
+          cards: [
+            {
+              tone: "primary",
+              label: "Revenue",
+              value: formatCents(localSourcingReport.totalRevenueCents)
+            },
+            {
+              tone: "warning",
+              label: "Cost Paid to Suppliers",
+              value: formatCents(localSourcingReport.totalCostCents)
+            },
+            {
+              tone: "teal",
+              label: "Net Margin",
+              value: formatCents(localSourcingReport.totalNetMarginCents)
+            }
+          ]
+        },
+        {
+          type: "table",
+          title: "Local Purchase Sales - By Supplier",
+          columns: [
+            { key: "supplier", header: "Supplier" },
+            { key: "lines", header: "Lines", align: "right" },
+            { key: "revenue", header: "Revenue", align: "right" },
+            { key: "cost", header: "Cost", align: "right" },
+            { key: "margin", header: "Margin", align: "right" }
+          ],
+          rows: localSourcingReport.bySupplier.map((entry) => ({
+            supplier: entry.supplierName,
+            lines: String(entry.lineCount),
+            revenue: formatCents(entry.revenueCents),
+            cost: formatCents(entry.costCents),
+            margin: formatCents(entry.netMarginCents)
+          }))
+        },
+        {
+          type: "table",
+          title: "Top Locally-Sourced Products",
+          columns: [
+            { key: "product", header: "Product" },
+            { key: "quantity", header: "Qty", align: "right" },
+            { key: "revenue", header: "Revenue", align: "right" },
+            { key: "cost", header: "Cost", align: "right" },
+            { key: "margin", header: "Margin", align: "right" }
+          ],
+          rows: localSourcingReport.topProducts.map((entry) => ({
+            product: entry.productName,
+            quantity: String(entry.quantitySold),
+            revenue: formatCents(entry.revenueCents),
+            cost: formatCents(entry.costCents),
+            margin: formatCents(entry.netMarginCents)
+          }))
+        }
+      ]
+    };
+  }, [localSourcingReport, resolvedRange]);
+
+  async function printLocalPurchases(): Promise<void> {
+    if (!localPurchaseExportRequest) return;
+    setPrintingLocalPurchases(true);
+    try {
+      await window.blueLedger.reportExport.toPdf(localPurchaseExportRequest);
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Failed to preview local purchase sales"));
+    } finally {
+      setPrintingLocalPurchases(false);
+    }
+  }
+
   const reportExportRequest = useMemo<ReportExportRequest | null>(() => {
-    if (!outstanding || !spendBreakdown) return null;
+    if (!outstanding || !spendBreakdown || !localSourcingReport) return null;
 
     const rawSections: Array<ReportExportSection | false> = [
       {
@@ -95,7 +185,12 @@ export function SuppliersReportRoute(): React.JSX.Element {
             value: formatCents(outstanding.totalOutstandingCents),
             caption: "Sum of every unpaid purchase balance"
           },
-          { tone: "teal", label: "Creditors", value: String(outstanding.creditorCount), caption: "Distinct suppliers you owe money to" }
+          {
+            tone: "teal",
+            label: "Creditors",
+            value: String(outstanding.creditorCount),
+            caption: "Distinct suppliers you owe money to"
+          }
         ]
       },
       spendBreakdown.length > 0 && {
@@ -125,34 +220,19 @@ export function SuppliersReportRoute(): React.JSX.Element {
           percent: `${row.percentOfTotal.toFixed(1)}%`
         }))
       },
-      outstanding.purchases.length > 0 && {
-        type: "table",
-        title: "Outstanding Purchases, Oldest First",
-        description: "A live snapshot as of today — not scoped to the period above.",
-        columns: [
-          { key: "supplier", header: "Supplier" },
-          { key: "poNumber", header: "PO Number" },
-          { key: "status", header: "Status" },
-          { key: "ordered", header: "Ordered" },
-          { key: "total", header: "Total", align: "right" },
-          { key: "paid", header: "Paid", align: "right" },
-          { key: "balance", header: "Balance", align: "right" },
-          { key: "daysOut", header: "Days Out", align: "right" }
-        ],
-        rows: outstanding.purchases.map((purchase) => ({
-          supplier: purchase.supplierName,
-          poNumber: purchase.purchaseNumber,
-          status: STATUS_LABEL[purchase.status] ?? purchase.status,
-          ordered: purchase.orderedAt ? formatDocumentDate(purchase.orderedAt) : "—",
-          total: formatCents(purchase.grandTotalCents),
-          paid: formatCents(purchase.amountPaidCents),
-          balance: formatCents(purchase.balanceCents),
-          daysOut: `${purchase.daysOutstanding}d`,
-          ...(purchase.daysOutstanding > 30 ? { _tone: "danger" as const } : {})
-        }))
-      }
+      ...supplierOutstandingSections(
+        "Local Suppliers",
+        outstanding.purchases.filter((row) => row.supplierType !== "international")
+      ),
+      ...supplierOutstandingSections(
+        "International Suppliers",
+        outstanding.purchases.filter((row) => row.supplierType === "international")
+      )
     ];
-    const sections = rawSections.filter((section): section is ReportExportSection => Boolean(section));
+    rawSections.push(...(localPurchaseExportRequest?.sections ?? []));
+    const sections = rawSections.filter((section): section is ReportExportSection =>
+      Boolean(section)
+    );
 
     return {
       module: "reports",
@@ -161,10 +241,15 @@ export function SuppliersReportRoute(): React.JSX.Element {
       sections,
       fileBaseName: `SuppliersReport_${resolvedRange.startDate}_to_${resolvedRange.endDate}`
     };
-  }, [outstanding, spendBreakdown, resolvedRange]);
+  }, [outstanding, spendBreakdown, localSourcingReport, localPurchaseExportRequest, resolvedRange]);
 
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }} className="mt-6 space-y-5 pb-10">
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25 }}
+      className="mt-6 space-y-5 pb-10"
+    >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Insights</p>
@@ -173,8 +258,8 @@ export function SuppliersReportRoute(): React.JSX.Element {
             Suppliers Report
           </h2>
           <p className="mt-1 text-xs font-semibold text-muted">
-            Who you buy from the most for a period you pick, every outstanding supplier payment right now, and a
-            full purchase history for any single supplier.
+            Who you buy from the most for a period you pick, every outstanding supplier payment
+            right now, and a full purchase history for any single supplier.
           </p>
         </div>
         {canExport && reportExportRequest && <ReportExportMenu request={reportExportRequest} />}
@@ -194,7 +279,9 @@ export function SuppliersReportRoute(): React.JSX.Element {
         </div>
 
         {error && (
-          <div className="mt-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">{error}</div>
+          <div className="mt-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-bold text-danger">
+            {error}
+          </div>
         )}
 
         <div className={cn("mt-5 space-y-4 transition-opacity", loading && "opacity-60")}>
@@ -207,7 +294,32 @@ export function SuppliersReportRoute(): React.JSX.Element {
         </div>
       </div>
 
-      {outstanding && <OutstandingPurchasesSection summary={outstanding} />}
+      {outstanding && (
+        <OutstandingPurchasesSection
+          summary={outstanding}
+          onPaid={() => void load(resolvedRange, locationFilter.locationId)}
+        />
+      )}
+
+      {localSourcingReport && (
+        <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
+          <LocalSourcingReportSection
+            report={localSourcingReport}
+            action={
+              canExport && (
+                <Button
+                  type="button"
+                  disabled={loading || Boolean(error) || printingLocalPurchases}
+                  onClick={() => void printLocalPurchases()}
+                  className="h-9 text-xs"
+                >
+                  {printingLocalPurchases ? "Preparing..." : "Print / PDF"}
+                </Button>
+              )
+            }
+          />
+        </section>
+      )}
 
       <SupplierPurchaseHistorySection />
     </motion.div>

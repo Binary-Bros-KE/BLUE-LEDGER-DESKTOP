@@ -23,12 +23,24 @@ import { cn } from "@renderer/shared/lib/cn";
 import { useStockRequestAlertsStore } from "@renderer/shared/stores/stock-request-alerts-store";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
-import { buildAvailableYears, currentYear, matchesYearFilter, yearFilterOptions } from "@renderer/shared/lib/year-filter";
-import { computeStockRequestItemFulfillmentTone, type StockRequestItemFulfillmentTone } from "@shared/lib/stock-request";
+import {
+  buildAvailableYears,
+  currentYear,
+  matchesYearFilter,
+  yearFilterOptions
+} from "@renderer/shared/lib/year-filter";
+import {
+  computeStockRequestItemFulfillmentTone,
+  type StockRequestItemFulfillmentTone
+} from "@shared/lib/stock-request";
 import { isStorefrontType, type Location } from "@shared/types/location";
 import type { StockRequestAvailability } from "@shared/types/main-store";
 import type { ProductListItem } from "@shared/types/product";
-import type { StockRequest, StockRequestListItem, StockRequestStatus } from "@shared/types/stock-request";
+import type {
+  StockRequest,
+  StockRequestListItem,
+  StockRequestStatus
+} from "@shared/types/stock-request";
 
 const FULFILLMENT_TONE_LABEL: Record<StockRequestItemFulfillmentTone, string> = {
   pending: "—",
@@ -37,7 +49,9 @@ const FULFILLMENT_TONE_LABEL: Record<StockRequestItemFulfillmentTone, string> = 
   none: "None"
 };
 
-function fulfillmentTone(tone: StockRequestItemFulfillmentTone): "success" | "warning" | "danger" | "neutral" {
+function fulfillmentTone(
+  tone: StockRequestItemFulfillmentTone
+): "success" | "warning" | "danger" | "neutral" {
   if (tone === "full") return "success";
   if (tone === "partial") return "warning";
   if (tone === "none") return "danger";
@@ -75,9 +89,20 @@ function statusTone(status: StockRequestStatus): "warning" | "success" | "danger
   return "warning";
 }
 
-function Th({ children, className }: { children: React.ReactNode; className?: string }): React.JSX.Element {
+function Th({
+  children,
+  className
+}: {
+  children: React.ReactNode;
+  className?: string;
+}): React.JSX.Element {
   return (
-    <th className={cn("px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider", className)}>
+    <th
+      className={cn(
+        "px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider",
+        className
+      )}
+    >
       {children}
     </th>
   );
@@ -163,7 +188,9 @@ export function StockRequestsRoute(): React.JSX.Element {
   // Reloads immediately when the approver alerts (useStockRequestAlerts) see the pending set change,
   // and on a light timer for everyone else (e.g. a requester watching for their request to be
   // decided) — both are just local-database reads; new requests from other devices land via sync.
-  const pendingKey = useStockRequestAlertsStore((state) => state.pending.map((request) => request.id).join(","));
+  const pendingKey = useStockRequestAlertsStore((state) =>
+    state.pending.map((request) => request.id).join(",")
+  );
   useEffect(() => {
     void loadRequests();
   }, [loadRequests, pendingKey]);
@@ -220,12 +247,14 @@ export function StockRequestsRoute(): React.JSX.Element {
   const filteredPickerProducts = useMemo(() => {
     const term = productSearch.trim().toLowerCase();
     if (!term) return [];
-    return products
-      .filter((product) => product.status === "active")
-      .filter((product) => `${product.name} ${product.sku}`.toLowerCase().includes(term))
-      // Enough that a common word (e.g. a brand) never hides the product being searched for —
-      // the old 8-result cap did, while Checkout showed every match. The list scrolls.
-      .slice(0, 50);
+    return (
+      products
+        .filter((product) => product.status === "active")
+        .filter((product) => `${product.name} ${product.sku}`.toLowerCase().includes(term))
+        // Enough that a common word (e.g. a brand) never hides the product being searched for —
+        // the old 8-result cap did, while Checkout showed every match. The list scrolls.
+        .slice(0, 50)
+    );
   }, [products, productSearch]);
 
   const availableYears = useMemo(
@@ -246,7 +275,9 @@ export function StockRequestsRoute(): React.JSX.Element {
     const term = searchTerm.trim().toLowerCase();
     if (term) {
       list = list.filter((request) =>
-        `${request.requestNumber} ${request.storefrontName} ${request.requestedByName}`.toLowerCase().includes(term)
+        `${request.requestNumber} ${request.storefrontName} ${request.requestedByName}`
+          .toLowerCase()
+          .includes(term)
       );
     }
     return list;
@@ -284,7 +315,10 @@ export function StockRequestsRoute(): React.JSX.Element {
       // than defaulting to 1: forcing a plausible-looking "1" onto a freshly-added line is bad UX —
       // it's too easy to leave unedited and submit the wrong quantity. submitCreateRequest below
       // blocks the whole submission if any line is left at 0.
-      return [...prev, { productId: product.id, productName: product.name, sku: product.sku, quantity: 0 }];
+      return [
+        ...prev,
+        { productId: product.id, productName: product.name, sku: product.sku, quantity: 0 }
+      ];
     });
     setProductSearch("");
   }
@@ -294,7 +328,9 @@ export function StockRequestsRoute(): React.JSX.Element {
     // planting a "1" the user never typed. submitCreateRequest's own guard is what actually stops an
     // empty line from being submitted.
     const next = Number.isFinite(quantity) && quantity > 0 ? Math.floor(quantity) : 0;
-    setCreateItems((prev) => prev.map((item) => (item.productId === productId ? { ...item, quantity: next } : item)));
+    setCreateItems((prev) =>
+      prev.map((item) => (item.productId === productId ? { ...item, quantity: next } : item))
+    );
   }
 
   /** Permissive counterpart used only by the free-typing quantity input's onChange — allows 0
@@ -304,7 +340,9 @@ export function StockRequestsRoute(): React.JSX.Element {
   function updateDraftItemQuantityDraft(productId: string, raw: string): void {
     const parsed = raw === "" ? 0 : Math.floor(Number(raw));
     const next = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-    setCreateItems((prev) => prev.map((item) => (item.productId === productId ? { ...item, quantity: next } : item)));
+    setCreateItems((prev) =>
+      prev.map((item) => (item.productId === productId ? { ...item, quantity: next } : item))
+    );
   }
 
   function removeDraftItem(productId: string): void {
@@ -347,6 +385,23 @@ export function StockRequestsRoute(): React.JSX.Element {
       setCreateSaving(false);
     }
   }
+
+  // Refresh the open document when sync changes the list; cancel stale responses on close.
+  const viewingRequestId = viewingRequest?.id;
+  useEffect(() => {
+    if (!viewingRequestId) return;
+    let cancelled = false;
+    void window.blueLedger.stockRequest
+      .get(viewingRequestId)
+      .then((request) => {
+        if (!cancelled)
+          setViewingRequest((current) => (current?.id === viewingRequestId ? request : current));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [requests, viewingRequestId]);
 
   async function openView(id: string): Promise<void> {
     setViewLoading(true);
@@ -422,7 +477,8 @@ export function StockRequestsRoute(): React.JSX.Element {
       setFulfillAvailability(availability);
       const defaults: Record<string, string> = {};
       for (const item of full.items) {
-        const available = availability.find((row) => row.productId === item.productId)?.availableQuantity ?? 0;
+        const available =
+          availability.find((row) => row.productId === item.productId)?.availableQuantity ?? 0;
         defaults[item.id] = String(Math.max(0, Math.min(item.quantityRequested, available)));
       }
       setFulfillQuantities(defaults);
@@ -514,7 +570,9 @@ export function StockRequestsRoute(): React.JSX.Element {
       <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Inventory</p>
+            <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">
+              Inventory
+            </p>
             <h2 className="mt-1 flex items-center gap-2 text-xl font-extrabold">
               <PackagePlus className="size-5 text-primary" aria-hidden="true" />
               Stock Requests
@@ -542,15 +600,37 @@ export function StockRequestsRoute(): React.JSX.Element {
         {requests !== null && requests.length > 0 && (
           <>
             <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <StatTile icon={PackagePlus} label="Total Requests" value={String(counts.total)} tone="primary" />
-              <StatTile icon={Clock} label="Pending" value={String(counts.pending)} tone="warning" />
-              <StatTile icon={CheckCircle2} label="Approved" value={String(counts.approved)} tone="success" />
-              <StatTile icon={XCircle} label="Rejected" value={String(counts.rejected)} tone="danger" />
+              <StatTile
+                icon={PackagePlus}
+                label="Total Requests"
+                value={String(counts.total)}
+                tone="primary"
+              />
+              <StatTile
+                icon={Clock}
+                label="Pending"
+                value={String(counts.pending)}
+                tone="warning"
+              />
+              <StatTile
+                icon={CheckCircle2}
+                label="Approved"
+                value={String(counts.approved)}
+                tone="success"
+              />
+              <StatTile
+                icon={XCircle}
+                label="Rejected"
+                value={String(counts.rejected)}
+                tone="danger"
+              />
             </div>
 
             <div className="mt-4 flex flex-wrap items-end gap-3">
               <label className="block sm:max-w-xs sm:flex-1">
-                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Search</span>
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
+                  Search
+                </span>
                 <div className="relative mt-1.5">
                   <Search
                     className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted"
@@ -580,7 +660,10 @@ export function StockRequestsRoute(): React.JSX.Element {
                   onChange={setLocationFilter}
                   options={[
                     { value: "", label: "All Storefronts" },
-                    ...storefronts.map((location) => ({ value: location.id, label: location.locationName }))
+                    ...storefronts.map((location) => ({
+                      value: location.id,
+                      label: location.locationName
+                    }))
                   ]}
                   className="w-44"
                 />
@@ -594,7 +677,9 @@ export function StockRequestsRoute(): React.JSX.Element {
                     onClick={() => setStatusFilter(tab.value)}
                     className={cn(
                       "rounded-md px-3 py-1.5 text-[11px] font-extrabold transition cursor-pointer",
-                      statusFilter === tab.value ? "bg-primary text-white" : "text-muted hover:bg-white"
+                      statusFilter === tab.value
+                        ? "bg-primary text-white"
+                        : "text-muted hover:bg-white"
                     )}
                   >
                     {tab.label}
@@ -653,7 +738,7 @@ export function StockRequestsRoute(): React.JSX.Element {
             <div className="overflow-x-auto rounded-lg border border-line">
               <table className="w-full table-fixed border-collapse text-sm">
                 <colgroup>
-                  <col className="w-[18%]" /> 
+                  <col className="w-[18%]" />
                   <col className="w-[15%]" />
                   <col className="w-[18%]" />
                   <col className="w-[10%]" />
@@ -670,15 +755,14 @@ export function StockRequestsRoute(): React.JSX.Element {
                 </thead>
                 <tbody>
                   {(filteredRequests ?? []).map((request) => (
-                    <tr key={request.id} className="border-t border-line odd:bg-white even:bg-soft/50">
+                    <tr
+                      key={request.id}
+                      className="border-t border-line odd:bg-white even:bg-soft/50"
+                    >
                       <td className="truncate px-4 py-3 text-xs font-bold tabular-nums text-muted">
                         <div className="flex flex-col gap-0.5">
-                          <span>
-                            {request.requestNumber}
-                          </span>
-                          <span>
-                            {formatDateTime(request.requestedAt)}
-                          </span>
+                          <span>{request.requestNumber}</span>
+                          <span>{formatDateTime(request.requestedAt)}</span>
                         </div>
                       </td>
                       <td className="truncate px-4 py-3 font-extrabold">
@@ -687,14 +771,17 @@ export function StockRequestsRoute(): React.JSX.Element {
                           <span>{request.storefrontName}</span>
                         </div>
                       </td>
-          
+
                       <td className="px-4 py-3 text-xs font-bold tabular-nums text-muted">
                         {request.itemCount} item{request.itemCount === 1 ? "" : "s"} ·{" "}
-                        {request.totalQuantityRequested} unit{request.totalQuantityRequested === 1 ? "" : "s"}
+                        {request.totalQuantityRequested} unit
+                        {request.totalQuantityRequested === 1 ? "" : "s"}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <DashedPill tone={statusTone(request.status)}>{request.status}</DashedPill>
+                          <DashedPill tone={statusTone(request.status)}>
+                            {request.status}
+                          </DashedPill>
                           {request.status === "approved" && request.fullyDispatched === false && (
                             <DashedPill tone="warning">Partial</DashedPill>
                           )}
@@ -771,15 +858,23 @@ export function StockRequestsRoute(): React.JSX.Element {
               onChange={setCreateStorefrontId}
               options={[
                 { value: "", label: "Select a storefront..." },
-                ...storefronts.map((location) => ({ value: location.id, label: location.locationName }))
+                ...storefronts.map((location) => ({
+                  value: location.id,
+                  label: location.locationName
+                }))
               ]}
               className="mb-4"
             />
           )}
 
-          <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Products</span>
+          <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
+            Products
+          </span>
           <div className="relative mt-1.5">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden="true" />
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted"
+              aria-hidden="true"
+            />
             <input
               type="text"
               value={productSearch}
@@ -797,7 +892,8 @@ export function StockRequestsRoute(): React.JSX.Element {
                     className="flex w-full items-center justify-between px-3.5 py-2 text-left text-sm hover:bg-soft cursor-pointer"
                   >
                     <span className="font-bold text-ink">
-                      {product.name} <span className="font-semibold text-muted">({product.sku})</span>
+                      {product.name}{" "}
+                      <span className="font-semibold text-muted">({product.sku})</span>
                     </span>
                   </button>
                 ))}
@@ -810,8 +906,12 @@ export function StockRequestsRoute(): React.JSX.Element {
               <table className="w-full border-collapse text-xs">
                 <thead>
                   <tr className="bg-soft">
-                    <th className="px-3 py-2 text-left font-extrabold uppercase tracking-wider text-muted">Product</th>
-                    <th className="px-3 py-2 text-right font-extrabold uppercase tracking-wider text-muted">Qty Requested</th>
+                    <th className="px-3 py-2 text-left font-extrabold uppercase tracking-wider text-muted">
+                      Product
+                    </th>
+                    <th className="px-3 py-2 text-right font-extrabold uppercase tracking-wider text-muted">
+                      Qty Requested
+                    </th>
                     <th className="px-3 py-2 text-right font-extrabold uppercase tracking-wider text-muted">
                       Available at Main Store
                     </th>
@@ -830,7 +930,9 @@ export function StockRequestsRoute(): React.JSX.Element {
                           type="number"
                           min={1}
                           value={item.quantity === 0 ? "" : item.quantity}
-                          onChange={(event) => updateDraftItemQuantityDraft(item.productId, event.target.value)}
+                          onChange={(event) =>
+                            updateDraftItemQuantityDraft(item.productId, event.target.value)
+                          }
                           onBlur={() => updateDraftItemQuantity(item.productId, item.quantity)}
                           aria-label={`Quantity for ${item.productName}`}
                           className={cn(
@@ -844,14 +946,18 @@ export function StockRequestsRoute(): React.JSX.Element {
                       <td
                         className={cn(
                           "px-3 py-2 text-right font-bold tabular-nums",
-                          item.quantity > getAvailableAtMainStore(item.productId) ? "text-danger" : "text-muted"
+                          item.quantity > getAvailableAtMainStore(item.productId)
+                            ? "text-danger"
+                            : "text-muted"
                         )}
                         title="How much could ship right now — a request for more than this can't be submitted"
                       >
                         {getAvailableAtMainStore(item.productId)}
                         {item.quantity > getAvailableAtMainStore(item.productId) && (
                           <span className="block text-[10px] font-extrabold uppercase">
-                            {getAvailableAtMainStore(item.productId) === 0 ? "Not available" : "Not enough"}
+                            {getAvailableAtMainStore(item.productId) === 0
+                              ? "Not available"
+                              : "Not enough"}
                           </span>
                         )}
                       </td>
@@ -894,7 +1000,9 @@ export function StockRequestsRoute(): React.JSX.Element {
               disabled={createSaving}
               className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {createSaving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
+              {createSaving ? (
+                <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
+              ) : null}
               {createSaving ? "Submitting..." : "Submit Request"}
             </Button>
           </div>
@@ -919,7 +1027,9 @@ export function StockRequestsRoute(): React.JSX.Element {
         ) : viewingRequest ? (
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
-              <DashedPill tone={statusTone(viewingRequest.status)}>{viewingRequest.status}</DashedPill>
+              <DashedPill tone={statusTone(viewingRequest.status)}>
+                {viewingRequest.status}
+              </DashedPill>
               <span className="text-xs font-semibold text-muted">
                 {viewingRequest.storefrontName} · Requested by {viewingRequest.requestedByName} ·{" "}
                 {formatDateTime(viewingRequest.requestedAt)}
@@ -961,7 +1071,9 @@ export function StockRequestsRoute(): React.JSX.Element {
                         <p className="font-extrabold text-ink">{item.productName}</p>
                         <p className="text-[10px] font-semibold text-muted">{item.sku}</p>
                       </td>
-                      <td className="px-3 py-2 text-right font-extrabold tabular-nums">{item.quantityRequested}</td>
+                      <td className="px-3 py-2 text-right font-extrabold tabular-nums">
+                        {item.quantityRequested}
+                      </td>
                       {viewingRequest.status === "pending" && (
                         <td
                           className="px-3 py-2 text-right font-bold tabular-nums text-muted"
@@ -974,16 +1086,32 @@ export function StockRequestsRoute(): React.JSX.Element {
                         <>
                           <td className="px-3 py-2 text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              <span className="font-extrabold tabular-nums text-ink">{item.quantityDispatched}</span>
-                              <DashedPill tone={fulfillmentTone(computeStockRequestItemFulfillmentTone(item))}>
-                                {FULFILLMENT_TONE_LABEL[computeStockRequestItemFulfillmentTone(item)]}
+                              <span className="font-extrabold tabular-nums text-ink">
+                                {item.quantityDispatched}
+                              </span>
+                              <DashedPill
+                                tone={fulfillmentTone(computeStockRequestItemFulfillmentTone(item))}
+                              >
+                                {
+                                  FULFILLMENT_TONE_LABEL[
+                                    computeStockRequestItemFulfillmentTone(item)
+                                  ]
+                                }
                               </DashedPill>
                             </div>
                           </td>
-                          <td className="px-3 py-2 text-right font-bold tabular-nums text-muted">{item.mainStorePreviousQuantity}</td>
-                          <td className="px-3 py-2 text-right font-extrabold tabular-nums text-danger">{item.mainStoreNewQuantity}</td>
-                          <td className="px-3 py-2 text-right font-bold tabular-nums text-muted">{item.previousQuantity}</td>
-                          <td className="px-3 py-2 text-right font-extrabold tabular-nums text-success">{item.newQuantity}</td>
+                          <td className="px-3 py-2 text-right font-bold tabular-nums text-muted">
+                            {item.mainStorePreviousQuantity}
+                          </td>
+                          <td className="px-3 py-2 text-right font-extrabold tabular-nums text-danger">
+                            {item.mainStoreNewQuantity}
+                          </td>
+                          <td className="px-3 py-2 text-right font-bold tabular-nums text-muted">
+                            {item.previousQuantity}
+                          </td>
+                          <td className="px-3 py-2 text-right font-extrabold tabular-nums text-success">
+                            {item.newQuantity}
+                          </td>
                         </>
                       )}
                     </tr>
@@ -994,15 +1122,21 @@ export function StockRequestsRoute(): React.JSX.Element {
 
             {viewingRequest.notes && (
               <div className="rounded-lg border border-line bg-soft/40 p-3">
-                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Notes</p>
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">
+                  Notes
+                </p>
                 <p className="mt-1 text-sm font-semibold text-ink">{viewingRequest.notes}</p>
               </div>
             )}
 
             {viewingRequest.status === "rejected" && viewingRequest.rejectionReason && (
               <div className="rounded-lg border border-danger/30 bg-danger-soft p-3">
-                <p className="text-[10px] font-extrabold uppercase tracking-wider text-danger">Rejection Reason</p>
-                <p className="mt-1 text-sm font-bold text-danger">{viewingRequest.rejectionReason}</p>
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-danger">
+                  Rejection Reason
+                </p>
+                <p className="mt-1 text-sm font-bold text-danger">
+                  {viewingRequest.rejectionReason}
+                </p>
               </div>
             )}
 
@@ -1017,7 +1151,8 @@ export function StockRequestsRoute(): React.JSX.Element {
 
             {viewingRequest.reviewedByName && (
               <p className="text-[11px] font-semibold text-muted">
-                Reviewed by {viewingRequest.reviewedByName} · {formatDateTime(viewingRequest.reviewedAt)}
+                Reviewed by {viewingRequest.reviewedByName} ·{" "}
+                {formatDateTime(viewingRequest.reviewedAt)}
               </p>
             )}
 
@@ -1056,7 +1191,9 @@ export function StockRequestsRoute(): React.JSX.Element {
       <Modal
         open={fulfillingRequest !== null || fulfillLoading}
         onClose={() => setFulfillingRequest(null)}
-        title={fulfillingRequest ? `Fulfil ${fulfillingRequest.requestNumber}` : "Fulfil Stock Request"}
+        title={
+          fulfillingRequest ? `Fulfil ${fulfillingRequest.requestNumber}` : "Fulfil Stock Request"
+        }
         description="Dispatch what's actually available — set a line to 0 for anything you can't ship right now."
         widthClassName="max-w-4xl"
       >
@@ -1073,7 +1210,9 @@ export function StockRequestsRoute(): React.JSX.Element {
             )}
 
             <div className="rounded-lg border border-line bg-soft px-3.5 py-2.5">
-              <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Fulfilling</p>
+              <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">
+                Fulfilling
+              </p>
               <p className="mt-0.5 text-sm font-bold text-ink">
                 {fulfillingRequest.requestNumber} · {fulfillingRequest.storefrontName}
               </p>
@@ -1105,7 +1244,10 @@ export function StockRequestsRoute(): React.JSX.Element {
                 </thead>
                 <tbody>
                   {fulfillingRequest.items.map((item) => {
-                    const dispatched = Math.max(0, Math.floor(Number(fulfillQuantities[item.id]) || 0));
+                    const dispatched = Math.max(
+                      0,
+                      Math.floor(Number(fulfillQuantities[item.id]) || 0)
+                    );
                     const tone = computeStockRequestItemFulfillmentTone({
                       quantityRequested: item.quantityRequested,
                       quantityDispatched: dispatched
@@ -1116,7 +1258,9 @@ export function StockRequestsRoute(): React.JSX.Element {
                           <p className="font-extrabold text-ink">{item.productName}</p>
                           <p className="text-[10px] font-semibold text-muted">{item.sku}</p>
                         </td>
-                        <td className="px-3 py-2 text-right font-extrabold tabular-nums">{item.quantityRequested}</td>
+                        <td className="px-3 py-2 text-right font-extrabold tabular-nums">
+                          {item.quantityRequested}
+                        </td>
                         <td className="px-3 py-2 text-right font-bold tabular-nums text-muted">
                           {getFulfillAvailability(item.productId)}
                         </td>
@@ -1131,7 +1275,9 @@ export function StockRequestsRoute(): React.JSX.Element {
                           />
                         </td>
                         <td className="px-3 py-2">
-                          <DashedPill tone={fulfillmentTone(tone)}>{FULFILLMENT_TONE_LABEL[tone]}</DashedPill>
+                          <DashedPill tone={fulfillmentTone(tone)}>
+                            {FULFILLMENT_TONE_LABEL[tone]}
+                          </DashedPill>
                         </td>
                       </tr>
                     );
@@ -1162,7 +1308,9 @@ export function StockRequestsRoute(): React.JSX.Element {
                 disabled={fulfillSaving}
                 className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {fulfillSaving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
+                {fulfillSaving ? (
+                  <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
+                ) : null}
                 {fulfillSaving ? "Dispatching..." : "Confirm Dispatch"}
               </Button>
             </div>
@@ -1186,7 +1334,9 @@ export function StockRequestsRoute(): React.JSX.Element {
             )}
 
             <div className="rounded-lg border border-line bg-soft px-3.5 py-2.5">
-              <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Rejecting</p>
+              <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">
+                Rejecting
+              </p>
               <p className="mt-0.5 text-sm font-bold text-ink">
                 {rejectingRequest.requestNumber} · {rejectingRequest.storefrontName}
               </p>
@@ -1214,7 +1364,9 @@ export function StockRequestsRoute(): React.JSX.Element {
                 disabled={rejectSaving}
                 className="h-9 border border-danger bg-danger text-xs text-white shadow-none hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {rejectSaving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
+                {rejectSaving ? (
+                  <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
+                ) : null}
                 {rejectSaving ? "Rejecting..." : "Reject Request"}
               </Button>
             </div>

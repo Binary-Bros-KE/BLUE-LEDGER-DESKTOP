@@ -12,6 +12,8 @@ export type OutstandingPurchaseRow = {
   status: string;
   orderedAt: string | null;
   grandTotalCents: number;
+  /** Received goods value plus the supplier shipping fee once goods arrive. */
+  payableCents: number;
   amountPaidCents: number;
   balanceCents: number;
   daysOutstanding: number;

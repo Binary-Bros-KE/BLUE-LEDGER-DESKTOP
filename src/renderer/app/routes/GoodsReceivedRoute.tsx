@@ -1,3 +1,4 @@
+import type { StockRequestListItem } from "@shared/types/stock-request";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Eye, Loader2, PackageCheck, Plus, Printer, Search, Trash2 } from "lucide-react";
@@ -12,7 +13,12 @@ import { usePermissions } from "@renderer/shared/hooks/use-permissions";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
-import { buildAvailableYears, currentYear, matchesYearFilter, yearFilterOptions } from "@renderer/shared/lib/year-filter";
+import {
+  buildAvailableYears,
+  currentYear,
+  matchesYearFilter,
+  yearFilterOptions
+} from "@renderer/shared/lib/year-filter";
 import { isStorefrontType, type Location } from "@shared/types/location";
 import type { MainStoreAllocationSummary } from "@shared/types/main-store";
 import type { LocationStockLevel } from "@shared/types/inventory";
@@ -37,9 +43,20 @@ function formatDateTime(value: string | null): string {
   }
 }
 
-function Th({ children, className }: { children: React.ReactNode; className?: string }): React.JSX.Element {
+function Th({
+  children,
+  className
+}: {
+  children: React.ReactNode;
+  className?: string;
+}): React.JSX.Element {
   return (
-    <th className={cn("px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider", className)}>
+    <th
+      className={cn(
+        "px-4 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-wider",
+        className
+      )}
+    >
       {children}
     </th>
   );
@@ -86,9 +103,14 @@ export function GoodsReceivedRoute(): React.JSX.Element {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [locationTransferOpen, setLocationTransferOpen] = useState(false);
-  const [destination, setDestination] = useState<Destination>(canReceiveIntoMainStore ? "main_store" : "storefront");
+  const [destination, setDestination] = useState<Destination>(
+    canReceiveIntoMainStore ? "main_store" : "storefront"
+  );
   const [allocationStorefrontId, setAllocationStorefrontId] = useState("");
   const [createLocationId, setCreateLocationId] = useState("");
+  const [linkedRequestId, setLinkedRequestId] = useState("");
+  const [pendingRequests, setPendingRequests] = useState<StockRequestListItem[]>([]);
+  const [requestLoading, setRequestLoading] = useState(false);
   const [createNotes, setCreateNotes] = useState("");
   const [createItems, setCreateItems] = useState<DraftItem[]>([]);
   const [productSearch, setProductSearch] = useState("");
@@ -141,6 +163,69 @@ export function GoodsReceivedRoute(): React.JSX.Element {
 
   const effectiveStorefrontLocationId = needsStorefrontPicker ? createLocationId : ownBranchId;
 
+  useEffect(() => {
+    setLinkedRequestId("");
+  }, [destination, effectiveStorefrontLocationId, createOpen]);
+
+  useEffect(() => {
+    if (
+      !createOpen ||
+      destination !== "main_store_transfer" ||
+      !can("stock_requests", "view") ||
+      !can("stock_requests", "approve")
+    )
+      return;
+    let cancelled = false;
+    void window.blueLedger.stockRequest
+      .list()
+      .then((rows) => {
+        if (!cancelled)
+          setPendingRequests(
+            rows.filter(
+              (row) =>
+                row.status === "pending" && row.storefrontId === effectiveStorefrontLocationId
+            )
+          );
+      })
+      .catch((err) => {
+        if (!cancelled) setCreateError(getErrorMessage(err, "Failed to load stock requests"));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [createOpen, destination, effectiveStorefrontLocationId, can]);
+
+  useEffect(() => {
+    if (!linkedRequestId) return;
+    let cancelled = false;
+    setRequestLoading(true);
+    setCreateItems([]);
+    void window.blueLedger.stockRequest
+      .get(linkedRequestId)
+      .then((request) => {
+        if (cancelled) return;
+        if (request.status !== "pending") throw new Error("This request has already been reviewed");
+        setCreateItems(
+          request.items.map((item) => ({
+            productId: item.productId,
+            productName: item.productName,
+            sku: item.sku,
+            quantity: item.quantityRequested
+          }))
+        );
+      })
+      .catch((err) => {
+        if (!cancelled) setCreateError(getErrorMessage(err, "Failed to load request"));
+      })
+      .finally(() => {
+        if (!cancelled) setRequestLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      setRequestLoading(false);
+    };
+  }, [linkedRequestId]);
+
   // Live-preview stock lookups — refreshed whenever the destination (or which bucket/storefront)
   // changes, so "Current Stock" / "New Total" in the preview table always reflect the choice
   // actually being submitted, not a stale snapshot from when the modal opened. A transfer needs
@@ -172,7 +257,9 @@ export function GoodsReceivedRoute(): React.JSX.Element {
     if (destination === "main_store") {
       const row = allocationSummary.find((r) => r.productId === productId);
       if (!row) return 0;
-      return allocationStorefrontId ? (row.allocatedByStorefront[allocationStorefrontId] ?? 0) : row.unallocatedQuantity;
+      return allocationStorefrontId
+        ? (row.allocatedByStorefront[allocationStorefrontId] ?? 0)
+        : row.unallocatedQuantity;
     }
     return storefrontStock.find((r) => r.productId === productId)?.quantity ?? 0;
   }
@@ -186,22 +273,29 @@ export function GoodsReceivedRoute(): React.JSX.Element {
   function getAvailableToTransfer(productId: string): number {
     const row = allocationSummary.find((r) => r.productId === productId);
     if (!row) return 0;
-    const allocated = effectiveStorefrontLocationId ? (row.allocatedByStorefront[effectiveStorefrontLocationId] ?? 0) : 0;
+    const allocated = effectiveStorefrontLocationId
+      ? (row.allocatedByStorefront[effectiveStorefrontLocationId] ?? 0)
+      : 0;
     return row.unallocatedQuantity + allocated;
   }
 
   const filteredPickerProducts = useMemo(() => {
     const term = productSearch.trim().toLowerCase();
     if (!term) return [];
-    return products
-      .filter((product) => product.status === "active")
-      .filter((product) => `${product.name} ${product.sku}`.toLowerCase().includes(term))
-      // Enough that a common word (e.g. a brand) never hides the product being searched for —
-      // the old 8-result cap did, while Checkout showed every match. The list scrolls.
-      .slice(0, 50);
+    return (
+      products
+        .filter((product) => product.status === "active")
+        .filter((product) => `${product.name} ${product.sku}`.toLowerCase().includes(term))
+        // Enough that a common word (e.g. a brand) never hides the product being searched for —
+        // the old 8-result cap did, while Checkout showed every match. The list scrolls.
+        .slice(0, 50)
+    );
   }, [products, productSearch]);
 
-  const availableYears = useMemo(() => buildAvailableYears((receipts ?? []).map((r) => r.createdAt)), [receipts]);
+  const availableYears = useMemo(
+    () => buildAvailableYears((receipts ?? []).map((r) => r.createdAt)),
+    [receipts]
+  );
 
   const filteredReceipts = useMemo(() => {
     if (!receipts) return null;
@@ -210,7 +304,9 @@ export function GoodsReceivedRoute(): React.JSX.Element {
       // Matches either the physical destination (locationId) or the Main-Store earmark
       // (allocationStorefrontId) — picking "Storefront X" should surface everything relevant to it,
       // including stock received at Main Store but earmarked for that storefront.
-      list = list.filter((r) => r.locationId === locationFilter || r.allocationStorefrontId === locationFilter);
+      list = list.filter(
+        (r) => r.locationId === locationFilter || r.allocationStorefrontId === locationFilter
+      );
     }
     const term = searchTerm.trim().toLowerCase();
     if (term) {
@@ -255,7 +351,10 @@ export function GoodsReceivedRoute(): React.JSX.Element {
       // than defaulting to 1: forcing a plausible-looking "1" onto a freshly-added line is bad UX —
       // it's too easy to leave unedited and record the wrong quantity. submitCreateReceipt below
       // blocks the whole submission if any line is left at 0.
-      return [...prev, { productId: product.id, productName: product.name, sku: product.sku, quantity: 0 }];
+      return [
+        ...prev,
+        { productId: product.id, productName: product.name, sku: product.sku, quantity: 0 }
+      ];
     });
     setProductSearch("");
   }
@@ -265,7 +364,9 @@ export function GoodsReceivedRoute(): React.JSX.Element {
     // planting a "1" the user never typed. submitCreateReceipt's own guard is what actually stops an
     // empty line from being submitted.
     const next = Number.isFinite(quantity) && quantity > 0 ? Math.floor(quantity) : 0;
-    setCreateItems((prev) => prev.map((item) => (item.productId === productId ? { ...item, quantity: next } : item)));
+    setCreateItems((prev) =>
+      prev.map((item) => (item.productId === productId ? { ...item, quantity: next } : item))
+    );
   }
 
   /** Permissive counterpart used only by the free-typing quantity input's onChange — allows 0
@@ -274,7 +375,9 @@ export function GoodsReceivedRoute(): React.JSX.Element {
   function updateDraftItemQuantityDraft(productId: string, raw: string): void {
     const parsed = raw === "" ? 0 : Math.floor(Number(raw));
     const next = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-    setCreateItems((prev) => prev.map((item) => (item.productId === productId ? { ...item, quantity: next } : item)));
+    setCreateItems((prev) =>
+      prev.map((item) => (item.productId === productId ? { ...item, quantity: next } : item))
+    );
   }
 
   function removeDraftItem(productId: string): void {
@@ -285,6 +388,7 @@ export function GoodsReceivedRoute(): React.JSX.Element {
     event.preventDefault();
     setCreateError(null);
 
+    if (requestLoading) return;
     if (createItems.length === 0) {
       setCreateError("Add at least one product");
       return;
@@ -299,7 +403,9 @@ export function GoodsReceivedRoute(): React.JSX.Element {
       return;
     }
     if (destination === "main_store_transfer") {
-      const shortItem = createItems.find((item) => item.quantity > getAvailableToTransfer(item.productId));
+      const shortItem = createItems.find(
+        (item) => item.quantity > getAvailableToTransfer(item.productId)
+      );
       if (shortItem) {
         setCreateError(`Not enough stock at Main Store for ${shortItem.productName}`);
         return;
@@ -310,14 +416,23 @@ export function GoodsReceivedRoute(): React.JSX.Element {
     try {
       await window.blueLedger.stockReceipt.create({
         destination,
+        stockRequestId: destination === "main_store_transfer" ? linkedRequestId || null : null,
         locationId: destination !== "main_store" && needsStorefrontPicker ? createLocationId : null,
-        allocationStorefrontId: destination === "main_store" ? allocationStorefrontId || null : null,
+        allocationStorefrontId:
+          destination === "main_store" ? allocationStorefrontId || null : null,
         notes: createNotes,
-        items: createItems.map((item) => ({ productId: item.productId, quantityReceived: item.quantity }))
+        items: createItems.map((item) => ({
+          productId: item.productId,
+          quantityReceived: item.quantity
+        }))
       });
       setCreateOpen(false);
       await loadReceipts();
-      showSuccessToast(destination === "main_store_transfer" ? "Stock transferred from Main Store" : "Goods received recorded");
+      showSuccessToast(
+        destination === "main_store_transfer"
+          ? "Stock transferred from Main Store"
+          : "Goods received recorded"
+      );
     } catch (err) {
       const message = getErrorMessage(err, "Failed to record goods received");
       setCreateError(message);
@@ -399,7 +514,9 @@ export function GoodsReceivedRoute(): React.JSX.Element {
       <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">Inventory</p>
+            <p className="text-[11px] font-extrabold uppercase tracking-wider text-teal">
+              Inventory
+            </p>
             <h2 className="mt-1 flex items-center gap-2 text-xl font-extrabold">
               <PackageCheck className="size-5 text-primary" aria-hidden="true" />
               Goods Received
@@ -436,14 +553,31 @@ export function GoodsReceivedRoute(): React.JSX.Element {
         {receipts !== null && receipts.length > 0 && (
           <>
             <div className="mt-4 grid grid-cols-3 gap-3">
-              <StatTile icon={PackageCheck} label="Total Receipts" value={String(counts.total)} tone="primary" />
-              <StatTile icon={PackageCheck} label="Line Items" value={String(counts.items)} tone="accent" />
-              <StatTile icon={PackageCheck} label="Units Received" value={String(counts.units)} tone="success" />
+              <StatTile
+                icon={PackageCheck}
+                label="Total Receipts"
+                value={String(counts.total)}
+                tone="primary"
+              />
+              <StatTile
+                icon={PackageCheck}
+                label="Line Items"
+                value={String(counts.items)}
+                tone="accent"
+              />
+              <StatTile
+                icon={PackageCheck}
+                label="Units Received"
+                value={String(counts.units)}
+                tone="success"
+              />
             </div>
 
             <div className="mt-4 flex flex-wrap items-end gap-3">
               <label className="block sm:max-w-xs sm:flex-1">
-                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Search</span>
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
+                  Search
+                </span>
                 <div className="relative mt-1.5">
                   <Search
                     className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted"
@@ -473,7 +607,10 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                   onChange={setLocationFilter}
                   options={[
                     { value: "", label: "All Locations" },
-                    ...locations.map((location) => ({ value: location.id, label: location.locationName }))
+                    ...locations.map((location) => ({
+                      value: location.id,
+                      label: location.locationName
+                    }))
                   ]}
                   className="w-44"
                 />
@@ -500,7 +637,8 @@ export function GoodsReceivedRoute(): React.JSX.Element {
               </div>
               <h3 className="mt-4 text-lg font-extrabold">No goods received yet</h3>
               <p className="mt-1 max-w-sm text-sm font-semibold text-muted">
-                Receive many products at once — batches show up here with a full history you can reopen anytime.
+                Receive many products at once — batches show up here with a full history you can
+                reopen anytime.
               </p>
               {canCreate && (
                 <Button type="button" onClick={openCreateModal} className="mt-5 h-9 text-xs">
@@ -545,7 +683,10 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                 </thead>
                 <tbody>
                   {(filteredReceipts ?? []).map((receipt) => (
-                    <tr key={receipt.id} className="border-t border-line odd:bg-white even:bg-soft/50">
+                    <tr
+                      key={receipt.id}
+                      className="border-t border-line odd:bg-white even:bg-soft/50"
+                    >
                       <td className="truncate px-4 py-3 text-xs font-bold tabular-nums text-muted">
                         <div className="flex flex-col gap-0.5">
                           <span>{receipt.receiptNumber}</span>
@@ -556,9 +697,13 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                         <div className="flex flex-col gap-0.5">
                           <span>{receipt.locationName}</span>
                           {receipt.allocationStorefrontName && (
-                            <DashedPill tone="accent">For {receipt.allocationStorefrontName}</DashedPill>
+                            <DashedPill tone="accent">
+                              For {receipt.allocationStorefrontName}
+                            </DashedPill>
                           )}
-                          {receipt.sourceType === "transfer" && <DashedPill tone="warning">Transfer from Main Store</DashedPill>}
+                          {receipt.sourceType === "transfer" && (
+                            <DashedPill tone="warning">Transfer from Main Store</DashedPill>
+                          )}
                           {receipt.sourceType === "location_transfer" && (
                             <DashedPill tone="warning">
                               Transfer from {receipt.transferFromLocationName ?? "another location"}
@@ -568,9 +713,12 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                       </td>
                       <td className="px-4 py-3 text-xs font-bold tabular-nums text-muted">
                         {receipt.itemCount} item{receipt.itemCount === 1 ? "" : "s"} ·{" "}
-                        {receipt.totalQuantityReceived} unit{receipt.totalQuantityReceived === 1 ? "" : "s"}
+                        {receipt.totalQuantityReceived} unit
+                        {receipt.totalQuantityReceived === 1 ? "" : "s"}
                       </td>
-                      <td className="truncate px-4 py-3 text-xs font-bold text-muted">{receipt.receivedByName}</td>
+                      <td className="truncate px-4 py-3 text-xs font-bold text-muted">
+                        {receipt.receivedByName}
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-2">
                           <button
@@ -618,7 +766,9 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                   }}
                   className={cn(
                     "flex-1 rounded-md px-2 py-1.5 text-[11px] font-extrabold uppercase tracking-wide transition cursor-pointer",
-                    destination === "main_store" ? "bg-primary text-white" : "text-muted hover:bg-white"
+                    destination === "main_store"
+                      ? "bg-primary text-white"
+                      : "text-muted hover:bg-white"
                   )}
                 >
                   Into Main Store
@@ -632,7 +782,9 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                 }}
                 className={cn(
                   "flex-1 rounded-md px-2 py-1.5 text-[11px] font-extrabold uppercase tracking-wide transition cursor-pointer",
-                  destination === "storefront" ? "bg-primary text-white" : "text-muted hover:bg-white"
+                  destination === "storefront"
+                    ? "bg-primary text-white"
+                    : "text-muted hover:bg-white"
                 )}
               >
                 Direct to Storefront
@@ -646,7 +798,9 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                   }}
                   className={cn(
                     "flex-1 rounded-md px-2 py-1.5 text-[11px] font-extrabold uppercase tracking-wide transition cursor-pointer",
-                    destination === "main_store_transfer" ? "bg-primary text-white" : "text-muted hover:bg-white"
+                    destination === "main_store_transfer"
+                      ? "bg-primary text-white"
+                      : "text-muted hover:bg-white"
                   )}
                 >
                   Transfer from Main Store
@@ -662,7 +816,10 @@ export function GoodsReceivedRoute(): React.JSX.Element {
               onChange={setAllocationStorefrontId}
               options={[
                 { value: "", label: "Unallocated" },
-                ...storefronts.map((location) => ({ value: location.id, label: location.locationName }))
+                ...storefronts.map((location) => ({
+                  value: location.id,
+                  label: location.locationName
+                }))
               ]}
               className="mt-3"
             />
@@ -673,14 +830,43 @@ export function GoodsReceivedRoute(): React.JSX.Element {
               onChange={setCreateLocationId}
               options={[
                 { value: "", label: "Select a storefront..." },
-                ...storefronts.map((location) => ({ value: location.id, label: location.locationName }))
+                ...storefronts.map((location) => ({
+                  value: location.id,
+                  label: location.locationName
+                }))
               ]}
               className="mt-3"
             />
           ) : null}
 
+          {destination === "main_store_transfer" &&
+            can("stock_requests", "view") &&
+            can("stock_requests", "approve") && (
+              <div className="mt-3">
+                <SelectField
+                  label="Fulfil stock request (optional)"
+                  value={linkedRequestId}
+                  onChange={setLinkedRequestId}
+                  options={[
+                    { value: "", label: "Unlinked transfer" },
+                    ...pendingRequests.map((request) => ({
+                      value: request.id,
+                      label: request.requestNumber
+                    }))
+                  ]}
+                />
+                <p className="mt-1 text-xs text-muted">
+                  Links this transfer to the selected request and marks it approved. Lower
+                  quantities record a partial dispatch.
+                </p>
+                {requestLoading && <p className="mt-1 text-xs text-muted">Loading request...</p>}
+              </div>
+            )}
+
           <div className="mt-4 flex items-center justify-between">
-            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Products</span>
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
+              Products
+            </span>
             <button
               type="button"
               onClick={() => setQuickCreateProductOpen(true)}
@@ -691,7 +877,10 @@ export function GoodsReceivedRoute(): React.JSX.Element {
             </button>
           </div>
           <div className="relative mt-1.5">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden="true" />
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted"
+              aria-hidden="true"
+            />
             <input
               type="text"
               value={productSearch}
@@ -709,7 +898,8 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                     className="flex w-full items-center justify-between px-3.5 py-2 text-left text-sm hover:bg-soft cursor-pointer"
                   >
                     <span className="font-bold text-ink">
-                      {product.name} <span className="font-semibold text-muted">({product.sku})</span>
+                      {product.name}{" "}
+                      <span className="font-semibold text-muted">({product.sku})</span>
                     </span>
                   </button>
                 ))}
@@ -722,15 +912,23 @@ export function GoodsReceivedRoute(): React.JSX.Element {
               <table className="w-full border-collapse text-xs">
                 <thead>
                   <tr className="bg-soft">
-                    <th className="px-3 py-2 text-left font-extrabold uppercase tracking-wider text-muted">Product</th>
-                    <th className="px-3 py-2 text-right font-extrabold uppercase tracking-wider text-muted">Qty Received</th>
+                    <th className="px-3 py-2 text-left font-extrabold uppercase tracking-wider text-muted">
+                      Product
+                    </th>
+                    <th className="px-3 py-2 text-right font-extrabold uppercase tracking-wider text-muted">
+                      Qty Received
+                    </th>
                     {destination === "main_store_transfer" && (
                       <th className="px-3 py-2 text-right font-extrabold uppercase tracking-wider text-muted">
                         Available at Main Store
                       </th>
                     )}
-                    <th className="px-3 py-2 text-right font-extrabold uppercase tracking-wider text-muted">Current Stock</th>
-                    <th className="px-3 py-2 text-right font-extrabold uppercase tracking-wider text-muted">New Total</th>
+                    <th className="px-3 py-2 text-right font-extrabold uppercase tracking-wider text-muted">
+                      Current Stock
+                    </th>
+                    <th className="px-3 py-2 text-right font-extrabold uppercase tracking-wider text-muted">
+                      New Total
+                    </th>
                     <th className="px-3 py-2" />
                   </tr>
                 </thead>
@@ -738,7 +936,8 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                   {createItems.map((item) => {
                     const currentStock = getCurrentStock(item.productId);
                     const availableToTransfer = getAvailableToTransfer(item.productId);
-                    const overRequested = destination === "main_store_transfer" && item.quantity > availableToTransfer;
+                    const overRequested =
+                      destination === "main_store_transfer" && item.quantity > availableToTransfer;
                     return (
                       <tr key={item.productId} className="border-t border-line">
                         <td className="px-3 py-2">
@@ -750,7 +949,9 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                             type="number"
                             min={1}
                             value={item.quantity === 0 ? "" : item.quantity}
-                            onChange={(event) => updateDraftItemQuantityDraft(item.productId, event.target.value)}
+                            onChange={(event) =>
+                              updateDraftItemQuantityDraft(item.productId, event.target.value)
+                            }
                             onBlur={() => updateDraftItemQuantity(item.productId, item.quantity)}
                             aria-label={`Quantity for ${item.productName}`}
                             className={cn(
@@ -774,7 +975,9 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                             {availableToTransfer}
                           </td>
                         )}
-                        <td className="px-3 py-2 text-right font-bold tabular-nums text-muted">{currentStock}</td>
+                        <td className="px-3 py-2 text-right font-bold tabular-nums text-muted">
+                          {currentStock}
+                        </td>
                         <td className="px-3 py-2 text-right font-extrabold tabular-nums text-success">
                           {currentStock + item.quantity}
                         </td>
@@ -815,10 +1018,12 @@ export function GoodsReceivedRoute(): React.JSX.Element {
             </Button>
             <Button
               type="submit"
-              disabled={createSaving}
+              disabled={createSaving || requestLoading}
               className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {createSaving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
+              {createSaving ? (
+                <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
+              ) : null}
               {createSaving ? "Recording..." : "Record Receipt"}
             </Button>
           </div>
@@ -843,13 +1048,15 @@ export function GoodsReceivedRoute(): React.JSX.Element {
               {viewingReceipt.allocationStorefrontName && (
                 <DashedPill tone="accent">For {viewingReceipt.allocationStorefrontName}</DashedPill>
               )}
-              {(viewingReceipt.sourceType === "transfer" || viewingReceipt.sourceType === "location_transfer") && (
+              {(viewingReceipt.sourceType === "transfer" ||
+                viewingReceipt.sourceType === "location_transfer") && (
                 <DashedPill tone="warning">
                   Transferred from {viewingReceipt.transferFromLocationName ?? "Main Store"}
                 </DashedPill>
               )}
               <span className="text-xs font-semibold text-muted">
-                Received by {viewingReceipt.receivedByName} · {formatDateTime(viewingReceipt.createdAt)}
+                Received by {viewingReceipt.receivedByName} ·{" "}
+                {formatDateTime(viewingReceipt.createdAt)}
               </span>
             </div>
 
@@ -863,10 +1070,17 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                     <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wider text-muted">
                       Received
                     </th>
-                    {(viewingReceipt.sourceType === "transfer" || viewingReceipt.sourceType === "location_transfer") && (
+                    {(viewingReceipt.sourceType === "transfer" ||
+                      viewingReceipt.sourceType === "location_transfer") && (
                       <>
-                        <QtyTh label="Qty Before" location={viewingReceipt.transferFromLocationName ?? "Main Store"} />
-                        <QtyTh label="Qty After" location={viewingReceipt.transferFromLocationName ?? "Main Store"} />
+                        <QtyTh
+                          label="Qty Before"
+                          location={viewingReceipt.transferFromLocationName ?? "Main Store"}
+                        />
+                        <QtyTh
+                          label="Qty After"
+                          location={viewingReceipt.transferFromLocationName ?? "Main Store"}
+                        />
                       </>
                     )}
                     <QtyTh label="Qty Before" location={viewingReceipt.locationName} />
@@ -880,15 +1094,26 @@ export function GoodsReceivedRoute(): React.JSX.Element {
                         <p className="font-extrabold text-ink">{item.productName}</p>
                         <p className="text-[10px] font-semibold text-muted">{item.sku}</p>
                       </td>
-                      <td className="px-3 py-2 text-right font-extrabold tabular-nums">{item.quantityReceived}</td>
-                      {(viewingReceipt.sourceType === "transfer" || viewingReceipt.sourceType === "location_transfer") && (
+                      <td className="px-3 py-2 text-right font-extrabold tabular-nums">
+                        {item.quantityReceived}
+                      </td>
+                      {(viewingReceipt.sourceType === "transfer" ||
+                        viewingReceipt.sourceType === "location_transfer") && (
                         <>
-                          <td className="px-3 py-2 text-right font-bold tabular-nums text-muted">{item.mainStorePreviousQuantity}</td>
-                          <td className="px-3 py-2 text-right font-extrabold tabular-nums text-danger">{item.mainStoreNewQuantity}</td>
+                          <td className="px-3 py-2 text-right font-bold tabular-nums text-muted">
+                            {item.mainStorePreviousQuantity}
+                          </td>
+                          <td className="px-3 py-2 text-right font-extrabold tabular-nums text-danger">
+                            {item.mainStoreNewQuantity}
+                          </td>
                         </>
                       )}
-                      <td className="px-3 py-2 text-right font-bold tabular-nums text-muted">{item.previousQuantity}</td>
-                      <td className="px-3 py-2 text-right font-extrabold tabular-nums text-success">{item.newQuantity}</td>
+                      <td className="px-3 py-2 text-right font-bold tabular-nums text-muted">
+                        {item.previousQuantity}
+                      </td>
+                      <td className="px-3 py-2 text-right font-extrabold tabular-nums text-success">
+                        {item.newQuantity}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -897,7 +1122,9 @@ export function GoodsReceivedRoute(): React.JSX.Element {
 
             {viewingReceipt.notes && (
               <div className="rounded-lg border border-line bg-soft/40 p-3">
-                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Notes</p>
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-muted">
+                  Notes
+                </p>
                 <p className="mt-1 text-sm font-semibold text-ink">{viewingReceipt.notes}</p>
               </div>
             )}

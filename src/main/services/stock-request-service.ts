@@ -1,11 +1,20 @@
+import { getDatabase } from "@main/database/connection";
+import { reconcileFulfilledStockRequests } from "@main/database/repositories/stock-request-reconciliation";
 import { runInTransaction } from "@main/database/connection";
 import * as inventoryRepository from "@main/database/repositories/inventory-repository";
 import * as locationRepository from "@main/database/repositories/location-repository";
 import * as productRepository from "@main/database/repositories/product-repository";
 import * as stockRequestRepository from "@main/database/repositories/stock-request-repository";
-import { getCurrentBranchScope, getCurrentEmployeeId, requirePermission } from "@main/services/auth-service";
+import {
+  getCurrentBranchScope,
+  getCurrentEmployeeId,
+  requirePermission
+} from "@main/services/auth-service";
 import { generateDocumentNumber } from "@main/services/document-number-service";
-import { computeStockRequestAvailability, distributeMainStoreStockCore } from "@main/services/main-store-service";
+import {
+  computeStockRequestAvailability,
+  distributeMainStoreStockCore
+} from "@main/services/main-store-service";
 import { assertNotAlreadyDecidedRemotely } from "@main/services/sync-engine";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import {
@@ -17,7 +26,11 @@ import {
   type StockRequestRejectInput
 } from "@shared/schemas/stock-request";
 import { isStorefrontType, type LocationType } from "@shared/types/location";
-import type { StockRequest, StockRequestItem, StockRequestListItem } from "@shared/types/stock-request";
+import type {
+  StockRequest,
+  StockRequestItem,
+  StockRequestListItem
+} from "@shared/types/stock-request";
 
 /** SR-D{n}-000001, SR-D{n}-000002, ... */
 function generateStockRequestNumber(tenantId: string): string {
@@ -67,6 +80,7 @@ function mapItemRow(row: stockRequestRepository.StockRequestItemRow): StockReque
 /** Throws "not found" (rather than a permission error) for a branch-scoped caller trying to read a
  * different storefront's request, so a Cashier probing ids can't tell the difference from a typo. */
 function buildStockRequest(id: string): StockRequest {
+  reconcileFulfilledStockRequests(getCurrentTenant().tenantId);
   const row = stockRequestRepository.findStockRequestRowById(id);
   if (!row) {
     throw new Error("Stock request not found");
@@ -86,6 +100,7 @@ export function listStockRequests(): StockRequestListItem[] {
   requirePermission("stock_requests", "view");
   const { tenantId } = getCurrentTenant();
   const locationId = getCurrentBranchScope();
+  reconcileFulfilledStockRequests(tenantId);
   return stockRequestRepository.findAllStockRequestRows(tenantId, locationId).map(mapListRow);
 }
 
@@ -96,6 +111,7 @@ export function listPendingStockRequests(): StockRequestListItem[] {
   requirePermission("stock_requests", "approve");
   const { tenantId } = getCurrentTenant();
   const locationId = getCurrentBranchScope();
+  reconcileFulfilledStockRequests(tenantId);
   return stockRequestRepository
     .findAllStockRequestRows(tenantId, locationId)
     .filter((row) => row.status === "pending")
@@ -125,7 +141,11 @@ export function createStockRequest(input: unknown): StockRequest {
     throw new Error("Choose which storefront this request is for");
   }
   const location = locationRepository.findLocationRowById(storefrontId);
-  if (!location || location.tenant_id !== tenantId || !isStorefrontType(location.location_type as LocationType)) {
+  if (
+    !location ||
+    location.tenant_id !== tenantId ||
+    !isStorefrontType(location.location_type as LocationType)
+  ) {
     throw new Error("Storefront not found");
   }
 
@@ -134,11 +154,17 @@ export function createStockRequest(input: unknown): StockRequest {
   // storefront's own earmark + the unallocated pool), nothing is inserted if any line is short.
   // Approval still re-checks at review time, since stock can move between request and review.
   const availableByProduct = new Map(
-    computeStockRequestAvailability(tenantId, storefrontId).map((row) => [row.productId, row.availableQuantity])
+    computeStockRequestAvailability(tenantId, storefrontId).map((row) => [
+      row.productId,
+      row.availableQuantity
+    ])
   );
   const requestedByProduct = new Map<string, number>();
   for (const item of parsed.items) {
-    requestedByProduct.set(item.productId, (requestedByProduct.get(item.productId) ?? 0) + item.quantity);
+    requestedByProduct.set(
+      item.productId,
+      (requestedByProduct.get(item.productId) ?? 0) + item.quantity
+    );
   }
   const shortages: string[] = [];
   for (const [productId, requested] of requestedByProduct) {
@@ -153,7 +179,9 @@ export function createStockRequest(input: unknown): StockRequest {
     }
   }
   if (shortages.length > 0) {
-    throw new Error(`Not enough stock at Main Store — ${shortages.join("; ")}. Reduce the quantity or remove the item.`);
+    throw new Error(
+      `Not enough stock at Main Store — ${shortages.join("; ")}. Reduce the quantity or remove the item.`
+    );
   }
 
   const requestNumber = generateStockRequestNumber(tenantId);
@@ -210,6 +238,7 @@ export async function approveStockRequest(id: string, input: unknown): Promise<S
     throw new Error("You must be signed in to do that");
   }
 
+  reconcileFulfilledStockRequests(getCurrentTenant().tenantId);
   const row = stockRequestRepository.findStockRequestRowById(id);
   if (!row) {
     throw new Error("Stock request not found");
@@ -242,29 +271,53 @@ export async function approveStockRequest(id: string, input: unknown): Promise<S
   }
 
   const availableByProduct = new Map(
-    computeStockRequestAvailability(tenantId, row.storefront_id).map((r) => [r.productId, r.availableQuantity])
+    computeStockRequestAvailability(tenantId, row.storefront_id).map((r) => [
+      r.productId,
+      r.availableQuantity
+    ])
   );
   const problems: string[] = [];
   for (const item of items) {
     const dispatched = dispatchByItemId.get(item.id) ?? 0;
     if (dispatched > item.quantity_requested) {
-      problems.push(`"${item.product_name}": can't dispatch more than the ${item.quantity_requested} requested`);
+      problems.push(
+        `"${item.product_name}": can't dispatch more than the ${item.quantity_requested} requested`
+      );
       continue;
     }
     const available = availableByProduct.get(item.product_id) ?? 0;
     if (dispatched > available) {
-      problems.push(`"${item.product_name}": only ${available} available at Main Store right now, tried to dispatch ${dispatched}`);
+      problems.push(
+        `"${item.product_name}": only ${available} available at Main Store right now, tried to dispatch ${dispatched}`
+      );
     }
   }
   if (problems.length > 0) {
-    throw new Error(`Can't dispatch as entered — ${problems.join("; ")}. Adjust the quantities and try again.`);
+    throw new Error(
+      `Can't dispatch as entered — ${problems.join("; ")}. Adjust the quantities and try again.`
+    );
   }
 
   runInTransaction(() => {
+    const current = stockRequestRepository.findStockRequestRowById(id);
+    const moved = getDatabase()
+      .prepare(
+        "SELECT 1 FROM stock_movements WHERE tenant_id = ? AND reference_type = 'stock_request_fulfillment' AND reference_id = ? LIMIT 1"
+      )
+      .get(tenantId, id);
+    const received = getDatabase()
+      .prepare("SELECT 1 FROM stock_receipts WHERE tenant_id = ? AND stock_request_id = ? LIMIT 1")
+      .get(tenantId, id);
+    if (!current || current.status !== "pending" || moved || received)
+      throw new Error(
+        "This request already has a decision or recorded stock transfer; refresh and review it before continuing"
+      );
     for (const item of items) {
       const quantityDispatched = dispatchByItemId.get(item.id) ?? 0;
-      const previousQuantity = inventoryRepository.findInventoryRow(item.product_id, row.storefront_id)?.quantity ?? 0;
-      const mainStorePreviousQuantity = inventoryRepository.findInventoryRow(item.product_id, mainStore.id)?.quantity ?? 0;
+      const previousQuantity =
+        inventoryRepository.findInventoryRow(item.product_id, row.storefront_id)?.quantity ?? 0;
+      const mainStorePreviousQuantity =
+        inventoryRepository.findInventoryRow(item.product_id, mainStore.id)?.quantity ?? 0;
 
       if (quantityDispatched > 0) {
         try {
@@ -316,6 +369,7 @@ export async function rejectStockRequest(id: string, input: unknown): Promise<St
     throw new Error("You must be signed in to do that");
   }
 
+  reconcileFulfilledStockRequests(getCurrentTenant().tenantId);
   const row = stockRequestRepository.findStockRequestRowById(id);
   if (!row) {
     throw new Error("Stock request not found");
@@ -325,6 +379,19 @@ export async function rejectStockRequest(id: string, input: unknown): Promise<St
   }
   await assertNotAlreadyDecidedRemotely("stock_requests", id, "pending");
 
+  const stillPending = stockRequestRepository.findStockRequestRowById(id)?.status === "pending";
+  const moved = getDatabase()
+    .prepare(
+      "SELECT 1 FROM stock_movements WHERE reference_type = 'stock_request_fulfillment' AND reference_id = ? LIMIT 1"
+    )
+    .get(id);
+  const receipt = getDatabase()
+    .prepare("SELECT 1 FROM stock_receipts WHERE stock_request_id = ? LIMIT 1")
+    .get(id);
+  if (!stillPending || moved || receipt)
+    throw new Error(
+      "This request already has a decision or recorded stock transfer; refresh and review it before continuing"
+    );
   stockRequestRepository.updateStockRequestStatusRow(id, {
     status: "rejected",
     rejectionReason: parsed.reason,

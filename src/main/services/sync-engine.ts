@@ -1,3 +1,4 @@
+import { reconcileFulfilledStockRequests } from "@main/database/repositories/stock-request-reconciliation";
 import { randomUUID } from "node:crypto";
 import type { SQLInputValue } from "node:sqlite";
 import electron from "electron";
@@ -176,9 +177,9 @@ const CONFLICT_AWARE_ENTITIES = new Set<SyncEntity>([
 /** Exported for sync-service.ts's getSyncSnapshot() — the UI-facing "what's the current sync state"
  * reader shares this app_settings-backed storage rather than duplicating the read logic. */
 export function readSetting<T>(key: string): T | null {
-  const row = getDatabase().prepare("SELECT value_json FROM app_settings WHERE key = ?").get(key) as
-    | { value_json: string }
-    | undefined;
+  const row = getDatabase()
+    .prepare("SELECT value_json FROM app_settings WHERE key = ?")
+    .get(key) as { value_json: string } | undefined;
   if (!row) return null;
   try {
     return JSON.parse(row.value_json) as T;
@@ -233,7 +234,12 @@ function beginRunReport(): void {
   };
 }
 
-function recordPullStat(delta: { pulled?: number; recovered?: number; dangling?: number; orphaned?: number }): void {
+function recordPullStat(delta: {
+  pulled?: number;
+  recovered?: number;
+  dangling?: number;
+  orphaned?: number;
+}): void {
   if (!runReport) return;
   runReport.pulled += delta.pulled ?? 0;
   runReport.recovered += delta.recovered ?? 0;
@@ -241,7 +247,11 @@ function recordPullStat(delta: { pulled?: number; recovered?: number; dangling?:
   runReport.orphaned += delta.orphaned ?? 0;
 }
 
-function recordPushStat(delta: { pushed?: number; pushFailed?: number; pushDeferred?: number }): void {
+function recordPushStat(delta: {
+  pushed?: number;
+  pushFailed?: number;
+  pushDeferred?: number;
+}): void {
   if (!runReport) return;
   runReport.pushed += delta.pushed ?? 0;
   runReport.pushFailed += delta.pushFailed ?? 0;
@@ -313,7 +323,12 @@ export async function assertNotAlreadyDecidedRemotely(
     response = await fetch(`${API_BASE_URL}/sync/row-status`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tenantId: identity.tenantId, deviceId: identity.deviceId, entity, id }),
+      body: JSON.stringify({
+        tenantId: identity.tenantId,
+        deviceId: identity.deviceId,
+        entity,
+        id
+      }),
       signal: AbortSignal.timeout(5_000)
     });
   } catch {
@@ -321,15 +336,17 @@ export async function assertNotAlreadyDecidedRemotely(
   }
   if (!response.ok) return;
 
-  const body = (await response.json().catch(() => null)) as
-    | { found: boolean; status: string | null }
-    | null;
+  const body = (await response.json().catch(() => null)) as {
+    found: boolean;
+    status: string | null;
+  } | null;
   if (!body || !body.found || body.status === null || body.status === expectedPendingStatus) return;
 
   // Someone else already decided this — refresh local state right away rather than leaving this
   // device showing "pending" until its next scheduled pull.
   void pullDeltas();
-  const verb = body.status === "approved" ? "approved" : body.status === "rejected" ? "rejected" : "decided";
+  const verb =
+    body.status === "approved" ? "approved" : body.status === "rejected" ? "rejected" : "decided";
   throw new Error(`This request was already ${verb} on another device.`);
 }
 
@@ -625,7 +642,9 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
     if (!row) return null;
 
     const itemRows = getDatabase()
-      .prepare("SELECT * FROM stock_request_items WHERE stock_request_id = ? ORDER BY created_at ASC")
+      .prepare(
+        "SELECT * FROM stock_request_items WHERE stock_request_id = ? ORDER BY created_at ASC"
+      )
       .all(id) as Array<{
       id: string;
       product_id: string;
@@ -678,7 +697,9 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
   // Same document-with-line-items shape as stock_requests. productId is null on a free-text line
   // until an approver links it (itemName always carries what was asked for).
   purchase_requisitions: (id) => {
-    const row = getDatabase().prepare("SELECT * FROM purchase_requisitions WHERE id = ?").get(id) as
+    const row = getDatabase()
+      .prepare("SELECT * FROM purchase_requisitions WHERE id = ?")
+      .get(id) as
       | {
           id: string;
           requisition_number: string;
@@ -699,7 +720,9 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
     if (!row) return null;
 
     const itemRows = getDatabase()
-      .prepare("SELECT * FROM purchase_requisition_items WHERE purchase_requisition_id = ? ORDER BY created_at ASC")
+      .prepare(
+        "SELECT * FROM purchase_requisition_items WHERE purchase_requisition_id = ? ORDER BY created_at ASC"
+      )
       .all(id) as Array<{
       id: string;
       product_id: string | null;
@@ -744,6 +767,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       | {
           id: string;
           receipt_number: string;
+          stock_request_id: string | null;
           location_id: string;
           allocation_storefront_id: string | null;
           received_by: string;
@@ -756,7 +780,9 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
     if (!row) return null;
 
     const itemRows = getDatabase()
-      .prepare("SELECT * FROM stock_receipt_items WHERE stock_receipt_id = ? ORDER BY created_at ASC")
+      .prepare(
+        "SELECT * FROM stock_receipt_items WHERE stock_receipt_id = ? ORDER BY created_at ASC"
+      )
       .all(id) as Array<{
       id: string;
       product_id: string;
@@ -771,6 +797,7 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
     return {
       id: row.id,
       receiptNumber: row.receipt_number,
+      stockRequestId: row.stock_request_id,
       // locationId/allocationStorefrontId/receivedBy are flat header columns, alias-translated
       // generically by resolvePayloadRefsForPush via refColumnsFor's bespokeColumns entry below —
       // only item.productId (nested inside the items JSON array) needs a manual resolveCloudRef call
@@ -1292,19 +1319,21 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       createdAt: i.created_at
     }));
 
-    const serviceCharges = serviceChargeRepository.findServiceChargeRowsForQuotation(id).map((s) => ({
-      id: s.id,
-      name: s.name,
-      feeCents: s.fee_cents,
-      costCents: s.cost_cents,
-      // Client request: now sent — see ServiceChargeTaxType's own doc comment
-      // (shared/schemas/charges.ts).
-      taxType: s.tax_type,
-      taxInclusive: s.tax_inclusive === null ? null : Boolean(s.tax_inclusive),
-      taxAmountCents: s.tax_amount_cents,
-      lineTotalCents: s.line_total_cents,
-      createdAt: s.created_at
-    }));
+    const serviceCharges = serviceChargeRepository
+      .findServiceChargeRowsForQuotation(id)
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        feeCents: s.fee_cents,
+        costCents: s.cost_cents,
+        // Client request: now sent — see ServiceChargeTaxType's own doc comment
+        // (shared/schemas/charges.ts).
+        taxType: s.tax_type,
+        taxInclusive: s.tax_inclusive === null ? null : Boolean(s.tax_inclusive),
+        taxAmountCents: s.tax_amount_cents,
+        lineTotalCents: s.line_total_cents,
+        createdAt: s.created_at
+      }));
 
     const deliveryRow = deliveryNoteRepository.findDeliveryNoteRowByQuotationId(id);
     const delivery = deliveryRow
@@ -1529,7 +1558,11 @@ function loadPendingOutboxGroups(): OutboxGroup[] {
     )
     .all() as Array<{ entity: SyncEntity; entity_id: string; is_delete: number }>;
 
-  return rows.map((r) => ({ entity: r.entity, entityId: r.entity_id, isDelete: r.is_delete === 1 }));
+  return rows.map((r) => ({
+    entity: r.entity,
+    entityId: r.entity_id,
+    isDelete: r.is_delete === 1
+  }));
 }
 
 function markOutboxSynced(entity: SyncEntity, entityId: string): void {
@@ -1610,7 +1643,9 @@ function markSourceRowSynced(entity: SyncEntity, id: string): void {
  * this row's NEXT push. */
 function markSyncedBaseline(entity: SyncEntity, id: string, localUpdatedAt: string): void {
   if (!CONFLICT_AWARE_ENTITIES.has(entity)) return;
-  getDatabase().prepare(`UPDATE ${entity} SET synced_updated_at = ? WHERE id = ?`).run(localUpdatedAt, id);
+  getDatabase()
+    .prepare(`UPDATE ${entity} SET synced_updated_at = ? WHERE id = ?`)
+    .run(localUpdatedAt, id);
 }
 
 /** Rows per /sync/push HTTP call. This is what caps request body size, NOT a limit on how many
@@ -1680,7 +1715,13 @@ async function pushOneBatch(
   }
 
   const body = (await response.json().catch(() => null)) as {
-    results: Array<{ id: string; status: string; error?: string; serverRow?: unknown; canonicalId?: string }>;
+    results: Array<{
+      id: string;
+      status: string;
+      error?: string;
+      serverRow?: unknown;
+      canonicalId?: string;
+    }>;
   } | null;
   if (!body) return;
 
@@ -1704,11 +1745,27 @@ async function pushOneBatch(
         if (payload) markSyncedBaseline(entity, result.id, payload.localUpdatedAt as string);
         recordPushStat({ pushed: 1 });
       } else if (result.status === "conflict") {
-        markOutboxConflict(entity, result.id, result.serverRow);
+        const decision = result.serverRow as Record<string, unknown> | undefined;
+        if (
+          entity === "stock_requests" &&
+          byId.get(result.id)?.status === "pending" &&
+          decision?.status === "approved"
+        ) {
+          applyPulledRow(entity, decision, true);
+          markOutboxSynced(entity, result.id);
+          markSourceRowSynced(entity, result.id);
+          markSyncedBaseline(entity, result.id, decision.localUpdatedAt as string);
+        } else {
+          markOutboxConflict(entity, result.id, result.serverRow);
+        }
       } else if (result.status === "deferred") {
         // Server rejected it because a referenced row isn't on the cloud yet — keep it queued and
         // retry, don't drop it (the old behavior was a silent "ok" that lost the row permanently).
-        markOutboxDeferred(entity, result.id, result.error ?? "waiting on a referenced record to sync");
+        markOutboxDeferred(
+          entity,
+          result.id,
+          result.error ?? "waiting on a referenced record to sync"
+        );
         recordPushStat({ pushDeferred: 1 });
       } else if (result.status === "aliased" && result.canonicalId) {
         // The server already had a row for this same natural key (roles/employees/payment_methods/
@@ -1775,8 +1832,13 @@ export async function pushOutbox(): Promise<void> {
     const upsertRows = items
       .filter((i) => !i.isDelete)
       .map((i) => ({ entityId: i.entityId, payload: PAYLOAD_BUILDERS[entity](i.entityId) }))
-      .filter((r): r is { entityId: string; payload: Record<string, unknown> } => r.payload !== null)
-      .map((r) => ({ entityId: r.entityId, payload: resolvePayloadRefsForPush(entity, r.payload) }));
+      .filter(
+        (r): r is { entityId: string; payload: Record<string, unknown> } => r.payload !== null
+      )
+      .map((r) => ({
+        entityId: r.entityId,
+        payload: resolvePayloadRefsForPush(entity, r.payload)
+      }));
 
     await pushBatch(identity.tenantId, identity.deviceId, entity, upsertRows);
   }
@@ -1994,8 +2056,18 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       // device's payload that predates this feature (missing these keys entirely) doesn't crash
       // trying to bind undefined into a NOT NULL column — same bug class as
       // [[project_syncedat_update_propagation_bug]]'s sibling issues this session.
-      { local: "default_allowances_json", cloud: "defaultAllowancesJson", type: "json", default: "[]" },
-      { local: "default_deductions_json", cloud: "defaultDeductionsJson", type: "json", default: "[]" },
+      {
+        local: "default_allowances_json",
+        cloud: "defaultAllowancesJson",
+        type: "json",
+        default: "[]"
+      },
+      {
+        local: "default_deductions_json",
+        cloud: "defaultDeductionsJson",
+        type: "json",
+        default: "[]"
+      },
       { local: "photo_path", cloud: "photoPath" }
     ]
   },
@@ -2060,11 +2132,26 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       // on a storefront it owns would push a payload missing these keys entirely; without this
       // default, toLocalValue's undefined-fallback would bind a bare null into a NOT NULL column
       // and crash the pull, exactly like sale_items.local_supplier_id did before it got one.
-      { local: "show_product_images_on_invoices", cloud: "showProductImagesOnInvoices", type: "bool", default: 0 },
-      { local: "show_product_images_on_quotations", cloud: "showProductImagesOnQuotations", type: "bool", default: 0 },
+      {
+        local: "show_product_images_on_invoices",
+        cloud: "showProductImagesOnInvoices",
+        type: "bool",
+        default: 0
+      },
+      {
+        local: "show_product_images_on_quotations",
+        cloud: "showProductImagesOnQuotations",
+        type: "bool",
+        default: 0
+      },
       // Same older-device-safety reasoning as the two fields above, but this one's own column
       // default is 1 (true), not 0 — matching include_business_info's own default polarity.
-      { local: "default_include_business_info", cloud: "defaultIncludeBusinessInfo", type: "bool", default: 1 }
+      {
+        local: "default_include_business_info",
+        cloud: "defaultIncludeBusinessInfo",
+        type: "bool",
+        default: 1
+      }
     ]
   },
   // Not a boot-seeded default — created on-demand the first time a Super Admin configures hours for
@@ -2111,10 +2198,20 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       { local: "kind", cloud: "kind", default: "general" },
       { local: "expense_number", cloud: "expenseNumber" },
       { local: "expense_date", cloud: "expenseDate" },
-      { local: "category_id", cloud: "categoryId", refEntity: "expense_categories", refNotNull: true },
+      {
+        local: "category_id",
+        cloud: "categoryId",
+        refEntity: "expense_categories",
+        refNotNull: true
+      },
       { local: "amount_cents", cloud: "amountCents" },
       { local: "paid_by", cloud: "paidBy" },
-      { local: "payment_method_id", cloud: "paymentMethodId", refEntity: "payment_methods", refNotNull: true },
+      {
+        local: "payment_method_id",
+        cloud: "paymentMethodId",
+        refEntity: "payment_methods",
+        refNotNull: true
+      },
       { local: "storefront_id", cloud: "storefrontId", refEntity: "locations" },
       { local: "reference", cloud: "reference" },
       { local: "description", cloud: "description" },
@@ -2137,7 +2234,12 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
       { local: "allowances_cents", cloud: "allowancesCents" },
       { local: "deductions_cents", cloud: "deductionsCents" },
       { local: "net_pay_cents", cloud: "netPayCents" },
-      { local: "payment_method_id", cloud: "paymentMethodId", refEntity: "payment_methods", refNotNull: true },
+      {
+        local: "payment_method_id",
+        cloud: "paymentMethodId",
+        refEntity: "payment_methods",
+        refNotNull: true
+      },
       { local: "payment_reference", cloud: "paymentReference" },
       { local: "status", cloud: "status" },
       { local: "notes", cloud: "notes" },
@@ -2167,7 +2269,12 @@ const APPLY_CONFIG: Partial<Record<SyncEntity, EntityApplyConfig>> = {
   customer_subscription_notices: {
     table: "customer_subscription_notices",
     columns: [
-      { local: "subscription_id", cloud: "subscriptionId", refEntity: "customer_subscriptions", refNotNull: true },
+      {
+        local: "subscription_id",
+        cloud: "subscriptionId",
+        refEntity: "customer_subscriptions",
+        refNotNull: true
+      },
       { local: "stage", cloud: "stage" },
       { local: "channel", cloud: "channel" },
       { local: "recipient", cloud: "recipient" },
@@ -2222,7 +2329,9 @@ function toLocalValue(value: unknown, col: ColumnMap): SQLInputValue {
   if (col.type === "bool") return value ? 1 : 0;
   if (col.type === "json") return JSON.stringify(value);
   if (col.refEntity) {
-    return (col.refNotNull ? resolveRef(col.refEntity, value) : resolveRefOrNull(col.refEntity, value)) as SQLInputValue;
+    return (
+      col.refNotNull ? resolveRef(col.refEntity, value) : resolveRefOrNull(col.refEntity, value)
+    ) as SQLInputValue;
   }
   return value as SQLInputValue;
 }
@@ -2277,7 +2386,9 @@ function resolveRef(entity: SyncEntity, value: unknown): unknown {
 function resolveRefOrNull(entity: SyncEntity, value: unknown): unknown {
   const resolved = resolveRef(entity, value);
   if (resolved === null || resolved === undefined) return resolved;
-  const exists = getDatabase().prepare(`SELECT 1 FROM ${entity} WHERE id = ?`).get(resolved as SQLInputValue);
+  const exists = getDatabase()
+    .prepare(`SELECT 1 FROM ${entity} WHERE id = ?`)
+    .get(resolved as SQLInputValue);
   return exists ? resolved : null;
 }
 
@@ -2318,7 +2429,12 @@ export function resolveCloudRef(entity: SyncEntity, value: unknown): unknown {
  * payment method that was never actually inserted there under that id (the exact mechanism behind
  * [[project_dangling_ref_cursor_freeze_bug]]'s frozen cursor on the OTHER device pulling it back). */
 function refColumnsFor(entity: SyncEntity): Array<{ cloud: string; refEntity: SyncEntity }> {
-  const bespokeColumns: Partial<Record<SyncEntity, Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }>>> = {
+  const bespokeColumns: Partial<
+    Record<
+      SyncEntity,
+      Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }>
+    >
+  > = {
     purchases: PURCHASE_HEADER_COLUMNS,
     borrows: BORROW_HEADER_COLUMNS,
     quotations: QUOTATION_HEADER_COLUMNS,
@@ -2332,13 +2448,18 @@ function refColumnsFor(entity: SyncEntity): Array<{ cloud: string; refEntity: Sy
     purchase_requisitions: PURCHASE_REQUISITION_HEADER_COLUMNS
   };
   const columns = APPLY_CONFIG[entity]?.columns ?? bespokeColumns[entity] ?? [];
-  return columns.filter((c): c is { local: string; cloud: string; refEntity: SyncEntity } => Boolean(c.refEntity));
+  return columns.filter((c): c is { local: string; cloud: string; refEntity: SyncEntity } =>
+    Boolean(c.refEntity)
+  );
 }
 
 /** Applied to every payload right before it's pushed — rewrites any refEntity-tagged field (see
  * refColumnsFor above) through resolveCloudRef, so a push can never carry a reference to an id the
  * cloud has already reconciled away. */
-function resolvePayloadRefsForPush(entity: SyncEntity, payload: Record<string, unknown>): Record<string, unknown> {
+function resolvePayloadRefsForPush(
+  entity: SyncEntity,
+  payload: Record<string, unknown>
+): Record<string, unknown> {
   for (const column of refColumnsFor(entity)) {
     if (payload[column.cloud] !== undefined) {
       payload[column.cloud] = resolveCloudRef(column.refEntity, payload[column.cloud]);
@@ -2391,9 +2512,9 @@ function applyPulledRow(entity: SyncEntity, row: Record<string, unknown>, force 
   // updating the row that's genuinely already there.
   const resolvedId = config.naturalKey ? (resolveRef(entity, id) as string) : id;
 
-  let existing = db.prepare(`SELECT id, updated_at FROM ${config.table} WHERE id = ?`).get(resolvedId) as
-    | { id: string; updated_at: string }
-    | undefined;
+  let existing = db
+    .prepare(`SELECT id, updated_at FROM ${config.table} WHERE id = ?`)
+    .get(resolvedId) as { id: string; updated_at: string } | undefined;
 
   // Reference data seeded locally at every boot (default roles, the SYSTEM employee, default
   // payment methods/expense categories, the Main Store location) gets a fresh id on EVERY device —
@@ -2422,7 +2543,11 @@ function applyPulledRow(entity: SyncEntity, row: Record<string, unknown>, force 
     }
   }
 
-  if (!force && existing && new Date(existing.updated_at).getTime() >= new Date(localUpdatedAt).getTime()) {
+  if (
+    !force &&
+    existing &&
+    new Date(existing.updated_at).getTime() >= new Date(localUpdatedAt).getTime()
+  ) {
     return; // local is already same-or-newer — never overwrite a more recent local edit.
   }
 
@@ -2454,7 +2579,9 @@ function applyPulledRow(entity: SyncEntity, row: Record<string, unknown>, force 
       now,
       ...(isConflictAware ? [localUpdatedAt] : [])
     ];
-    db.prepare(`INSERT INTO ${config.table} (${columns.join(", ")}) VALUES (${placeholders})`).run(...values);
+    db.prepare(`INSERT INTO ${config.table} (${columns.join(", ")}) VALUES (${placeholders})`).run(
+      ...values
+    );
   } else {
     const setClauses = [
       ...config.columns.map((c) => `${c.local} = ?`),
@@ -2479,7 +2606,12 @@ function applyPulledRow(entity: SyncEntity, row: Record<string, unknown>, force 
 
 /** Sale's business fields, header-row only — mirrors the generic ColumnMap shape but kept separate
  * from APPLY_CONFIG since the header alone isn't the whole story for this entity (see below). */
-const SALE_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }> = [
+const SALE_HEADER_COLUMNS: Array<{
+  local: string;
+  cloud: string;
+  refEntity?: SyncEntity;
+  refNotNull?: boolean;
+}> = [
   { local: "receipt_number", cloud: "receiptNumber" },
   { local: "location_id", cloud: "locationId", refEntity: "locations", refNotNull: true },
   { local: "employee_id", cloud: "employeeId", refEntity: "employees", refNotNull: true },
@@ -2536,15 +2668,20 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
   // sale" on every OTHER device's Checkout screen on every sync cycle — it doesn't fix the source
   // (the stale device itself needs updating), but it stops the symptom from spreading.
   if (row.saleStatus === "pending") {
-    console.warn(`[sync] ignored a 'pending' sale pulled from the cloud (${id}) — held sales are local-only; source device is likely still running old code`);
+    console.warn(
+      `[sync] ignored a 'pending' sale pulled from the cloud (${id}) — held sales are local-only; source device is likely still running old code`
+    );
     return;
   }
 
   const existing = db.prepare("SELECT updated_at FROM sales WHERE id = ?").get(id) as
-    | { updated_at: string }
-    | undefined;
+    { updated_at: string } | undefined;
 
-  if (!force && existing && new Date(existing.updated_at).getTime() >= new Date(localUpdatedAt).getTime()) {
+  if (
+    !force &&
+    existing &&
+    new Date(existing.updated_at).getTime() >= new Date(localUpdatedAt).getTime()
+  ) {
     return;
   }
 
@@ -2577,7 +2714,9 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         ...SALE_HEADER_COLUMNS.map(
           (c) =>
             (c.refEntity
-              ? ((c.refNotNull ? resolveRef(c.refEntity, row[c.cloud]) : resolveRefOrNull(c.refEntity, row[c.cloud])) as SQLInputValue)
+              ? ((c.refNotNull
+                  ? resolveRef(c.refEntity, row[c.cloud])
+                  : resolveRefOrNull(c.refEntity, row[c.cloud])) as SQLInputValue)
               : (row[c.cloud] as SQLInputValue)) ?? null
         ),
         JSON.stringify(row.payments ?? []),
@@ -2598,7 +2737,9 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         now,
         ...(isConflictAware ? [localUpdatedAt] : [])
       ];
-      db.prepare(`INSERT INTO sales (${columns.join(", ")}) VALUES (${placeholders})`).run(...values);
+      db.prepare(`INSERT INTO sales (${columns.join(", ")}) VALUES (${placeholders})`).run(
+        ...values
+      );
     } else {
       const setClauses = [
         ...SALE_HEADER_COLUMNS.map((c) => `${c.local} = ?`),
@@ -2616,7 +2757,9 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         ...SALE_HEADER_COLUMNS.map(
           (c) =>
             (c.refEntity
-              ? ((c.refNotNull ? resolveRef(c.refEntity, row[c.cloud]) : resolveRefOrNull(c.refEntity, row[c.cloud])) as SQLInputValue)
+              ? ((c.refNotNull
+                  ? resolveRef(c.refEntity, row[c.cloud])
+                  : resolveRefOrNull(c.refEntity, row[c.cloud])) as SQLInputValue)
               : (row[c.cloud] as SQLInputValue)) ?? null
         ),
         JSON.stringify(row.payments ?? []),
@@ -2663,7 +2806,10 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         // undefined bind parameter (unlike null, which is fine), so without normalizing first this
         // crashed the WHOLE row — every sale from a pre-feature device, not just ones that actually
         // used local sourcing.
-        resolveRefOrNull("suppliers", (item.localSupplierId as string | null | undefined) ?? null) as string | null,
+        resolveRefOrNull(
+          "suppliers",
+          (item.localSupplierId as string | null | undefined) ?? null
+        ) as string | null,
         // Older device's payload predates this field entirely too — same fallback reasoning as
         // localCostCents above.
         (item.sectionLabel as string | null | undefined) ?? null,
@@ -2699,7 +2845,11 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
         // Older device's payload predates these fields entirely — same fallback reasoning as
         // taxType/sectionLabel above for sale_items.
         (charge.taxType as string | undefined) ?? "none",
-        charge.taxInclusive === undefined || charge.taxInclusive === null ? null : charge.taxInclusive ? 1 : 0,
+        charge.taxInclusive === undefined || charge.taxInclusive === null
+          ? null
+          : charge.taxInclusive
+            ? 1
+            : 0,
         (charge.taxAmountCents as number | undefined) ?? 0,
         (charge.lineTotalCents as number | undefined) ?? (charge.feeCents as number),
         charge.createdAt as string
@@ -2737,7 +2887,10 @@ function applySalePulledRow(row: Record<string, unknown>, force: boolean): void 
  * through unchanged. SQLite's own constraint-failed message lists the exact column pair, so matching
  * on that text is precise, not a guess. */
 function isDeliveryNoteNumberCollision(err: unknown): boolean {
-  return err instanceof Error && err.message.includes("delivery_notes.tenant_id, delivery_notes.delivery_note_number");
+  return (
+    err instanceof Error &&
+    err.message.includes("delivery_notes.tenant_id, delivery_notes.delivery_note_number")
+  );
 }
 
 /** Inserts one pulled delivery note. A UNIQUE(tenant_id, delivery_note_number) collision here means
@@ -2813,7 +2966,10 @@ function insertPulledDeliveryNote(
     // Deterministic per delivery id (not random/timestamp-based) — so if this same pulled row is
     // retried on a later cycle before it's ever fully committed, it renumbers to the exact same
     // disambiguated value every time instead of drifting.
-    const suffix = fields.id.replace(/[^a-zA-Z0-9]/g, "").slice(-6).toUpperCase();
+    const suffix = fields.id
+      .replace(/[^a-zA-Z0-9]/g, "")
+      .slice(-6)
+      .toUpperCase();
     const disambiguated = `${fields.deliveryNoteNumber}-${suffix}`;
     console.error(
       `[sync] delivery note number "${fields.deliveryNoteNumber}" collided with an existing local ` +
@@ -2834,7 +2990,12 @@ function insertPulledDeliveryNote(
  * sale_return line items don't). */
 function upsertDocumentHeader(
   table: string,
-  businessColumns: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }>,
+  businessColumns: Array<{
+    local: string;
+    cloud: string;
+    refEntity?: SyncEntity;
+    refNotNull?: boolean;
+  }>,
   jsonColumns: Array<{ local: string; cloud: string }>,
   row: Record<string, unknown>,
   force: boolean
@@ -2845,10 +3006,13 @@ function upsertDocumentHeader(
   const localCreatedAt = (row.localCreatedAt as string | null) ?? localUpdatedAt;
 
   const existing = db.prepare(`SELECT updated_at FROM ${table} WHERE id = ?`).get(id) as
-    | { updated_at: string }
-    | undefined;
+    { updated_at: string } | undefined;
 
-  if (!force && existing && new Date(existing.updated_at).getTime() >= new Date(localUpdatedAt).getTime()) {
+  if (
+    !force &&
+    existing &&
+    new Date(existing.updated_at).getTime() >= new Date(localUpdatedAt).getTime()
+  ) {
     return null;
   }
 
@@ -2877,7 +3041,9 @@ function upsertDocumentHeader(
       ...businessColumns.map(
         (c) =>
           (c.refEntity
-            ? ((c.refNotNull ? resolveRef(c.refEntity, row[c.cloud]) : resolveRefOrNull(c.refEntity, row[c.cloud])) as SQLInputValue)
+            ? ((c.refNotNull
+                ? resolveRef(c.refEntity, row[c.cloud])
+                : resolveRefOrNull(c.refEntity, row[c.cloud])) as SQLInputValue)
             : (row[c.cloud] as SQLInputValue)) ?? null
       ),
       ...jsonColumns.map((c) => JSON.stringify(row[c.cloud] ?? null)),
@@ -2887,7 +3053,9 @@ function upsertDocumentHeader(
       now,
       ...(isConflictAware ? [localUpdatedAt] : [])
     ];
-    db.prepare(`INSERT INTO ${table} (${columns.join(", ")}) VALUES (${placeholders})`).run(...values);
+    db.prepare(`INSERT INTO ${table} (${columns.join(", ")}) VALUES (${placeholders})`).run(
+      ...values
+    );
   } else {
     const setClauses = [
       ...businessColumns.map((c) => `${c.local} = ?`),
@@ -2901,7 +3069,9 @@ function upsertDocumentHeader(
       ...businessColumns.map(
         (c) =>
           (c.refEntity
-            ? ((c.refNotNull ? resolveRef(c.refEntity, row[c.cloud]) : resolveRefOrNull(c.refEntity, row[c.cloud])) as SQLInputValue)
+            ? ((c.refNotNull
+                ? resolveRef(c.refEntity, row[c.cloud])
+                : resolveRefOrNull(c.refEntity, row[c.cloud])) as SQLInputValue)
             : (row[c.cloud] as SQLInputValue)) ?? null
       ),
       ...jsonColumns.map((c) => JSON.stringify(row[c.cloud] ?? null)),
@@ -2916,7 +3086,12 @@ function upsertDocumentHeader(
   return localTenantId;
 }
 
-const QUOTATION_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }> = [
+const QUOTATION_HEADER_COLUMNS: Array<{
+  local: string;
+  cloud: string;
+  refEntity?: SyncEntity;
+  refNotNull?: boolean;
+}> = [
   { local: "quotation_number", cloud: "quotationNumber" },
   // Nullable now, same as SALE_HEADER_COLUMNS' own customer_id (walk-in quotations) — was
   // refNotNull: true, which meant a quotation whose customer became genuinely unresolvable (e.g. a
@@ -2944,7 +3119,13 @@ const QUOTATION_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?
 function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): void {
   runInTransaction(() => {
     const id = row.id as string;
-    const localTenantId = upsertDocumentHeader("quotations", QUOTATION_HEADER_COLUMNS, [], row, force);
+    const localTenantId = upsertDocumentHeader(
+      "quotations",
+      QUOTATION_HEADER_COLUMNS,
+      [],
+      row,
+      force
+    );
     if (!localTenantId) return;
 
     const db = getDatabase();
@@ -2992,7 +3173,10 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
         // see applySalePulledRow's own identical comment for sale_items.
         item.isLocallySourced ? 1 : 0,
         (item.localCostCents as number | null | undefined) ?? null,
-        resolveRefOrNull("suppliers", (item.localSupplierId as string | null | undefined) ?? null) as string | null,
+        resolveRefOrNull(
+          "suppliers",
+          (item.localSupplierId as string | null | undefined) ?? null
+        ) as string | null,
         (item.sectionLabel as string | null | undefined) ?? null,
         // Older device's payload predates variants — same fallback as sectionLabel.
         (item.variantKey as string | null | undefined) ?? null,
@@ -3017,7 +3201,11 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
         charge.feeCents as number,
         (charge.costCents as number | undefined) ?? 0,
         (charge.taxType as string | undefined) ?? "none",
-        charge.taxInclusive === undefined || charge.taxInclusive === null ? null : charge.taxInclusive ? 1 : 0,
+        charge.taxInclusive === undefined || charge.taxInclusive === null
+          ? null
+          : charge.taxInclusive
+            ? 1
+            : 0,
         (charge.taxAmountCents as number | undefined) ?? 0,
         (charge.lineTotalCents as number | undefined) ?? (charge.feeCents as number),
         charge.createdAt as string
@@ -3050,7 +3238,12 @@ function applyQuotationPulledRow(row: Record<string, unknown>, force: boolean): 
   });
 }
 
-const PURCHASE_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }> = [
+const PURCHASE_HEADER_COLUMNS: Array<{
+  local: string;
+  cloud: string;
+  refEntity?: SyncEntity;
+  refNotNull?: boolean;
+}> = [
   { local: "purchase_number", cloud: "purchaseNumber" },
   // Same missing-tag bug as SALE_HEADER_COLUMNS' customer_id — fixed identically.
   { local: "supplier_id", cloud: "supplierId", refEntity: "suppliers", refNotNull: true },
@@ -3143,7 +3336,12 @@ function applyPurchasePulledRow(row: Record<string, unknown>, force: boolean): v
   });
 }
 
-const BORROW_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }> = [
+const BORROW_HEADER_COLUMNS: Array<{
+  local: string;
+  cloud: string;
+  refEntity?: SyncEntity;
+  refNotNull?: boolean;
+}> = [
   { local: "borrow_number", cloud: "borrowNumber" },
   { local: "direction", cloud: "direction" },
   { local: "supplier_id", cloud: "supplierId", refEntity: "suppliers", refNotNull: true },
@@ -3188,7 +3386,12 @@ function applyBorrowPulledRow(row: Record<string, unknown>, force: boolean): voi
   });
 }
 
-const SALE_RETURN_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }> = [
+const SALE_RETURN_HEADER_COLUMNS: Array<{
+  local: string;
+  cloud: string;
+  refEntity?: SyncEntity;
+  refNotNull?: boolean;
+}> = [
   { local: "sale_id", cloud: "saleId", refEntity: "sales", refNotNull: true },
   { local: "status", cloud: "status" },
   { local: "reason", cloud: "reason" },
@@ -3204,7 +3407,13 @@ const SALE_RETURN_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntit
 function applySaleReturnPulledRow(row: Record<string, unknown>, force: boolean): void {
   runInTransaction(() => {
     const id = row.id as string;
-    const localTenantId = upsertDocumentHeader("sale_returns", SALE_RETURN_HEADER_COLUMNS, [], row, force);
+    const localTenantId = upsertDocumentHeader(
+      "sale_returns",
+      SALE_RETURN_HEADER_COLUMNS,
+      [],
+      row,
+      force
+    );
     if (!localTenantId) return;
 
     const db = getDatabase();
@@ -3324,7 +3533,9 @@ function applySupplierBalanceEntryPulledRow(row: Record<string, unknown>): void 
     const id = row.id as string;
     const db = getDatabase();
 
-    const alreadyApplied = db.prepare("SELECT 1 FROM supplier_balance_entries WHERE id = ?").get(id);
+    const alreadyApplied = db
+      .prepare("SELECT 1 FROM supplier_balance_entries WHERE id = ?")
+      .get(id);
     if (alreadyApplied) return;
 
     const localTenantId = tenantRepository.findTenantRow()!.id;
@@ -3354,7 +3565,12 @@ function applySupplierBalanceEntryPulledRow(row: Record<string, unknown>): void 
   });
 }
 
-const STOCK_REQUEST_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }> = [
+const STOCK_REQUEST_HEADER_COLUMNS: Array<{
+  local: string;
+  cloud: string;
+  refEntity?: SyncEntity;
+  refNotNull?: boolean;
+}> = [
   { local: "request_number", cloud: "requestNumber" },
   { local: "storefront_id", cloud: "storefrontId", refEntity: "locations", refNotNull: true },
   { local: "status", cloud: "status" },
@@ -3378,7 +3594,19 @@ const STOCK_REQUEST_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEnt
 function applyStockRequestPulledRow(row: Record<string, unknown>, force: boolean): void {
   runInTransaction(() => {
     const id = row.id as string;
-    const localTenantId = upsertDocumentHeader("stock_requests", STOCK_REQUEST_HEADER_COLUMNS, [], row, force);
+    const current = getDatabase()
+      .prepare("SELECT status FROM stock_requests WHERE id = ?")
+      .get(id) as { status: string } | undefined;
+    if (current && current.status !== "pending" && row.status !== current.status) return;
+    const decisionArrived =
+      current?.status === "pending" && (row.status === "approved" || row.status === "rejected");
+    const localTenantId = upsertDocumentHeader(
+      "stock_requests",
+      STOCK_REQUEST_HEADER_COLUMNS,
+      [],
+      row,
+      force || decisionArrived
+    );
     if (!localTenantId) return;
 
     const db = getDatabase();
@@ -3425,7 +3653,12 @@ function pulledQuantityDispatched(status: unknown, item: Record<string, unknown>
   return null;
 }
 
-const PURCHASE_REQUISITION_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }> = [
+const PURCHASE_REQUISITION_HEADER_COLUMNS: Array<{
+  local: string;
+  cloud: string;
+  refEntity?: SyncEntity;
+  refNotNull?: boolean;
+}> = [
   { local: "requisition_number", cloud: "requisitionNumber" },
   { local: "storefront_id", cloud: "storefrontId", refEntity: "locations", refNotNull: true },
   { local: "status", cloud: "status" },
@@ -3444,7 +3677,13 @@ const PURCHASE_REQUISITION_HEADER_COLUMNS: Array<{ local: string; cloud: string;
 function applyPurchaseRequisitionPulledRow(row: Record<string, unknown>, force: boolean): void {
   runInTransaction(() => {
     const id = row.id as string;
-    const localTenantId = upsertDocumentHeader("purchase_requisitions", PURCHASE_REQUISITION_HEADER_COLUMNS, [], row, force);
+    const localTenantId = upsertDocumentHeader(
+      "purchase_requisitions",
+      PURCHASE_REQUISITION_HEADER_COLUMNS,
+      [],
+      row,
+      force
+    );
     if (!localTenantId) return;
 
     const db = getDatabase();
@@ -3468,8 +3707,14 @@ function applyPurchaseRequisitionPulledRow(row: Record<string, unknown>, force: 
   });
 }
 
-const STOCK_RECEIPT_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEntity?: SyncEntity; refNotNull?: boolean }> = [
+const STOCK_RECEIPT_HEADER_COLUMNS: Array<{
+  local: string;
+  cloud: string;
+  refEntity?: SyncEntity;
+  refNotNull?: boolean;
+}> = [
   { local: "receipt_number", cloud: "receiptNumber" },
+  { local: "stock_request_id", cloud: "stockRequestId" },
   { local: "location_id", cloud: "locationId", refEntity: "locations", refNotNull: true },
   { local: "allocation_storefront_id", cloud: "allocationStorefrontId", refEntity: "locations" },
   { local: "received_by", cloud: "receivedBy", refEntity: "employees", refNotNull: true },
@@ -3482,7 +3727,13 @@ const STOCK_RECEIPT_HEADER_COLUMNS: Array<{ local: string; cloud: string; refEnt
 function applyStockReceiptPulledRow(row: Record<string, unknown>, force: boolean): void {
   runInTransaction(() => {
     const id = row.id as string;
-    const localTenantId = upsertDocumentHeader("stock_receipts", STOCK_RECEIPT_HEADER_COLUMNS, [], row, force);
+    const localTenantId = upsertDocumentHeader(
+      "stock_receipts",
+      STOCK_RECEIPT_HEADER_COLUMNS,
+      [],
+      row,
+      force
+    );
     if (!localTenantId) return;
 
     const db = getDatabase();
@@ -3549,7 +3800,9 @@ function recordPullOrphanAttempt(
   const db = getDatabase();
   const now = new Date().toISOString();
   const existing = db
-    .prepare("SELECT attempts, first_seen_at FROM sync_pull_orphans WHERE entity = ? AND row_id = ?")
+    .prepare(
+      "SELECT attempts, first_seen_at FROM sync_pull_orphans WHERE entity = ? AND row_id = ?"
+    )
     .get(entity, rowId) as { attempts: number; first_seen_at: string } | undefined;
   const attempts = (existing?.attempts ?? 0) + 1;
   const firstSeenAt = existing?.first_seen_at ?? now;
@@ -3565,7 +3818,9 @@ function recordPullOrphanAttempt(
 
 /** Clears the orphan record for a row that just applied successfully. */
 function clearPullOrphan(entity: SyncEntity, rowId: string): void {
-  getDatabase().prepare("DELETE FROM sync_pull_orphans WHERE entity = ? AND row_id = ?").run(entity, rowId);
+  getDatabase()
+    .prepare("DELETE FROM sync_pull_orphans WHERE entity = ? AND row_id = ?")
+    .run(entity, rowId);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -3575,7 +3830,9 @@ function clearPullOrphan(entity: SyncEntity, rowId: string): void {
 /** Header-level refEntity columns that refColumnsFor() doesn't know about — the two append-only
  * ledger entities have no column array anywhere. Everything else (generic APPLY_CONFIG entities +
  * the 6 bespoke document entities) is already covered by refColumnsFor(). */
-const EXTRA_HEADER_REFS: Partial<Record<SyncEntity, Array<{ cloud: string; refEntity: SyncEntity }>>> = {
+const EXTRA_HEADER_REFS: Partial<
+  Record<SyncEntity, Array<{ cloud: string; refEntity: SyncEntity }>>
+> = {
   stock_movements: [
     { cloud: "productId", refEntity: "products" },
     { cloud: "locationId", refEntity: "locations" }
@@ -3585,7 +3842,9 @@ const EXTRA_HEADER_REFS: Partial<Record<SyncEntity, Array<{ cloud: string; refEn
 
 /** Line-item refEntity fields — every bespoke document's items reference products by `productId`
  * (see each apply function's item INSERT). */
-const ITEM_REFS: Partial<Record<SyncEntity, Array<{ itemsKey: string; idKey: string; refEntity: SyncEntity }>>> = {
+const ITEM_REFS: Partial<
+  Record<SyncEntity, Array<{ itemsKey: string; idKey: string; refEntity: SyncEntity }>>
+> = {
   sales: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }],
   quotations: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }],
   purchases: [{ itemsKey: "items", idKey: "productId", refEntity: "products" }],
@@ -3605,13 +3864,17 @@ function rowExistsLocally(entity: SyncEntity, id: string): boolean {
 /** Every (refEntity, id) this pulled row points at that isn't present in this device's local DB yet —
  * alias-resolved first, deduped. Drives both the on-demand parent fetch and the sync_dangling_refs
  * log. */
-function missingRefsFor(entity: SyncEntity, row: Record<string, unknown>): Array<{ refEntity: SyncEntity; id: string }> {
+function missingRefsFor(
+  entity: SyncEntity,
+  row: Record<string, unknown>
+): Array<{ refEntity: SyncEntity; id: string }> {
   const out = new Map<string, { refEntity: SyncEntity; id: string }>();
   const consider = (refEntity: SyncEntity, rawId: unknown): void => {
     if (rawId === null || rawId === undefined || rawId === "") return;
     const resolved = resolveRef(refEntity, rawId) as string;
     if (typeof resolved !== "string") return;
-    if (!rowExistsLocally(refEntity, resolved)) out.set(`${refEntity}:${resolved}`, { refEntity, id: resolved });
+    if (!rowExistsLocally(refEntity, resolved))
+      out.set(`${refEntity}:${resolved}`, { refEntity, id: resolved });
   };
   for (const col of [...refColumnsFor(entity), ...(EXTRA_HEADER_REFS[entity] ?? [])]) {
     consider(col.refEntity, row[col.cloud]);
@@ -3650,7 +3913,9 @@ async function fetchRowsById(
       return null;
     }
     if (!response.ok) return null;
-    const body = (await response.json().catch(() => null)) as { rows: Array<Record<string, unknown>> } | null;
+    const body = (await response.json().catch(() => null)) as {
+      rows: Array<Record<string, unknown>>;
+    } | null;
     if (!body || !Array.isArray(body.rows)) return null;
     all.push(...body.rows);
   }
@@ -3737,7 +4002,9 @@ function recordDanglingRefs(entity: SyncEntity, row: Record<string, unknown>): v
 }
 
 function clearDanglingRefs(entity: SyncEntity, rowId: string): void {
-  getDatabase().prepare("DELETE FROM sync_dangling_refs WHERE entity = ? AND row_id = ?").run(entity, rowId);
+  getDatabase()
+    .prepare("DELETE FROM sync_dangling_refs WHERE entity = ? AND row_id = ?")
+    .run(entity, rowId);
 }
 
 /** Any dangling link whose parent has since arrived is no longer dangling — drop the record. The
@@ -3871,7 +4138,12 @@ async function retryPullOrphans(): Promise<void> {
     } catch {
       continue;
     }
-    const outcome = await applyPulledRowWithRecovery(identity.tenantId, identity.deviceId, r.entity, payload);
+    const outcome = await applyPulledRowWithRecovery(
+      identity.tenantId,
+      identity.deviceId,
+      r.entity,
+      payload
+    );
     if (outcome !== "failed") clearPullOrphan(r.entity, r.row_id);
   }
 }
@@ -3880,7 +4152,9 @@ async function retryPullOrphans(): Promise<void> {
  * structural problem, retried every cycle, never permanently skipped. Surfaced in the Cloud Sync
  * tab. */
 export function getPullOrphanCount(): number {
-  const row = getDatabase().prepare("SELECT COUNT(*) as count FROM sync_pull_orphans").get() as { count: number };
+  const row = getDatabase().prepare("SELECT COUNT(*) as count FROM sync_pull_orphans").get() as {
+    count: number;
+  };
   return row.count;
 }
 
@@ -3959,7 +4233,9 @@ function rewindEntityForAutoRepair(entity: SyncEntity, why: string): void {
   const db = getDatabase();
   console.warn(`[sync] auto-repair "${entity}": ${why} — rewinding its cursor for a clean re-pull`);
   writeCursor(entity, new Date(0).toISOString());
-  db.prepare("DELETE FROM sync_pull_orphans WHERE entity = ? AND last_error LIKE '%FOREIGN KEY constraint failed%'").run(entity);
+  db.prepare(
+    "DELETE FROM sync_pull_orphans WHERE entity = ? AND last_error LIKE '%FOREIGN KEY constraint failed%'"
+  ).run(entity);
   db.prepare("DELETE FROM sync_dangling_refs WHERE entity = ?").run(entity);
   writeSetting(`sync_auto_repair_at:${entity}`, new Date().toISOString());
   writeSetting(`sync_auto_repair_count:${entity}`, autoRepairCount(entity) + 1);
@@ -3989,8 +4265,12 @@ function autoRepairStuckEntities(): void {
 
   const entitiesWithOrphans = new Set(orphans.map((o) => o.entity));
   for (const entity of SYNC_ENTITIES) {
-    if (!entitiesWithOrphans.has(entity) && !(readSetting<DriftReport>("sync_drift_report") ?? {})[entity]) {
-      if (autoRepairCount(entity) > 0 || readSetting<number>(`sync_drift_streak:${entity}`)) resetAutoRepairBudget(entity);
+    if (
+      !entitiesWithOrphans.has(entity) &&
+      !(readSetting<DriftReport>("sync_drift_report") ?? {})[entity]
+    ) {
+      if (autoRepairCount(entity) > 0 || readSetting<number>(`sync_drift_streak:${entity}`))
+        resetAutoRepairBudget(entity);
     }
   }
 
@@ -4000,7 +4280,10 @@ function autoRepairStuckEntities(): void {
     if (!isRecoverableOrphanError(o.last_error)) continue;
     recoverableOldestByEntity.set(
       o.entity,
-      Math.min(recoverableOldestByEntity.get(o.entity) ?? Infinity, new Date(o.first_seen_at).getTime())
+      Math.min(
+        recoverableOldestByEntity.get(o.entity) ?? Infinity,
+        new Date(o.first_seen_at).getTime()
+      )
     );
   }
   for (const [entity, oldestSeenAt] of recoverableOldestByEntity) {
@@ -4023,13 +4306,17 @@ function autoRepairFromDrift(drift: DriftReport): void {
     const behind = entry !== undefined && entry.local < entry.remote;
     const streakKey = `sync_drift_streak:${entity}`;
     if (!behind) {
-      if (readSetting<number>(streakKey)) db.prepare("DELETE FROM app_settings WHERE key = ?").run(streakKey);
+      if (readSetting<number>(streakKey))
+        db.prepare("DELETE FROM app_settings WHERE key = ?").run(streakKey);
       continue;
     }
     const streak = (readSetting<number>(streakKey) ?? 0) + 1;
     writeSetting(streakKey, streak);
     if (streak < 2 || !autoRepairAllowed(entity)) continue;
-    rewindEntityForAutoRepair(entity, `behind the cloud (${entry.local} < ${entry.remote}) across ${streak} drift checks`);
+    rewindEntityForAutoRepair(
+      entity,
+      `behind the cloud (${entry.local} < ${entry.remote}) across ${streak} drift checks`
+    );
   }
 }
 
@@ -4045,8 +4332,15 @@ export function listBlockedRecords(): Array<{
   autoRecovering: boolean;
 }> {
   const rows = getDatabase()
-    .prepare("SELECT entity, row_id, last_error, attempts FROM sync_pull_orphans ORDER BY first_seen_at ASC")
-    .all() as Array<{ entity: SyncEntity; row_id: string; last_error: string | null; attempts: number }>;
+    .prepare(
+      "SELECT entity, row_id, last_error, attempts FROM sync_pull_orphans ORDER BY first_seen_at ASC"
+    )
+    .all() as Array<{
+    entity: SyncEntity;
+    row_id: string;
+    last_error: string | null;
+    attempts: number;
+  }>;
 
   return rows.map((r) => {
     const recoverable = isRecoverableOrphanError(r.last_error);
@@ -4152,7 +4446,9 @@ export async function checkDrift(): Promise<DriftReport | null> {
     // would report a permanent false "drift" any time a cashier has an open ticket at the moment of
     // the check, indistinguishable from a genuine stuck row.
     const where = entity === "sales" ? " WHERE sale_status != 'pending'" : "";
-    const row = getDatabase().prepare(`SELECT COUNT(*) as count FROM ${entity}${where}`).get() as { count: number };
+    const row = getDatabase().prepare(`SELECT COUNT(*) as count FROM ${entity}${where}`).get() as {
+      count: number;
+    };
     localCounts[entity] = row.count;
   }
 
@@ -4161,7 +4457,11 @@ export async function checkDrift(): Promise<DriftReport | null> {
     response = await fetch(`${API_BASE_URL}/sync/counts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tenantId: identity.tenantId, deviceId: identity.deviceId, entities: SYNC_ENTITIES }),
+      body: JSON.stringify({
+        tenantId: identity.tenantId,
+        deviceId: identity.deviceId,
+        entities: SYNC_ENTITIES
+      }),
       signal: AbortSignal.timeout(15_000)
     });
   } catch {
@@ -4169,7 +4469,9 @@ export async function checkDrift(): Promise<DriftReport | null> {
   }
   if (!response.ok) return null;
 
-  const body = (await response.json().catch(() => null)) as { counts: Partial<Record<SyncEntity, number>> } | null;
+  const body = (await response.json().catch(() => null)) as {
+    counts: Partial<Record<SyncEntity, number>>;
+  } | null;
   if (!body) return null;
 
   const drift: DriftReport = {};
@@ -4211,9 +4513,13 @@ export async function getEntitySyncOverview(): Promise<EntitySyncOverviewRow[]> 
     // checkDrift()'s own banner just above it despite both claiming to describe the same moment.
     const where = entity === "sales" ? " WHERE sale_status != 'pending'" : "";
     const pendingExtra = entity === "sales" ? " AND sale_status != 'pending'" : "";
-    const localRow = db.prepare(`SELECT COUNT(*) as count FROM ${entity}${where}`).get() as { count: number };
+    const localRow = db.prepare(`SELECT COUNT(*) as count FROM ${entity}${where}`).get() as {
+      count: number;
+    };
     const pendingRow = db
-      .prepare(`SELECT COUNT(*) as count FROM ${entity} WHERE sync_status != 'synced'${pendingExtra}`)
+      .prepare(
+        `SELECT COUNT(*) as count FROM ${entity} WHERE sync_status != 'synced'${pendingExtra}`
+      )
       .get() as { count: number };
     const lastSyncedRow = db
       .prepare(`SELECT MAX(last_synced_at) as lastSyncedAt FROM ${entity}`)
@@ -4235,7 +4541,11 @@ export async function getEntitySyncOverview(): Promise<EntitySyncOverviewRow[]> 
     response = await fetch(`${API_BASE_URL}/sync/counts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tenantId: identity.tenantId, deviceId: identity.deviceId, entities: SYNC_ENTITIES }),
+      body: JSON.stringify({
+        tenantId: identity.tenantId,
+        deviceId: identity.deviceId,
+        entities: SYNC_ENTITIES
+      }),
       signal: AbortSignal.timeout(15_000)
     });
   } catch {
@@ -4243,7 +4553,9 @@ export async function getEntitySyncOverview(): Promise<EntitySyncOverviewRow[]> 
   }
   if (!response.ok) return rows;
 
-  const body = (await response.json().catch(() => null)) as { counts: Partial<Record<SyncEntity, number>> } | null;
+  const body = (await response.json().catch(() => null)) as {
+    counts: Partial<Record<SyncEntity, number>>;
+  } | null;
   if (!body) return rows;
 
   return rows.map((row) => ({ ...row, remoteCount: body.counts[row.entity] ?? 0 }));
@@ -4263,7 +4575,11 @@ export function getSyncDiagnostics(): SyncDiagnostics {
   }
 
   const countRow = (status: string): number =>
-    (db.prepare("SELECT COUNT(*) as c FROM sync_outbox WHERE status = ?").get(status) as { c: number }).c;
+    (
+      db.prepare("SELECT COUNT(*) as c FROM sync_outbox WHERE status = ?").get(status) as {
+        c: number;
+      }
+    ).c;
 
   const outboxProblems = db
     .prepare(
@@ -4291,7 +4607,11 @@ export function getSyncDiagnostics(): SyncDiagnostics {
   for (const entity of SYNC_ENTITIES) {
     const attempts = autoRepairCount(entity);
     if (attempts > 0) {
-      autoRepairs.push({ entity, attempts, lastAt: readSetting<string>(`sync_auto_repair_at:${entity}`) ?? "" });
+      autoRepairs.push({
+        entity,
+        attempts,
+        lastAt: readSetting<string>(`sync_auto_repair_at:${entity}`) ?? ""
+      });
     }
   }
 
@@ -4363,6 +4683,12 @@ async function runSyncCycle(): Promise<void> {
     await pullDeltas();
   } catch (err) {
     console.error("[sync] pullDeltas failed:", err);
+  }
+  try {
+    const requestTenant = tenantRepository.findTenantRow();
+    if (requestTenant) reconcileFulfilledStockRequests(requestTenant.id);
+  } catch (err) {
+    console.error("[sync] reconcileFulfilledStockRequests failed:", err);
   }
   try {
     await pushOutbox();
@@ -4509,7 +4835,11 @@ const CONFLICT_LABEL_BUILDERS: Partial<Record<SyncEntity, (entityId: string) => 
   },
   sale_returns: (id) => {
     const row = saleReturnRepository.findSaleReturnDetailRowById(id);
-    return row ? (row.invoice_number ? `Credit note — Invoice ${row.invoice_number}` : `Return — Receipt ${row.receipt_number ?? "?"}`) : id;
+    return row
+      ? row.invoice_number
+        ? `Credit note — Invoice ${row.invoice_number}`
+        : `Return — Receipt ${row.receipt_number ?? "?"}`
+      : id;
   },
   sale_voids: (id) => {
     const row = saleVoidRepository.findSaleVoidDetailRowById(id);
@@ -4525,15 +4855,19 @@ const CONFLICT_LABEL_BUILDERS: Partial<Record<SyncEntity, (entityId: string) => 
   stock_movements: (id) => {
     const row = stockMovementRepository.findStockMovementRowById(id);
     if (!row) return id;
-    const productName = productRepository.findProductRowById(row.product_id)?.name ?? "Unknown product";
+    const productName =
+      productRepository.findProductRowById(row.product_id)?.name ?? "Unknown product";
     const sign = row.quantity_change > 0 ? "+" : "";
     return `Stock Movement — ${productName} (${sign}${row.quantity_change}) at ${row.location_name}`;
   },
   main_store_allocations: (id) => {
     const row = mainStoreAllocationRepository.findAllocationRowById(id);
     if (!row) return id;
-    const productName = productRepository.findProductRowById(row.product_id)?.name ?? "Unknown product";
-    const bucket = row.storefront_id ? (locationRepository.findLocationRowById(row.storefront_id)?.location_name ?? "a storefront") : "Unallocated";
+    const productName =
+      productRepository.findProductRowById(row.product_id)?.name ?? "Unknown product";
+    const bucket = row.storefront_id
+      ? (locationRepository.findLocationRowById(row.storefront_id)?.location_name ?? "a storefront")
+      : "Unallocated";
     return `Main Store Allocation — ${productName} (${bucket})`;
   }
 };
@@ -4546,7 +4880,9 @@ function labelFor(entity: SyncEntity, entityId: string): string {
  * generic header-column machinery refColumnsFor (above) reads from — so they need their own short,
  * hand-written ref-field list here instead. Every other entity is already fully covered by
  * refColumnsFor. */
-const EXTRA_CONFLICT_REF_FIELDS: Partial<Record<SyncEntity, Array<{ cloud: string; refEntity: SyncEntity }>>> = {
+const EXTRA_CONFLICT_REF_FIELDS: Partial<
+  Record<SyncEntity, Array<{ cloud: string; refEntity: SyncEntity }>>
+> = {
   stock_movements: [
     { cloud: "productId", refEntity: "products" },
     { cloud: "locationId", refEntity: "locations" },
@@ -4564,7 +4900,10 @@ const EXTRA_CONFLICT_REF_FIELDS: Partial<Record<SyncEntity, Array<{ cloud: strin
  * snapshots (they're already in the same id-space at this point — see this function's own caller for
  * why); a field whose id doesn't resolve to a local row falls back to the bare id, same as labelFor
  * everywhere else — not worse than the unresolved case, just not improved. */
-function humanizeConflictSnapshot(entity: SyncEntity, snapshot: Record<string, unknown>): Record<string, unknown> {
+function humanizeConflictSnapshot(
+  entity: SyncEntity,
+  snapshot: Record<string, unknown>
+): Record<string, unknown> {
   const refFields = [...refColumnsFor(entity), ...(EXTRA_CONFLICT_REF_FIELDS[entity] ?? [])];
   if (refFields.length === 0) return snapshot;
   const result = { ...snapshot };
@@ -4589,7 +4928,15 @@ type ConflictRow = {
  * when the actual DATA is identical, so ignored when deciding whether a conflict has become moot.
  * Mirrors CloudSyncRoute.tsx's own DIFF_IGNORED_FIELDS exactly (kept in sync by hand — both are
  * short, stable lists that only change if a conflict-aware payload shape itself changes). */
-const CONFLICT_IGNORED_FIELDS = new Set(["id", "tenantId", "deviceId", "syncedAt", "baseUpdatedAt", "localCreatedAt", "localUpdatedAt"]);
+const CONFLICT_IGNORED_FIELDS = new Set([
+  "id",
+  "tenantId",
+  "deviceId",
+  "syncedAt",
+  "baseUpdatedAt",
+  "localCreatedAt",
+  "localUpdatedAt"
+]);
 
 /** JSON with object keys sorted (at every depth) and undefined treated as null — so two values that
  * only differ in key ORDER compare equal. Postgres jsonb hands objects back with its own key order
@@ -4610,7 +4957,10 @@ export function canonicalJson(value: unknown): string {
   );
 }
 
-function snapshotsEffectivelyMatch(local: Record<string, unknown>, remote: Record<string, unknown>): boolean {
+function snapshotsEffectivelyMatch(
+  local: Record<string, unknown>,
+  remote: Record<string, unknown>
+): boolean {
   const keys = new Set([...Object.keys(local), ...Object.keys(remote)]);
   for (const key of keys) {
     if (CONFLICT_IGNORED_FIELDS.has(key)) continue;
@@ -4653,16 +5003,23 @@ export function clearStalePhantomConflicts(): void {
   for (const group of groups.values()) {
     const snapshots = group
       .filter((r) => r.remote_snapshot_json)
-      .map((r) => ({ row: r, snap: JSON.parse(r.remote_snapshot_json as string) as Record<string, unknown> }));
+      .map((r) => ({
+        row: r,
+        snap: JSON.parse(r.remote_snapshot_json as string) as Record<string, unknown>
+      }));
     const latest = snapshots[snapshots.length - 1];
     if (!latest) continue;
     const { entity, entity_id: entityId } = latest.row;
-    const remoteVersion = typeof latest.snap.localUpdatedAt === "string" ? latest.snap.localUpdatedAt : null;
+    const remoteVersion =
+      typeof latest.snap.localUpdatedAt === "string" ? latest.snap.localUpdatedAt : null;
 
     try {
       const rawPayload = PAYLOAD_BUILDERS[entity](entityId);
       if (!rawPayload) continue;
-      const localSnapshot = resolvePayloadRefsForPush(entity, rawPayload) as Record<string, unknown>;
+      const localSnapshot = resolvePayloadRefsForPush(entity, rawPayload) as Record<
+        string,
+        unknown
+      >;
 
       // 1) Nothing left to decide — both sides hold the same data. Clear it AND adopt the server's
       // version as this row's baseline: without the baseline, the very next edit of this row was
@@ -4676,7 +5033,9 @@ export function clearStalePhantomConflicts(): void {
           if (remoteVersion) {
             markSyncedBaseline(entity, entityId, remoteVersion);
             const pending = db
-              .prepare(`SELECT 1 FROM sync_outbox WHERE entity = ? AND entity_id = ? AND status IN ('queued', 'failed') LIMIT 1`)
+              .prepare(
+                `SELECT 1 FROM sync_outbox WHERE entity = ? AND entity_id = ? AND status IN ('queued', 'failed') LIMIT 1`
+              )
               .get(entity, entityId);
             if (!pending) markSourceRowSynced(entity, entityId);
           }
@@ -4691,7 +5050,9 @@ export function clearStalePhantomConflicts(): void {
       const selfAuthored =
         ownDeviceId !== null &&
         remoteVersion !== null &&
-        snapshots.some((s) => s.snap.deviceId === ownDeviceId && s.snap.localUpdatedAt === remoteVersion);
+        snapshots.some(
+          (s) => s.snap.deviceId === ownDeviceId && s.snap.localUpdatedAt === remoteVersion
+        );
       if (selfAuthored) resolveConflict(latest.row.id, "mine");
     } catch (err) {
       console.error(`[sync] Could not auto-clear conflict for ${entity}/${entityId}:`, err);
@@ -4739,8 +5100,12 @@ export function listConflicts(): SyncConflictItem[] {
 
   return rows.map((row) => {
     const rawPayload = PAYLOAD_BUILDERS[row.entity](row.entity_id);
-    const localSnapshot = rawPayload ? (resolvePayloadRefsForPush(row.entity, rawPayload) as Record<string, unknown>) : {};
-    const remoteSnapshot = row.remote_snapshot_json ? (JSON.parse(row.remote_snapshot_json) as Record<string, unknown>) : {};
+    const localSnapshot = rawPayload
+      ? (resolvePayloadRefsForPush(row.entity, rawPayload) as Record<string, unknown>)
+      : {};
+    const remoteSnapshot = row.remote_snapshot_json
+      ? (JSON.parse(row.remote_snapshot_json) as Record<string, unknown>)
+      : {};
     return {
       id: row.id,
       entity: row.entity,
@@ -4760,7 +5125,9 @@ export function listConflicts(): SyncConflictItem[] {
  * a role's fields changing on their own doesn't look like a mystery. */
 export function listRecentReconciliations(limit = 20): SyncReconciliationItem[] {
   const rows = getDatabase()
-    .prepare(`SELECT entity, local_id, created_at FROM sync_id_aliases ORDER BY created_at DESC LIMIT ?`)
+    .prepare(
+      `SELECT entity, local_id, created_at FROM sync_id_aliases ORDER BY created_at DESC LIMIT ?`
+    )
     .all(limit) as Array<{ entity: SyncEntity; local_id: string; created_at: string }>;
 
   return rows.map((row) => ({
@@ -4782,8 +5149,11 @@ export function listRecentReconciliations(limit = 20): SyncReconciliationItem[] 
 export function resolveConflict(outboxId: string, resolution: ConflictResolution): void {
   const db = getDatabase();
   const row = db
-    .prepare(`SELECT entity, entity_id, remote_snapshot_json FROM sync_outbox WHERE id = ? AND status = 'conflict'`)
-    .get(outboxId) as { entity: SyncEntity; entity_id: string; remote_snapshot_json: string | null } | undefined;
+    .prepare(
+      `SELECT entity, entity_id, remote_snapshot_json FROM sync_outbox WHERE id = ? AND status = 'conflict'`
+    )
+    .get(outboxId) as
+    { entity: SyncEntity; entity_id: string; remote_snapshot_json: string | null } | undefined;
   if (!row) return;
 
   const remoteSnapshot = row.remote_snapshot_json
@@ -4814,7 +5184,10 @@ export function resolveConflict(outboxId: string, resolution: ConflictResolution
   const table = row.entity;
   const remoteLocalUpdatedAt = remoteSnapshot?.localUpdatedAt as string | undefined;
   if (remoteLocalUpdatedAt) {
-    db.prepare(`UPDATE ${table} SET synced_updated_at = ? WHERE id = ?`).run(remoteLocalUpdatedAt, row.entity_id);
+    db.prepare(`UPDATE ${table} SET synced_updated_at = ? WHERE id = ?`).run(
+      remoteLocalUpdatedAt,
+      row.entity_id
+    );
   }
   db.prepare(`UPDATE ${table} SET updated_at = ? WHERE id = ?`).run(now, row.entity_id);
   db.prepare(

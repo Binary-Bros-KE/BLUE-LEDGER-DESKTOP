@@ -18,25 +18,31 @@ export type OutstandingPurchaseRowRaw = {
   status: string;
   ordered_at: string | null;
   created_at: string;
+  received_value_cents: number;
+  shipping_cost_cents: number;
   grand_total_cents: number;
   amount_paid_cents: number;
 };
 
 /** Every currently-outstanding (unpaid or partially-paid) purchase, oldest
  * first — a live snapshot, not scoped to any selected period. */
-export function findOutstandingPurchases(tenantId: string, locationId: string | null): OutstandingPurchaseRowRaw[] {
+export function findOutstandingPurchases(
+  tenantId: string,
+  locationId: string | null
+): OutstandingPurchaseRowRaw[] {
   return getDatabase()
     .prepare(
       `
       SELECT
         p.id AS purchase_id, p.supplier_id, s.business_name AS supplier_name, s.supplier_type, s.phone_1 AS phone,
         p.purchase_number, p.status, p.ordered_at, p.created_at,
-        p.grand_total_cents, p.amount_paid_cents
+        p.grand_total_cents, p.amount_paid_cents, p.received_value_cents, p.shipping_cost_cents
       FROM purchases p
       JOIN suppliers s ON s.id = p.supplier_id
       WHERE p.tenant_id = ?
         AND ${EXCLUDE_DRAFT_AND_CANCELLED}
-        AND p.payment_status != 'paid'
+        AND p.received_value_cents > 0
+        AND p.received_value_cents + p.shipping_cost_cents > p.amount_paid_cents
         AND (? IS NULL OR p.location_id = ?)
       ORDER BY COALESCE(p.ordered_at, p.created_at) ASC
     `

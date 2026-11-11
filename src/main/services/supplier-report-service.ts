@@ -1,6 +1,12 @@
+import { computePurchasePayableCents } from "@shared/lib/purchase";
 import { assertSupplierVisible, isSupplierHidden } from "@main/services/supplier-service";
 import * as supplierReportRepository from "@main/database/repositories/supplier-report-repository";
-import { getCurrentBranchScope, requirePermission, requirePermissionAnyOf, resolveReportLocationScope } from "@main/services/auth-service";
+import {
+  getCurrentBranchScope,
+  requirePermission,
+  requirePermissionAnyOf,
+  resolveReportLocationScope
+} from "@main/services/auth-service";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { dateRangeInputSchema, locationScopeInputSchema } from "@shared/schemas/report";
 import { supplierPurchaseHistoryInputSchema } from "@shared/schemas/supplier-report";
@@ -8,7 +14,7 @@ import type {
   OutstandingPurchaseRow,
   OutstandingPurchasesSummary,
   SupplierPurchaseHistoryEntry,
-  SupplierSpendRow,
+  SupplierSpendRow
 } from "@shared/types/supplier-report";
 
 const PURCHASE_HISTORY_LIMIT = 200;
@@ -41,7 +47,9 @@ export function getSupplierSpendBreakdown(input: unknown): SupplierSpendRow[] {
   const startIso = startOfDayIso(startDate);
   const endIsoExclusive = startOfDayIso(addDaysIso(endDate, 1));
 
-  const rows = supplierReportRepository.findSupplierSpendInRange(tenantId, locationId, startIso, endIsoExclusive).filter((row) => !isSupplierHidden(row.supplier_id));
+  const rows = supplierReportRepository
+    .findSupplierSpendInRange(tenantId, locationId, startIso, endIsoExclusive)
+    .filter((row) => !isSupplierHidden(row.supplier_id));
   const totalCents = rows.reduce((sum, row) => sum + row.total_spent_cents, 0);
 
   return rows.map((row) => ({
@@ -50,7 +58,8 @@ export function getSupplierSpendBreakdown(input: unknown): SupplierSpendRow[] {
     phone: row.phone,
     purchaseCount: row.purchase_count,
     totalSpentCents: row.total_spent_cents,
-    percentOfTotal: totalCents > 0 ? Math.round((row.total_spent_cents / totalCents) * 1000) / 10 : 0,
+    percentOfTotal:
+      totalCents > 0 ? Math.round((row.total_spent_cents / totalCents) * 1000) / 10 : 0
   }));
 }
 
@@ -67,25 +76,33 @@ export function getOutstandingPurchases(input: unknown): OutstandingPurchasesSum
   const locationId = resolveReportLocationScope(explicitLocationId);
 
   const now = Date.now();
-  const rows = supplierReportRepository.findOutstandingPurchases(tenantId, locationId).filter((row) => !isSupplierHidden(row.supplier_id));
+  const rows = supplierReportRepository
+    .findOutstandingPurchases(tenantId, locationId)
+    .filter((row) => !isSupplierHidden(row.supplier_id));
 
   const purchases: OutstandingPurchaseRow[] = rows
     .map((row) => {
-      const balanceCents = Math.max(0, row.grand_total_cents - row.amount_paid_cents);
+      const payableCents = computePurchasePayableCents({
+        receivedValueCents: row.received_value_cents,
+        shippingFeeCents: row.shipping_cost_cents
+      });
+      const balanceCents = Math.max(0, payableCents - row.amount_paid_cents);
       const referenceDate = row.ordered_at ?? row.created_at;
       return {
         purchaseId: row.purchase_id,
         supplierId: row.supplier_id,
         supplierName: row.supplier_name,
-        supplierType: row.supplier_type === "international" ? ("international" as const) : ("local" as const),
+        supplierType:
+          row.supplier_type === "international" ? ("international" as const) : ("local" as const),
         phone: row.phone,
         purchaseNumber: row.purchase_number,
         status: row.status,
         orderedAt: row.ordered_at,
         grandTotalCents: row.grand_total_cents,
+        payableCents,
         amountPaidCents: row.amount_paid_cents,
         balanceCents,
-        daysOutstanding: Math.floor((now - new Date(referenceDate).getTime()) / DAY_MS),
+        daysOutstanding: Math.floor((now - new Date(referenceDate).getTime()) / DAY_MS)
       };
     })
     .filter((purchase) => purchase.balanceCents > 0);
@@ -93,7 +110,7 @@ export function getOutstandingPurchases(input: unknown): OutstandingPurchasesSum
   return {
     totalOutstandingCents: purchases.reduce((sum, purchase) => sum + purchase.balanceCents, 0),
     creditorCount: new Set(purchases.map((purchase) => purchase.supplierId)).size,
-    purchases,
+    purchases
   };
 }
 
@@ -106,7 +123,12 @@ export function getSupplierPurchaseHistory(input: unknown): SupplierPurchaseHist
   const { tenantId } = getCurrentTenant();
   const locationId = getCurrentBranchScope();
 
-  const rows = supplierReportRepository.findSupplierPurchaseHistory(tenantId, locationId, supplierId, PURCHASE_HISTORY_LIMIT);
+  const rows = supplierReportRepository.findSupplierPurchaseHistory(
+    tenantId,
+    locationId,
+    supplierId,
+    PURCHASE_HISTORY_LIMIT
+  );
 
   return rows.map((row) => ({
     purchaseId: row.purchase_id,
@@ -118,6 +140,6 @@ export function getSupplierPurchaseHistory(input: unknown): SupplierPurchaseHist
     itemCount: row.item_count,
     grandTotalCents: row.grand_total_cents,
     amountPaidCents: row.amount_paid_cents,
-    paymentStatus: row.payment_status,
+    paymentStatus: row.payment_status
   }));
 }

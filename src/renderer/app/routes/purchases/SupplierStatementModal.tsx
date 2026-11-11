@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Eye, Loader2, Printer, Search, Wallet } from "lucide-react";
 import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
@@ -9,7 +9,10 @@ import { fromCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { formatDocumentDate } from "@shared/lib/date";
 import type { PaymentMethod } from "@shared/types/payment-method";
-import { PURCHASE_PAYMENT_STATUS_OPTIONS, type PurchasePaymentStatus } from "@shared/types/purchase";
+import {
+  PURCHASE_PAYMENT_STATUS_OPTIONS,
+  type PurchasePaymentStatus
+} from "@shared/types/purchase";
 import type { SupplierPickerOption } from "@shared/types/supplier";
 import type { SupplierStatementViewModel } from "@shared/types/supplier-statement";
 
@@ -35,8 +38,10 @@ export function SupplierStatementModal({
   onClose,
   suppliers,
   paymentMethods,
-  onPaid
+  onPaid,
+  initialSupplierId
 }: {
+  initialSupplierId?: string;
   open: boolean;
   onClose: () => void;
   suppliers: SupplierPickerOption[];
@@ -79,7 +84,9 @@ export function SupplierStatementModal({
 
   // Client request: previously there was no way to pay a single purchase from the statement itself —
   // only "pay everything." Opens a small modal scoped to just this one purchase.
-  const [payingPurchase, setPayingPurchase] = useState<SupplierStatementViewModel["purchases"][number] | null>(null);
+  const [payingPurchase, setPayingPurchase] = useState<
+    SupplierStatementViewModel["purchases"][number] | null
+  >(null);
   const [payAmount, setPayAmount] = useState("");
   const [payMethodId, setPayMethodId] = useState("");
   const [payReference, setPayReference] = useState("");
@@ -87,17 +94,24 @@ export function SupplierStatementModal({
   const [payError, setPayError] = useState<string | null>(null);
 
   const activePaymentMethods = useMemo(
-    () => paymentMethods.filter((method) => method.isActive).sort((a, b) => a.sortOrder - b.sortOrder),
+    () =>
+      paymentMethods.filter((method) => method.isActive).sort((a, b) => a.sortOrder - b.sortOrder),
     [paymentMethods]
   );
-  const selectedBulkMethod = activePaymentMethods.find((method) => method.id === bulkPaymentMethodId) ?? null;
-  const selectedPayMethod = activePaymentMethods.find((method) => method.id === payMethodId) ?? null;
+  const selectedBulkMethod =
+    activePaymentMethods.find((method) => method.id === bulkPaymentMethodId) ?? null;
+  const selectedPayMethod =
+    activePaymentMethods.find((method) => method.id === payMethodId) ?? null;
 
   const filteredSuppliers = useMemo(() => {
     const active = suppliers.filter((supplier) => supplier.status === "active");
     const term = search.trim().toLowerCase();
     if (!term) return active.slice(0, 20);
-    return active.filter((supplier) => `${supplier.businessName} ${supplier.phone1}`.toLowerCase().includes(term)).slice(0, 20);
+    return active
+      .filter((supplier) =>
+        `${supplier.businessName} ${supplier.phone1}`.toLowerCase().includes(term)
+      )
+      .slice(0, 20);
   }, [suppliers, search]);
 
   function handleClose(): void {
@@ -133,7 +147,9 @@ export function SupplierStatementModal({
       return;
     }
     if (totalCents > vm.totalOutstandingCents) {
-      setBulkError(`Amount exceeds the total outstanding balance of ${money(vm.totalOutstandingCents)}`);
+      setBulkError(
+        `Amount exceeds the total outstanding balance of ${money(vm.totalOutstandingCents)}`
+      );
       return;
     }
 
@@ -174,7 +190,9 @@ export function SupplierStatementModal({
     }
     setBulkSaving(false);
     if (paidCount > 0) {
-      showSuccessToast(`Recorded payment across ${paidCount} purchase${paidCount === 1 ? "" : "s"}`);
+      showSuccessToast(
+        `Recorded payment across ${paidCount} purchase${paidCount === 1 ? "" : "s"}`
+      );
       onPaid();
       await openStatement(vm.supplierId);
     }
@@ -205,7 +223,9 @@ export function SupplierStatementModal({
       return;
     }
     if (amountCents > payingPurchase.balanceDueCents) {
-      setPayError(`Amount exceeds this purchase's balance of ${money(payingPurchase.balanceDueCents)}`);
+      setPayError(
+        `Amount exceeds this purchase's balance of ${money(payingPurchase.balanceDueCents)}`
+      );
       return;
     }
 
@@ -258,6 +278,10 @@ export function SupplierStatementModal({
     }
   }
 
+  useEffect(() => {
+    if (open && initialSupplierId) void openStatement(initialSupplierId);
+  }, [open, initialSupplierId]);
+
   function handleStatusFilterChange(value: "pending" | "paid" | "all"): void {
     setStatusFilter(value);
     if (vm) void openStatement(vm.supplierId, { status: value });
@@ -275,12 +299,17 @@ export function SupplierStatementModal({
 
   const money = (cents: number): string => (vm ? `${vm.currency} ${(cents / 100).toFixed(2)}` : "");
   const availableCreditCents =
-    vm && vm.creditLimitCents !== null ? Math.max(0, vm.creditLimitCents - vm.totalOutstandingCents) : null;
+    vm && vm.creditLimitCents !== null
+      ? Math.max(0, vm.creditLimitCents - vm.totalOutstandingCents)
+      : null;
   // With the "Paid"/"All" filters, vm.purchases can include purchases with nothing left owed — the
   // bulk-pay flow (button visibility, count, and which purchases actually get marked paid) must
   // only ever touch the ones that genuinely still owe something, regardless of which filter is on
   // screen.
-  const outstandingPurchases = useMemo(() => (vm ? vm.purchases.filter((p) => p.balanceDueCents > 0) : []), [vm]);
+  const outstandingPurchases = useMemo(
+    () => (vm ? vm.purchases.filter((p) => p.balanceDueCents > 0) : []),
+    [vm]
+  );
 
   // Client request: a statement used to show only the running totals, not the payments that
   // actually produced them. Collapsed by default (a history view can list many purchases) — expand
@@ -301,7 +330,10 @@ export function SupplierStatementModal({
     setActionError(null);
     setNotice(null);
     try {
-      const result = await window.blueLedger.printer.printSupplierStatementDocument(vm.supplierId, vm.filters);
+      const result = await window.blueLedger.printer.printSupplierStatementDocument(
+        vm.supplierId,
+        vm.filters
+      );
       if (result.success) {
         setNotice(result.message);
         showSuccessToast(result.message);
@@ -344,7 +376,10 @@ export function SupplierStatementModal({
         widthClassName="max-w-md"
       >
         <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden="true" />
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted"
+            aria-hidden="true"
+          />
           <input
             autoFocus
             type="text"
@@ -355,7 +390,9 @@ export function SupplierStatementModal({
           />
         </div>
         {loadError && (
-          <div className="mt-3 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2.5 text-xs font-bold text-danger">{loadError}</div>
+          <div className="mt-3 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2.5 text-xs font-bold text-danger">
+            {loadError}
+          </div>
         )}
         <div className="mt-3 max-h-80 space-y-1.5 overflow-y-auto">
           {loading ? (
@@ -363,7 +400,9 @@ export function SupplierStatementModal({
               <Loader2 className="size-6 animate-spin" aria-hidden="true" />
             </div>
           ) : filteredSuppliers.length === 0 ? (
-            <p className="px-1 py-4 text-center text-xs font-semibold text-muted">No suppliers found</p>
+            <p className="px-1 py-4 text-center text-xs font-semibold text-muted">
+              No suppliers found
+            </p>
           ) : (
             filteredSuppliers.map((supplier) => (
               <button
@@ -373,7 +412,9 @@ export function SupplierStatementModal({
                 className="flex w-full items-center justify-between rounded-lg border border-line px-3.5 py-2.5 text-left transition hover:bg-soft cursor-pointer"
               >
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-extrabold text-ink">{supplier.businessName}</p>
+                  <p className="truncate text-sm font-extrabold text-ink">
+                    {supplier.businessName}
+                  </p>
                   <p className="text-[11px] font-semibold text-muted">{supplier.phone1}</p>
                 </div>
               </button>
@@ -392,18 +433,26 @@ export function SupplierStatementModal({
         {vm && (
           <div>
             {notice && (
-              <div className="mb-3 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-xs font-bold text-success">{notice}</div>
+              <div className="mb-3 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-xs font-bold text-success">
+                {notice}
+              </div>
             )}
             {actionError && (
-              <div className="mb-3 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2 text-xs font-bold text-danger">{actionError}</div>
+              <div className="mb-3 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2 text-xs font-bold text-danger">
+                {actionError}
+              </div>
             )}
 
             <div className="flex flex-wrap items-end gap-3">
               <label className="block">
-                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Show</span>
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
+                  Show
+                </span>
                 <select
                   value={statusFilter}
-                  onChange={(event) => handleStatusFilterChange(event.target.value as "pending" | "paid" | "all")}
+                  onChange={(event) =>
+                    handleStatusFilterChange(event.target.value as "pending" | "paid" | "all")
+                  }
                   className="mt-1.5 h-9 rounded-lg border border-line bg-white px-3 text-xs font-semibold text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
                 >
                   <option value="pending">Pending only</option>
@@ -412,7 +461,9 @@ export function SupplierStatementModal({
                 </select>
               </label>
               <label className="block">
-                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">From</span>
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
+                  From
+                </span>
                 <input
                   type="date"
                   value={dateFrom}
@@ -421,7 +472,9 @@ export function SupplierStatementModal({
                 />
               </label>
               <label className="block">
-                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">To</span>
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-muted">
+                  To
+                </span>
                 <input
                   type="date"
                   value={dateTo}
@@ -449,27 +502,43 @@ export function SupplierStatementModal({
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-sm font-extrabold text-ink">{vm.businessName}</p>
-                  {vm.physicalAddress && <p className="text-[11px] text-muted">{vm.physicalAddress}</p>}
+                  {vm.physicalAddress && (
+                    <p className="text-[11px] text-muted">{vm.physicalAddress}</p>
+                  )}
                   {vm.primaryPhone && <p className="text-[11px] text-muted">{vm.primaryPhone}</p>}
                 </div>
                 <div className="text-right">
-                  <p className="text-xs font-extrabold uppercase tracking-wide text-primary">Statement</p>
-                  <p className="text-[11px] font-semibold text-muted">{formatDocumentDate(vm.generatedAt)}</p>
+                  <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
+                    Statement
+                  </p>
+                  <p className="text-[11px] font-semibold text-muted">
+                    {formatDocumentDate(vm.generatedAt)}
+                  </p>
                 </div>
               </div>
 
               <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                  <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted">Supplier</p>
+                  <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted">
+                    Supplier
+                  </p>
                   <p className="mt-1 text-sm font-extrabold text-ink">{vm.supplierName}</p>
                   <p className="text-[11px] font-semibold text-muted">{vm.supplierPhone}</p>
-                  {vm.supplierEmail && <p className="text-[11px] font-semibold text-muted">{vm.supplierEmail}</p>}
+                  {vm.supplierEmail && (
+                    <p className="text-[11px] font-semibold text-muted">{vm.supplierEmail}</p>
+                  )}
                 </div>
                 {vm.creditLimitCents !== null && availableCreditCents !== null && (
                   <div className="border-t border-dashed border-line pt-3 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
-                    <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted">Credit Limit</p>
-                    <p className="mt-1 text-sm font-extrabold text-ink">{money(vm.creditLimitCents)}</p>
-                    <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted">Available Credit</p>
+                    <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted">
+                      Credit Limit
+                    </p>
+                    <p className="mt-1 text-sm font-extrabold text-ink">
+                      {money(vm.creditLimitCents)}
+                    </p>
+                    <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted">
+                      Available Credit
+                    </p>
                     <p className="text-sm font-extrabold text-ink">{money(availableCreditCents)}</p>
                   </div>
                 )}
@@ -491,8 +560,13 @@ export function SupplierStatementModal({
                   <tbody>
                     {vm.purchases.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="px-2.5 py-4 text-center font-semibold text-muted">
-                          {statusFilter === "pending" ? "No outstanding purchases" : "No purchases match this filter"}
+                        <td
+                          colSpan={7}
+                          className="px-2.5 py-4 text-center font-semibold text-muted"
+                        >
+                          {statusFilter === "pending"
+                            ? "No outstanding purchases"
+                            : "No purchases match this filter"}
                         </td>
                       </tr>
                     ) : (
@@ -501,14 +575,22 @@ export function SupplierStatementModal({
                         return (
                           <Fragment key={purchase.id}>
                             <tr className="border-b border-line last:border-0">
-                              <td className="px-2.5 py-2 font-bold text-ink">{purchase.purchaseNumber}</td>
+                              <td className="px-2.5 py-2 font-bold text-ink">
+                                {purchase.purchaseNumber}
+                              </td>
                               <td className="px-2.5 py-2 text-muted">
                                 {purchase.orderedAt ? formatDocumentDate(purchase.orderedAt) : "-"}
                               </td>
-                              <td className="px-2.5 py-2 text-right font-semibold text-ink">{money(purchase.grandTotalCents)}</td>
-                              <td className="px-2.5 py-2 text-right font-extrabold text-ink">{money(purchase.balanceDueCents)}</td>
+                              <td className="px-2.5 py-2 text-right font-semibold text-ink">
+                                {money(purchase.grandTotalCents)}
+                              </td>
+                              <td className="px-2.5 py-2 text-right font-extrabold text-ink">
+                                {money(purchase.balanceDueCents)}
+                              </td>
                               <td className="px-2.5 py-2">
-                                <DashedPill tone={statusTone(purchase.paymentStatus)}>{statusLabel(purchase.paymentStatus)}</DashedPill>
+                                <DashedPill tone={statusTone(purchase.paymentStatus)}>
+                                  {statusLabel(purchase.paymentStatus)}
+                                </DashedPill>
                               </td>
                               <td className="px-2.5 py-2">
                                 {purchase.payments.length === 0 ? (
@@ -524,7 +606,8 @@ export function SupplierStatementModal({
                                     ) : (
                                       <ChevronRight className="size-3.5" aria-hidden="true" />
                                     )}
-                                    {purchase.payments.length} payment{purchase.payments.length === 1 ? "" : "s"}
+                                    {purchase.payments.length} payment
+                                    {purchase.payments.length === 1 ? "" : "s"}
                                   </button>
                                 )}
                               </td>
@@ -560,11 +643,21 @@ export function SupplierStatementModal({
                                     <tbody>
                                       {purchase.payments.map((payment) => (
                                         <tr key={payment.id} className="border-t border-line/60">
-                                          <td className="px-2 py-1 text-muted">{formatDocumentDate(payment.occurredAt)}</td>
-                                          <td className="px-2 py-1 text-right font-bold text-ink">{money(payment.amountCents)}</td>
-                                          <td className="px-2 py-1 text-ink">{payment.paymentMethodName}</td>
-                                          <td className="px-2 py-1 text-muted">{payment.reference ?? "-"}</td>
-                                          <td className="px-2 py-1 text-muted">{payment.performedByName}</td>
+                                          <td className="px-2 py-1 text-muted">
+                                            {formatDocumentDate(payment.occurredAt)}
+                                          </td>
+                                          <td className="px-2 py-1 text-right font-bold text-ink">
+                                            {money(payment.amountCents)}
+                                          </td>
+                                          <td className="px-2 py-1 text-ink">
+                                            {payment.paymentMethodName}
+                                          </td>
+                                          <td className="px-2 py-1 text-muted">
+                                            {payment.reference ?? "-"}
+                                          </td>
+                                          <td className="px-2 py-1 text-muted">
+                                            {payment.performedByName}
+                                          </td>
                                         </tr>
                                       ))}
                                     </tbody>
@@ -591,7 +684,9 @@ export function SupplierStatementModal({
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="font-extrabold text-ink">Total Outstanding</span>
-                  <span className="font-extrabold text-danger">{money(vm.totalOutstandingCents)}</span>
+                  <span className="font-extrabold text-danger">
+                    {money(vm.totalOutstandingCents)}
+                  </span>
                 </div>
               </div>
             </div>
@@ -614,7 +709,11 @@ export function SupplierStatementModal({
                 disabled={printing}
                 className="h-9 border border-line bg-white text-[11px] text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {printing ? <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" /> : <Printer className="mr-1.5 size-3.5" aria-hidden="true" />}
+                {printing ? (
+                  <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Printer className="mr-1.5 size-3.5" aria-hidden="true" />
+                )}
                 Print
               </Button>
               <Button
@@ -623,7 +722,11 @@ export function SupplierStatementModal({
                 disabled={previewing}
                 className="h-9 border border-line bg-white text-[11px] text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {previewing ? <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" /> : <Eye className="mr-1.5 size-3.5" aria-hidden="true" />}
+                {previewing ? (
+                  <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Eye className="mr-1.5 size-3.5" aria-hidden="true" />
+                )}
                 Preview
               </Button>
             </div>
@@ -646,11 +749,18 @@ export function SupplierStatementModal({
               </div>
             )}
             <p className="mb-4 text-xs font-semibold text-muted">
-              Total outstanding: <span className="font-extrabold text-ink">{money(vm.totalOutstandingCents)}</span>.
-              If this amount doesn't cover everything, whichever purchases come first in the priority below get
-              paid off first — the rest stay outstanding.
+              Total outstanding:{" "}
+              <span className="font-extrabold text-ink">{money(vm.totalOutstandingCents)}</span>. If
+              this amount doesn't cover everything, whichever purchases come first in the priority
+              below get paid off first — the rest stay outstanding.
             </p>
-            <Field label="Amount" type="number" value={bulkAmount} onChange={setBulkAmount} placeholder="0.00" />
+            <Field
+              label="Amount"
+              type="number"
+              value={bulkAmount}
+              onChange={setBulkAmount}
+              placeholder="0.00"
+            />
             <SelectField
               label="Priority"
               value={bulkPriority}
@@ -694,7 +804,9 @@ export function SupplierStatementModal({
                 disabled={bulkSaving || !bulkPaymentMethodId}
                 className="h-9 bg-success text-xs hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {bulkSaving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
+                {bulkSaving ? (
+                  <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
+                ) : null}
                 {bulkSaving ? "Saving..." : "Record Payment"}
               </Button>
             </div>
@@ -717,9 +829,18 @@ export function SupplierStatementModal({
               </div>
             )}
             <p className="mb-4 text-xs font-semibold text-muted">
-              Balance due: <span className="font-extrabold text-ink">{money(payingPurchase.balanceDueCents)}</span>
+              Balance due:{" "}
+              <span className="font-extrabold text-ink">
+                {money(payingPurchase.balanceDueCents)}
+              </span>
             </p>
-            <Field label="Amount" type="number" value={payAmount} onChange={setPayAmount} placeholder="0.00" />
+            <Field
+              label="Amount"
+              type="number"
+              value={payAmount}
+              onChange={setPayAmount}
+              placeholder="0.00"
+            />
             <SelectField
               label="Payment Method"
               value={payMethodId}
@@ -753,7 +874,9 @@ export function SupplierStatementModal({
                 disabled={paySaving || !payMethodId}
                 className="h-9 bg-success text-xs hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {paySaving ? <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" /> : null}
+                {paySaving ? (
+                  <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
+                ) : null}
                 {paySaving ? "Saving..." : "Record Payment"}
               </Button>
             </div>

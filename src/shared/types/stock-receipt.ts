@@ -24,6 +24,7 @@ export type StockReceiptItem = {
 export type StockReceiptListItem = {
   id: string;
   receiptNumber: string;
+  stockRequestId: string | null;
   locationId: string;
   locationName: string;
   allocationStorefrontId: string | null;
