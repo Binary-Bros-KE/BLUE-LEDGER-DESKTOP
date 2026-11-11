@@ -1421,6 +1421,8 @@ const PAYLOAD_BUILDERS: Record<SyncEntity, (id: string) => Record<string, unknow
       // attachmentPath deliberately NOT sent — local file path, no shared cloud storage yet.
       orderedAt: row.ordered_at,
       receivedAt: row.received_at,
+      // Used to stay on this device, so everywhere else showed "Created By —".
+      createdBy: resolveCloudRef("employees", row.created_by),
       items,
       localCreatedAt: row.created_at,
       localUpdatedAt: row.updated_at,
@@ -3099,7 +3101,8 @@ function applyPurchasePulledRow(row: Record<string, unknown>, force: boolean): v
         shipment_courier_name = ?,
         shipment_tracking_number = ?,
         shipment_departed_at = ?,
-        shipment_eta = ?
+        shipment_eta = ?,
+        created_by = COALESCE(?, created_by)
       WHERE id = ?`
     ).run(
       (row.receivedValueCents as number | undefined) ?? 0,
@@ -3108,6 +3111,9 @@ function applyPurchasePulledRow(row: Record<string, unknown>, force: boolean): v
       (row.shipmentTrackingNumber as string | undefined) ?? null,
       (row.shipmentDepartedAt as string | undefined) ?? null,
       (row.shipmentEta as string | undefined) ?? null,
+      // COALESCE: a cloud copy pushed before createdBy synced never blanks the name this device still
+      // has. Null too while that employee hasn't reached this device yet.
+      (resolveRefOrNull("employees", row.createdBy ?? null) as string | null) ?? null,
       id
     );
 
