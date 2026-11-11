@@ -28,10 +28,10 @@ function PartyList({
           {parties.map((party, index) => (
             <tr key={party.id ?? `party-${index}`} className="border-t border-line odd:bg-white even:bg-soft/50 first:border-t-0">
               <td className="truncate px-3 py-2 font-bold text-ink">{party.name}</td>
-              <td className="px-3 py-2 text-right text-xs font-semibold text-muted">
+              <td className="w-32 px-3 py-2 text-right text-xs font-semibold text-muted">
                 {party.documentCount} document{party.documentCount === 1 ? "" : "s"}
               </td>
-              <td className="w-28 px-3 py-2 text-right font-bold tabular-nums text-ink">{money(party.balanceCents)}</td>
+              <td className="w-40 px-3 py-2 text-right font-bold tabular-nums text-ink">{money(party.balanceCents)}</td>
             </tr>
           ))}
         </tbody>
@@ -100,9 +100,12 @@ export function DebtorsCreditorsSection({
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="space-y-4">
         <div className="rounded-lg border border-line bg-white p-4">
-          <p className="text-[11px] font-bold uppercase tracking-wide text-muted">Who owes you</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-muted">Who owes you</p>
+            <p className="text-xs font-extrabold tabular-nums text-ink">{money(totalDebtCents)}</p>
+          </div>
           <div className="mt-3">
             <PartyList parties={debtors} emptyMessage="No customer currently owes you money." />
           </div>
