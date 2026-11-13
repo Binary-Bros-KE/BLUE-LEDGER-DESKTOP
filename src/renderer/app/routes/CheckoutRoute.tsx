@@ -708,7 +708,7 @@ export function CheckoutRoute(): React.JSX.Element {
     const term = customerSearch.trim().toLowerCase();
     if (!term) return active.slice(0, 30);
     return active
-      .filter((customer) => `${customer.name} ${customer.phone} ${customer.customerCode}`.toLowerCase().includes(term))
+      .filter((customer) => `${customer.name} ${customer.companyName ?? ""} ${customer.phone} ${customer.customerCode}`.toLowerCase().includes(term))
       .slice(0, 30);
   }, [customers, customerSearch]);
 

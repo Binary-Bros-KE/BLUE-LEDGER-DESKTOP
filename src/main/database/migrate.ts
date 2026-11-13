@@ -3823,6 +3823,14 @@ const migrations = [
     ALTER TABLE stock_receipts ADD COLUMN stock_request_id TEXT;
     CREATE UNIQUE INDEX idx_stock_receipt_request ON stock_receipts(stock_request_id) WHERE stock_request_id IS NOT NULL;
   `
+  },
+  {
+    // Client request: an optional company a customer belongs to. SERVER 20261113090000_customer_company.
+    version: 114,
+    name: "customer_company",
+    sql: `
+    ALTER TABLE customers ADD COLUMN company_name TEXT;
+  `
   }
 ] as const;
 

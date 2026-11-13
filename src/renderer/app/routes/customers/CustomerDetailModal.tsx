@@ -94,6 +94,7 @@ export function CustomerDetailModal({
 
       <div className="mt-5 space-y-5">
         <Section title="Contact Information">
+          <InfoRow label="Company" value={customer.companyName ?? "—"} />
           <InfoRow label="Phone" value={customer.phone} />
           <InfoRow label="Email" value={customer.email ?? "—"} />
           <InfoRow label="KRA PIN" value={customer.kraPin ?? "—"} />

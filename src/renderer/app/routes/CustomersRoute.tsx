@@ -20,6 +20,7 @@ type FormState = {
   phone: string;
   customerType: CustomerType;
   email: string;
+  companyName: string;
   kraPin: string;
   physicalAddress: string;
   creditLimit: string;
@@ -31,6 +32,7 @@ const emptyForm: FormState = {
   phone: "",
   customerType: "retail",
   email: "",
+  companyName: "",
   kraPin: "",
   physicalAddress: "",
   creditLimit: "",
@@ -43,6 +45,7 @@ function toFormState(customer: Customer): FormState {
     phone: customer.phone,
     customerType: customer.customerType,
     email: customer.email ?? "",
+    companyName: customer.companyName ?? "",
     kraPin: customer.kraPin ?? "",
     physicalAddress: customer.physicalAddress ?? "",
     creditLimit: fromCents(customer.creditLimitCents),
@@ -92,7 +95,7 @@ export function CustomersRoute(): React.JSX.Element {
     const term = searchTerm.trim().toLowerCase();
     if (!term) return customers;
     return customers.filter((customer) => {
-      const haystack = `${customer.name} ${customer.phone} ${customer.email ?? ""} ${customer.customerCode}`.toLowerCase();
+      const haystack = `${customer.name} ${customer.companyName ?? ""} ${customer.phone} ${customer.email ?? ""} ${customer.customerCode}`.toLowerCase();
       return haystack.includes(term);
     });
   }, [customers, searchTerm]);
@@ -106,6 +109,7 @@ export function CustomersRoute(): React.JSX.Element {
       columns: [
         { key: "code", header: "Code" },
         { key: "name", header: "Name" },
+        { key: "company", header: "Company" },
         { key: "phone", header: "Phone" },
         { key: "type", header: "Type" },
         { key: "balance", header: "Balance", align: "right" },
@@ -114,6 +118,7 @@ export function CustomersRoute(): React.JSX.Element {
       rows: filteredCustomers.map((customer) => ({
         code: customer.customerCode,
         name: customer.name,
+        company: customer.companyName ?? "—",
         phone: customer.phone,
         type: customerTypeLabel(customer.customerType),
         balance: formatCents(customer.currentBalanceCents),
@@ -155,6 +160,7 @@ export function CustomersRoute(): React.JSX.Element {
       phone: form.phone,
       customerType: form.customerType,
       email: form.email,
+      companyName: form.companyName,
       kraPin: form.kraPin,
       physicalAddress: form.physicalAddress,
       creditLimitCents: form.creditLimit.trim() === "" ? null : toCents(form.creditLimit),
@@ -335,7 +341,12 @@ export function CustomersRoute(): React.JSX.Element {
                       <td className="truncate px-4 py-3 text-xs font-bold tabular-nums text-muted">
                         {customer.customerCode}
                       </td>
-                      <td className="truncate px-4 py-3 font-extrabold">{customer.name}</td>
+                      <td className="truncate px-4 py-3 font-extrabold">
+                        {customer.name}
+                        {customer.companyName && (
+                          <span className="block truncate text-xs font-semibold text-muted">{customer.companyName}</span>
+                        )}
+                      </td>
                       <td className="truncate px-4 py-3 text-xs font-semibold text-muted">
                         {customer.phone}
                       </td>
@@ -440,6 +451,12 @@ export function CustomersRoute(): React.JSX.Element {
               Additional Details (Optional)
             </p>
             <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field
+                label="Company"
+                value={form.companyName}
+                onChange={(value) => updateField("companyName", value)}
+                placeholder="e.g. Eakha Company Ltd"
+              />
               <SelectField
                 label="Customer Type"
                 value={form.customerType}

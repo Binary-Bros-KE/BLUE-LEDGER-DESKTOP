@@ -10,6 +10,7 @@ export type CustomerRow = {
   name: string;
   phone: string;
   email: string | null;
+  company_name: string | null;
   kra_pin: string | null;
   physical_address: string | null;
   credit_limit_cents: number | null;
@@ -80,11 +81,11 @@ export function insertCustomerRow(
     .prepare(
       `
       INSERT INTO customers (
-        id, tenant_id, customer_code, customer_type, name, phone, email, kra_pin,
+        id, tenant_id, customer_code, customer_type, name, phone, email, company_name, kra_pin,
         physical_address, credit_limit_cents, current_balance_cents, notes,
         status, location_id, created_at, updated_at, sync_status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'active', ?, ?, ?, 'pending')
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'active', ?, ?, ?, 'pending')
     `
     )
     .run(
@@ -95,6 +96,7 @@ export function insertCustomerRow(
       input.name,
       input.phone,
       input.email,
+      input.companyName,
       input.kraPin,
       input.physicalAddress,
       input.creditLimitCents,
@@ -122,6 +124,7 @@ export function updateCustomerRow(id: string, input: CustomerInput): CustomerRow
         name = ?,
         phone = ?,
         email = ?,
+        company_name = ?,
         kra_pin = ?,
         physical_address = ?,
         credit_limit_cents = ?,
@@ -136,6 +139,7 @@ export function updateCustomerRow(id: string, input: CustomerInput): CustomerRow
       input.name,
       input.phone,
       input.email,
+      input.companyName,
       input.kraPin,
       input.physicalAddress,
       input.creditLimitCents,
@@ -217,6 +221,7 @@ export function mapCustomerRow(row: CustomerRow): Customer {
     name: row.name,
     phone: row.phone,
     email: row.email,
+    companyName: row.company_name,
     kraPin: row.kra_pin,
     physicalAddress: row.physical_address,
     creditLimitCents: row.credit_limit_cents,

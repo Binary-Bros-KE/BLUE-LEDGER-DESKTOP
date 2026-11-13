@@ -24,6 +24,8 @@ export type CustomerInputFields = {
   name: string;
   phone: string;
   customerType: CustomerType;
+  /** Optional: the company this customer belongs to. */
+  companyName: string | null;
   email: string | null;
   kraPin: string | null;
   physicalAddress: string | null;
