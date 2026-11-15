@@ -1,3 +1,4 @@
+import { applyMarkPoint, previewMarkPoint } from "@main/services/mark-point-service";
 import electron from "electron";
 import { getSession, login, logout } from "@main/services/auth-service";
 import {
@@ -579,6 +580,8 @@ export function registerIpcHandlers(): void {
     setProductStatus(id, status)
   );
   ipcMain.handle(ipcChannels.productBulkSetTaxType, (_event, input: unknown) => bulkSetProductTaxType(input));
+  ipcMain.handle(ipcChannels.productMarkPointPreview, (_event, input: unknown) => previewMarkPoint(input));
+  ipcMain.handle(ipcChannels.productMarkPointApply, (_event, input: unknown) => applyMarkPoint(input));
   ipcMain.handle(ipcChannels.productPickImage, () => pickAndStoreProductImage());
   ipcMain.handle(ipcChannels.productBrandList, () => listProductBrands());
   ipcMain.handle(ipcChannels.productVariantGet, (_event, productId: string) => getVariantGroup(productId));

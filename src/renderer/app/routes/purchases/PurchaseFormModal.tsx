@@ -14,6 +14,7 @@ import { TAX_TYPE_OPTIONS, type Product, type ProductListItem, type ProductTaxTy
 import type { Purchase } from "@shared/types/purchase";
 import type { Supplier, SupplierType } from "@shared/types/supplier";
 import { useAppStore } from "@renderer/shared/stores/app-store";
+import { sellingFromBuying, strictMarkPoint } from "@shared/lib/mark-point";
 import { QuickCreateProductModal } from "@renderer/shared/components/QuickCreateProductModal";
 import { QuickCreateSupplierModal } from "@renderer/shared/components/QuickCreateSupplierModal";
 
@@ -40,6 +41,8 @@ type ItemLine = {
    * price) onto the product itself — see purchase-service.ts's syncProductPricingFromOrder. Blank/0
    * is treated as "leave the product's selling price alone" at submit time, not "set it to zero". */
   sellingPrice: string;
+  /** Someone typed this line's selling price: strict Mark Point no longer fills it from the cost. */
+  sellingTyped?: boolean;
   discount: string;
   /** Defaults from the product's own category when added, but a real supplier invoice can
    * classify a line differently — editable per line, unlike the old whole-order dropdown. */
@@ -157,6 +160,15 @@ export function PurchaseFormModal({
   const [attachmentPath, setAttachmentPath] = useState<string | null>(null);
   const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [items, setItems] = useState<ItemLine[]>([]);
+  // Strict Mark Point (Business Profile): a new cost fills the line's selling price, until someone types
+  // one. Prices here are per the line's price unit, so no factor. The service does the same for a line
+  // saved without a selling price (purchase-service.ts syncProductPricingFromOrder).
+  const strictMp = useAppStore((state) => strictMarkPoint(state.context?.tenant));
+  function costChange(line: ItemLine, unitCost: string): Partial<ItemLine> {
+    const cents = toCents(unitCost);
+    if (strictMp === null || line.sellingTyped || cents <= 0) return { unitCost };
+    return { unitCost, sellingPrice: fromCents(sellingFromBuying(cents, strictMp)) };
+  }
   const [productSearch, setProductSearch] = useState("");
 
   const [quickCreateSupplierOpen, setQuickCreateSupplierOpen] = useState(false);
@@ -701,7 +713,7 @@ export function PurchaseFormModal({
                           min={0}
                           step="0.01"
                           value={line.unitCost}
-                          onChange={(event) => updateItemLine(line.productId, { unitCost: event.target.value })}
+                          onChange={(event) => updateItemLine(line.productId, costChange(line, event.target.value))}
                           className="h-7 w-24 rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
                         />
                       </label>
@@ -716,7 +728,7 @@ export function PurchaseFormModal({
                             min={0}
                             step="0.01"
                             value={line.sellingPrice}
-                            onChange={(event) => updateItemLine(line.productId, { sellingPrice: event.target.value })}
+                            onChange={(event) => updateItemLine(line.productId, { sellingPrice: event.target.value, sellingTyped: true })}
                             className="h-7 w-24 rounded-md border border-line px-1.5 text-right text-xs font-semibold outline-none focus:border-accent"
                           />
                         </label>

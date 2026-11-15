@@ -58,6 +58,8 @@ export const ipcChannels = {
   productUpdate: "product:update",
   productSetStatus: "product:set-status",
   productBulkSetTaxType: "product:bulk-set-tax-type",
+  productMarkPointPreview: "product:mark-point-preview",
+  productMarkPointApply: "product:mark-point-apply",
   productPickImage: "product:pick-image",
   productBrandList: "product:brand-list",
   productVariantGet: "product:variant-get",

@@ -37,8 +37,15 @@ export const businessProfileInputSchema = z.object({
   ownerEmail: optionalText(),
   vatRatePercent: z.coerce.number().min(0).max(100),
   pricesTaxInclusive: z.boolean(),
+  // Mark Point (shared/lib/mark-point.ts). Optional so an older caller's save leaves it off.
+  markPointEnabled: z.boolean().optional().default(false),
+  markPoint: z.coerce.number().gt(1, "Mark point must be more than 1").max(100).nullable().optional().default(null),
+  markPointStrict: z.boolean().optional().default(false),
   receiptHeader: optionalText(500),
   receiptFooter: optionalText(500)
+}).refine((value) => !value.markPointEnabled || value.markPoint !== null, {
+  message: "Enter a mark point, e.g. 1.33",
+  path: ["markPoint"]
 });
 
 export type BusinessProfileInput = z.infer<typeof businessProfileInputSchema>;

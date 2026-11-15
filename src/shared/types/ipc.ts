@@ -31,7 +31,7 @@ import type {
   MainStoreProductRow,
   StockRequestAvailability
 } from "./main-store";
-import type { Product, ProductListItem, ProductStatus, ProductStockSummary, VariantGroupView } from "./product";
+import type { MarkPointPreview, Product, ProductListItem, ProductStatus, ProductStockSummary, VariantGroupView } from "./product";
 import type {
   DeliveryMethodInput,
   NewsletterSubscriber,
@@ -335,6 +335,14 @@ export type IpcInvokeMap = {
   "product:bulk-set-tax-type": {
     args: [Record<string, unknown>];
     result: { updatedCount: number };
+  };
+  "product:mark-point-preview": {
+    args: [Record<string, unknown>];
+    result: MarkPointPreview;
+  };
+  "product:mark-point-apply": {
+    args: [Record<string, unknown>];
+    result: MarkPointPreview;
   };
   "product:pick-image": {
     args: [];
@@ -1745,6 +1753,8 @@ export type BlueLedgerApi = {
     bulkSetTaxType: (
       input: Record<string, unknown>
     ) => Promise<IpcInvokeMap["product:bulk-set-tax-type"]["result"]>;
+    previewMarkPoint: (input: Record<string, unknown>) => Promise<IpcInvokeMap["product:mark-point-preview"]["result"]>;
+    applyMarkPoint: (input: Record<string, unknown>) => Promise<IpcInvokeMap["product:mark-point-apply"]["result"]>;
     pickImage: () => Promise<IpcInvokeMap["product:pick-image"]["result"]>;
     brandList: () => Promise<IpcInvokeMap["product:brand-list"]["result"]>;
     variantGet: (productId: string) => Promise<IpcInvokeMap["product:variant-get"]["result"]>;

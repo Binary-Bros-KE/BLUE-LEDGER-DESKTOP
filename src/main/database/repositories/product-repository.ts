@@ -419,6 +419,18 @@ export function setProductStatusRow(id: string, status: ProductStatus): ProductR
  * every row needs to get picked up by the existing AFTER UPDATE sync-outbox trigger), just batched
  * across many ids in one statement instead of one row. tenant_id is re-checked here too — defense
  * in depth even though callers only ever pass ids already scoped to the caller's own product list. */
+/** Apply Mark Point's write: only the three prices, queued for sync like any product edit. */
+export function updateMarkPointPricesRow(
+  id: string,
+  input: { buyingPriceCents: number; sellingPriceCents: number; minimumPriceCents: number | null }
+): void {
+  getDatabase()
+    .prepare(
+      "UPDATE products SET buying_price_cents = ?, selling_price_cents = ?, minimum_price_cents = ?, sync_status = 'pending', updated_at = ? WHERE id = ?"
+    )
+    .run(input.buyingPriceCents, input.sellingPriceCents, input.minimumPriceCents, new Date().toISOString(), id);
+}
+
 export function bulkSetTaxTypeRows(tenantId: string, productIds: string[], taxType: string): number {
   if (productIds.length === 0) return 0;
   const now = new Date().toISOString();

@@ -44,6 +44,10 @@ type CloudBusinessProfileFields = {
   ownerEmail: string | null;
   vatRatePercent: number;
   pricesTaxInclusive: boolean;
+  /** Absent from an older server — then this device's own Mark Point settings stay as they are. */
+  markPointEnabled?: boolean;
+  markPoint?: number | null;
+  markPointStrict?: boolean;
   invoiceEditsDisabled: boolean;
   invoiceStockFromMainStore?: boolean;
   /** When the CLOUD last received a business-profile push, from any device — compared against this
@@ -321,6 +325,13 @@ export async function checkInWithServer(): Promise<void> {
           pricesTaxInclusive: result.pricesTaxInclusive,
           businessProfileUpdatedAt: result.businessProfileUpdatedAt
         });
+        if (result.markPointEnabled !== undefined) {
+          tenantRepository.applyMarkPointFromCloudRow({
+            enabled: result.markPointEnabled,
+            markPoint: result.markPoint ?? null,
+            strict: result.markPointStrict ?? false
+          });
+        }
       }
     }
     // Set from the admin dashboard only — applied on every check-in, not gated on the profile
@@ -369,6 +380,9 @@ export async function pushProfileToServer(profile: {
   ownerEmail: string | null;
   vatRatePercent: number;
   pricesTaxInclusive: boolean;
+  markPointEnabled: boolean;
+  markPoint: number | null;
+  markPointStrict: boolean;
 }): Promise<void> {
   const tenantRow = tenantRepository.findTenantRow();
   if (!tenantRow?.license_key) return;
@@ -398,7 +412,10 @@ export async function pushProfileToServer(profile: {
         ownerPhone: profile.ownerPhone,
         ownerEmail: profile.ownerEmail,
         vatRatePercent: profile.vatRatePercent,
-        pricesTaxInclusive: profile.pricesTaxInclusive
+        pricesTaxInclusive: profile.pricesTaxInclusive,
+        markPointEnabled: profile.markPointEnabled,
+        markPoint: profile.markPoint,
+        markPointStrict: profile.markPointStrict
       }),
       signal: AbortSignal.timeout(8_000)
     });

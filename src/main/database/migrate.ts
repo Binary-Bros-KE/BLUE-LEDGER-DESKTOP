@@ -3831,6 +3831,18 @@ const migrations = [
     sql: `
     ALTER TABLE customers ADD COLUMN company_name TEXT;
   `
+  },
+  {
+    // Client request: "Mark Point" — selling = buying x mark point (shared/lib/mark-point.ts). Off by
+    // default, so nothing changes for a business that never turns it on. Synced with the Business
+    // Profile like the tax rate (SERVER Tenant.markPoint*).
+    version: 115,
+    name: "mark_point",
+    sql: `
+    ALTER TABLE tenant ADD COLUMN mark_point_enabled INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE tenant ADD COLUMN mark_point REAL;
+    ALTER TABLE tenant ADD COLUMN mark_point_strict INTEGER NOT NULL DEFAULT 0;
+  `
   }
 ] as const;
 

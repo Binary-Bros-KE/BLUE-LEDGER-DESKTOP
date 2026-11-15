@@ -12,6 +12,8 @@ import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { fromCents, toCents } from "@renderer/shared/lib/money";
 import { showErrorToast, showSuccessToast } from "@renderer/shared/lib/toast";
 import { useAppStore } from "@renderer/shared/stores/app-store";
+import { initialPriceFollowing, markPointPriceChange, type PriceFollowing } from "@renderer/shared/lib/mark-point-form";
+import { strictMarkPoint } from "@shared/lib/mark-point";
 import type { Category } from "@shared/types/category";
 import type { Location } from "@shared/types/location";
 import {
@@ -139,6 +141,20 @@ export function ProductEditModal({
 
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]): void {
     setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  // Strict Mark Point (Business Profile): typing one price fills the other — see mark-point-form.ts.
+  const strictMp = useAppStore((state) => strictMarkPoint(state.context?.tenant));
+  const [priceFollowing, setPriceFollowing] = useState<PriceFollowing>(() => initialPriceFollowing(
+    fromCents(displayPriceCents(product.buyingPriceCents, product.unitConfig)),
+    fromCents(displayPriceCents(product.sellingPriceCents, product.unitConfig)),
+    strictMarkPoint(useAppStore.getState().context?.tenant)
+  ));
+
+  function updatePrice(edited: "buying" | "selling", value: string): void {
+    const next = markPointPriceChange({ buying: form.buyingPrice, selling: form.sellingPrice, following: priceFollowing }, edited, value, strictMp);
+    setPriceFollowing(next.following);
+    setForm((prev) => ({ ...prev, buyingPrice: next.buying, sellingPrice: next.selling }));
   }
 
   const units = useProductUnits(product);
@@ -368,12 +384,17 @@ export function ProductEditModal({
 
         <div className="mt-5 border-t border-line pt-5">
           <p className="text-[11px] font-extrabold uppercase tracking-wider text-muted">Pricing</p>
+          {strictMp !== null && (
+            <p className="mt-1 text-[11px] font-semibold text-muted">
+              Mark point {strictMp}: typing the buying or selling price fills in the other. You can still change either.
+            </p>
+          )}
           <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-5">
             <Field
               label={`Buying Price${units.priceLabel}`}
               type="number"
               value={form.buyingPrice}
-              onChange={(value) => updateField("buyingPrice", value)}
+              onChange={(value) => updatePrice("buying", value)}
               placeholder="0.00"
               required
             />
@@ -381,7 +402,7 @@ export function ProductEditModal({
               label={`Selling Price${units.priceLabel}`}
               type="number"
               value={form.sellingPrice}
-              onChange={(value) => updateField("sellingPrice", value)}
+              onChange={(value) => updatePrice("selling", value)}
               placeholder="0.00"
               required
             />

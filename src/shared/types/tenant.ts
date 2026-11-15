@@ -62,6 +62,12 @@ export type BusinessProfile = {
   ownerEmail: string | null;
   vatRatePercent: number;
   pricesTaxInclusive: boolean;
+  /** Mark Point (shared/lib/mark-point.ts): off unless the owner turns it on in Business Profile. */
+  markPointEnabled: boolean;
+  /** Selling = buying x this, e.g. 1.33. */
+  markPoint: number | null;
+  /** New and edited products, and purchases, fill the other price from it automatically. */
+  markPointStrict: boolean;
   /** Business Profile "Disable invoice edits" — synced to every device/mobile; see invoice-service.ts's updateInvoice. */
   invoiceEditsDisabled: boolean;
   /** Admin "Invoice stock from Main Store" toggle — when true, an invoice (or a quotation converted into one)
@@ -128,6 +134,12 @@ export type TenantContext = {
    * shape satisfies directly. */
   vatRatePercent: number;
   pricesTaxInclusive: boolean;
+  /** Mark Point (shared/lib/mark-point.ts): off unless the owner turns it on in Business Profile. */
+  markPointEnabled: boolean;
+  /** Selling = buying x this, e.g. 1.33. */
+  markPoint: number | null;
+  /** New and edited products, and purchases, fill the other price from it automatically. */
+  markPointStrict: boolean;
   invoiceEditsDisabled: boolean;
   /** Admin "Invoice stock from Main Store" toggle — when true, an invoice (or a quotation converted into one)
    * can take its stock from the Main Store instead of the storefront; see invoice-service.ts. */

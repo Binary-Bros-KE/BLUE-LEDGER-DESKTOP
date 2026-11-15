@@ -89,3 +89,16 @@ test("Create & Receive into another storefront is refused, and nothing is saved"
   assert.throws(() => order("loc-b", true), /not found|storefront/);
   assert.equal(count(), before);
 });
+
+test("strict Mark Point prices an order line that has no selling price from its cost", () => {
+  getDatabase().prepare("UPDATE tenant SET mark_point_enabled = 1, mark_point = 1.33, mark_point_strict = 1").run();
+  try {
+    order("loc-a"); // cost 2.00, no selling price on the line
+    const product = getDatabase().prepare("SELECT buying_price_cents AS buying, selling_price_cents AS selling FROM products WHERE id = 'prod-1'").get() as { buying: number; selling: number };
+    assert.equal(product.buying, 200);
+    assert.equal(product.selling, 300, "2.00 x 1.33 = 2.66, rounded up to 3");
+  } finally {
+    getDatabase().prepare("UPDATE tenant SET mark_point_enabled = 0, mark_point_strict = 0").run();
+    getDatabase().prepare("UPDATE products SET selling_price_cents = 500 WHERE id = 'prod-1'").run();
+  }
+});

@@ -34,6 +34,9 @@ export type TenantRow = {
   owner_email: string | null;
   vat_rate_percent: number;
   prices_tax_inclusive: number;
+  mark_point_enabled: number;
+  mark_point: number | null;
+  mark_point_strict: number;
   invoice_edits_disabled: number;
   invoice_stock_from_main_store: number;
   receipt_header: string | null;
@@ -132,6 +135,9 @@ export function updateTenantProfileRow(input: BusinessProfileInput): TenantRow {
         owner_email = ?,
         vat_rate_percent = ?,
         prices_tax_inclusive = ?,
+        mark_point_enabled = ?,
+        mark_point = ?,
+        mark_point_strict = ?,
         receipt_header = ?,
         receipt_footer = ?,
         sync_status = 'pending',
@@ -161,6 +167,9 @@ export function updateTenantProfileRow(input: BusinessProfileInput): TenantRow {
       input.ownerEmail,
       input.vatRatePercent,
       input.pricesTaxInclusive ? 1 : 0,
+      input.markPointEnabled ? 1 : 0,
+      input.markPoint,
+      input.markPointStrict ? 1 : 0,
       input.receiptHeader,
       input.receiptFooter,
       now,
@@ -283,6 +292,9 @@ export function mapTenantRow(row: TenantRow, appVersion: string): TenantRecord {
     ownerEmail: row.owner_email,
     vatRatePercent: row.vat_rate_percent,
     pricesTaxInclusive: Boolean(row.prices_tax_inclusive),
+    markPointEnabled: Boolean(row.mark_point_enabled),
+    markPoint: row.mark_point,
+    markPointStrict: Boolean(row.mark_point_strict),
     invoiceEditsDisabled: Boolean(row.invoice_edits_disabled),
     invoiceStockFromMainStore: Boolean(row.invoice_stock_from_main_store),
     receiptHeader: row.receipt_header,
@@ -487,6 +499,16 @@ export function seedBusinessProfileFieldsRow(input: {
  * 'pending' — this data just came FROM the cloud, there's nothing new to push back. Stamps
  * business_profile_updated_at to the CLOUD's own timestamp (not `now()`), so it becomes the
  * correct baseline this device compares against next time, not a fresh "I just edited this" mark. */
+/** Mark Point from the cloud copy of the Business Profile — only called when the server sent it (an
+ * older server doesn't, and that must not switch it off here). */
+export function applyMarkPointFromCloudRow(input: { enabled: boolean; markPoint: number | null; strict: boolean }): void {
+  getDatabase()
+    .prepare(
+      "UPDATE tenant SET mark_point_enabled = ?, mark_point = ?, mark_point_strict = ? WHERE id = (SELECT id FROM tenant ORDER BY created_at LIMIT 1)"
+    )
+    .run(input.enabled ? 1 : 0, input.markPoint, input.strict ? 1 : 0);
+}
+
 export function applyBusinessProfileFromCloudRow(input: {
   businessName: string;
   businessType: string;

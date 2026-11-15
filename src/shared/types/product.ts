@@ -59,6 +59,24 @@ export const PRODUCT_TAX_MODE_OPTIONS = [
 
 export type ProductTaxMode = (typeof PRODUCT_TAX_MODE_OPTIONS)[number]["value"];
 
+/** Apply Mark Point's preview (and its result, once applied). Prices per base unit; priceFactor turns
+ * them into the unit they're typed in (see shared/lib/product-units.ts). */
+export type MarkPointPreview = {
+  markPoint: number;
+  considered: number;
+  toUpdate: number;
+  sellingFilled: number;
+  buyingFilled: number;
+  skipped: { noPrices: number; hasBoth: number; unchanged: number };
+  sample: Array<{
+    productId: string;
+    name: string;
+    priceFactor: number;
+    before: { buyingPriceCents: number; sellingPriceCents: number };
+    after: { buyingPriceCents: number; sellingPriceCents: number };
+  }>;
+};
+
 export type ProductStatus = "active" | "inactive";
 
 export type ProductSyncStatus = "pending" | "synced" | "syncing" | "error";

@@ -1,5 +1,5 @@
 // Lets `node --test` run the app's own TypeScript: every .ts file is an ES module with its types
-// stripped, the @main/ @shared/ path aliases resolve like they do in the build, extensionless imports
+// stripped, the @main/ @shared/ @renderer/ path aliases resolve like they do in the build, extensionless imports
 // find their .ts file, and the few modules that need Electron (the real database file, the signed-in
 // session, the tenant) are swapped for the in-memory stand-ins in tests/stubs.
 import { existsSync } from "node:fs";
@@ -28,7 +28,7 @@ function stubFor(url) {
 
 export async function resolve(specifier, context, nextResolve) {
   let target = null;
-  if (specifier.startsWith("@main/") || specifier.startsWith("@shared/")) {
+  if (specifier.startsWith("@main/") || specifier.startsWith("@shared/") || specifier.startsWith("@renderer/")) {
     target = withTsExtension(new URL(specifier.slice(1), SRC));
   } else if ((specifier.startsWith("./") || specifier.startsWith("../")) && context.parentURL?.endsWith(".ts")) {
     target = withTsExtension(new URL(specifier, context.parentURL));

@@ -1,3 +1,5 @@
+import { getStrictMarkPoint, priceFactorOf } from "@main/services/mark-point-service";
+import { sellingFromBuying } from "@shared/lib/mark-point";
 import type { SupplierType } from "@shared/types/supplier";
 import { canSeeInternationalSuppliers, isSupplierHidden } from "@main/services/supplier-service";
 import { randomUUID } from "node:crypto";
@@ -214,7 +216,18 @@ function prepareCart(
  * is confirmed yet) or on receiving goods (that's stock arrival, a separate concern — see the
  * Stock Before/After freeze pattern). See product-repository.ts's updatePricingFromPurchaseRow for
  * the actual column-level behavior (minimum price always pinned to the new buying price). */
-function syncProductPricingFromOrder(items: Array<{ productId: string; unitCostCents: number; sellingPriceCents: number | null }>): void {
+function syncProductPricingFromOrder(orderItems: Array<{ productId: string; unitCostCents: number; sellingPriceCents: number | null }>): void {
+  // Strict Mark Point (Business Profile): a line that doesn't set its own selling price sells at its new
+  // cost x the mark point — this is what prices a Local Credit Purchase, where only the cost is typed.
+  const markPoint = getStrictMarkPoint();
+  const items =
+    markPoint === null
+      ? orderItems
+      : orderItems.map((item) => {
+          if (item.sellingPriceCents !== null && item.sellingPriceCents !== undefined) return item;
+          const product = productRepository.findProductRowById(item.productId);
+          return { ...item, sellingPriceCents: sellingFromBuying(item.unitCostCents, markPoint, priceFactorOf(product?.unit_config_json ?? null)) };
+        });
   // Placing the order makes the cost the product's buying price — never let that go above what it
   // sells for (the same rule the product form enforces). Checked for every line before any is written.
   for (const item of items) {

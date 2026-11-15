@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import {
   AlertTriangle,
   Boxes,
+  Calculator,
   Info,
   Layers,
   Loader2,
@@ -17,6 +18,9 @@ import {
   TrendingDown
 } from "lucide-react";
 import { BulkTaxCategoryModal } from "@renderer/app/routes/products/BulkTaxCategoryModal";
+import { ApplyMarkPointModal } from "@renderer/app/routes/products/ApplyMarkPointModal";
+import { activeMarkPoint } from "@shared/lib/mark-point";
+import type { MarkPointPreview } from "@shared/types/product";
 import { ProductCreateModal } from "@renderer/app/routes/products/ProductCreateModal";
 import { ProductDetailModal } from "@renderer/app/routes/products/ProductDetailModal";
 import { ProductEditModal } from "@renderer/app/routes/products/ProductEditModal";
@@ -102,6 +106,8 @@ function buildCategoryOptions(categories: Category[]): { value: string; label: s
 
 export function ProductsRoute(): React.JSX.Element {
   const currency = useAppStore((state) => state.context?.tenant.currency ?? "");
+  // Only shown to a business that turned Mark Point on in Business Profile.
+  const markPoint = useAppStore((state) => activeMarkPoint(state.context?.tenant));
   const { can, session } = usePermissions();
   // A branch-scoped session (a storefront Manager, say) is always locked server-side to their own
   // storefront regardless of what's requested — the filter dropdown only does something real for a
@@ -135,6 +141,7 @@ export function ProductsRoute(): React.JSX.Element {
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkTaxModalOpen, setBulkTaxModalOpen] = useState(false);
+  const [markPointOpen, setMarkPointOpen] = useState(false);
   const [variantsProductId, setVariantsProductId] = useState<string | null>(null);
   const [groupOpen, setGroupOpen] = useState(false);
 
@@ -335,6 +342,14 @@ export function ProductsRoute(): React.JSX.Element {
     showSuccessToast(message);
   }
 
+  async function handleMarkPointApplied(result: MarkPointPreview): Promise<void> {
+    setSelectedIds(new Set());
+    await loadAll();
+    const message = `Mark point ${result.markPoint} applied to ${result.toUpdate} product${result.toUpdate === 1 ? "" : "s"}.`;
+    setNotice(message);
+    showSuccessToast(message);
+  }
+
   function clearFilters(): void {
     setSearchTerm("");
     setCategoryFilter("");
@@ -406,6 +421,16 @@ export function ProductsRoute(): React.JSX.Element {
           </div>
           <div className="flex items-center gap-2">
             {canExport && exportRequest && <ExportMenu request={exportRequest} />}
+            {canEdit && markPoint !== null && (
+              <Button
+                type="button"
+                onClick={() => setMarkPointOpen(true)}
+                className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft"
+              >
+                <Calculator className="mr-1.5 size-4" aria-hidden="true" />
+                Apply Mark Point
+              </Button>
+            )}
             {canCreate && (
               <Button type="button" onClick={() => setCreateOpen(true)} className="h-9 text-xs">
                 <Plus className="mr-1.5 size-4" aria-hidden="true" />
@@ -548,6 +573,16 @@ export function ProductsRoute(): React.JSX.Element {
                 >
                   <Layers className="mr-1.5 size-3.5" aria-hidden="true" />
                   Group as Variants
+                </Button>
+              )}
+              {markPoint !== null && (
+                <Button
+                  type="button"
+                  onClick={() => setMarkPointOpen(true)}
+                  className="h-8 border border-accent/50 bg-white text-xs text-ink shadow-none hover:bg-accent/10"
+                >
+                  <Calculator className="mr-1.5 size-3.5" aria-hidden="true" />
+                  Apply Mark Point
                 </Button>
               )}
               <Button type="button" onClick={() => setBulkTaxModalOpen(true)} className="h-8 text-xs">
@@ -829,6 +864,17 @@ export function ProductsRoute(): React.JSX.Element {
           onClose={() => setBulkTaxModalOpen(false)}
           productIds={Array.from(selectedIds)}
           onApplied={handleBulkTaxApplied}
+        />
+      )}
+
+      {canEdit && markPoint !== null && (
+        <ApplyMarkPointModal
+          open={markPointOpen}
+          onClose={() => setMarkPointOpen(false)}
+          markPoint={markPoint}
+          selectedIds={Array.from(selectedIds)}
+          categoryOptions={categoryOptions}
+          onApplied={handleMarkPointApplied}
         />
       )}
     </motion.div>

@@ -156,5 +156,16 @@ export const bulkSetTaxTypeSchema = z.object({
 
 export type BulkSetTaxTypeInput = z.infer<typeof bulkSetTaxTypeSchema>;
 
+/** Apply Mark Point (main/services/mark-point-service.ts). */
+export const markPointApplySchema = z
+  .object({
+    scope: z.enum(["all", "selected", "category"]),
+    productIds: z.array(z.string().trim().min(1)).optional().default([]),
+    categoryId: z.string().trim().min(1).nullable().optional().default(null),
+    bothPrices: z.enum(["skip", "selling_from_buying", "buying_from_selling"])
+  })
+  .refine((value) => value.scope !== "selected" || value.productIds.length > 0, { message: "Select at least one product", path: ["productIds"] })
+  .refine((value) => value.scope !== "category" || value.categoryId !== null, { message: "Choose a category", path: ["categoryId"] });
+
 export type ProductCreateInput = z.infer<typeof productCreateSchema>;
 export type ProductUpdateInput = z.infer<typeof productUpdateSchema>;

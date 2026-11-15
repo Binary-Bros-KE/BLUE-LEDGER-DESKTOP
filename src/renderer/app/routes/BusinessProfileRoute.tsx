@@ -14,6 +14,7 @@ import { Button } from "@renderer/shared/components/Button";
 import { Field, SelectField } from "@renderer/shared/components/form-fields";
 import { StampBadge } from "@renderer/shared/components/StampBadge";
 import { usePermissions } from "@renderer/shared/hooks/use-permissions";
+import { useAppStore } from "@renderer/shared/stores/app-store";
 import { cn } from "@renderer/shared/lib/cn";
 import { getErrorMessage } from "@renderer/shared/lib/errors";
 import { logoBoxClassName } from "@renderer/shared/lib/logo";
@@ -48,6 +49,9 @@ type FormState = {
   ownerEmail: string;
   vatRatePercent: string;
   pricesTaxInclusive: boolean;
+  markPointEnabled: boolean;
+  markPoint: string;
+  markPointStrict: boolean;
 };
 
 function toFormState(record: TenantRecord): FormState {
@@ -71,7 +75,10 @@ function toFormState(record: TenantRecord): FormState {
     ownerPhone: record.ownerPhone ?? "",
     ownerEmail: record.ownerEmail ?? "",
     vatRatePercent: String(record.vatRatePercent),
-    pricesTaxInclusive: record.pricesTaxInclusive
+    pricesTaxInclusive: record.pricesTaxInclusive,
+    markPointEnabled: record.markPointEnabled,
+    markPoint: record.markPoint === null ? "" : String(record.markPoint),
+    markPointStrict: record.markPointStrict
   };
 }
 
@@ -147,11 +154,14 @@ export function BusinessProfileRoute(): React.JSX.Element {
       const updated = await window.blueLedger.tenant.updateProfile({
         ...form,
         businessLogoRatio: form.businessLogoRatio || null,
-        vatRatePercent: Number(form.vatRatePercent) || 0
+        vatRatePercent: Number(form.vatRatePercent) || 0,
+        markPoint: form.markPoint.trim() === "" ? null : Number(form.markPoint)
       });
       setProfile(updated);
       setForm(toFormState(updated));
       setSavedAt(Date.now());
+      // Every other screen reads tax and mark point from the app context, loaded once at start.
+      void useAppStore.getState().hydrate();
       showSuccessToast("Business profile saved");
     } catch (err) {
       const message = getErrorMessage(err, "Failed to save business profile");
@@ -328,6 +338,57 @@ export function BusinessProfileRoute(): React.JSX.Element {
             Zero-Rated — from its own edit screen. Each product can also override inclusive vs.
             exclusive individually; this setting is only the default new products start with.
           </p>
+        </FormSection>
+
+        <FormSection title="Mark Point">
+          <label className="flex items-start gap-2 text-sm font-bold text-ink sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={form.markPointEnabled}
+              onChange={(event) => updateField("markPointEnabled", event.target.checked)}
+              disabled={!canEdit}
+              className="mt-0.5 size-4 accent-primary"
+            />
+            <span>
+              Use a mark point
+              <span className="block text-xs font-semibold text-muted">
+                Selling price = buying price x mark point. Off by default — nothing changes until you turn it on.
+              </span>
+            </span>
+          </label>
+          {form.markPointEnabled && (
+            <>
+              <Field
+                label="Mark Point"
+                type="number"
+                value={form.markPoint}
+                onChange={(value) => updateField("markPoint", value)}
+                placeholder="e.g. 1.33"
+              />
+              <p className="self-end pb-2 text-xs font-semibold text-muted">
+                {Number(form.markPoint) > 1
+                  ? `Buying 100 sells at ${Math.ceil(100 * Number(form.markPoint) - 1e-6)}; selling 100 means buying ${Math.floor(100 / Number(form.markPoint) + 1e-6)}.`
+                  : "e.g. 1.33: buying 100 sells at 133."}
+              </p>
+              <label className="flex items-start gap-2 text-sm font-bold text-ink sm:col-span-2">
+                <input
+                  type="checkbox"
+                  checked={form.markPointStrict}
+                  onChange={(event) => updateField("markPointStrict", event.target.checked)}
+                  disabled={!canEdit}
+                  className="mt-0.5 size-4 accent-primary"
+                />
+                <span>
+                  All products follow the mark point
+                  <span className="block text-xs font-semibold text-muted">
+                    When adding or editing a product, typing one price fills in the other; a purchase's new buying price
+                    also sets the selling price. Both stay editable. To update existing products, use Apply Mark Point on
+                    the Products page.
+                  </span>
+                </span>
+              </label>
+            </>
+          )}
         </FormSection>
 
         <FormSection title="Contact">

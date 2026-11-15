@@ -42,6 +42,9 @@ function toTenantContext(row: tenantRepository.TenantRow): TenantContext {
     currency: row.currency as Currency,
     vatRatePercent: row.vat_rate_percent,
     pricesTaxInclusive: Boolean(row.prices_tax_inclusive),
+    markPointEnabled: Boolean(row.mark_point_enabled),
+    markPoint: row.mark_point,
+    markPointStrict: Boolean(row.mark_point_strict),
     invoiceEditsDisabled: Boolean(row.invoice_edits_disabled),
     invoiceStockFromMainStore: Boolean(row.invoice_stock_from_main_store),
     activated: row.license_key !== null,
@@ -150,7 +153,10 @@ export function updateTenantProfile(input: unknown): TenantRecord {
     ownerPhone: parsed.ownerPhone,
     ownerEmail: parsed.ownerEmail,
     vatRatePercent: parsed.vatRatePercent,
-    pricesTaxInclusive: parsed.pricesTaxInclusive
+    pricesTaxInclusive: parsed.pricesTaxInclusive,
+    markPointEnabled: parsed.markPointEnabled,
+    markPoint: parsed.markPoint,
+    markPointStrict: parsed.markPointStrict
   });
 
   return tenantRepository.mapTenantRow(row, app.getVersion());
