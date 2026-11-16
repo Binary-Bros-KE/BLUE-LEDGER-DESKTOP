@@ -1,3 +1,5 @@
+import { sendBillingTopUpStkPush } from "@main/services/billing-mpesa-service";
+import { submitBillingPesapalTopUp } from "@main/services/billing-pesapal-service";
 import { applyMarkPoint, previewMarkPoint } from "@main/services/mark-point-service";
 import electron from "electron";
 import { getSession, login, logout } from "@main/services/auth-service";
@@ -368,7 +370,7 @@ import {
   pickBusinessLogoPath,
   updateTenantProfile
 } from "@main/services/tenant-service";
-import { activateInstallation, fetchPaymentHistory, fetchPaymentSchedule, heartbeatAndGetContext } from "@main/services/license-service";
+import { activateInstallation, fetchPaymentHistory, fetchPaymentSchedule, fetchWallet, heartbeatAndGetContext } from "@main/services/license-service";
 import { checkBillingStkStatus, getBillingStkStatus, sendBillingStkPush } from "@main/services/billing-mpesa-service";
 import {
   checkPesapalStatus,
@@ -488,6 +490,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.activationHeartbeat, () => heartbeatAndGetContext());
   ipcMain.handle(ipcChannels.activationPayments, () => fetchPaymentHistory());
   ipcMain.handle(ipcChannels.activationPaymentSchedule, () => fetchPaymentSchedule());
+  ipcMain.handle(ipcChannels.activationWallet, () => fetchWallet());
+  ipcMain.handle(ipcChannels.billingMpesaSendTopUp, (_event, input: { phone: string; amountKes: number }) => sendBillingTopUpStkPush(input));
+  ipcMain.handle(ipcChannels.billingPesapalSubmitTopUp, (_event, input: { amountKes: number }) => submitBillingPesapalTopUp(input));
   ipcMain.handle(ipcChannels.billingMpesaSendStkPush, (_event, input: { phone: string; periodCount: number }) =>
     sendBillingStkPush(input)
   );

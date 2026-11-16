@@ -41,4 +41,31 @@ export type PaymentScheduleResult = {
    * billing-pesapal-service.ts (SERVER). Powers PaymentsRoute.tsx's "Auto-Billing Active" badge. */
   pesapalAutoBillingEnabled: boolean;
   pesapalAutoBillingActivatedAt: string | null;
+  /** Prepaid balance — absent from an older SERVER. */
+  walletBalanceCents?: number;
+};
+
+/** SERVER's subscription-wallet-service.ts WalletSummary — the prepaid balance and its ledger. */
+export type WalletEntry = {
+  id: string;
+  /** TOPUP | DEDUCTION | ADJUSTMENT */
+  kind: string;
+  amountCents: number;
+  balanceAfterCents: number;
+  billingPeriod: string | null;
+  paymentMethod: string | null;
+  reference: string | null;
+  note: string | null;
+  createdAt: string;
+};
+
+export type WalletSummary = {
+  balanceCents: number;
+  currency: string;
+  pricePerPeriodCents: number | null;
+  billingCycle: string;
+  periodsCovered: number;
+  nextDueDate: string | null;
+  nextDueUncovered: boolean;
+  entries: WalletEntry[];
 };

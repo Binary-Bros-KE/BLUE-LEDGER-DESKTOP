@@ -51,6 +51,8 @@ function toTenantContext(row: tenantRepository.TenantRow): TenantContext {
     licenseStatus: row.license_status as LicenseStatus,
     nextDueDate: row.next_due_date,
     subscriptionType: row.subscription_type as SubscriptionType | null,
+    walletBalanceCents: row.wallet_balance_cents,
+    pricePerPeriodCents: row.price_per_period_cents,
     ecommerceEnabled: Boolean(row.ecommerce_enabled),
     createdAt: row.created_at,
     updatedAt: row.updated_at

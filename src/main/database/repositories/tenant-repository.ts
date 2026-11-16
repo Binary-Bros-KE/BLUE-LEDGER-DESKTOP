@@ -37,6 +37,8 @@ export type TenantRow = {
   mark_point_enabled: number;
   mark_point: number | null;
   mark_point_strict: number;
+  wallet_balance_cents: number | null;
+  price_per_period_cents: number | null;
   invoice_edits_disabled: number;
   invoice_stock_from_main_store: number;
   receipt_header: string | null;
@@ -501,6 +503,13 @@ export function seedBusinessProfileFieldsRow(input: {
  * correct baseline this device compares against next time, not a fresh "I just edited this" mark. */
 /** Mark Point from the cloud copy of the Business Profile — only called when the server sent it (an
  * older server doesn't, and that must not switch it off here). */
+/** The prepaid balance and one period's price, from a check-in. Only called when the server sent them. */
+export function setWalletCacheRow(input: { walletBalanceCents: number; pricePerPeriodCents: number | null }): void {
+  getDatabase()
+    .prepare("UPDATE tenant SET wallet_balance_cents = ?, price_per_period_cents = ? WHERE id = (SELECT id FROM tenant ORDER BY created_at LIMIT 1)")
+    .run(input.walletBalanceCents, input.pricePerPeriodCents);
+}
+
 export function applyMarkPointFromCloudRow(input: { enabled: boolean; markPoint: number | null; strict: boolean }): void {
   getDatabase()
     .prepare(

@@ -157,6 +157,10 @@ export type TenantContext = {
    * licenseStatus above. */
   nextDueDate: string | null;
   subscriptionType: SubscriptionType | null;
+  /** Prepaid balance and what one period costs, from the last check-in (null = never heard) — see
+   * shared/lib/balance-reminder.ts. */
+  walletBalanceCents: number | null;
+  pricePerPeriodCents: number | null;
   /** Cached from the last activation/heartbeat — the renderer's Sidebar hides the "Online Store"
    * nav item unless this is true. See TenantManagement.ecommerceEnabled. */
   ecommerceEnabled: boolean;

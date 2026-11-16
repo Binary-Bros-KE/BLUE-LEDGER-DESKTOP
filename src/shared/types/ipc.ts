@@ -1,6 +1,6 @@
 import type { AppContext, TenantContext, TenantRecord } from "./tenant";
 import type { UpdateStatusResult } from "./update";
-import type { PaymentHistoryResult, PaymentScheduleResult } from "./subscription-payment";
+import type { PaymentHistoryResult, PaymentScheduleResult, WalletSummary } from "./subscription-payment";
 import type { BillingMpesaStatusResult, BillingStkPushResult } from "./billing-mpesa";
 import type { BillingPesapalStatusResult, BillingPesapalSubmitOrderResult } from "./billing-pesapal";
 import type { BrandTheme } from "./theme";
@@ -159,6 +159,18 @@ export type IpcInvokeMap = {
   "activation:payment-schedule": {
     args: [];
     result: PaymentScheduleResult | null;
+  };
+  "activation:wallet": {
+    args: [];
+    result: WalletSummary | null;
+  };
+  "billing-mpesa:send-topup": {
+    args: [{ phone: string; amountKes: number }];
+    result: BillingStkPushResult;
+  };
+  "billing-pesapal:submit-topup": {
+    args: [{ amountKes: number }];
+    result: BillingPesapalSubmitOrderResult;
   };
   "billing-mpesa:send-stk-push": {
     args: [{ phone: string; periodCount: number }];
@@ -1650,12 +1662,14 @@ export type BlueLedgerApi = {
     heartbeat: () => Promise<IpcInvokeMap["activation:heartbeat"]["result"]>;
     payments: () => Promise<IpcInvokeMap["activation:payments"]["result"]>;
     paymentSchedule: () => Promise<IpcInvokeMap["activation:payment-schedule"]["result"]>;
+    wallet: () => Promise<IpcInvokeMap["activation:wallet"]["result"]>;
   };
   billingMpesa: {
     sendStkPush: (input: {
       phone: string;
       periodCount: number;
     }) => Promise<IpcInvokeMap["billing-mpesa:send-stk-push"]["result"]>;
+    sendTopUp: (input: { phone: string; amountKes: number }) => Promise<IpcInvokeMap["billing-mpesa:send-topup"]["result"]>;
     getStkStatus: (checkoutRequestId: string) => Promise<IpcInvokeMap["billing-mpesa:get-stk-status"]["result"]>;
     checkStkStatus: (checkoutRequestId: string) => Promise<IpcInvokeMap["billing-mpesa:check-stk-status"]["result"]>;
   };
@@ -1664,6 +1678,7 @@ export type BlueLedgerApi = {
       periodCount: number;
       enrollAutoBilling: boolean;
     }) => Promise<IpcInvokeMap["billing-pesapal:submit-order"]["result"]>;
+    submitTopUp: (input: { amountKes: number }) => Promise<IpcInvokeMap["billing-pesapal:submit-topup"]["result"]>;
     getStatus: (orderTrackingId: string) => Promise<IpcInvokeMap["billing-pesapal:get-status"]["result"]>;
     checkStatus: (orderTrackingId: string) => Promise<IpcInvokeMap["billing-pesapal:check-status"]["result"]>;
     openRedirect: (redirectUrl: string) => Promise<IpcInvokeMap["billing-pesapal:open-redirect"]["result"]>;

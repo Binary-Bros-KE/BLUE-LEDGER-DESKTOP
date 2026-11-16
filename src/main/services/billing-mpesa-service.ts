@@ -52,6 +52,12 @@ export async function sendBillingStkPush(input: { phone: string; periodCount: nu
   return callServer<BillingStkPushResult>("/billing-mpesa/stk-push", { ...input, deviceId });
 }
 
+/** Top up the prepaid balance by any amount — SERVER pays what's due from it on its own. */
+export async function sendBillingTopUpStkPush(input: { phone: string; amountKes: number }): Promise<BillingStkPushResult> {
+  const deviceId = tenantRepository.findTenantRow()?.server_id ?? undefined;
+  return callServer<BillingStkPushResult>("/billing-mpesa/topup", { ...input, deviceId });
+}
+
 export type BillingMpesaStatusResult = {
   status: string;
   message: string;

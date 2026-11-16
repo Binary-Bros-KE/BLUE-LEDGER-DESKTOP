@@ -52,6 +52,12 @@ export async function submitBillingPesapalOrder(input: {
 }
 
 /** Passive — polled automatically. Never triggers a real Pesapal query server-side. */
+/** Top up the prepaid balance by card/PayPal — never recurring. */
+export async function submitBillingPesapalTopUp(input: { amountKes: number }): Promise<BillingPesapalSubmitOrderResult> {
+  const deviceId = tenantRepository.findTenantRow()?.server_id ?? undefined;
+  return callServer<BillingPesapalSubmitOrderResult>("/billing-pesapal/topup", { ...input, deviceId });
+}
+
 export async function getPesapalStatus(orderTrackingId: string): Promise<BillingPesapalStatusResult> {
   return callServer<BillingPesapalStatusResult>("/billing-pesapal/status", { orderTrackingId });
 }

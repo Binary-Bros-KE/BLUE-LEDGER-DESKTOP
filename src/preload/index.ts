@@ -23,15 +23,18 @@ const api: BlueLedgerApi = {
     activate: (licenseKey) => invoke("activation:activate", licenseKey),
     heartbeat: () => invoke("activation:heartbeat"),
     payments: () => invoke("activation:payments"),
-    paymentSchedule: () => invoke("activation:payment-schedule")
+    paymentSchedule: () => invoke("activation:payment-schedule"),
+    wallet: () => invoke("activation:wallet")
   },
   billingMpesa: {
     sendStkPush: (input) => invoke("billing-mpesa:send-stk-push", input),
+    sendTopUp: (input) => invoke("billing-mpesa:send-topup", input),
     getStkStatus: (checkoutRequestId) => invoke("billing-mpesa:get-stk-status", checkoutRequestId),
     checkStkStatus: (checkoutRequestId) => invoke("billing-mpesa:check-stk-status", checkoutRequestId)
   },
   billingPesapal: {
     submitOrder: (input) => invoke("billing-pesapal:submit-order", input),
+    submitTopUp: (input) => invoke("billing-pesapal:submit-topup", input),
     getStatus: (orderTrackingId) => invoke("billing-pesapal:get-status", orderTrackingId),
     checkStatus: (orderTrackingId) => invoke("billing-pesapal:check-status", orderTrackingId),
     openRedirect: (redirectUrl) => invoke("billing-pesapal:open-redirect", redirectUrl)

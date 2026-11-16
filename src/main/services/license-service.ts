@@ -4,7 +4,7 @@ import * as dropshipRepository from "@main/database/repositories/dropship-reposi
 import * as tenantRepository from "@main/database/repositories/tenant-repository";
 import type { DropshipSupplierInfo } from "@shared/types/dropship";
 import { getCurrentTenant } from "@main/services/tenant-service";
-import type { PaymentHistoryResult, PaymentScheduleResult } from "@shared/types/subscription-payment";
+import type { PaymentHistoryResult, PaymentScheduleResult, WalletSummary } from "@shared/types/subscription-payment";
 import type { TenantContext } from "@shared/types/tenant";
 
 const { app } = electron;
@@ -89,6 +89,9 @@ type HeartbeatResponse = CloudBusinessProfileFields & {
   maxDevices: number;
   ecommerceEnabled?: boolean;
   dropship?: DropshipHeartbeat | null;
+  /** Prepaid balance — absent from an older SERVER. */
+  walletBalanceCents?: number;
+  pricePerPeriodCents?: number | null;
 };
 
 function osDescription(): string {
@@ -289,6 +292,9 @@ export async function checkInWithServer(): Promise<void> {
       ecommerceEnabled: result.ecommerceEnabled,
       isSuspended: result.licenseStatus === "SUSPENDED"
     });
+    if (result.walletBalanceCents !== undefined) {
+      tenantRepository.setWalletCacheRow({ walletBalanceCents: result.walletBalanceCents, pricePerPeriodCents: result.pricePerPeriodCents ?? null });
+    }
     tenantRepository.backfillWorkstationDeviceSequenceRow(workstation.id, result.deviceSequence);
     tenantRepository.touchWorkstationHeartbeatRow(workstation.id, app.getVersion());
 
@@ -450,6 +456,25 @@ export async function fetchPaymentHistory(): Promise<PaymentHistoryResult | null
 /** Renderer-invokable — the "Jan ✅ Feb ✅ Mar ❌" calendar plus per-period pricing for the "pay in
  * advance" picker (see PayNowModal.tsx / BusinessProfileRoute.tsx). Same null-on-failure contract
  * as fetchPaymentHistory above. */
+/** The prepaid balance and its history (SERVER /activation/wallet). Null when offline. */
+export async function fetchWallet(): Promise<WalletSummary | null> {
+  const tenantRow = tenantRepository.findTenantRow();
+  if (!tenantRow?.license_key) return null;
+  try {
+    const response = await fetch(`${API_BASE_URL}/activation/wallet`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ licenseKey: tenantRow.license_key }),
+      signal: AbortSignal.timeout(8_000)
+    });
+    const wallet = await parseJsonResponse<WalletSummary>(response);
+    tenantRepository.setWalletCacheRow({ walletBalanceCents: wallet.balanceCents, pricePerPeriodCents: wallet.pricePerPeriodCents });
+    return wallet;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchPaymentSchedule(): Promise<PaymentScheduleResult | null> {
   const tenantRow = tenantRepository.findTenantRow();
   if (!tenantRow?.license_key) return null;

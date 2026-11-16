@@ -3843,6 +3843,16 @@ const migrations = [
     ALTER TABLE tenant ADD COLUMN mark_point REAL;
     ALTER TABLE tenant ADD COLUMN mark_point_strict INTEGER NOT NULL DEFAULT 0;
   `
+  },
+  {
+    // Prepaid subscription balance (SERVER subscription-wallet-service.ts), cached from each check-in
+    // so the "your balance won't cover the next payment" reminder works offline. NULL = never heard.
+    version: 116,
+    name: "subscription_wallet_cache",
+    sql: `
+    ALTER TABLE tenant ADD COLUMN wallet_balance_cents INTEGER;
+    ALTER TABLE tenant ADD COLUMN price_per_period_cents INTEGER;
+  `
   }
 ] as const;
 

@@ -5,6 +5,8 @@ import { Field } from "@renderer/shared/components/form-fields";
 import { useAppStore } from "@renderer/shared/stores/app-store";
 import { useAuthStore } from "@renderer/shared/stores/auth-store";
 import { computeGraceStatus } from "@shared/lib/grace-period";
+import { computeBalanceReminder } from "@shared/lib/balance-reminder";
+import { formatCents } from "@renderer/shared/lib/money";
 
 const PUNCH_COUNT = 3;
 
@@ -30,6 +32,10 @@ export function LoginRoute(): React.JSX.Element {
   const grace = context
     ? computeGraceStatus(context.tenant.nextDueDate, context.tenant.subscriptionType, context.tenant.licenseStatus)
     : { state: "current" as const };
+
+  // Prepaid balance short of the next payment (shared/lib/balance-reminder.ts) — from the cached
+  // check-in, so it shows offline too. Only for a business that has topped up before.
+  const balanceReminder = context && grace.state === "current" ? computeBalanceReminder(context.tenant) : null;
 
   // The exact overdue-period count, for a specific "you have N overdue invoices" message instead
   // of a vague day-countdown — same schedule data PayNowModal/LicenseBlockedRoute already use, so
@@ -168,6 +174,17 @@ export function LoginRoute(): React.JSX.Element {
                   ) : (
                     <>Your subscription payment is overdue. Please settle it to avoid any inconvenience.</>
                   )}
+                </span>
+              </div>
+            )}
+
+            {balanceReminder && (
+              <div className="mt-4 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5 text-xs font-bold text-warning">
+                <AlertTriangle className="mt-0.5 size-4 flex-none" aria-hidden="true" />
+                <span>
+                  Your balance won't cover the payment due in {balanceReminder.daysUntilDue} day
+                  {balanceReminder.daysUntilDue === 1 ? "" : "s"}. Top up at least {context?.tenant.currency}{" "}
+                  {formatCents(balanceReminder.shortByCents)} from Payments.
                 </span>
               </div>
             )}

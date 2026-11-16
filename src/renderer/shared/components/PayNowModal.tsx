@@ -24,6 +24,55 @@ import type { BillingMpesaTransactionStatus } from "@shared/types/billing-mpesa"
 import type { BillingPesapalTransactionStatus } from "@shared/types/billing-pesapal";
 import type { PaymentScheduleResult } from "@shared/types/subscription-payment";
 
+/** Same floor as SERVER's lib/subscription-wallet.ts MIN_TOPUP_KES. */
+const MIN_TOPUP_KES = 50;
+
+/** Any amount, with quick picks for whole periods — "3 months" is what people usually mean. */
+function TopUpAmount({
+  amountText,
+  setAmountText,
+  pricePerPeriodCents,
+  currency,
+  periodNoun
+}: {
+  amountText: string;
+  setAmountText: (value: string) => void;
+  pricePerPeriodCents: number | null;
+  currency: string;
+  periodNoun: string;
+}): React.JSX.Element {
+  const price = pricePerPeriodCents ?? 0;
+  const amountCents = Math.floor(Number(amountText) || 0) * 100;
+  const covers = price > 0 ? Math.floor(amountCents / price) : 0;
+  return (
+    <div className="mt-3">
+      <Field label={`Amount (${currency})`} type="number" value={amountText} onChange={setAmountText} placeholder="e.g. 6000" />
+      {price > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {[1, 3, 6, 12].map((count) => (
+            <button
+              key={count}
+              type="button"
+              onClick={() => setAmountText(String(Math.ceil((price * count) / 100)))}
+              className="rounded-full border border-line bg-white px-2.5 py-1 text-[11px] font-bold text-ink transition hover:border-accent hover:text-accent cursor-pointer"
+            >
+              {count} {periodNoun}
+              {count === 1 ? "" : "s"}
+            </button>
+          ))}
+        </div>
+      )}
+      {price > 0 && amountCents > 0 && (
+        <p className="mt-2 text-[11px] font-semibold text-muted">
+          {covers > 0
+            ? `Covers ${covers} ${periodNoun}${covers === 1 ? "" : "s"} at ${currency} ${formatCents(price)} each.`
+            : `Less than one ${periodNoun} (${currency} ${formatCents(price)}) — it stays on your balance until there's enough.`}
+        </p>
+      )}
+    </div>
+  );
+}
+
 const PAYMENT_METHODS = [
   { key: "mpesa", label: "M-Pesa", icon: Smartphone },
   { key: "card", label: "Card", icon: CreditCard },
@@ -62,11 +111,15 @@ export function PayNowModal({
   open,
   onClose,
   amountLabel,
+  mode = "pay",
   onPaymentSuccess
 }: {
   open: boolean;
   onClose: () => void;
   amountLabel?: string | undefined;
+  /** "topup": any amount onto the prepaid balance (SERVER subscription-wallet-service.ts), which then
+   * pays each period as it falls due — same methods and waiting states, an amount instead of a count. */
+  mode?: "pay" | "topup";
   /** Called right after a successful payment (either method) — separate from the global
    * heartbeat+hydrate below, which only refreshes app-level license/tenant state, not a page's own
    * locally-fetched data (e.g. PaymentScheduleCalendar's schedule, PaymentsRoute's payment list).
@@ -81,6 +134,10 @@ export function PayNowModal({
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [phone, setPhone] = useState("");
   const [periodCount, setPeriodCount] = useState(1);
+  const [amountText, setAmountText] = useState("");
+  const isTopUp = mode === "topup";
+  const topUpKes = Math.floor(Number(amountText) || 0);
+  const successMessage = isTopUp ? "Top-up received — it's on your balance and pays each period as it falls due." : MPESA_MESSAGES.success;
 
   const [state, setState] = useState<MpesaFlowState>("idle");
   const [message, setMessage] = useState<string | null>(null);
@@ -114,8 +171,8 @@ export function PayNowModal({
   function markResolved(result: { status: BillingMpesaTransactionStatus; mpesaReceiptNumber: string | null }): void {
     if (result.status === "success") {
       setState("success");
-      setMessage(MPESA_MESSAGES.success);
-      showSuccessToast(MPESA_MESSAGES.success);
+      setMessage(successMessage);
+      showSuccessToast(successMessage);
       void window.blueLedger.activation.heartbeat().then(() => hydrate());
       onPaymentSuccess?.();
     } else {
@@ -150,8 +207,8 @@ export function PayNowModal({
   function markPesapalResolved(result: { status: BillingPesapalTransactionStatus }): void {
     if (result.status === "success") {
       setPesapalState("success");
-      setPesapalMessage(PESAPAL_MESSAGES.success);
-      showSuccessToast(PESAPAL_MESSAGES.success);
+      setPesapalMessage(isTopUp ? successMessage : PESAPAL_MESSAGES.success);
+      showSuccessToast(isTopUp ? successMessage : PESAPAL_MESSAGES.success);
       void window.blueLedger.activation.heartbeat().then(() => hydrate());
       onPaymentSuccess?.();
     } else {
@@ -216,10 +273,17 @@ export function PayNowModal({
       showErrorToast("Enter a valid phone number");
       return;
     }
+    if (isTopUp && topUpKes < MIN_TOPUP_KES) {
+      setState("error");
+      setMessage(`Enter an amount of at least ${MIN_TOPUP_KES}`);
+      return;
+    }
     setState("sending");
     setMessage(null);
     try {
-      const result = await window.blueLedger.billingMpesa.sendStkPush({ phone: phone.trim(), periodCount });
+      const result = isTopUp
+        ? await window.blueLedger.billingMpesa.sendTopUp({ phone: phone.trim(), amountKes: topUpKes })
+        : await window.blueLedger.billingMpesa.sendStkPush({ phone: phone.trim(), periodCount });
       setCheckoutRequestId(result.checkoutRequestId);
       setState("awaiting");
       setMessage(MPESA_MESSAGES.pending);
@@ -236,14 +300,21 @@ export function PayNowModal({
    * never shows the recurring checkbox for it; only the dedicated Setup Auto Billing button does
    * (see billing-pesapal-service.ts's own comment on why these stay separate on Pesapal's side too). */
   async function handlePesapalSubmit(enroll: boolean): Promise<void> {
+    if (isTopUp && topUpKes < MIN_TOPUP_KES) {
+      setPesapalState("error");
+      setPesapalMessage(`Enter an amount of at least ${MIN_TOPUP_KES}`);
+      return;
+    }
     setAutoBillingFlow(enroll);
     setPesapalState("submitting");
     setPesapalMessage(null);
     try {
-      const result = await window.blueLedger.billingPesapal.submitOrder({
-        periodCount: enroll ? 1 : periodCount,
-        enrollAutoBilling: enroll
-      });
+      const result = isTopUp
+        ? await window.blueLedger.billingPesapal.submitTopUp({ amountKes: topUpKes })
+        : await window.blueLedger.billingPesapal.submitOrder({
+            periodCount: enroll ? 1 : periodCount,
+            enrollAutoBilling: enroll
+          });
       setOrderTrackingId(result.orderTrackingId);
       setAutoBillingAccountNumber(result.accountNumber);
       void window.blueLedger.billingPesapal.openRedirect(result.redirectUrl);
@@ -262,6 +333,7 @@ export function PayNowModal({
     setSchedule(null);
     setPhone("");
     setPeriodCount(1);
+    setAmountText("");
     setState("idle");
     setMessage(null);
     setCheckoutRequestId(null);
@@ -282,9 +354,13 @@ export function PayNowModal({
     <Modal
       open={open}
       onClose={handleClose}
-      title="Pay Now"
+      title={isTopUp ? "Top Up Balance" : "Pay Now"}
       description={
-        amountLabel ? `Settle ${amountLabel} with Blue Ledger.` : "Choose a payment method to settle your Blue Ledger account."
+        isTopUp
+          ? "Add any amount to your balance. Each payment is taken from it automatically when it falls due."
+          : amountLabel
+            ? `Settle ${amountLabel} with Blue Ledger.`
+            : "Choose a payment method to settle your Blue Ledger account."
       }
     >
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -331,14 +407,26 @@ export function PayNowModal({
 
                 <Field label="M-Pesa Phone Number" value={phone} onChange={setPhone} placeholder="e.g. 0712 345 678" />
 
-                <PeriodStepper periodCount={periodCount} setPeriodCount={setPeriodCount} periodNoun={periodNoun} />
+                {isTopUp ? (
+                  <TopUpAmount
+                    amountText={amountText}
+                    setAmountText={setAmountText}
+                    pricePerPeriodCents={schedule.pricePerPeriodCents}
+                    currency={schedule.currency}
+                    periodNoun={periodNoun}
+                  />
+                ) : (
+                  <>
+                    <PeriodStepper periodCount={periodCount} setPeriodCount={setPeriodCount} periodNoun={periodNoun} />
 
-                <div className="mt-3 flex items-center justify-between rounded-lg bg-ink px-4 py-3">
-                  <span className="text-xs font-extrabold uppercase tracking-wide text-white/70">Total</span>
-                  <span className="text-lg font-extrabold text-white">
-                    {schedule.currency} {formatCents(amountCents)}
-                  </span>
-                </div>
+                    <div className="mt-3 flex items-center justify-between rounded-lg bg-ink px-4 py-3">
+                      <span className="text-xs font-extrabold uppercase tracking-wide text-white/70">Total</span>
+                      <span className="text-lg font-extrabold text-white">
+                        {schedule.currency} {formatCents(amountCents)}
+                      </span>
+                    </div>
+                  </>
+                )}
 
                 {state === "error" && message && (
                   <div className="mt-3 flex items-center gap-2 rounded-lg border border-danger/30 bg-danger-soft px-3.5 py-2.5 text-sm font-bold text-danger">
@@ -349,7 +437,7 @@ export function PayNowModal({
 
                 <Button type="button" onClick={() => void handleSend()} className="mt-3 h-10 w-full text-xs">
                   <Smartphone className="mr-1.5 size-4" aria-hidden="true" />
-                  Send STK Push
+                  {isTopUp ? `Top Up ${topUpKes > 0 ? formatCents(topUpKes * 100) : ""}` : "Send STK Push"}
                 </Button>
               </div>
             )}
@@ -420,14 +508,26 @@ export function PayNowModal({
                   </div>
                 )}
 
-                <PeriodStepper periodCount={periodCount} setPeriodCount={setPeriodCount} periodNoun={periodNoun} />
+                {isTopUp ? (
+                  <TopUpAmount
+                    amountText={amountText}
+                    setAmountText={setAmountText}
+                    pricePerPeriodCents={schedule.pricePerPeriodCents}
+                    currency={schedule.currency}
+                    periodNoun={periodNoun}
+                  />
+                ) : (
+                  <>
+                    <PeriodStepper periodCount={periodCount} setPeriodCount={setPeriodCount} periodNoun={periodNoun} />
 
-                <div className="mt-3 flex items-center justify-between rounded-lg bg-ink px-4 py-3">
-                  <span className="text-xs font-extrabold uppercase tracking-wide text-white/70">Total</span>
-                  <span className="text-lg font-extrabold text-white">
-                    {schedule.currency} {formatCents(amountCents)}
-                  </span>
-                </div>
+                    <div className="mt-3 flex items-center justify-between rounded-lg bg-ink px-4 py-3">
+                      <span className="text-xs font-extrabold uppercase tracking-wide text-white/70">Total</span>
+                      <span className="text-lg font-extrabold text-white">
+                        {schedule.currency} {formatCents(amountCents)}
+                      </span>
+                    </div>
+                  </>
+                )}
 
                 {pesapalState === "error" && pesapalMessage && (
                   <div className="mt-3 flex items-center gap-2 rounded-lg border border-danger/30 bg-danger-soft px-3.5 py-2.5 text-sm font-bold text-danger">
@@ -438,14 +538,16 @@ export function PayNowModal({
 
                 <Button type="button" onClick={() => void handlePesapalSubmit(false)} className="mt-3 h-10 w-full text-xs">
                   <ExternalLink className="mr-1.5 size-4" aria-hidden="true" />
-                  Pay with {selected === "card" ? "Card" : "PayPal"}
+                  {isTopUp ? "Top Up" : "Pay"} with {selected === "card" ? "Card" : "PayPal"}
                 </Button>
 
                 <p className="mt-2 text-center text-[10px] font-semibold text-muted">
                   Payment processing is handled securely by Pesapal — you'll be redirected to complete it.
                 </p>
 
-                <AutoBillingPanel accountNumber={autoBillingAccountNumber} onSetup={() => void handlePesapalSubmit(true)} />
+                {!isTopUp && (
+                  <AutoBillingPanel accountNumber={autoBillingAccountNumber} onSetup={() => void handlePesapalSubmit(true)} />
+                )}
               </div>
             )}
 

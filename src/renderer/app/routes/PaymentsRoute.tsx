@@ -6,6 +6,7 @@ import { Button } from "@renderer/shared/components/Button";
 import { DashedPill } from "@renderer/shared/components/DashedPill";
 import { PayNowModal } from "@renderer/shared/components/PayNowModal";
 import { PaymentScheduleCalendar } from "./business-profile/PaymentScheduleCalendar";
+import { BalanceSection } from "./payments/BalanceSection";
 import { cn } from "@renderer/shared/lib/cn";
 import { formatCents } from "@renderer/shared/lib/money";
 import type { SubscriptionPaymentRecord } from "@shared/types/subscription-payment";
@@ -150,6 +151,8 @@ export function PaymentsRoute(): React.JSX.Element {
           )}
         </section>
       )}
+
+      <BalanceSection onChanged={handlePaymentSuccess} />
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
         <div className="flex items-center justify-between gap-4">
