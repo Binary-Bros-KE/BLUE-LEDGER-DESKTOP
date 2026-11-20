@@ -24,6 +24,8 @@ before(() => {
   insertRow("locations", { id: "store", tenant_id: "tenant-1", location_name: "Main Store", location_code: "MS", location_type: "distribution_center", status: "active", phone: "0700000000" });
   insertRow("locations", { id: "shop-a", tenant_id: "tenant-1", location_name: "Shop A", location_code: "A", location_type: "storefront", status: "active", phone: "0700000001" });
   insertRow("locations", { id: "shop-b", tenant_id: "tenant-1", location_name: "Shop B", location_code: "B", location_type: "storefront", status: "active", phone: "0700000002" });
+  insertRow("categories", { id: "cat-empty", tenant_id: "tenant-1", name: "Aerials", status: "active" });
+  insertRow("categories", { id: "cat-off", tenant_id: "tenant-1", name: "Old Range", status: "inactive" });
   insertRow("products", { id: "rice", tenant_id: "tenant-1", name: "Rice", sku: "RICE", buying_price_cents: 10_000, selling_price_cents: 13_000, track_stock: 1, status: "active" });
   insertRow("products", { id: "oil", tenant_id: "tenant-1", name: "Oil", sku: "OIL", buying_price_cents: 20_000, selling_price_cents: 25_000, track_stock: 1, status: "active" });
   insertRow("inventory", { id: "i1", tenant_id: "tenant-1", product_id: "rice", location_id: "store", quantity: 100 });
@@ -55,6 +57,10 @@ test("stock value per location, Main Store first, negative stock counts as none"
   const uncategorized = data.categoryValueBreakdown.find((entry) => entry.name === "Uncategorized")!;
   assert.equal(uncategorized.valueCents, 1_400_000);
   assert.equal(uncategorized.retailValueCents, data.overview.totalRetailValueCents, "category table carries selling value too");
+  const aerials = data.categoryValueBreakdown.find((entry) => entry.name === "Aerials");
+  assert.deepEqual(aerials && [aerials.quantity, aerials.valueCents, aerials.retailValueCents], [0, 0, 0], "an active category with nothing in stock still shows, at zero");
+  assert.equal(data.categoryValueBreakdown.some((entry) => entry.name === "Old Range"), false, "inactive categories stay out");
+  assert.equal(data.categoryValueBreakdown[0]!.name, "Uncategorized", "biggest value first, zero categories after");
 });
 
 test("a branch-scoped manager sees only their own location's value", () => {

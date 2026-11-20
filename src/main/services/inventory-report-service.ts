@@ -1,3 +1,4 @@
+import * as categoryRepository from "@main/database/repositories/category-repository";
 import * as inventoryReportRepository from "@main/database/repositories/inventory-report-repository";
 import type { CurrentStockRow, StockMovementReportRowRaw } from "@main/database/repositories/inventory-report-repository";
 import { requirePermissionAnyOf, resolveReportLocationScope } from "@main/services/auth-service";
@@ -248,6 +249,17 @@ export function getInventoryReportData(input: unknown): InventoryReportData {
   };
 
   const categoryMap = new Map<string, { id: string; name: string; quantity: number; valueCents: number; retailValueCents: number }>();
+  // Every active category is listed, at zero when nothing in it is in stock (or it has no products
+  // yet) — otherwise a business with 30 categories saw only the handful that happen to hold stock.
+  const activeCategories = categoryRepository
+    .findAllCategoryRows(tenantId)
+    .filter((category) => category.status === "active")
+    .sort((a, b) => a.name.localeCompare(b.name));
+  for (const category of activeCategories) {
+    if (!categoryMap.has(category.name)) {
+      categoryMap.set(category.name, { id: category.name, name: category.name, quantity: 0, valueCents: 0, retailValueCents: 0 });
+    }
+  }
   for (const row of rows) {
     const key = row.category_name ?? "Uncategorized";
     const bucket = categoryMap.get(key) ?? { id: key, name: key, quantity: 0, valueCents: 0, retailValueCents: 0 };
