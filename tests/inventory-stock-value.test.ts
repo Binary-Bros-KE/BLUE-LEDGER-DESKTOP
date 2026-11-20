@@ -51,6 +51,10 @@ test("stock value per location, Main Store first, negative stock counts as none"
   assert.equal(store.percentOfTotal, 85.7);
   const storeSection = data.sections.find((section) => section.isMainStore)!;
   assert.equal(storeSection.stockValueCents, store.valueCents, "matches the Main Store card's own Stock Value");
+  assert.equal(storeSection.retailValueCents, store.retailValueCents, "and its selling-price value");
+  const uncategorized = data.categoryValueBreakdown.find((entry) => entry.name === "Uncategorized")!;
+  assert.equal(uncategorized.valueCents, 1_400_000);
+  assert.equal(uncategorized.retailValueCents, data.overview.totalRetailValueCents, "category table carries selling value too");
 });
 
 test("a branch-scoped manager sees only their own location's value", () => {

@@ -28,12 +28,13 @@ export function InventoryStockValueSection({ entries }: { entries: StockValueBre
       </div>
       {entries.length > 0 && (
         <div className="mt-3 overflow-x-auto rounded-lg border border-line">
-          <table className="w-full min-w-[480px] table-fixed border-collapse text-sm">
+          <table className="w-full min-w-[560px] table-fixed border-collapse text-sm">
             <thead>
               <tr className="bg-primary text-white">
                 <Th>Category</Th>
                 <Th className="text-right">Units</Th>
-                <Th className="text-right">Value</Th>
+                <Th className="text-right">Value (Buying)</Th>
+                <Th className="text-right">Value (Selling)</Th>
                 <Th className="text-right">% of Total</Th>
               </tr>
             </thead>
@@ -43,6 +44,7 @@ export function InventoryStockValueSection({ entries }: { entries: StockValueBre
                   <td className="truncate px-3 py-2 font-bold text-ink">{entry.name}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-muted">{entry.quantity}</td>
                   <td className="px-3 py-2 text-right font-bold tabular-nums text-ink">{money(entry.valueCents)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-muted">{money(entry.retailValueCents)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-muted">{entry.percentOfTotal.toFixed(1)}%</td>
                 </tr>
               ))}

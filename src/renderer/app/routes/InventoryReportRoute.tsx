@@ -63,7 +63,8 @@ function buildLocationExportSections(section: LocationInventorySectionData): Rep
         { label: "Products", value: String(section.productCount) },
         { label: "Low Stock", value: String(section.lowStockCount) },
         { label: "Out of Stock", value: String(section.outOfStockCount) },
-        { label: "Stock Value", value: money(section.stockValueCents) }
+        { label: "Stock Value (Buying)", value: money(section.stockValueCents) },
+        { label: "Stock Value (Selling)", value: money(section.retailValueCents) }
       ]
     },
     section.products.length > 0 && {
@@ -173,8 +174,8 @@ export function InventoryReportRoute(): React.JSX.Element {
             value: String(data.overview.outOfStockProductCount),
             caption: "Distinct products at zero anywhere — store or storefront"
           },
-          { tone: "success", label: "Total Stock Value", value: money(data.overview.totalStockValueCents), caption: "Every unit, at buying price" },
-          { tone: "teal", label: "At Selling Price", value: money(data.overview.totalRetailValueCents), caption: "The same units, at selling price" }
+          { tone: "success", label: "Stock Value (Buying)", value: money(data.overview.totalStockValueCents), caption: "Every unit, at buying price" },
+          { tone: "teal", label: "Stock Value (Selling)", value: money(data.overview.totalRetailValueCents), caption: "The same units, at selling price" }
         ]
       },
       data.locationValueBreakdown.length > 0 && {
@@ -201,13 +202,15 @@ export function InventoryReportRoute(): React.JSX.Element {
         columns: [
           { key: "category", header: "Category" },
           { key: "units", header: "Units", align: "right" },
-          { key: "value", header: "Value", align: "right" },
+          { key: "value", header: "Value (Buying)", align: "right" },
+          { key: "retail", header: "Value (Selling)", align: "right" },
           { key: "percent", header: "% of Total", align: "right" }
         ],
         rows: data.categoryValueBreakdown.map((entry) => ({
           category: entry.name,
           units: String(entry.quantity),
           value: money(entry.valueCents),
+          retail: money(entry.retailValueCents),
           percent: `${entry.percentOfTotal.toFixed(1)}%`
         }))
       },
@@ -280,12 +283,18 @@ export function InventoryReportRoute(): React.JSX.Element {
 
           {data && (
             <>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 <OverviewCard
                   tone="success"
-                  label="Total Stock Value"
+                  label="Stock Value (Buying)"
                   displayValue={money(data.overview.totalStockValueCents)}
-                  formula={`At buying price, every location · ${money(data.overview.totalRetailValueCents)} at selling price`}
+                  formula="Every unit, every location, at buying price"
+                />
+                <OverviewCard
+                  tone="teal"
+                  label="Stock Value (Selling)"
+                  displayValue={money(data.overview.totalRetailValueCents)}
+                  formula={`The same units at selling price · ${money(data.overview.totalRetailValueCents - data.overview.totalStockValueCents)} potential margin`}
                 />
                 <OverviewCard
                   tone="primary"

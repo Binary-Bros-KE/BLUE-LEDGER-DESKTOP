@@ -2,7 +2,10 @@ export type StockValueBreakdownEntry = {
   id: string;
   name: string;
   quantity: number;
+  /** At buying price. */
   valueCents: number;
+  /** The same units at selling price. */
+  retailValueCents: number;
   percentOfTotal: number;
 };
 
@@ -108,7 +111,10 @@ export type LocationInventorySection = {
   totalUnits: number;
   lowStockCount: number;
   outOfStockCount: number;
+  /** This location's own stock at buying price. */
   stockValueCents: number;
+  /** The same stock at selling price. */
+  retailValueCents: number;
   products: LocationProductRow[];
   movements: StockMovementReportRow[];
   allocation: MainStoreAllocationInfo | null;

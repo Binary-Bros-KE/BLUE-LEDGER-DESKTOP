@@ -112,7 +112,7 @@ export function LocationInventorySection({
         {exportRequest && <ReportExportMenu request={exportRequest} />}
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
         <div className="rounded-md border border-line bg-soft/60 px-3 py-2">
           <p className="text-[9px] font-bold uppercase tracking-wide text-muted">Products</p>
           <p className="mt-0.5 text-lg font-bold tabular-nums text-ink">{section.productCount}</p>
@@ -130,8 +130,12 @@ export function LocationInventorySection({
           </p>
         </div>
         <div className="rounded-md border border-line bg-soft/60 px-3 py-2">
-          <p className="text-[9px] font-bold uppercase tracking-wide text-muted">Stock Value</p>
+          <p className="text-[9px] font-bold uppercase tracking-wide text-muted">Stock Value (Buying)</p>
           <p className="mt-0.5 text-lg font-bold tabular-nums text-ink">{money(section.stockValueCents)}</p>
+        </div>
+        <div className="rounded-md border border-line bg-soft/60 px-3 py-2">
+          <p className="text-[9px] font-bold uppercase tracking-wide text-muted">Stock Value (Selling)</p>
+          <p className="mt-0.5 text-lg font-bold tabular-nums text-ink">{money(section.retailValueCents)}</p>
         </div>
       </div>
 

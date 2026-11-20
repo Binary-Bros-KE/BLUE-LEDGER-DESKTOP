@@ -28,7 +28,7 @@ function onHand(quantity: number): number {
 }
 
 function toBreakdownEntries(
-  rows: { id: string; name: string; quantity: number; valueCents: number }[],
+  rows: { id: string; name: string; quantity: number; valueCents: number; retailValueCents: number }[],
   totalCents: number
 ): StockValueBreakdownEntry[] {
   return rows
@@ -36,7 +36,8 @@ function toBreakdownEntries(
       id: row.id,
       name: row.name,
       quantity: row.quantity,
-      valueCents: row.valueCents,
+      valueCents: Math.round(row.valueCents),
+      retailValueCents: Math.round(row.retailValueCents),
       percentOfTotal: totalCents > 0 ? Math.round((row.valueCents / totalCents) * 1000) / 10 : 0,
     }))
     .sort((a, b) => b.valueCents - a.valueCents);
@@ -123,12 +124,14 @@ export function getInventoryReportData(input: unknown): InventoryReportData {
   const sections: LocationInventorySection[] = [...locationBuckets.entries()]
     .map(([locId, bucket]) => {
       let ownStockValueCents = 0;
+      let ownRetailValueCents = 0;
 
       const products: LocationProductRow[] = bucket.rows.map((row) => {
         const isLow = row.reorder_level > 0 && row.quantity < row.reorder_level;
         const isOutOfStock = row.quantity <= 0;
         const ownValueCents = onHand(row.quantity) * row.buying_price_cents;
         ownStockValueCents += ownValueCents;
+        ownRetailValueCents += onHand(row.quantity) * row.selling_price_cents;
 
         let storefrontTotalQuantity: number | null = null;
         let storefrontIsLow: boolean | null = null;
@@ -204,6 +207,7 @@ export function getInventoryReportData(input: unknown): InventoryReportData {
         lowStockCount: products.filter((product) => product.isLow).length,
         outOfStockCount: products.filter((product) => product.isOutOfStock).length,
         stockValueCents,
+        retailValueCents: Math.round(ownRetailValueCents),
         products,
         movements: movementRows.map(toMovementRow),
         allocation,
@@ -223,10 +227,6 @@ export function getInventoryReportData(input: unknown): InventoryReportData {
   const totalStockValueCents = rows.reduce((sum, row) => sum + onHand(row.quantity) * row.buying_price_cents, 0);
   const totalRetailValueCents = rows.reduce((sum, row) => sum + onHand(row.quantity) * row.selling_price_cents, 0);
 
-  const retailByLocation = new Map<string, number>();
-  for (const row of rows) {
-    retailByLocation.set(row.location_id, (retailByLocation.get(row.location_id) ?? 0) + onHand(row.quantity) * row.selling_price_cents);
-  }
   // Same order as the sections (Main Store first), from the same own-stock numbers.
   const locationValueBreakdown: LocationValueEntry[] = sections.map((section) => ({
     locationId: section.locationId,
@@ -234,7 +234,7 @@ export function getInventoryReportData(input: unknown): InventoryReportData {
     isMainStore: section.isMainStore,
     totalUnits: section.products.reduce((sum, product) => sum + onHand(product.quantity), 0),
     valueCents: Math.round(section.stockValueCents),
-    retailValueCents: Math.round(retailByLocation.get(section.locationId) ?? 0),
+    retailValueCents: section.retailValueCents,
     percentOfTotal: totalStockValueCents > 0 ? Math.round((section.stockValueCents / totalStockValueCents) * 1000) / 10 : 0,
   }));
 
@@ -247,12 +247,13 @@ export function getInventoryReportData(input: unknown): InventoryReportData {
     totalRetailValueCents: Math.round(totalRetailValueCents),
   };
 
-  const categoryMap = new Map<string, { id: string; name: string; quantity: number; valueCents: number }>();
+  const categoryMap = new Map<string, { id: string; name: string; quantity: number; valueCents: number; retailValueCents: number }>();
   for (const row of rows) {
     const key = row.category_name ?? "Uncategorized";
-    const bucket = categoryMap.get(key) ?? { id: key, name: key, quantity: 0, valueCents: 0 };
+    const bucket = categoryMap.get(key) ?? { id: key, name: key, quantity: 0, valueCents: 0, retailValueCents: 0 };
     bucket.quantity += row.quantity;
     bucket.valueCents += onHand(row.quantity) * row.buying_price_cents;
+    bucket.retailValueCents += onHand(row.quantity) * row.selling_price_cents;
     categoryMap.set(key, bucket);
   }
 
