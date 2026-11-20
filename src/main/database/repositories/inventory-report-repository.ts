@@ -18,6 +18,7 @@ export type CurrentStockRow = {
   reserved_quantity: number;
   available_quantity: number;
   buying_price_cents: number;
+  selling_price_cents: number;
   reorder_level: number;
 };
 
@@ -29,7 +30,7 @@ export function findCurrentStockRows(tenantId: string, locationId: string | null
         i.product_id, p.name AS product_name, p.sku, c.name AS category_name,
         i.location_id, l.location_name, l.location_type,
         i.quantity, i.reserved_quantity, i.available_quantity,
-        p.buying_price_cents, p.reorder_level
+        p.buying_price_cents, p.selling_price_cents, p.reorder_level
       FROM inventory i
       JOIN products p ON p.id = i.product_id
       JOIN locations l ON l.id = i.location_id

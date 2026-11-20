@@ -15,7 +15,21 @@ export type InventoryOverviewStats = {
   totalUnits: number;
   lowStockProductCount: number;
   outOfStockProductCount: number;
+  /** Every unit on hand at buying price (negative stock counts as none). */
   totalStockValueCents: number;
+  /** The same units at selling price. */
+  totalRetailValueCents: number;
+};
+
+/** One location's share of the stock value — Main Store first, then each storefront. */
+export type LocationValueEntry = {
+  locationId: string;
+  locationName: string;
+  isMainStore: boolean;
+  totalUnits: number;
+  valueCents: number;
+  retailValueCents: number;
+  percentOfTotal: number;
 };
 
 export type StockMovementReportRow = {
@@ -102,6 +116,8 @@ export type LocationInventorySection = {
 
 export type InventoryReportData = {
   overview: InventoryOverviewStats;
+  /** Stock value per location (Main Store included), same numbers as each section's Stock Value. */
+  locationValueBreakdown: LocationValueEntry[];
   categoryValueBreakdown: StockValueBreakdownEntry[];
   sections: LocationInventorySection[];
 };

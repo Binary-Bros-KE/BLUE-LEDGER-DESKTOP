@@ -12,6 +12,7 @@ import type { InventoryReportData, LocationInventorySection as LocationInventory
 import type { ReportExportRequest, ReportExportSection } from "@shared/types/report-export";
 import { OverviewCard } from "./reports/FinancialOverviewCards";
 import { InventoryStockValueSection } from "./reports/InventoryStockValueSection";
+import { StockValueByLocationSection } from "./reports/StockValueByLocationSection";
 import { LocationInventorySection } from "./reports/LocationInventorySection";
 import { ProductDetailModal } from "./reports/ProductDetailModal";
 import { StockAsOfDateSection } from "./reports/StockAsOfDateSection";
@@ -172,8 +173,27 @@ export function InventoryReportRoute(): React.JSX.Element {
             value: String(data.overview.outOfStockProductCount),
             caption: "Distinct products at zero anywhere — store or storefront"
           },
-          { tone: "success", label: "Total Stock Value", value: money(data.overview.totalStockValueCents), caption: "Every unit, at buying price" }
+          { tone: "success", label: "Total Stock Value", value: money(data.overview.totalStockValueCents), caption: "Every unit, at buying price" },
+          { tone: "teal", label: "At Selling Price", value: money(data.overview.totalRetailValueCents), caption: "The same units, at selling price" }
         ]
+      },
+      data.locationValueBreakdown.length > 0 && {
+        type: "table",
+        title: "Stock Value by Location",
+        columns: [
+          { key: "location", header: "Location" },
+          { key: "units", header: "Units", align: "right" },
+          { key: "value", header: "Value (Buying)", align: "right" },
+          { key: "retail", header: "Value (Selling)", align: "right" },
+          { key: "percent", header: "% of Total", align: "right" }
+        ],
+        rows: data.locationValueBreakdown.map((entry) => ({
+          location: entry.isMainStore ? `${entry.locationName} (Main Store)` : entry.locationName,
+          units: String(entry.totalUnits),
+          value: money(entry.valueCents),
+          retail: money(entry.retailValueCents),
+          percent: `${entry.percentOfTotal.toFixed(1)}%`
+        }))
       },
       data.categoryValueBreakdown.length > 0 && {
         type: "table",
@@ -260,7 +280,13 @@ export function InventoryReportRoute(): React.JSX.Element {
 
           {data && (
             <>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                <OverviewCard
+                  tone="success"
+                  label="Total Stock Value"
+                  displayValue={money(data.overview.totalStockValueCents)}
+                  formula={`At buying price, every location · ${money(data.overview.totalRetailValueCents)} at selling price`}
+                />
                 <OverviewCard
                   tone="primary"
                   label="Total Products"
@@ -286,6 +312,8 @@ export function InventoryReportRoute(): React.JSX.Element {
                   formula="Distinct products at zero anywhere — store or storefront"
                 />
               </div>
+
+              <StockValueByLocationSection entries={data.locationValueBreakdown} totalCents={data.overview.totalStockValueCents} />
 
               <InventoryStockValueSection entries={data.categoryValueBreakdown} />
 

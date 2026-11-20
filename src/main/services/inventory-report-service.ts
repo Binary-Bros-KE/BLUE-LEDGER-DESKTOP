@@ -7,6 +7,7 @@ import type {
   InventoryOverviewStats,
   InventoryReportData,
   LocationInventorySection,
+  LocationValueEntry,
   LocationProductRow,
   MainStoreAllocationInfo,
   StockAsOfDateData,
@@ -18,6 +19,12 @@ const MOVEMENT_LIMIT_PER_SECTION = 50;
 
 function isMainStoreType(locationType: string): boolean {
   return locationType === "warehouse" || locationType === "distribution_center";
+}
+
+/** Stock value counts what's actually there: a negative balance (a queued sale, or negative stock
+ * allowed) is a counting problem, not negative money — same rule as the phone's stock value report. */
+function onHand(quantity: number): number {
+  return Math.max(0, quantity);
 }
 
 function toBreakdownEntries(
@@ -120,7 +127,7 @@ export function getInventoryReportData(input: unknown): InventoryReportData {
       const products: LocationProductRow[] = bucket.rows.map((row) => {
         const isLow = row.reorder_level > 0 && row.quantity < row.reorder_level;
         const isOutOfStock = row.quantity <= 0;
-        const ownValueCents = row.quantity * row.buying_price_cents;
+        const ownValueCents = onHand(row.quantity) * row.buying_price_cents;
         ownStockValueCents += ownValueCents;
 
         let storefrontTotalQuantity: number | null = null;
@@ -213,14 +220,31 @@ export function getInventoryReportData(input: unknown): InventoryReportData {
     if (row.reorder_level > 0 && row.quantity < row.reorder_level) lowProductIds.add(row.product_id);
     if (row.quantity <= 0) outProductIds.add(row.product_id);
   }
-  const totalStockValueCents = rows.reduce((sum, row) => sum + row.quantity * row.buying_price_cents, 0);
+  const totalStockValueCents = rows.reduce((sum, row) => sum + onHand(row.quantity) * row.buying_price_cents, 0);
+  const totalRetailValueCents = rows.reduce((sum, row) => sum + onHand(row.quantity) * row.selling_price_cents, 0);
+
+  const retailByLocation = new Map<string, number>();
+  for (const row of rows) {
+    retailByLocation.set(row.location_id, (retailByLocation.get(row.location_id) ?? 0) + onHand(row.quantity) * row.selling_price_cents);
+  }
+  // Same order as the sections (Main Store first), from the same own-stock numbers.
+  const locationValueBreakdown: LocationValueEntry[] = sections.map((section) => ({
+    locationId: section.locationId,
+    locationName: section.locationName,
+    isMainStore: section.isMainStore,
+    totalUnits: section.products.reduce((sum, product) => sum + onHand(product.quantity), 0),
+    valueCents: Math.round(section.stockValueCents),
+    retailValueCents: Math.round(retailByLocation.get(section.locationId) ?? 0),
+    percentOfTotal: totalStockValueCents > 0 ? Math.round((section.stockValueCents / totalStockValueCents) * 1000) / 10 : 0,
+  }));
 
   const overview: InventoryOverviewStats = {
     distinctProductCount: new Set(rows.map((row) => row.product_id)).size,
     totalUnits: rows.reduce((sum, row) => sum + row.quantity, 0),
     lowStockProductCount: lowProductIds.size,
     outOfStockProductCount: outProductIds.size,
-    totalStockValueCents,
+    totalStockValueCents: Math.round(totalStockValueCents),
+    totalRetailValueCents: Math.round(totalRetailValueCents),
   };
 
   const categoryMap = new Map<string, { id: string; name: string; quantity: number; valueCents: number }>();
@@ -228,12 +252,13 @@ export function getInventoryReportData(input: unknown): InventoryReportData {
     const key = row.category_name ?? "Uncategorized";
     const bucket = categoryMap.get(key) ?? { id: key, name: key, quantity: 0, valueCents: 0 };
     bucket.quantity += row.quantity;
-    bucket.valueCents += row.quantity * row.buying_price_cents;
+    bucket.valueCents += onHand(row.quantity) * row.buying_price_cents;
     categoryMap.set(key, bucket);
   }
 
   return {
     overview,
+    locationValueBreakdown,
     categoryValueBreakdown: toBreakdownEntries([...categoryMap.values()], totalStockValueCents),
     sections,
   };
