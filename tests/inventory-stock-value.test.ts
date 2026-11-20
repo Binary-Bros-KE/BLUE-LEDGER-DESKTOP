@@ -54,6 +54,13 @@ test("stock value per location, Main Store first, negative stock counts as none"
   const storeSection = data.sections.find((section) => section.isMainStore)!;
   assert.equal(storeSection.stockValueCents, store.valueCents, "matches the Main Store card's own Stock Value");
   assert.equal(storeSection.retailValueCents, store.retailValueCents, "and its selling-price value");
+  const storeRice = storeSection.products.find((row) => row.productId === "rice")!;
+  assert.deepEqual([storeRice.ownValueCents, storeRice.ownRetailValueCents], [100 * 10_000, 100 * 13_000], "Main Store rows: store quantity only");
+  const shopA = data.sections.find((section) => section.locationName === "Shop A")!;
+  const shopRice = shopA.products.find((row) => row.productId === "rice")!;
+  assert.equal(shopRice.ownValueCents, 20 * 10_000, "a storefront's printed value is its own stock, not Main Store's too");
+  assert.equal(shopRice.valueCents, 120 * 10_000, "the on-screen figure still includes Main Store's stock");
+  assert.equal(shopA.products.reduce((sum, row) => sum + row.ownValueCents, 0), shopA.stockValueCents, "the table adds up to the tile");
   const uncategorized = data.categoryValueBreakdown.find((entry) => entry.name === "Uncategorized")!;
   assert.equal(uncategorized.valueCents, 1_400_000);
   assert.equal(uncategorized.retailValueCents, data.overview.totalRetailValueCents, "category table carries selling value too");

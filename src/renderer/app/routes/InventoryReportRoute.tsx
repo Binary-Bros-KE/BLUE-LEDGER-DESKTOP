@@ -40,7 +40,6 @@ function buildLocationExportSections(section: LocationInventorySectionData): Rep
 
   const columns = [
     { key: "product", header: "Product" },
-    { key: "sku", header: "SKU" },
     { key: "category", header: "Category" },
     ...(showMainStoreReference
       ? [
@@ -51,7 +50,9 @@ function buildLocationExportSections(section: LocationInventorySectionData): Rep
     { key: "qty", header: section.isMainStore ? "Qty in Store" : "Qty Available Here", align: "right" as const },
     ...(section.isMainStore ? [{ key: "storefrontQty", header: "Qty in Storefronts", align: "right" as const }] : []),
     { key: "unitCost", header: "Unit Cost", align: "right" as const },
-    { key: "value", header: "Value", align: "right" as const },
+    { key: "value", header: "Value (Buying)", align: "right" as const },
+    { key: "retail", header: "Value (Selling)", align: "right" as const },
+    { key: "margin", header: "Margin", align: "right" as const },
     { key: "percent", header: "%", align: "right" as const }
   ];
 
@@ -75,15 +76,17 @@ function buildLocationExportSections(section: LocationInventorySectionData): Rep
         const tone = productRowTone(row, section.isMainStore);
         return {
           product: row.productName,
-          sku: row.sku,
           category: row.categoryName ?? "—",
           mainStoreQty: row.mainStoreQuantity !== null ? String(row.mainStoreQuantity) : "—",
           allocated: row.allocatedToThisStorefront !== null ? String(row.allocatedToThisStorefront) : "—",
           qty: String(row.quantity),
           storefrontQty: row.storefrontTotalQuantity !== null ? String(row.storefrontTotalQuantity) : "—",
           unitCost: money(row.buyingPriceCents),
-          value: money(row.valueCents),
-          percent: `${row.percentOfLocationValue.toFixed(1)}%`,
+          // This location's own stock only, so the table adds up to its Stock Value tiles above.
+          value: money(row.ownValueCents),
+          retail: money(row.ownRetailValueCents),
+          margin: money(row.ownRetailValueCents - row.ownValueCents),
+          percent: `${(section.stockValueCents > 0 ? (row.ownValueCents / section.stockValueCents) * 100 : 0).toFixed(1)}%`,
           ...(tone ? { _tone: tone } : {})
         };
       })

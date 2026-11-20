@@ -169,7 +169,10 @@ export function getInventoryReportData(input: unknown): InventoryReportData {
           mainStoreQuantity,
           allocatedToThisStorefront,
           buyingPriceCents: row.buying_price_cents,
+          sellingPriceCents: row.selling_price_cents,
           valueCents: displayValueCents,
+          ownValueCents: Math.round(ownValueCents),
+          ownRetailValueCents: Math.round(onHand(row.quantity) * row.selling_price_cents),
           percentOfLocationValue: 0,
         };
       });

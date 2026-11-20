@@ -82,8 +82,15 @@ export type LocationProductRow = {
   mainStoreQuantity: number | null;
   allocatedToThisStorefront: number | null;
   buyingPriceCents: number;
+  sellingPriceCents: number;
   valueCents: number;
   percentOfLocationValue: number;
+  /** This location's own stock only (negative counts as none), at buying and at selling price — what
+   * the printed report's Value (Buying) / Value (Selling) / Margin columns use, so a table adds up to
+   * the location's Stock Value tiles. (valueCents above is the on-screen figure, which on a storefront
+   * also counts Main Store's stock of the product.) */
+  ownValueCents: number;
+  ownRetailValueCents: number;
 };
 
 /** Stock sitting at Main Store that's been earmarked for a storefront but not
