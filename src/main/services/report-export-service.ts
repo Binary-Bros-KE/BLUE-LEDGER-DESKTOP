@@ -224,6 +224,12 @@ function buildReportHtml(request: ReportExportRequest): string {
   .subtitle { font-size: 12px; color: ${BRAND_GOLD}; margin: 4px 0 0; }
   .generated { font-size: 10px; color: ${BRAND_GOLD}; text-align: right; margin: 0; }
   .section { margin-top: 22px; break-inside: avoid; }
+  /* A table flows on from wherever it starts (right under the cards, not on a fresh page): it may
+     split across pages, its header row repeats, and no row or title is cut off on its own. */
+  .section.table-section { break-inside: auto; }
+  .section-title, .section-desc { break-after: avoid; }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; }
   .section-title { font-size: 15px; font-weight: bold; color: ${INK}; margin: 0 0 2px; }
   .section-desc { font-size: 10.5px; color: ${BRAND_GOLD}; margin: 0 0 10px; }
   .cards { display: flex; gap: 10px; flex-wrap: wrap; }
@@ -337,5 +343,5 @@ function renderSectionHtml(section: ReportExportSection): string {
       </tr>`
     )
     .join("");
-  return `<div class="section">${heading}<table><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></div>`;
+  return `<div class="section table-section">${heading}<table><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></div>`;
 }
