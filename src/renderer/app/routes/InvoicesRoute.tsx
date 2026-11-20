@@ -1,3 +1,4 @@
+import { overdueLabel } from "@shared/lib/overdue";
 import { InvoiceCreditNotes } from "./invoices/InvoiceCreditNotes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LineQuantityField } from "@renderer/shared/components/LineQuantityField";
@@ -190,6 +191,11 @@ function statusTone(status: PaymentStatus): "success" | "warning" | "danger" | "
 
 function statusLabel(status: PaymentStatus): string {
   return PAYMENT_STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status;
+}
+
+/** An overdue invoice's pill says how long it's been overdue ("30 days") instead of just "Overdue". */
+function invoiceStatusLabel(invoice: { paymentStatus: PaymentStatus; dueDate: string | null }): string {
+  return invoice.paymentStatus === "overdue" && invoice.dueDate ? overdueLabel(invoice.dueDate) : statusLabel(invoice.paymentStatus);
 }
 
 function transactionTypeLabel(type: TransactionType): string {
@@ -559,7 +565,7 @@ export function InvoicesRoute(): React.JSX.Element {
         amount: `${currency} ${formatCents(invoice.grandTotalCents)}`,
         paid: `${currency} ${formatCents(invoice.amountPaidCents)}`,
         balance: `${currency} ${formatCents(invoice.balanceDueCents)}`,
-        status: statusLabel(invoice.paymentStatus)
+        status: invoiceStatusLabel(invoice)
       })),
       stats: summary
         ? [
@@ -1811,7 +1817,7 @@ export function InvoicesRoute(): React.JSX.Element {
                       <td className="px-3 py-2.5">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <DashedPill tone={statusTone(invoice.paymentStatus)}>
-                            {statusLabel(invoice.paymentStatus)}
+                            {invoiceStatusLabel(invoice)}
                           </DashedPill>
                           {cancellationStatusBySaleId.get(invoice.id)?.pending && (
                             <DashedPill tone="accent">Cancellation Pending</DashedPill>
@@ -1883,7 +1889,7 @@ export function InvoicesRoute(): React.JSX.Element {
         ) : viewingSale ? (
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <DashedPill tone={statusTone(viewingSale.paymentStatus)}>{statusLabel(viewingSale.paymentStatus)}</DashedPill>
+              <DashedPill tone={statusTone(viewingSale.paymentStatus)}>{invoiceStatusLabel(viewingSale)}</DashedPill>
               <DashedPill tone="accent">{transactionTypeLabel(viewingSale.transactionType)}</DashedPill>
               {cancellationStatusBySaleId.get(viewingSale.id)?.pending && (
                 <DashedPill tone="accent">Cancellation Pending</DashedPill>
