@@ -4,6 +4,7 @@ import * as dropshipRepository from "@main/database/repositories/dropship-reposi
 import * as tenantRepository from "@main/database/repositories/tenant-repository";
 import type { DropshipSupplierInfo } from "@shared/types/dropship";
 import { getCurrentTenant } from "@main/services/tenant-service";
+import { getSession } from "@main/services/auth-service";
 import type { PaymentHistoryResult, PaymentScheduleResult, WalletSummary } from "@shared/types/subscription-payment";
 import type { TenantContext } from "@shared/types/tenant";
 
@@ -244,13 +245,18 @@ export async function checkInWithServer(): Promise<void> {
   if (!workstation?.server_id) return;
 
   try {
+    const session = getSession();
     const response = await fetch(`${API_BASE_URL}/activation/heartbeat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         licenseKey: tenantRow.license_key,
         deviceId: workstation.server_id,
-        appVersion: app.getVersion()
+        appVersion: app.getVersion(),
+        // Who's signed in on this till right now (null = nobody) — the admin Activity tab's "who's
+        // using which till" and each person's last-seen-on-desktop (SERVER activity-service.ts).
+        employeeId: session?.employee.id ?? null,
+        employeeName: session ? `${session.employee.firstName} ${session.employee.lastName}`.trim() : null
       }),
       signal: AbortSignal.timeout(8_000)
     });
