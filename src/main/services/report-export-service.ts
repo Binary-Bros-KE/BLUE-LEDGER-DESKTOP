@@ -52,7 +52,7 @@ export async function exportReportToPdf(request: ReportExportRequest): Promise<v
     // ERR_INVALID_URL ceiling on a large report, not just the invoice/quotation case it was first
     // found on.
     await loadHtmlIntoWindow(win, html);
-    buffer = await win.webContents.printToPDF({ printBackground: true, landscape: true });
+    buffer = await win.webContents.printToPDF({ printBackground: true, landscape: request.orientation !== "portrait" });
   } finally {
     win.destroy();
   }
@@ -210,6 +210,19 @@ function writeSectionSheet(sheet: ExcelJS.Worksheet, section: Extract<ReportExpo
 
 function buildReportHtml(request: ReportExportRequest): string {
   const body = request.sections.map((section) => renderSectionHtml(section)).join("");
+  const portrait = request.orientation === "portrait";
+  // Portrait is ~2/3 the width: tighter padding and table text so a 10-column table still fits.
+  const portraitCss = portrait
+    ? `
+  body { padding: 8px; }
+  .card { flex-basis: 150px; padding: 12px; }
+  .card-value { font-size: 17px; }
+  .tile { flex-basis: 140px; }
+  .tile-value { font-size: 16px; }
+  .bar-label { flex-basis: 130px; }
+  th { font-size: 8px; padding: 5px 4px; }
+  td { font-size: 9.5px; padding: 5px 4px; }`
+    : "";
 
   return `<!doctype html>
 <html>
@@ -217,7 +230,7 @@ function buildReportHtml(request: ReportExportRequest): string {
 <meta charset="utf-8" />
 <style>
   * { box-sizing: border-box; }
-  @page { size: A4 landscape; margin: 12mm; }
+  @page { size: A4 ${portrait ? "portrait" : "landscape"}; margin: 12mm; }
   body { font-family: Arial, Helvetica, sans-serif; color: ${INK}; margin: 0; padding: 24px; font-size: 12px; }
   .header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 3px solid ${BRAND_NAVY}; padding-bottom: 12px; }
   .title { font-size: 22px; font-weight: bold; color: ${BRAND_NAVY}; margin: 0; }
@@ -256,7 +269,7 @@ function buildReportHtml(request: ReportExportRequest): string {
   tr.tone-warning td { background: #fdf3e3 !important; }
   .left { text-align: left; }
   .right { text-align: right; white-space: nowrap; }
-  .center { text-align: center; }
+  .center { text-align: center; }${portraitCss}
 </style>
 </head>
 <body>

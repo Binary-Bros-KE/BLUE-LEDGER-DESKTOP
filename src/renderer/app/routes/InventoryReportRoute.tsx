@@ -142,6 +142,7 @@ export function InventoryReportRoute(): React.JSX.Element {
         module: "reports",
         title: `Inventory Report — ${section.locationName}`,
         sections: buildLocationExportSections(section),
+        orientation: "portrait",
         fileBaseName: `InventoryReport_${section.locationName.replace(/[^a-z0-9]+/gi, "_")}_${dateSuffix}`
       });
     }
@@ -225,6 +226,7 @@ export function InventoryReportRoute(): React.JSX.Element {
       module: "reports",
       title: "Inventory Report",
       sections,
+      orientation: "portrait",
       fileBaseName: `InventoryReport_${new Date().toISOString().slice(0, 10)}`
     };
   }, [data]);

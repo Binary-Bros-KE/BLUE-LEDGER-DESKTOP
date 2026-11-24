@@ -61,4 +61,6 @@ export type ReportExportRequest = {
   subtitle?: string;
   sections: ReportExportSection[];
   fileBaseName: string;
+  /** PDF page orientation — landscape unless a report asks otherwise (Inventory prints portrait). */
+  orientation?: "portrait" | "landscape";
 };
