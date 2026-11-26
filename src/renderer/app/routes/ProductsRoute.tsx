@@ -14,11 +14,13 @@ import {
   Plus,
   Power,
   PowerOff,
+  Printer,
   Search,
   TrendingDown
 } from "lucide-react";
 import { BulkTaxCategoryModal } from "@renderer/app/routes/products/BulkTaxCategoryModal";
 import { ApplyMarkPointModal } from "@renderer/app/routes/products/ApplyMarkPointModal";
+import { PriceTagsModal } from "@renderer/app/routes/products/PriceTagsModal";
 import { activeMarkPoint } from "@shared/lib/mark-point";
 import type { MarkPointPreview } from "@shared/types/product";
 import { ProductCreateModal } from "@renderer/app/routes/products/ProductCreateModal";
@@ -142,6 +144,7 @@ export function ProductsRoute(): React.JSX.Element {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkTaxModalOpen, setBulkTaxModalOpen] = useState(false);
   const [markPointOpen, setMarkPointOpen] = useState(false);
+  const [priceTagsOpen, setPriceTagsOpen] = useState(false);
   const [variantsProductId, setVariantsProductId] = useState<string | null>(null);
   const [groupOpen, setGroupOpen] = useState(false);
 
@@ -421,6 +424,15 @@ export function ProductsRoute(): React.JSX.Element {
           </div>
           <div className="flex items-center gap-2">
             {canExport && exportRequest && <ExportMenu request={exportRequest} />}
+            <Button
+              type="button"
+              onClick={() => setPriceTagsOpen(true)}
+              disabled={!products || products.length === 0}
+              className="h-9 border border-line bg-white text-xs text-ink shadow-none hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Printer className="mr-1.5 size-4" aria-hidden="true" />
+              Price Tags
+            </Button>
             {canEdit && markPoint !== null && (
               <Button
                 type="button"
@@ -866,6 +878,15 @@ export function ProductsRoute(): React.JSX.Element {
           onApplied={handleBulkTaxApplied}
         />
       )}
+
+      <PriceTagsModal
+        open={priceTagsOpen}
+        onClose={() => setPriceTagsOpen(false)}
+        products={products ?? []}
+        categoryOptions={categoryOptions}
+        initialSelectedIds={Array.from(selectedIds)}
+        currency={currency}
+      />
 
       {canEdit && markPoint !== null && (
         <ApplyMarkPointModal

@@ -377,7 +377,9 @@ const api: BlueLedgerApi = {
     printStockRequestDocument: (stockRequestId) => invoke("printer:print-stock-request-document", stockRequestId),
     getPdfPreviewData: (previewId) => invoke("printer:get-pdf-preview-data", previewId),
     printPdfPreview: (previewId) => invoke("printer:print-pdf-preview", previewId),
-    downloadPdfPreview: (previewId) => invoke("printer:download-pdf-preview", previewId)
+    downloadPdfPreview: (previewId) => invoke("printer:download-pdf-preview", previewId),
+    priceTagPrinters: () => invoke("price-tags:printers"),
+    printPriceTags: (input) => invoke("price-tags:print", input)
   },
   statement: {
     getForCustomer: (customerId, filters) => invoke("statement:get-for-customer", customerId, filters)

@@ -144,6 +144,7 @@ import {
   shareSalaryPayslip,
   testPrinterConnection
 } from "@main/services/printer-service";
+import { listPriceTagPrinters, printPriceTags } from "@main/services/price-tag-service";
 import {
   attachDeliveryToQuotation,
   attachDeliveryToSale,
@@ -1079,6 +1080,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.printerGetPdfPreviewData, (_event, previewId: string) => getPdfPreviewData(previewId));
   ipcMain.handle(ipcChannels.printerPrintPdfPreview, (_event, previewId: string) => printPdfPreview(previewId));
   ipcMain.handle(ipcChannels.printerDownloadPdfPreview, (_event, previewId: string) => downloadPdfPreview(previewId));
+  ipcMain.handle(ipcChannels.priceTagsPrinters, () => listPriceTagPrinters());
+  ipcMain.handle(ipcChannels.priceTagsPrint, (_event, input: unknown) => printPriceTags(input));
   ipcMain.handle(ipcChannels.statementGetForCustomer, (_event, customerId: string, filters?: unknown) =>
     getCustomerStatement(customerId, filters)
   );

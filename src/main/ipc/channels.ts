@@ -289,6 +289,8 @@ export const ipcChannels = {
   printerGetPdfPreviewData: "printer:get-pdf-preview-data",
   printerPrintPdfPreview: "printer:print-pdf-preview",
   printerDownloadPdfPreview: "printer:download-pdf-preview",
+  priceTagsPrinters: "price-tags:printers",
+  priceTagsPrint: "price-tags:print",
   statementGetForCustomer: "statement:get-for-customer",
   supplierStatementGetForSupplier: "supplier-statement:get-for-supplier",
   deliveryNoteGet: "delivery-note:get",

@@ -73,7 +73,7 @@ const PRINTER_TYPE_MAP: Record<PrinterType, PrinterTypes> = {
   custom: PrinterTypes.CUSTOM
 };
 
-function loadPrinterSettings(): PrinterSettings {
+export function loadPrinterSettings(): PrinterSettings {
   const row = getDatabase()
     .prepare("SELECT value_json FROM app_settings WHERE key = ?")
     .get(PRINTER_SETTINGS_STORAGE_KEY) as { value_json: string } | undefined;
@@ -142,7 +142,7 @@ function buildPrinter(settings: PrinterSettings): ThermalPrinter {
  * specific printer's actual printable width turns out to be — this varies by model/brand even among
  * printers nominally on the same 80mm roll (many only print ~72mm of it), so a single hardcoded
  * "correct" value can't fit every printer; the user dials it in by trial and error instead. */
-function resolveThermalPageWidthIn(paperWidth: number): number {
+export function resolveThermalPageWidthIn(paperWidth: number): number {
   const BASELINE_CHARS = 48;
   const BASELINE_WIDTH_IN = 3.15;
   return (paperWidth / BASELINE_CHARS) * BASELINE_WIDTH_IN;

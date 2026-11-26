@@ -58,6 +58,7 @@ import type { OutstandingPurchasesSummary, SupplierPurchaseHistoryEntry, Supplie
 import type { LocalSourcingReport } from "./local-sourcing-report";
 import type { TaxReport } from "./tax-report";
 import type { PrinterActionResult, PrinterSettings } from "./printer";
+import type { PriceTagPrinters } from "./price-tags";
 import type { Expense, ExpenseSummary } from "./expense";
 import type { ExportListRequest } from "./export";
 import type { ReportExportRequest } from "./report-export";
@@ -1216,6 +1217,14 @@ export type IpcInvokeMap = {
     args: [string];
     result: PrinterActionResult;
   };
+  "price-tags:printers": {
+    args: [];
+    result: PriceTagPrinters;
+  };
+  "price-tags:print": {
+    args: [Record<string, unknown>];
+    result: PrinterActionResult;
+  };
   "printer:generate-quotation-pdf": {
     args: [string];
     result: string | null;
@@ -2269,6 +2278,8 @@ export type BlueLedgerApi = {
     getPdfPreviewData: (previewId: string) => Promise<IpcInvokeMap["printer:get-pdf-preview-data"]["result"]>;
     printPdfPreview: (previewId: string) => Promise<IpcInvokeMap["printer:print-pdf-preview"]["result"]>;
     downloadPdfPreview: (previewId: string) => Promise<IpcInvokeMap["printer:download-pdf-preview"]["result"]>;
+    priceTagPrinters: () => Promise<IpcInvokeMap["price-tags:printers"]["result"]>;
+    printPriceTags: (input: Record<string, unknown>) => Promise<IpcInvokeMap["price-tags:print"]["result"]>;
   };
   statement: {
     getForCustomer: (
