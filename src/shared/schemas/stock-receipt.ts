@@ -17,7 +17,7 @@ import { optionalText } from "@shared/schemas/common";
  * allocation buckets at all. fromLocationId is required (and validated distinct from locationId)
  * only when destination is "location_transfer". */
 export const stockReceiptCreateSchema = z.object({
-  destination: z.enum(["main_store", "storefront", "main_store_transfer", "location_transfer"]),
+  destination: z.enum(["main_store", "storefront", "main_store_transfer", "location_transfer", "main_store_return"]),
   stockRequestId: z.string().trim().min(1).nullable().optional(),
   locationId: z.string().trim().min(1).nullable().optional(),
   fromLocationId: z.string().trim().min(1).nullable().optional(),

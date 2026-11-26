@@ -27,6 +27,9 @@ type DraftItem = {
  * products are picked FIRST here (this section is first in the form), locations chosen right before
  * submitting — the reverse order of the other three destinations, which is fine since none of them
  * share UI beyond the same product-search-and-add mechanism.
+ *
+ * "To" also offers Main Store: that sends the batch back as destination "main_store_return" (stock
+ * stays earmarked for the sending storefront, like Main Store's own single-product Return).
  */
 export function LocationTransferModal({
   open,
@@ -52,6 +55,8 @@ export function LocationTransferModal({
   const [error, setError] = useState<string | null>(null);
 
   const storefronts = useMemo(() => locations.filter((location) => isStorefrontType(location.locationType)), [locations]);
+  const mainStore = useMemo(() => locations.find((location) => !isStorefrontType(location.locationType)) ?? null, [locations]);
+  const toMainStore = mainStore !== null && toLocationId === mainStore.id;
 
   useEffect(() => {
     if (!fromLocationId) {
@@ -144,7 +149,7 @@ export function LocationTransferModal({
       return;
     }
     if (!fromLocationId || !toLocationId) {
-      const message = "Choose both a From and To storefront";
+      const message = "Choose where the stock comes from and where it goes";
       setError(message);
       showErrorToast(message);
       return;
@@ -157,13 +162,12 @@ export function LocationTransferModal({
 
     setSaving(true);
     try {
-      await window.blueLedger.stockReceipt.create({
-        destination: "location_transfer",
-        fromLocationId,
-        locationId: toLocationId,
-        notes,
-        items: items.map((item) => ({ productId: item.productId, quantityReceived: item.quantity }))
-      });
+      const lines = items.map((item) => ({ productId: item.productId, quantityReceived: item.quantity }));
+      await window.blueLedger.stockReceipt.create(
+        toMainStore
+          ? { destination: "main_store_return", fromLocationId, notes, items: lines }
+          : { destination: "location_transfer", fromLocationId, locationId: toLocationId, notes, items: lines }
+      );
       resetForm();
       await onCreated();
       onClose();
@@ -181,7 +185,7 @@ export function LocationTransferModal({
       open={open}
       onClose={onClose}
       title="Transfer Between Locations"
-      description="Move several products from one storefront to another, with a permanent, reprintable record."
+      description="Move several products from a storefront to another storefront or back to Main Store, with a permanent, reprintable record."
       widthClassName="max-w-2xl"
     >
       <form onSubmit={handleSubmit}>
@@ -296,15 +300,21 @@ export function LocationTransferModal({
             ]}
           />
           <SelectField
-            label="To Storefront"
+            label="To"
             value={toLocationId}
             onChange={setToLocationId}
             options={[
-              { value: "", label: "Choose storefront" },
+              { value: "", label: "Choose destination" },
+              ...(mainStore ? [{ value: mainStore.id, label: `${mainStore.locationName} (Main Store)` }] : []),
               ...storefronts.filter((location) => location.id !== fromLocationId).map((location) => ({ value: location.id, label: location.locationName }))
             ]}
           />
         </div>
+        {toMainStore && (
+          <p className="mt-2 text-xs font-semibold text-muted">
+            Goes back into Main Store, still earmarked for the storefront it came from.
+          </p>
+        )}
 
         <TextAreaField
           label="Notes"

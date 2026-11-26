@@ -132,6 +132,10 @@ export function getStockReceipt(id: string): StockReceipt {
  * allocation buckets are involved, so it's a plain transfer_out/transfer_in pair, not
  * distributeMainStoreStockCore.
  *
+ * main_store_return is the reverse of main_store_transfer — a batch of a storefront's stock sent
+ * back to Main Store, credited to that storefront's own allocation (returnToMainStore, in bulk). It
+ * lists as a location transfer from that storefront, received at Main Store.
+ *
  * previousQuantity/newQuantity (and, for a transfer, mainStorePreviousQuantity/mainStoreNewQuantity)
  * are captured HERE, immediately before each item's movement applies — not recomputed later — so the
  * printed/reprinted document always shows exactly what was true at the moment of receiving, even if
@@ -158,7 +162,35 @@ export async function createStockReceipt(input: unknown): Promise<StockReceipt> 
   // sourcing via distributeMainStoreStockCore — a plain storefront has no such buckets to draw from).
   let transferFromLocationId: string | null = null;
 
-  if (parsed.destination === "main_store") {
+  if (parsed.destination === "main_store_return") {
+    // The bulk counterpart of main-store-service.ts's returnToMainStore: storefront stock goes back
+    // to Main Store, still earmarked for that storefront (see the item loop below). Same permission
+    // as that single-product return; a branch-scoped employee can only send their own storefront's.
+    requirePermission("stock_transfers", "create");
+    const mainStore = locationRepository.findMainStoreLocationRow(tenantId);
+    if (!mainStore) {
+      throw new Error("No Main Store is set up for this business yet");
+    }
+    const fromId = parsed.fromLocationId;
+    if (!fromId) {
+      throw new Error("Choose which storefront this stock is coming from");
+    }
+    const branchScope = getCurrentBranchScope();
+    if (branchScope && fromId !== branchScope) {
+      throw new Error("You can only send stock from your own storefront");
+    }
+    const fromLocation = locationRepository.findLocationRowById(fromId);
+    if (
+      !fromLocation ||
+      fromLocation.tenant_id !== tenantId ||
+      !isStorefrontType(fromLocation.location_type as LocationType)
+    ) {
+      throw new Error("Source storefront not found");
+    }
+    targetLocationId = mainStore.id;
+    allocationStorefrontId = null;
+    transferFromLocationId = fromId;
+  } else if (parsed.destination === "main_store") {
     // Same boundary role-service.ts's own DEFAULT_SYSTEM_ROLES comment describes: Manager keeps
     // "inventory" (their own storefront's stock) but deliberately never gets "main_store" — that
     // split only means something if it's also enforced here, not just left to the UI hiding the
@@ -326,6 +358,36 @@ export async function createStockReceipt(input: unknown): Promise<StockReceipt> 
           referenceType: "stock_receipt",
           referenceId: receiptId
         });
+      } else if (parsed.destination === "main_store_return") {
+        // Same pair as returnToMainStore: out of the storefront, into Main Store under that
+        // storefront's own allocation — still logically theirs, just physically back at Main Store.
+        applyValidatedStockMovement(
+          {
+            productId: item.productId,
+            locationId: transferFromLocationId as string,
+            movementType: "transfer_out",
+            quantityChange: -item.quantityReceived,
+            referenceType: "stock_receipt",
+            referenceId: receiptId,
+            performedBy: employeeId,
+            notes: parsed.notes
+          },
+          tenantId
+        );
+        applyValidatedStockMovement(
+          {
+            productId: item.productId,
+            locationId: targetLocationId,
+            movementType: "transfer_in",
+            quantityChange: item.quantityReceived,
+            referenceType: "stock_receipt",
+            referenceId: receiptId,
+            performedBy: employeeId,
+            notes: parsed.notes,
+            allocationStorefrontId: transferFromLocationId
+          },
+          tenantId
+        );
       } else if (parsed.destination === "location_transfer") {
         // Plain transfer_out/transfer_in pair, same as recordStockTransfer — deliberately NOT
         // distributeMainStoreStockCore, which is specifically about Main Store's allocation buckets;
