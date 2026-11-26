@@ -58,17 +58,6 @@ function effectivePriceCents(product: ProductListItem | Product, pricing: WebPri
 
 type WebsiteSection = "products" | "home" | "look" | "delivery" | "subscribers";
 
-const SECTION_COPY: Record<WebsiteSection, { title: string; intro: string }> = {
-  products: {
-    title: "Website Products",
-    intro: "Choose which products appear on your website and set their online prices, photos and descriptions."
-  },
-  home: { title: "Home Page", intro: "Edit every section of your website home page: text, images, categories and links." },
-  look: { title: "Look & Branding", intro: "Your logo, contact channels and category images. Colours and design are set up by Blue Ledger." },
-  delivery: { title: "Delivery Options", intro: "The delivery choices and fees customers see at checkout." },
-  subscribers: { title: "Newsletter Subscribers", intro: "Everyone who signed up for your newsletter on the website." }
-};
-
 /** Website Manager screens (one per sidebar entry) — store status on every one, then the section. */
 export function OnlineStoreRoute({ section = "products" }: { section?: WebsiteSection }): React.JSX.Element {
   const currency = useAppStore((state) => state.context?.tenant.currency ?? "");
@@ -252,12 +241,6 @@ export function OnlineStoreRoute({ section = "products" }: { section?: WebsiteSe
 
   return (
     <div className="space-y-6">
-      <div>
-        <p className="text-[11px] font-extrabold uppercase tracking-wider text-accent">Website Manager</p>
-        <h1 className="mt-1 text-2xl font-extrabold">{SECTION_COPY[tab].title}</h1>
-        <p className="mt-1 text-sm font-semibold text-muted">{SECTION_COPY[tab].intro}</p>
-      </div>
-
       {/* Store status ------------------------------------------------------------------ */}
       <div className="rounded-lg border border-line bg-white p-5 shadow-soft">
         {overview?.store ? (
