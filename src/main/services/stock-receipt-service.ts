@@ -133,8 +133,8 @@ export function getStockReceipt(id: string): StockReceipt {
  * distributeMainStoreStockCore.
  *
  * main_store_return is the reverse of main_store_transfer — a batch of a storefront's stock sent
- * back to Main Store, credited to that storefront's own allocation (returnToMainStore, in bulk). It
- * lists as a location transfer from that storefront, received at Main Store.
+ * back to Main Store's unallocated stock (not earmarked for that storefront, unlike Main Store's own
+ * single-product Return). It lists as a location transfer from that storefront, received at Main Store.
  *
  * previousQuantity/newQuantity (and, for a transfer, mainStorePreviousQuantity/mainStoreNewQuantity)
  * are captured HERE, immediately before each item's movement applies — not recomputed later — so the
@@ -163,9 +163,9 @@ export async function createStockReceipt(input: unknown): Promise<StockReceipt> 
   let transferFromLocationId: string | null = null;
 
   if (parsed.destination === "main_store_return") {
-    // The bulk counterpart of main-store-service.ts's returnToMainStore: storefront stock goes back
-    // to Main Store, still earmarked for that storefront (see the item loop below). Same permission
-    // as that single-product return; a branch-scoped employee can only send their own storefront's.
+    // Storefront stock sent back to Main Store's unallocated stock (see the item loop below). Same
+    // permission as Main Store's single-product Return; a branch-scoped employee can only send their
+    // own storefront's.
     requirePermission("stock_transfers", "create");
     const mainStore = locationRepository.findMainStoreLocationRow(tenantId);
     if (!mainStore) {
@@ -359,8 +359,8 @@ export async function createStockReceipt(input: unknown): Promise<StockReceipt> 
           referenceId: receiptId
         });
       } else if (parsed.destination === "main_store_return") {
-        // Same pair as returnToMainStore: out of the storefront, into Main Store under that
-        // storefront's own allocation — still logically theirs, just physically back at Main Store.
+        // Out of the storefront, into Main Store's UNALLOCATED stock — unlike returnToMainStore's
+        // single-product return, a bulk send-back is not kept earmarked for the sending storefront.
         applyValidatedStockMovement(
           {
             productId: item.productId,
@@ -384,7 +384,7 @@ export async function createStockReceipt(input: unknown): Promise<StockReceipt> 
             referenceId: receiptId,
             performedBy: employeeId,
             notes: parsed.notes,
-            allocationStorefrontId: transferFromLocationId
+            allocationStorefrontId: null
           },
           tenantId
         );

@@ -28,8 +28,8 @@ type DraftItem = {
  * submitting — the reverse order of the other three destinations, which is fine since none of them
  * share UI beyond the same product-search-and-add mechanism.
  *
- * "To" also offers Main Store: that sends the batch back as destination "main_store_return" (stock
- * stays earmarked for the sending storefront, like Main Store's own single-product Return).
+ * "To" also offers Main Store: that sends the batch back as destination "main_store_return", into
+ * Main Store's unallocated stock.
  */
 export function LocationTransferModal({
   open,
@@ -312,7 +312,7 @@ export function LocationTransferModal({
         </div>
         {toMainStore && (
           <p className="mt-2 text-xs font-semibold text-muted">
-            Goes back into Main Store, still earmarked for the storefront it came from.
+            Goes back into Main Store as unallocated stock, free for any storefront.
           </p>
         )}
 

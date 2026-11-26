@@ -4,6 +4,7 @@ import { getDatabase, resetTestDatabase } from "./stubs/connection.ts";
 import { migrateDatabase } from "../src/main/database/migrate.ts";
 import { setTestSession } from "./stubs/auth-service.ts";
 import { createStockReceipt } from "../src/main/services/stock-receipt-service.ts";
+import { deriveUnallocatedQuantity } from "../src/main/services/main-store-service.ts";
 
 function insert(table: string, values: Record<string, string | number | null>): void {
   const db = getDatabase();
@@ -59,7 +60,7 @@ beforeEach(() => {
   session(null);
 });
 
-test("sends a batch from a storefront back to Main Store, earmarked for that storefront, with a receipt of record", async () => {
+test("sends a batch from a storefront back to Main Store's unallocated stock, with a receipt of record", async () => {
   const receipt = await createStockReceipt({
     destination: "main_store_return",
     fromLocationId: "shop",
@@ -72,7 +73,8 @@ test("sends a batch from a storefront back to Main Store, earmarked for that sto
 
   assert.deepEqual([quantity("p1", "shop"), quantity("p1", "main")], [15, 15]);
   assert.deepEqual([quantity("p2", "shop"), quantity("p2", "main")], [0, 30]);
-  assert.deepEqual([earmarked("p1", "shop"), earmarked("p2", "shop")], [5, 20]);
+  assert.deepEqual([earmarked("p1", "shop"), earmarked("p2", "shop")], [0, 0], "not earmarked for the sending storefront");
+  assert.deepEqual([deriveUnallocatedQuantity("p1", "main"), deriveUnallocatedQuantity("p2", "main")], [15, 30]);
 
   assert.equal(receipt.locationId, "main");
   assert.equal(receipt.sourceType, "location_transfer");
