@@ -168,6 +168,8 @@ export function ThemePanel({
   const [contact, setContact] = useState<TrylistThemeConfig["contact"]>(() => parseThemeConfig(themeJson).contact);
   const [savingBrand, setSavingBrand] = useState(false);
   const [savingTopBar, setSavingTopBar] = useState(false);
+  const [footerTagline, setFooterTagline] = useState(() => parseThemeConfig(themeJson).footerTagline);
+  const [savingFooter, setSavingFooter] = useState(false);
   const [savingContact, setSavingContact] = useState(false);
 
   // Trust bar + brands: edited freely, saved with their own buttons (brand LOGOS save instantly).
@@ -236,6 +238,17 @@ export function ThemePanel({
       setSavingTopBar(false);
     }
   }, [apply, topBar]);
+
+  const saveFooter = useCallback(async () => {
+    setSavingFooter(true);
+    try {
+      await apply({ footerTagline: footerTagline.trim() || null }, "Footer saved");
+    } catch (err) {
+      showErrorToast(getErrorMessage(err, "Couldn't save"));
+    } finally {
+      setSavingFooter(false);
+    }
+  }, [apply, footerTagline]);
 
   const saveContact = useCallback(async () => {
     setSavingContact(true);
@@ -515,6 +528,24 @@ export function ThemePanel({
         <div className="flex justify-end">
           <Button onClick={() => void saveTopBar()} disabled={savingTopBar}>
             {savingTopBar ? <Loader2 className="size-4 animate-spin" /> : "Save"}
+          </Button>
+        </div>
+      </Card>
+
+      <Card title="Footer">
+        <TextAreaField
+          label="Description under the logo (blank = none)"
+          value={footerTagline}
+          onChange={setFooterTagline}
+          rows={3}
+          placeholder="Dealers in: networking, electronics, CCTV cameras…"
+        />
+        <p className="text-xs text-muted">
+          Shown in the website footer above your address and phone, which come from Business Profile.
+        </p>
+        <div className="flex justify-end">
+          <Button onClick={() => void saveFooter()} disabled={savingFooter}>
+            {savingFooter ? <Loader2 className="size-4 animate-spin" /> : "Save"}
           </Button>
         </div>
       </Card>
