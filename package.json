@@ -1,6 +1,6 @@
 {
   "name": "blue-ledger-desktop",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "description": "Offline-first multi-tenant POS desktop client for Blue Ledger.",
   "main": "./out/main/index.js",
   "scripts": {

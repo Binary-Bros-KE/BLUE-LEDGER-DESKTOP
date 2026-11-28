@@ -30,6 +30,7 @@ import {
   ShoppingBag,
   ShoppingCart,
   Store,
+  Tag,
   Truck,
   Tv,
   Users,
@@ -347,6 +348,13 @@ export const navGroups: NavGroup[] = [
         label: "Suppliers Report",
         description: "Purchasing & spend by supplier",
         icon: Truck,
+        permissionModule: "reports"
+      },
+      {
+        key: "reports-dropship-prices",
+        label: "Supplier Prices",
+        description: "Price changes from dropship suppliers",
+        icon: Tag,
         permissionModule: "reports"
       },
       {

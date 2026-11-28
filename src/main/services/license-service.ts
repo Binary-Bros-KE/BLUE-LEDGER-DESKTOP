@@ -2,7 +2,7 @@ import * as os from "node:os";
 import electron from "electron";
 import * as dropshipRepository from "@main/database/repositories/dropship-repository";
 import * as tenantRepository from "@main/database/repositories/tenant-repository";
-import type { DropshipSupplierInfo } from "@shared/types/dropship";
+import type { DropshipPriceReport, DropshipSupplierInfo } from "@shared/types/dropship";
 import { getCurrentTenant } from "@main/services/tenant-service";
 import { getSession } from "@main/services/auth-service";
 import type { PaymentHistoryResult, PaymentScheduleResult, WalletSummary } from "@shared/types/subscription-payment";
@@ -476,6 +476,26 @@ export async function fetchWallet(): Promise<WalletSummary | null> {
     const wallet = await parseJsonResponse<WalletSummary>(response);
     tenantRepository.setWalletCacheRow({ walletBalanceCents: wallet.balanceCents, pricePerPeriodCents: wallet.pricePerPeriodCents });
     return wallet;
+  } catch {
+    return null;
+  }
+}
+
+/** The dropship "Supplier Price Changes" report (SERVER /activation/dropship-price-report), with the
+ * renderer's filters passed straight through. Null when offline or not activated. */
+export async function fetchDropshipPriceReport(query: Record<string, unknown>): Promise<DropshipPriceReport | null> {
+  const tenantRow = tenantRepository.findTenantRow();
+  if (!tenantRow?.license_key) return null;
+  const workstation = tenantRepository.findPrimaryWorkstationRow(tenantRow.id);
+  if (!workstation?.server_id) return null;
+  try {
+    const response = await fetch(`${API_BASE_URL}/activation/dropship-price-report`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...query, licenseKey: tenantRow.license_key, deviceId: workstation.server_id }),
+      signal: AbortSignal.timeout(15_000)
+    });
+    return await parseJsonResponse<DropshipPriceReport>(response);
   } catch {
     return null;
   }

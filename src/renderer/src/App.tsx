@@ -30,6 +30,7 @@ import { InventoryReportRoute } from "@renderer/app/routes/InventoryReportRoute"
 import { ProductsReportRoute } from "@renderer/app/routes/ProductsReportRoute";
 import { CustomersReportRoute } from "@renderer/app/routes/CustomersReportRoute";
 import { SuppliersReportRoute } from "@renderer/app/routes/SuppliersReportRoute";
+import { DropshipPricesReportRoute } from "@renderer/app/routes/DropshipPricesReportRoute";
 import { TaxReportRoute } from "@renderer/app/routes/TaxReportRoute";
 import { ProductsRoute } from "@renderer/app/routes/ProductsRoute";
 import { OnlineOrdersRoute } from "@renderer/app/routes/OnlineOrdersRoute";
@@ -227,6 +228,8 @@ export function App(): React.JSX.Element {
         <CustomersReportRoute />
       ) : activeNavKey === "reports-suppliers" ? (
         <SuppliersReportRoute />
+      ) : activeNavKey === "reports-dropship-prices" ? (
+        <DropshipPricesReportRoute />
       ) : activeNavKey === "reports-tax" ? (
         <TaxReportRoute />
       ) : activeNavKey === "settings" ? (

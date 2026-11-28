@@ -8,7 +8,7 @@ import type { AuthSession } from "./auth";
 import type { Category, CategoryStatus } from "./category";
 import type { Customer, CustomerStatus } from "./customer";
 import type { Employee, EmployeeListItem, EmployeeStatus } from "./employee";
-import type { DropshipState } from "./dropship";
+import type { DropshipPriceReport, DropshipPriceReportQuery, DropshipState } from "./dropship";
 import type { InventoryBalance, LocationStockLevel } from "./inventory";
 import type { InventoryReportData, StockAsOfDateData } from "./inventory-report";
 import type { InvoiceListItem, InvoiceSummary } from "./invoice";
@@ -532,6 +532,11 @@ export type IpcInvokeMap = {
   "dropship:state": {
     args: [];
     result: DropshipState;
+  };
+  /** Null when the server can't be reached — the report is fetched live, never cached. */
+  "dropship:price-report": {
+    args: [DropshipPriceReportQuery];
+    result: DropshipPriceReport | null;
   };
   "inventory:overview": {
     args: [string];
@@ -1872,6 +1877,7 @@ export type BlueLedgerApi = {
   };
   dropship: {
     state: () => Promise<IpcInvokeMap["dropship:state"]["result"]>;
+    priceReport: (query: DropshipPriceReportQuery) => Promise<IpcInvokeMap["dropship:price-report"]["result"]>;
   };
   inventory: {
     overview: (productId: string) => Promise<IpcInvokeMap["inventory:overview"]["result"]>;

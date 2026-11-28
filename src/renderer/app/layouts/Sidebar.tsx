@@ -8,7 +8,10 @@ import { useAuthStore } from "@renderer/shared/stores/auth-store";
 import { useUiStore } from "@renderer/shared/stores/ui-store";
 import { useOnlineOrderAlertsStore } from "@renderer/shared/stores/online-order-alerts-store";
 import { useWebsiteStore } from "@renderer/shared/stores/website-store";
+import { useHasDropshipSuppliers } from "@renderer/shared/hooks/use-dropship-source";
 
+/** Entries that only a store dropshipping from a supplier gets. */
+const DROPSHIP_KEYS = new Set(["reports-dropship-prices"]);
 /** Website Manager entries — all need the tenant's online store to be on. */
 const WEBSITE_KEYS = new Set(["online-orders", "online-store", "website-home", "website-look", "website-delivery", "website-subscribers"]);
 /** Entries that only exist on some website templates. */
@@ -43,6 +46,8 @@ export function Sidebar(): React.JSX.Element {
   const templateId = useWebsiteStore((state) => state.templateId);
   const setTemplateId = useWebsiteStore((state) => state.setTemplateId);
   const canViewWebsite = can("online_store", "view");
+  // Dropship-only reports show only for a store that dropships from a supplier.
+  const hasDropship = useHasDropshipSuppliers();
 
   // Learn the website template once, so template-only entries (the Adia Home Page) can show.
   useEffect(() => {
@@ -61,12 +66,13 @@ export function Sidebar(): React.JSX.Element {
           items: group.items.filter(
             (item) =>
               canViewNavItem(item, can) &&
+              (!DROPSHIP_KEYS.has(item.key) || hasDropship) &&
               (!WEBSITE_KEYS.has(item.key) || ecommerceEnabled) &&
               (!TEMPLATE_ONLY[item.key] || (templateId !== null && TEMPLATE_ONLY[item.key]!.includes(templateId)))
           )
         }))
         .filter((group) => group.items.length > 0),
-    [can, ecommerceEnabled, templateId]
+    [can, hasDropship, ecommerceEnabled, templateId]
   );
 
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);

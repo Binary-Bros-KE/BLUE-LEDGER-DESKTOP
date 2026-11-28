@@ -13,6 +13,23 @@ function loadState(): Promise<DropshipState> {
   return cached.state;
 }
 
+/** True while this store dropships from at least one supplier — gates dropship-only screens. */
+export function useHasDropshipSuppliers(): boolean {
+  const [has, setHas] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    loadState()
+      .then((state) => {
+        if (!cancelled) setHas(state.suppliers.length > 0);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return has;
+}
+
 export type DropshipSource = { supplierName: string; asOf: string | null };
 
 /** Non-null when this product's stock follows a dropship supplier. Always null for a tenant without
